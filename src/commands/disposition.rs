@@ -79,11 +79,13 @@ async fn ack_with_retry(
 
 #[async_trait(?Send)]
 trait AckClient {
+    #[must_use = "acknowledgement response must be awaited and handled"]
     async fn request(&mut self, request: Request) -> crate::daemon::Result<Response>;
 }
 
 #[async_trait(?Send)]
 trait AckConnector {
+    #[must_use = "acknowledgement connection result must be awaited and handled"]
     async fn connect_or_spawn(
         &mut self,
         store_key: &str,

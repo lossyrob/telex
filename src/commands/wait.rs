@@ -102,11 +102,13 @@ enum WaitTerminal {
 #[async_trait(?Send)]
 trait WaitClient {
     fn supports_backend_recovery(&self) -> bool;
+    #[must_use = "wait response must be awaited and handled"]
     async fn request(&mut self, request: Request) -> crate::daemon::Result<Response>;
 }
 
 #[async_trait(?Send)]
 trait WaitConnector {
+    #[must_use = "wait connection result must be awaited and handled"]
     async fn connect_or_spawn(
         &mut self,
         store_key: &str,
@@ -261,6 +263,7 @@ async fn wait_loop<C: WaitConnector>(
                 message,
                 needs_attach_reason,
             } if code == ERROR_NEEDS_ATTACH => {
+                let needs_attach_detail = format!("{code}: {message}");
                 if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
                     return Err(anyhow!("{code}: {message}"));
                 }
@@ -288,9 +291,9 @@ async fn wait_loop<C: WaitConnector>(
                         if remaining_wait_timeout_ms(wait_deadline) == Some(0) {
                             return Ok(WaitTerminal::Response(Response::Timeout));
                         }
-                        return Ok(WaitTerminal::DaemonGone(
-                            "reconnect grace expired before re-register completed".to_string(),
-                        ));
+                        return Ok(WaitTerminal::DaemonGone(format!(
+                            "{needs_attach_detail}; reconnect grace expired before re-register completed"
+                        )));
                     }
                 }
             }

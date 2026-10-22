@@ -1,6 +1,6 @@
 [package]
 name = "telex"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "A CLI-first message fabric for AI agent sessions"
 license = "MIT"
@@ -34,6 +34,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dirs = "5"
 getrandom = "0.2"
 sha2 = "0.11"
+fs2 = "0.4"
 
 # SQLite backend (feature: sqlite)
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
@@ -71,7 +72,7 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [features]
 # Batteries-included default. Build a leaner binary with e.g.

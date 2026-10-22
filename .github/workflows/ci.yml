@@ -51,6 +51,15 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_windows_publication_test.py
 
+      - name: Enable Windows diagnostic symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "CARGO_PROFILE_DEV_DEBUG=2" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_PROFILE_TEST_DEBUG=2" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -64,17 +73,136 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
+      - name: Prebuild workspace test symbols
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --no-run --verbose
+
+      - name: Configure Windows crash dumps
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumps = Join-Path $env:RUNNER_TEMP "telex-crash-dumps"
+          New-Item -ItemType Directory -Path $dumps -Force | Out-Null
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -Value $dumps `
+            -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType -Value 2 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpCount -Value 10 `
+            -PropertyType DWord -Force | Out-Null
+
+      - name: Verify Windows diagnostic symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
+            throw "matching telex.pdb was not generated"
+          }
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName workspace -SnapshotSymbols
+
       - name: Test
         run: cargo test --workspace --verbose
 
+      - name: Check Windows crashes after workspace tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName workspace
+
+      - name: Prebuild SQLite process-test symbols
+        if: runner.os == 'Windows'
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          --no-run
+
+      - name: Snapshot SQLite process-test symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/capture_windows_crash_evidence.ps1
+          -EvidenceName sqlite -SnapshotSymbols
+
+      - name: Complete SQLite Application Client suite
+        # The public Application Client battery, the executable external
+        # consumer fixture, and the isolated InstalledCurrent process proofs all
+        # spawn real daemons from an isolated installed layout, so they run on
+        # both OS axes with the SQLite backend selected explicitly.
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          -- --test-threads=1
+
+      - name: Check Windows crashes after SQLite process tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName sqlite
+
+      - name: Prebuild Postgres process-test symbols
+        if: runner.os == 'Windows'
+        run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process --no-run
+
+      - name: Snapshot Postgres process-test symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/capture_windows_crash_evidence.ps1
+          -EvidenceName postgres -SnapshotSymbols
+
       - name: Credential invocation lifecycle
         run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
+
+      - name: Check Windows crashes after Postgres process tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName postgres
 
       - name: Check formatting
         run: cargo fmt --check
 
       - name: Run Clippy
         run: cargo clippy --workspace -- -D warnings
+
+      - name: Run Clippy over the Application Client test surface
+        # Warnings-denied lint for the conformance battery, the external
+        # consumer fixture harness, and the InstalledCurrent process proofs.
+        run: >-
+          cargo clippy --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          -- -D warnings
+
+      - name: Fail on collected Windows crash dumps
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName final
+
+      - name: Upload Windows crash evidence
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-test-crash-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}\telex-crash-dumps
+            ${{ runner.temp }}\telex-crash-symbols
+            target\debug\telex.exe
+            target\debug\telex.pdb
+          if-no-files-found: error
 
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
@@ -198,6 +326,21 @@ jobs:
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,postgres"
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,entra"
 
+      - name: Consumer fixture stays free of private seams
+        # The external fixture is a public-surface consumer stand-in. Compiling
+        # it is not enough: assert it never names daemon, install, backend, IPC,
+        # CLI, registry, or profile internals.
+        run: |
+          set -o pipefail
+          if grep -REn 'telex::(daemon|daemon_ipc|daemon_bootstrap|install|backend|cli|commands|ipc|registry|profiles|config|session_watch|identity|release|output)\b' tests/fixtures/application-client-consumer/src; then
+            echo "::error::the external consumer fixture reached a private/internal telex module"
+            exit 1
+          fi
+          echo "ok: the consumer fixture uses only telex::application_client and telex::model"
+
+      - name: Lint the external consumer fixture with warnings denied
+        run: cargo clippy --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features sqlite --all-targets -- -D warnings
+
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
         # actionable error AND a non-zero exit. Assert both, so a regression where the stub
@@ -256,3 +399,270 @@ jobs:
           TELEX_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           TELEX_PG_REQUIRE: "1"
         run: cargo test --all-features --test conformance --test daemon_core_postgres --test wait_recovery_process
+
+      - name: Run the Application Client battery and consumer fixtures on live Postgres
+        # The same backend-neutral semantic battery as the SQLite leg, plus the
+        # executable external consumer probes, against per-run and per-test
+        # unique schemas. TELEX_PG_REQUIRE=1 makes a missing or empty URL a hard
+        # failure, so this job can never pass by silently skipping Postgres.
+        env:
+          TELEX_PG_REQUIRE: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+          cargo test --all-features \
+            --test application_client_conformance \
+            --test application_client_fixture \
+            -- --test-threads=1
+
+      - name: Run InstalledCurrent process proofs on live Postgres
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PROCESS_PG_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          TELEX_PG_PASSWORD: postgres
+        run: cargo test --all-features --test installed_current_process -- --test-threads=1
+
+      - name: Missing Postgres URL fails closed under TELEX_PG_REQUIRE
+        # Proves the fail-closed guard itself: with TELEX_PG_REQUIRE=1 and no
+        # URL the Postgres legs must fail rather than skip.
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PG_URL: ""
+        run: |
+          set -o pipefail
+          if cargo test --all-features --test application_client_conformance -- --test-threads=1 postgres_application_client_conformance; then
+            echo "::error::TELEX_PG_REQUIRE=1 with no TELEX_PG_URL must fail, not skip"
+            exit 1
+          fi
+          echo "ok: the Postgres Application Client leg fails closed without credentials"
+
+  installed-current-postgres-windows:
+    name: InstalledCurrent Postgres process proofs (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Locate or install PostgreSQL
+        shell: pwsh
+        run: |
+          $pgBin = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $pgBin) {
+            choco install postgresql16 --params "/Password:postgres" --no-progress -y
+            $pgBin = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin" -Directory |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+          }
+          if (-not $pgBin) {
+            throw "PostgreSQL binaries were not found"
+          }
+          $pgBin.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $data = Join-Path $env:RUNNER_TEMP "telex-postgres"
+          $passwordFile = Join-Path $env:RUNNER_TEMP "telex-postgres-password"
+          "postgres" | Set-Content -Path $passwordFile -Encoding ascii -NoNewline
+          & (Join-Path $pgBin.FullName "initdb.exe") -D $data -A scram-sha-256 -U postgres --pwfile=$passwordFile
+          Remove-Item $passwordFile -Force
+          & (Join-Path $pgBin.FullName "pg_ctl.exe") -D $data -o "-p 55432 -h 127.0.0.1" -w start
+          "TELEX_PG_DATA=$data" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run public fixtures and InstalledCurrent process proofs
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PG_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PROCESS_PG_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PG_PASSWORD: postgres
+        run: >-
+          cargo test --all-features
+          --test application_client_fixture
+          --test installed_current_process
+          -- --test-threads=1
+
+      - name: Stop PostgreSQL
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:TELEX_PG_DATA) {
+            pg_ctl -D $env:TELEX_PG_DATA -m immediate stop
+          }
+
+  released-v021-upgrade-windows:
+    name: Released v0.2.1 upgrade proof (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout the exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Download and verify the official v0.2.1 asset
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
+          $downloads = Join-Path $evidence "downloads"
+          $extract = Join-Path $evidence "released"
+          New-Item -ItemType Directory -Path $downloads, $extract -Force | Out-Null
+          $asset = "telex-v0.2.1-x86_64-pc-windows-msvc.zip"
+          $archive = Join-Path $downloads $asset
+          $sidecar = "$archive.sha256"
+          $url = "https://github.com/lossyrob/telex/releases/download/v0.2.1/$asset"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Invoke-WebRequest -Uri "$url.sha256" -OutFile $sidecar
+          $expected = "f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0"
+          $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $sidecarHash = ((Get-Content -Raw $sidecar).Trim() -split "\s+")[0].ToLowerInvariant()
+          if ($archiveHash -ne $expected -or $sidecarHash -ne $expected) {
+            throw "official v0.2.1 asset checksum mismatch"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          "TELEX_RELEASED_V021_EXE=$(Join-Path $extract 'telex.exe')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_RELEASED_V021_ARCHIVE_SHA256=$archiveHash" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_PROOF_REPORT=$(Join-Path $evidence 'report.json')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_PROOF_EVIDENCE=$evidence" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prove the released v0.2.1 writer and exact candidate
+        shell: pwsh
+        env:
+          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+          TELEX_V021_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $log = Join-Path $env:TELEX_V021_PROOF_EVIDENCE "cargo-test.log"
+          cargo test --no-default-features --features sqlite `
+            --test installed_current_process `
+            released_v021_writer_installs_exact_candidate `
+            -- --ignored --exact --nocapture 2>&1 |
+            Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload released-upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: released-v021-upgrade-proof-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}\telex-v021-proof
+          if-no-files-found: error
+
+  windows-heap-diagnostics:
+    name: Windows heap diagnostics
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+      CARGO_PROFILE_TEST_DEBUG: "2"
+      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout the exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure full PageHeap and crash dumps
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-heap-diagnostics"
+          $dumps = Join-Path $evidence "dumps"
+          $logs = Join-Path $evidence "logs"
+          New-Item -ItemType Directory -Path $dumps, $logs -Force | Out-Null
+          "TELEX_HEAP_EVIDENCE=$evidence" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpFolder -Value $dumps `
+            -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpType -Value 2 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpCount -Value 20 `
+            -PropertyType DWord -Force | Out-Null
+
+          $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\telex.exe"
+          New-Item -Path $ifeo -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name GlobalFlag -Value 0x02000000 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
+            -PropertyType DWord -Force | Out-Null
+
+      - name: Stress the full Windows process suite under PageHeap
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo test --no-default-features --features sqlite `
+            --test daemon_process_sqlite --no-run
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName "pageheap" `
+            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols") `
+            -SnapshotSymbols
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\attempt-$attempt.txt"
+            cargo test --no-default-features --features sqlite `
+              --test daemon_process_sqlite -- --nocapture 2>&1 |
+              Tee-Object -FilePath $log
+            $cargoExit = $LASTEXITCODE
+            Start-Sleep -Seconds 10
+            tests/capture_windows_crash_evidence.ps1 `
+              -EvidenceName "pageheap-$attempt" `
+              -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+              -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols")
+            if ($cargoExit -ne 0) {
+              exit $cargoExit
+            }
+          }
+
+      - name: Settle and check final PageHeap dumps
+        if: always()
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 10
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName "pageheap-final" `
+            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols")
+
+      - name: Verify matching heap diagnostic symbols
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "target\debug\telex.exe") -or
+              -not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
+            throw "matching telex.exe and telex.pdb were not generated"
+          }
+
+      - name: Upload heap diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-heap-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}\telex-heap-diagnostics
+            target\debug\telex.exe
+            target\debug\telex.pdb
+          if-no-files-found: error

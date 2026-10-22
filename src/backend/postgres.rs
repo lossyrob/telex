@@ -4,9 +4,12 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tokio_postgres::error::SqlState;
-use tokio_postgres::{IsolationLevel, Row, Transaction};
+use tokio_postgres::{GenericClient, IsolationLevel, Row, Transaction};
 
 use super::{
     application_compound_state_delta, application_operation_state_delta, retryable_backend_error,
@@ -19,7 +22,62 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 pub struct PgBackend {
     connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
+    release: Arc<PgReleaseClient>,
     notify_channel: String,
+}
+
+struct PgReleaseClient {
+    client: AsyncMutex<Option<ManagedPgClient>>,
+    connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
+    profile: Option<crate::profiles::BackendProfile>,
+    proactive_repair: bool,
+    repairing: Arc<AtomicBool>,
+}
+
+struct ManagedPgClient {
+    client: tokio_postgres::Client,
+    driver: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for ManagedPgClient {
+    fn drop(&mut self) {
+        self.driver.abort();
+    }
+}
+
+struct ReleaseRepairGate(Arc<AtomicBool>);
+
+impl Drop for ReleaseRepairGate {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+async fn run_bounded_release_repair<F, T>(
+    _gate: ReleaseRepairGate,
+    budget: Duration,
+    repair: F,
+) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::time::timeout(budget, repair).await.ok()
+}
+
+struct ConnectionTaskGuard(Option<tokio::task::JoinHandle<()>>);
+
+impl ConnectionTaskGuard {
+    fn disarm(&mut self) {
+        let _ = self.0.take();
+    }
+}
+
+impl Drop for ConnectionTaskGuard {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.abort();
+        }
+    }
 }
 
 enum PgConnector {
@@ -434,7 +492,7 @@ fn fanout_recipients(to_addr: &str, cc: Option<&str>) -> Vec<String> {
     recipients
 }
 
-async fn pg_now_ms(client: &tokio_postgres::Client) -> Result<i64> {
+async fn pg_now_ms(client: &(impl GenericClient + Sync)) -> Result<i64> {
     Ok(client
         .query_one(
             "SELECT floor(extract(epoch from clock_timestamp()) * 1000)::bigint",
@@ -671,7 +729,9 @@ async fn pg_insert_message(
     ))
 }
 
-async fn raise_clock_hwm_to_existing_timestamps(client: &tokio_postgres::Client) -> Result<()> {
+async fn raise_clock_hwm_to_existing_timestamps(
+    client: &(impl GenericClient + Sync),
+) -> Result<()> {
     client
         .execute(
             "UPDATE clock_hwm
@@ -744,10 +804,9 @@ async fn materialize_pending_delivery_rows_for_recipient_tx(
 }
 
 async fn backfill_existing_deliveries_consumed_once(
-    client: &mut tokio_postgres::Client,
+    client: &(impl GenericClient + Sync),
 ) -> Result<()> {
-    let tx = client.transaction().await?;
-    let complete: bool = tx
+    let complete: bool = client
         .query_one(
             "SELECT EXISTS(
                 SELECT 1 FROM telex_schema_meta
@@ -758,26 +817,124 @@ async fn backfill_existing_deliveries_consumed_once(
         .await?
         .get(0);
     if !complete {
-        tx.execute(
-            "UPDATE deliveries
+        client
+            .execute(
+                "UPDATE deliveries
              SET consumed_at_ms = delivered_at_ms
              WHERE consumed_at_ms IS NULL",
-            &[],
-        )
-        .await?;
-        tx.execute(
-            "INSERT INTO telex_schema_meta(key, value)
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
              VALUES ('delivery_consumed_backfill_v1_complete', '1')
              ON CONFLICT(key) DO UPDATE SET value='1'",
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
     }
-    tx.commit().await?;
+
     Ok(())
 }
 
-async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> {
+async fn backfill_delivery_rows_once(client: &(impl GenericClient + Sync)) -> Result<()> {
+    let complete: bool = client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM telex_schema_meta
+                WHERE key='delivery_backfill_v2_complete' AND value='1'
+             )",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !complete {
+        client
+            .execute(
+                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+             SELECT m.id, m.to_addr, m.created_at_ms, NULL
+             FROM messages m
+             ON CONFLICT(message_id, recipient) DO NOTHING",
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+             SELECT m.id, btrim(cc_addr), m.created_at_ms, m.created_at_ms
+             FROM messages m
+             CROSS JOIN LATERAL unnest(string_to_array(COALESCE(m.cc, ''), ',')) AS cc_addr
+             WHERE btrim(cc_addr) <> '' AND btrim(cc_addr) <> m.to_addr
+             ON CONFLICT(message_id, recipient) DO NOTHING",
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
+             VALUES ('delivery_backfill_v2_complete', '1')
+             ON CONFLICT(key) DO UPDATE SET value='1'",
+                &[],
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+async fn backfill_terminal_disposition_consumption_once(
+    client: &(impl GenericClient + Sync),
+) -> Result<()> {
+    let complete: bool = client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM telex_schema_meta
+                WHERE key='terminal_disposition_consumption_v1_complete' AND value='1'
+             )",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !complete {
+        let sql = format!(
+            "UPDATE deliveries d
+             SET consumed_at_ms = terminal.at_ms
+             FROM (
+                 SELECT disp.message_id, disp.recipient, MAX(disp.at_ms) AS at_ms
+                 FROM dispositions disp
+                 WHERE disp.state IN ({})
+                 GROUP BY disp.message_id, disp.recipient
+             ) terminal
+             WHERE d.message_id=terminal.message_id
+               AND d.recipient=terminal.recipient
+               AND d.consumed_at_ms IS NULL",
+            terminal_dispositions_sql_list()
+        );
+        client.execute(&sql, &[]).await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
+             VALUES ('terminal_disposition_consumption_v1_complete', '1')
+             ON CONFLICT(key) DO UPDATE SET value='1'",
+                &[],
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn acquire_schema_migration_lock(client: &(impl GenericClient + Sync)) -> Result<()> {
+    client
+        .query_one(
+            "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 0))",
+            &[],
+        )
+        .await?;
+    Ok(())
+}
+
+async fn current_schema_version(client: &(impl GenericClient + Sync)) -> Result<i64> {
     let exists: bool = client
         .query_one(
             "SELECT to_regclass('telex_schema_version') IS NOT NULL",
@@ -797,7 +954,7 @@ async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> 
         .get(0))
 }
 
-async fn publish_schema_version(client: &tokio_postgres::Client) -> Result<()> {
+async fn publish_schema_version(client: &(impl GenericClient + Sync)) -> Result<()> {
     client
         .execute(
             "INSERT INTO telex_schema_version(singleton, version) VALUES (1, $1)
@@ -816,6 +973,7 @@ impl PgBackend {
         schema: Option<&str>,
     ) -> Result<Self> {
         let client = Self::open_client(&config, schema).await?;
+        let release_config = Self::release_config(&config);
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
             connector: PgConnector::Static {
@@ -823,19 +981,59 @@ impl PgBackend {
                 schema: schema.map(str::to_string),
             },
             client: AsyncMutex::new(client),
+            release: Arc::new(PgReleaseClient {
+                client: AsyncMutex::new(None),
+                connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
+                profile: None,
+                proactive_repair: false,
+                repairing: Arc::new(AtomicBool::new(false)),
+            }),
             notify_channel,
         })
     }
 
     pub async fn connect_profile(profile: crate::profiles::BackendProfile) -> Result<Self> {
+        Self::connect_profile_inner(profile, false).await
+    }
+
+    pub(crate) async fn connect_profile_for_daemon(
+        profile: crate::profiles::BackendProfile,
+    ) -> Result<Self> {
+        Self::connect_profile_inner(profile, true).await
+    }
+
+    async fn connect_profile_inner(
+        profile: crate::profiles::BackendProfile,
+        prepare_release: bool,
+    ) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
+        let release_config = Self::release_config(&config);
+        let release_client = if prepare_release {
+            Some(Self::open_release_client(&release_config, schema.as_deref()).await?)
+        } else {
+            None
+        };
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
+        let release_profile = profile.clone();
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
+            release: Arc::new(PgReleaseClient {
+                client: AsyncMutex::new(release_client),
+                connection: AsyncMutex::new((release_config, schema)),
+                profile: Some(release_profile),
+                proactive_repair: prepare_release,
+                repairing: Arc::new(AtomicBool::new(false)),
+            }),
             notify_channel,
         })
+    }
+
+    fn release_config(config: &tokio_postgres::Config) -> tokio_postgres::Config {
+        let mut release = config.clone();
+        release.application_name("telex-drain-release");
+        release
     }
 
     async fn open_client(
@@ -846,11 +1044,12 @@ impl PgBackend {
             .connect(make_tls()?)
             .await
             .context("connecting to postgres")?;
-        tokio::spawn(async move {
+        let connection = tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("[telex] postgres connection ended: {e}");
             }
         });
+        let mut connection = ConnectionTaskGuard(Some(connection));
         // The holder's live drain (`fetch_undelivered`) is correct only if every poll re-snapshots
         // the latest committed state — i.e. each autocommit query runs under READ COMMITTED. A
         // server- or role-level `default_transaction_isolation` of REPEATABLE READ/SERIALIZABLE
@@ -873,27 +1072,119 @@ impl PgBackend {
                 .await
                 .context("setting schema search_path")?;
         }
+        connection.disarm();
         Ok(client)
+    }
+
+    async fn open_release_client(
+        config: &tokio_postgres::Config,
+        schema: Option<&str>,
+    ) -> Result<ManagedPgClient> {
+        let (client, connection) = config
+            .connect(make_tls()?)
+            .await
+            .context("connecting PostgreSQL release client")?;
+        let driver = tokio::spawn(async move {
+            if let Err(error) = connection.await {
+                eprintln!("[telex] postgres release connection ended: {error}");
+            }
+        });
+        let mut driver = ConnectionTaskGuard(Some(driver));
+        client
+            .batch_execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED;
+                 SET statement_timeout TO '4000ms';
+                 SET lock_timeout TO '4000ms';",
+            )
+            .await
+            .context("initializing PostgreSQL release session")?;
+        if let Some(schema) = schema {
+            let schema = sanitize_ident(schema)?;
+            client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA IF NOT EXISTS {schema}; SET search_path TO {schema}, public;"
+                ))
+                .await
+                .context("setting PostgreSQL release schema search_path")?;
+        }
+        let driver = driver.0.take().expect("release driver remains owned");
+        Ok(ManagedPgClient { client, driver })
     }
 
     async fn client(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>> {
         let mut client = self.client.lock().await;
         if client.is_closed() {
-            *client = self.reconnect_client().await?;
+            let (replacement, refreshed) = self.reconnect_client().await?;
+            *client = replacement;
+            if let Some((config, schema)) = refreshed {
+                *self.release.connection.lock().await = (Self::release_config(&config), schema);
+            }
+        }
+        if self.release.proactive_repair {
+            self.schedule_release_repair();
         }
         Ok(client)
     }
 
-    async fn reconnect_client(&self) -> Result<tokio_postgres::Client> {
+    fn schedule_release_repair(&self) {
+        if self.release.repairing.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let release = self.release.clone();
+        let gate = ReleaseRepairGate(release.repairing.clone());
+        tokio::spawn(async move {
+            let repair = async {
+                {
+                    let client = release.client.lock().await;
+                    if client
+                        .as_ref()
+                        .is_some_and(|client| !client.client.is_closed())
+                    {
+                        return Ok::<_, anyhow::Error>(());
+                    }
+                }
+                let (config, schema) = if let Some(profile) = &release.profile {
+                    let (config, schema) = crate::profiles::pg_connect_config(profile)
+                        .await
+                        .context("resolving release reconnect profile")?;
+                    (PgBackend::release_config(&config), schema)
+                } else {
+                    let cached = release.connection.lock().await;
+                    (cached.0.clone(), cached.1.clone())
+                };
+                let replacement =
+                    PgBackend::open_release_client(&config, schema.as_deref()).await?;
+                let mut client = release.client.lock().await;
+                if client
+                    .as_ref()
+                    .is_none_or(|client| client.client.is_closed())
+                {
+                    *client = Some(replacement);
+                    *release.connection.lock().await = (config, schema);
+                }
+                Ok(())
+            };
+            let _ = run_bounded_release_repair(gate, Duration::from_secs(5), repair).await;
+        });
+    }
+
+    async fn reconnect_client(
+        &self,
+    ) -> Result<(
+        tokio_postgres::Client,
+        Option<(tokio_postgres::Config, Option<String>)>,
+    )> {
         match &self.connector {
-            PgConnector::Static { config, schema } => {
-                Self::open_client(config, schema.as_deref()).await
-            }
+            PgConnector::Static { config, schema } => Self::open_client(config, schema.as_deref())
+                .await
+                .map(|client| (client, None)),
             PgConnector::Profile(profile) => {
                 let (config, schema) = crate::profiles::pg_connect_config(profile)
                     .await
                     .context("resolving postgres reconnect profile")?;
-                Self::open_client(&config, schema.as_deref()).await
+                Self::open_client(&config, schema.as_deref())
+                    .await
+                    .map(|client| (client, Some((config, schema))))
             }
         }
         .context("reconnecting to postgres")
@@ -920,24 +1211,24 @@ impl Backend for PgBackend {
 
     async fn init_schema(&self) -> Result<()> {
         let mut client = self.client().await?;
-        let schema_version = current_schema_version(&client).await?;
+        let tx = client.transaction().await?;
+        acquire_schema_migration_lock(&tx).await?;
+        let schema_version = current_schema_version(&tx).await?;
         if schema_version > CURRENT_SCHEMA_VERSION {
             bail!(
                 "Postgres schema version {schema_version} is newer than supported version {CURRENT_SCHEMA_VERSION}"
             );
         }
-        client.batch_execute(SCHEMA).await?;
+        tx.batch_execute(SCHEMA).await?;
         let store_id = new_logical_store_id()?;
-        client
-            .execute(
-                "INSERT INTO application_store_identity(singleton, logical_store_id)
+        tx.execute(
+            "INSERT INTO application_store_identity(singleton, logical_store_id)
                  VALUES (1, $1) ON CONFLICT(singleton) DO NOTHING",
-                &[&store_id],
-            )
-            .await?;
-        client
-            .batch_execute(
-                "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
+            &[&store_id],
+        )
+        .await?;
+        tx.batch_execute(
+            "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
                  ALTER TABLE leases ADD COLUMN IF NOT EXISTS owner_instance_id text;
                  ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS consumed_at_ms bigint;
                  ALTER TABLE dispositions ADD COLUMN IF NOT EXISTS origin text;
@@ -964,19 +1255,21 @@ impl Backend for PgBackend {
                  );
                  CREATE INDEX IF NOT EXISTS detach_tombstones_session_idx
                     ON detach_tombstones(session_id);",
-            )
-            .await?;
-        let now = pg_now_ms(&client).await?;
-        client
-            .execute(
-                "INSERT INTO clock_hwm(id, hwm_ms) VALUES (1, $1)
+        )
+        .await?;
+        let now = pg_now_ms(&tx).await?;
+        tx.execute(
+            "INSERT INTO clock_hwm(id, hwm_ms) VALUES (1, $1)
                  ON CONFLICT(id) DO NOTHING",
-                &[&now],
-            )
-            .await?;
-        backfill_existing_deliveries_consumed_once(&mut client).await?;
-        raise_clock_hwm_to_existing_timestamps(&client).await?;
-        publish_schema_version(&client).await?;
+            &[&now],
+        )
+        .await?;
+        backfill_existing_deliveries_consumed_once(&tx).await?;
+        backfill_delivery_rows_once(&tx).await?;
+        backfill_terminal_disposition_consumption_once(&tx).await?;
+        raise_clock_hwm_to_existing_timestamps(&tx).await?;
+        publish_schema_version(&tx).await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1061,7 +1354,7 @@ impl Backend for PgBackend {
 
     async fn claim_lease(&self, claim: &LeaseClaim, window_secs: i64) -> Result<LeaseOutcome> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         let live_floor = now - window_secs * 1000;
         let rows = client
             .query(
@@ -1102,7 +1395,7 @@ impl Backend for PgBackend {
 
     async fn heartbeat(&self, address: &str) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "UPDATE leases SET heartbeat_at_ms=$2 WHERE address=$1",
@@ -1141,7 +1434,7 @@ impl Backend for PgBackend {
 
     async fn occupancy(&self, address: &str, window_secs: i64) -> Result<Occupancy> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         let row = client
             .query_opt(
                 "SELECT occupant, heartbeat_at_ms, owner_instance_id FROM leases WHERE address=$1",
@@ -1338,7 +1631,7 @@ impl Backend for PgBackend {
     ) -> Result<bool> {
         let result = async {
             let client = self.client().await?;
-            let now = pg_now_ms(&client).await?;
+            let now = pg_now_ms(&*client).await?;
             let n = client
                 .execute(
                     "UPDATE leases
@@ -1359,16 +1652,85 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        let client = self.client().await?;
-        let n = client
-            .execute(
-                "UPDATE leases
-                    SET owner_instance_id = NULL
-                  WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
-                &[&address, &owner_instance_id, &lease_epoch],
+        // Drain must not queue behind unrelated work holding the ordinary
+        // client mutex or perform credential discovery. Lazily open one
+        // release connection from the cached resolved config, then reuse it
+        // for the backend's remaining members. The full acquisition + fenced
+        // update shares one bound.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut client = match tokio::time::timeout_at(deadline, self.release.client.lock()).await {
+            Ok(client) => client,
+            Err(_) => {
+                self.schedule_release_repair();
+                return Err(anyhow!(
+                    "postgres lease release could not acquire its client in 5s"
+                ));
+            }
+        };
+        if client
+            .as_ref()
+            .is_none_or(|client| client.client.is_closed())
+        {
+            let (config, schema) =
+                match tokio::time::timeout_at(deadline, self.release.connection.lock()).await {
+                    Ok(cached) => (cached.0.clone(), cached.1.clone()),
+                    Err(_) => {
+                        drop(client);
+                        self.schedule_release_repair();
+                        return Err(anyhow!("postgres lease release config wait exceeded 5s"));
+                    }
+                };
+            let replacement = match tokio::time::timeout_at(
+                deadline,
+                Self::open_release_client(&config, schema.as_deref()),
             )
-            .await?;
-        Ok(n > 0)
+            .await
+            {
+                Ok(Ok(replacement)) => replacement,
+                Ok(Err(error)) => {
+                    drop(client);
+                    self.schedule_release_repair();
+                    return Err(error);
+                }
+                Err(_) => {
+                    drop(client);
+                    self.schedule_release_repair();
+                    return Err(anyhow!("postgres lease release connection exceeded 5s"));
+                }
+            };
+            *client = Some(replacement);
+        }
+        let result = tokio::time::timeout_at(
+            deadline,
+            client
+                .as_ref()
+                .expect("release client initialized")
+                .client
+                .execute(
+                    "UPDATE leases
+                        SET owner_instance_id = NULL
+                      WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
+                    &[&address, &owner_instance_id, &lease_epoch],
+                ),
+        )
+        .await;
+        match result {
+            Ok(Ok(count)) => Ok(count > 0),
+            Ok(Err(error)) => {
+                *client = None;
+                drop(client);
+                self.schedule_release_repair();
+                Err(error.into())
+            }
+            Err(_) => {
+                *client = None;
+                drop(client);
+                self.schedule_release_repair();
+                Err(anyhow!(
+                    "postgres lease release exceeded its 5s shutdown budget"
+                ))
+            }
+        }
     }
 
     async fn release_epoch_lease_for_detach(
@@ -1675,7 +2037,7 @@ impl Backend for PgBackend {
         reason: &str,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO detach_tombstones(session_id, address, reason, at_ms)
@@ -1778,7 +2140,7 @@ impl Backend for PgBackend {
         reason: &str,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO application_detach_intents(
@@ -1878,7 +2240,7 @@ impl Backend for PgBackend {
         occupant: Option<&str>,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms, consumed_at_ms) \
@@ -3301,8 +3663,101 @@ impl Backend for PgBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_wait_error, sanitize_ident};
+    use super::{
+        classify_wait_error, run_bounded_release_repair, sanitize_ident, ReleaseRepairGate,
+    };
     use crate::backend::is_retryable_backend_error;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+
+    struct DropEvidence(Arc<AtomicBool>);
+
+    impl Drop for DropEvidence {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn release_repair_budget_includes_mutex_wait_and_clears_gate() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let mutex = Arc::new(Mutex::new(()));
+        let held = mutex.lock().await;
+        let waiting = mutex.clone();
+
+        let result = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_millis(10),
+            async move {
+                let _guard = waiting.lock().await;
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_none(),
+            "held mutex must exhaust the one repair budget"
+        );
+        assert!(
+            !repairing.load(Ordering::Acquire),
+            "timeout must clear the single-flight gate"
+        );
+        assert!(
+            !repairing.swap(true, Ordering::AcqRel),
+            "a subsequent repair must be schedulable"
+        );
+        repairing.store(false, Ordering::Release);
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn release_repair_timeout_drops_unpublished_replacement() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let unpublished_dropped = Arc::new(AtomicBool::new(false));
+        let publication = Arc::new(Mutex::new(()));
+        let held = publication.lock().await;
+        let delayed = publication.clone();
+        let evidence = unpublished_dropped.clone();
+
+        let result = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_millis(10),
+            async move {
+                let _unpublished = DropEvidence(evidence);
+                let _publication = delayed.lock().await;
+            },
+        )
+        .await;
+
+        assert!(result.is_none());
+        assert!(unpublished_dropped.load(Ordering::Acquire));
+        assert!(!repairing.load(Ordering::Acquire));
+        drop(held);
+    }
+
+    #[test]
+    fn dropping_unpolled_release_repair_clears_gate() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let repair = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_secs(5),
+            std::future::pending::<()>(),
+        );
+
+        drop(repair);
+
+        assert!(
+            !repairing.load(Ordering::Acquire),
+            "an unpolled repair future must still release single-flight ownership"
+        );
+        assert!(
+            !repairing.swap(true, Ordering::AcqRel),
+            "repair scheduling must recover after dropping an unpolled future"
+        );
+        repairing.store(false, Ordering::Release);
+    }
 
     #[test]
     fn wait_classifies_structural_network_errors_through_context() {

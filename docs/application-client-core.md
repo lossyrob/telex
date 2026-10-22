@@ -35,11 +35,18 @@ telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", 
 None of these profiles enables `self-update`. A single-backend profile does not
 enable the other backend.
 
-No published Telex release contains this binding yet. Source consumers must
-replace the placeholder with the full commit ID of a reviewed revision. The
-compatibility promise applies to that pinned source revision and subsequent
-documented version transitions; an unpinned Git dependency follows a moving
-branch and is outside the promise.
+Telex v0.2.1 is the published Application Client baseline. Package consumers
+remain on v0.2.1 until a separate release authorization publishes a later
+version. Source consumers evaluating the issue #152 conformance revision must
+replace the placeholder with its full reviewed commit ID; an unpinned Git
+dependency follows a moving branch and is outside the compatibility promise.
+
+Required Windows CI downloads the official v0.2.1 release asset and uses that
+released binary to install the exact candidate into a disposable volume-root
+fixture. The proof verifies absent-field manifest compatibility, exact-image
+admission, public Application Client attachment, immutable manifest bytes and
+file identity, and exact daemon shutdown. It never targets the operator's
+installed Telex state or workstation profile directories.
 
 ## Compatibility boundary
 
@@ -59,6 +66,15 @@ possible. Serde support lets applications persist typed evidence; it does not
 promise stable JSON, a C ABI, a cross-language serialization format, or a public
 daemon protocol. Backend rows not already used by the binding, daemon frames,
 CLI types, private helpers, and product DTOs are not supported binding surfaces.
+
+Published v0.2.1 exposes `ApplicationClientError` as an exhaustive public enum.
+Issue #152 is an unpublished 0.3.0 source transition:
+`ApplicationClientError` becomes `#[non_exhaustive]` and adds the
+authority-required `DaemonBootstrap(DaemonBootstrapFailure)` variant. Consumers
+moving from 0.2.x must update their dependency intent, add a wildcard arm to
+error matches for future variants, and handle typed daemon-bootstrap failures.
+Package consumers remain on published v0.2.1 until a separate release is
+authorized; source consumers must pin the exact reviewed 0.3.0 head.
 
 ## Runtime and cancellation
 
@@ -94,6 +110,298 @@ Telex or the selected backend committed nothing:
 
 The binding does not retain a detached lifecycle executor. The caller owns the
 operation object and the Tokio task that drives it.
+
+## Selecting the shared daemon
+
+Production consumers reach the shared Telex daemon through
+`ApplicationClient::connect_with_daemon`. The additive constructor takes an
+`ApplicationDaemonBootstrap` policy without changing existing
+`ApplicationClientConfig` struct literals, and returns a client that runs
+every later reconnect through the same policy.
+
+```rust
+use std::path::PathBuf;
+use telex::application_client::{
+    ApplicationClient, ApplicationClientConfig, ApplicationClientError,
+    ApplicationDaemonBootstrap, ApplicationResponsibility,
+};
+
+async fn connect(
+    responsibility: ApplicationResponsibility,
+    trusted_root: PathBuf,
+) -> Result<ApplicationClient, ApplicationClientError> {
+    let config = ApplicationClientConfig {
+        responsibility,
+        backend: None,
+        db_override: None,
+    };
+    ApplicationClient::connect_with_daemon(
+        config,
+        ApplicationDaemonBootstrap::InstalledCurrent { trusted_root },
+    )
+    .await
+}
+```
+
+`ApplicationDaemonBootstrap` is `#[non_exhaustive]` and exposes two
+variants:
+
+- `InstalledCurrent { trusted_root }` is the supported production seam.
+  `trusted_root` MUST be an absolute path; a relative or empty root is
+  rejected at configuration time. The client freezes one canonical
+  absolute root at that point, so a later working-directory change
+  cannot reinterpret it.
+- `ExactExecutable { executable }` pins one canonical Telex executable
+  for development and tests. It applies the same canonical
+  process-image and untrusted-writability checks, has no installed
+  manifest authority, and does not follow upgrade or rollback. On
+  Windows, spawned exact targets inherit the same restricted launch
+  witness and publish its startup identity; a fresh exact policy refuses
+  a prestarted peer whose mapped image no longer matches the pinned file.
+
+`ApplicationClient::connect(config)` retains source-compatible
+current-executable behavior for legacy and internal callers. It is
+never an automatic fallback from `InstalledCurrent`.
+
+### Installed layout expectations
+
+`InstalledCurrent { trusted_root }` reads a strict versioned layout
+under the trusted root:
+
+```text
+<trusted-root>/
+  current                   # selector: the currently authoritative tag
+  previous                  # bookkeeping for rollback; never independently authoritative
+  .telex-selector.lock      # persistent OS-backed selector-coordination lock
+  versions/
+    <tag>/
+      manifest.json         # selected manifest, bound to <tag> and executable
+      telex[.exe]           # versioned executable
+```
+
+The trusted root, `.telex-selector.lock`, the selector value, the selected
+manifest, the selected version directory, and the executable MUST all
+be owned by the current OS user and MUST deny write, delete, or
+ownership control to other principals. The client refuses selectors,
+manifests, version directories, or executables that redirect through a
+symlink or reparse point. `current` is the sole selection authority;
+`previous` is only made authoritative by validated rollback.
+
+Every connect-or-spawn cycle:
+
+1. acquires a shared selector-admission lease under the trusted root
+   (Unix uses an advisory shared/exclusive flock; Windows uses a
+   `LockFileEx` range lock);
+2. reads `current`, resolves `<root>/versions/<tag>/telex[.exe]`, and
+   validates the manifest's tag, build, package version, protocol
+   version, supported schema range, required capabilities, and
+   Application Client bootstrap-admission version;
+3. freezes one immutable target and uses it for both spawn and
+   pre-`Hello` peer authentication;
+4. holds the shared lease through reuse-safe process identity checks,
+   version and capability negotiation, and a successful `HelloAck`; and
+5. releases only after the connection is established.
+
+The admission field is normally explicit. One compatibility case is
+recognized for a published v0.2.1 updater that installed the 0.3.x
+binary but wrote the older manifest shape: the raw key must be absent,
+not zero, malformed, duplicated, or set to another value. The client
+drops shared admission, takes exclusive selector admission, holds the
+exact selected executable, and runs a bounded credential-stripped
+`--json version` probe. Only an exact admission-version-1 and
+build/protocol/schema/capability match creates an in-memory completion.
+Nothing is written to the immutable manifest. The client then
+reacquires shared admission and revalidates the full selector,
+manifest, target path, and file identities. An exact-key process cache
+may skip only the probe, never fresh shared validation.
+
+The daemon spawned into this policy independently acquires a shared
+selector lease before publishing its endpoint, capability, or
+readiness. On Windows the parent narrowly inherits the exact executable
+witness held across process creation. The child validates and retains
+that handle through admission and atomically binds its handle-derived
+identity and admission version to the owner-private capability record,
+PID, start time, instance, and singleton scope before readiness.
+Pre-`Hello` authentication checks that evidence with the named-pipe
+PID, SID, start time, and canonical process-image path. Reopening the
+pathname is not authoritative.
+
+Upgrade, rollback, and install garbage collection hold the selector
+lock exclusively across their selector snapshot and mutation.
+After upgrade or rollback publishes `current`, it releases exclusive
+admission before starting any station-intent successor through the same
+admitted InstalledCurrent spawn path.
+Existing-peer authentication and `HelloAck` are bounded; the final
+acknowledgment must match the selected build, package, protocol,
+authentication-policy version, and required capabilities. Selector
+admission always precedes daemon singleton or spawn admission. Callers
+do not manage or observe the lock file directly.
+
+### Typed failures
+
+Bootstrap failures return
+`ApplicationClientError::DaemonBootstrap(DaemonBootstrapFailure)`. The
+inner value is `#[non_exhaustive]` and covers the accepted taxonomy:
+
+| Variant | Meaning |
+| --- | --- |
+| `InvalidTrustedRoot` | `trusted_root` is not an absolute path or cannot be canonicalized to a stable absolute root. |
+| `UnsafeInstallAuthority` | The trusted root or its authority chain fails ownership, permissions, containment, or reparse-point checks. |
+| `MissingCurrent` | The `current` selector is missing or unreadable. |
+| `InvalidManifest` | The selected manifest fails required-field validation or does not bind its tag and executable. |
+| `IncompatibleManifest` | The manifest's build identity, protocol version, supported schema range, or required capabilities are incompatible with the running client. |
+| `SelectionUnstable` | Bounded selector-movement or admission-contention retries were exhausted without a stable resolution. |
+| `MissingExecutable` | The resolved version executable is missing or cannot be opened. |
+| `ExecutableIdentityMismatch` | A prestarted or spawned peer's canonical process-image path or platform file identity does not match the frozen target. |
+| `ForeignDaemon` | A prestarted peer is not the selected image, or `HelloAck` proves an incompatible build, capability, or protocol. |
+
+Durable public evidence carried by these failures never exposes raw
+authority paths. The client does not fall back automatically from
+`InstalledCurrent` to `ExactExecutable` or to `connect(config)`; a
+typed failure surfaces to the caller so it can act on the specific
+condition.
+
+## Replacing temporary consumer seams
+
+Existing consumer code that reached the daemon through a private path
+migrates to the supported public seam:
+
+- **CLI stdout/stderr parsing.** Replace shelling out to `telex ...`
+  and scanning its text with `ApplicationClient::connect_with_daemon`
+  plus the typed lifecycle, send, receive, reply, acknowledgment,
+  disposition, history, and recovery calls on `ApplicationClient`.
+  Public results carry the identities and typed reasons callers need;
+  free-form text is not part of the supported contract.
+- **Raw daemon IPC.** Do not open the daemon's local endpoint,
+  handshake, or wire frames directly from consumer code. Those frames
+  remain private daemon internals. `connect_with_daemon` performs the
+  admission, peer authentication, and version and capability handshake
+  through the shared client.
+- **Spike helpers and environment variables.** Retire spike-only
+  environment variables, helper binaries, namespaces, local UUID
+  files, and store-path fingerprints as identity sources. Use
+  `ApplicationResponsibility` for stable identity and
+  `LogicalStoreId` for opaque store identity carried on public
+  results.
+- **Private Watcher or Operator Station clients.** Drop
+  product-specific client forks and re-implementations. Send-only
+  Watcher probes and bidirectional Operator Station probes both use
+  the same `telex::application_client` surface, differ only in
+  `ApplicationCapability`, and share the same
+  `connect_with_daemon` entry point.
+- **Missing shared semantics.** If a required semantic is genuinely
+  absent from the shared client, block on the shared contract in
+  [`docs/design/application-client.md`](design/application-client.md)
+  and issue [#152](https://github.com/lossyrob/telex/issues/152)
+  rather than shipping a private fallback.
+
+Callers that previously relied on the source-compatible
+`ApplicationClient::connect(config)` behavior for tests or development
+may keep it, or move to
+`ApplicationDaemonBootstrap::ExactExecutable { executable }` for a
+pinned-target dev/test seam. Neither is a supported production path.
+
+## Conformance suite
+
+The Application Client conformance suite lives in
+`tests/application_client_conformance.rs` and runs the same
+backend-neutral scenario functions against an isolated SQLite store
+and a credentialed Postgres schema. Each scenario is mapped to one of
+the ten families below in the file's `COVERAGE` table.
+
+Backend-neutral SQLite runs need no extra environment:
+
+```sh
+cargo test --test application_client_conformance \
+    --no-default-features --features sqlite
+```
+
+Credentialed Postgres runs require a reachable server and the
+usual `TELEX_PG_*` environment. Set `TELEX_PG_REQUIRE=1` so a missing
+credential fails closed instead of skipping into success-shaped
+evidence:
+
+```sh
+TELEX_PG_REQUIRE=1 \
+    cargo test --test application_client_conformance \
+    --no-default-features --features postgres
+```
+
+The dual-backend profile runs both legs when both environments are
+available:
+
+```sh
+TELEX_PG_REQUIRE=1 \
+    cargo test --test application_client_conformance \
+    --no-default-features --features sqlite,postgres
+```
+
+Two consumer-shaped fixtures live in
+`tests/fixtures/application-client-consumer`. The harness in
+`tests/application_client_fixture.rs` builds each with
+`--no-default-features` and runs it through
+`ApplicationDaemonBootstrap::InstalledCurrent`, so the fixture code
+touches only the shared `telex::application_client` surface. The
+Watcher-shaped probe exercises send-only lifecycle, and the Operator
+Station-shaped probe exercises bidirectional lifecycle,
+acknowledgment, ordinary reply, source resolution, and compound
+operations. A two-process Station phase also persists caller-owned
+ingest evidence, exits before acknowledgment, repairs membership in a
+fresh runtime, recovers the exact pending delivery without duplicate
+ingest, and then acknowledges on both backend legs.
+
+Additional `InstalledCurrent` process-level coverage lives in
+`tests/installed_current_process.rs`.
+
+### Required coverage families
+
+The suite exercises the same ten families the `client-conformance`
+node is scoped to prove:
+
+1. fresh runtime identity and stable responsibility/store identity;
+2. strict and bounded recovery, restart loss, deliberate detach,
+   predicate death, owner demotion, collision evidence, and unknown
+   future loss reasons;
+3. atomic-or-compensable multi-address attach/reconcile/detach;
+4. send-only false-attendance prevention and bidirectional exact
+   delivery ack;
+5. independent receipt/workflow axes and ack-after-ingest restart
+   recovery;
+6. operation replay, fingerprint mismatch, authoritative exact-tuple
+   `NotRecorded`, retention-boundary invalidation, accepted-send
+   indeterminate windows, and post-restart reconciliation;
+7. unresolved/recent/thread filtering before bounds and store-scoped
+   source resolution;
+8. monotonic delta ordering, gap detection, resync, and no-regression
+   backfill;
+9. compound prerequisite ordering, partial/indeterminate outcomes,
+   recovery handles, and crash continuation;
+10. schema v2-to-v3 migration, newer-schema refusal, bounded cleanup,
+    principal provenance, and raw path/credential exclusion.
+
+### Truthful status
+
+The current implementation exposes the public
+`ApplicationDaemonBootstrap`, `connect_with_daemon`, and typed
+`DaemonBootstrapFailure` surface, plus the selector lock and
+pre-`Hello` trust mechanics documented above. Local evidence covers
+the SQLite conformance battery, the external Watcher-shaped and
+Operator Station-shaped fixture probes, and the Windows
+`InstalledCurrent` process tests.
+
+The following remain authoritative CI obligations rather than
+completed local evidence:
+
+- credentialed Postgres runs of the conformance battery and consumer
+  fixtures (`TELEX_PG_REQUIRE=1`); and
+- Linux `InstalledCurrent` process coverage across the platform
+  matrix.
+
+This binding does not by itself pass `consumer-integration-gate`,
+publish a release, authorize Watcher or Operator Station launch,
+complete packaging or operational hardening, receive both consumer
+attestations, or establish production readiness. Those gates remain
+downstream of this suite.
 
 ## Core model
 
@@ -226,29 +534,3 @@ backend evidence. Postgres exposes the configured connection user as
   `accepted` before the application authors a replacement. If no record or
   mapping exists and the persisted retention generation still matches, it
   returns typed authoritative `NotRecorded` evidence.
-
-## Required later conformance coverage
-
-The `client-conformance` node must run the same semantic cases against SQLite and
-credentialed Postgres:
-
-1. fresh runtime identity and stable responsibility/store identity;
-2. strict and bounded recovery, restart loss, deliberate detach, predicate death,
-   owner demotion, collision evidence, and unknown future loss reasons;
-3. atomic-or-compensable multi-address attach/reconcile/detach;
-4. send-only false-attendance prevention and bidirectional exact delivery ack;
-5. independent receipt/workflow axes and ack-after-ingest restart recovery;
-6. operation replay, fingerprint mismatch, authoritative exact-tuple
-   `NotRecorded`, retention-boundary invalidation, accepted-send indeterminate
-   windows, and post-restart reconciliation;
-7. unresolved/recent/thread filtering before bounds and store-scoped source
-   resolution;
-8. monotonic delta ordering, gap detection, resync, and no-regression backfill;
-9. compound prerequisite ordering, partial/indeterminate outcomes, recovery
-   handles, and crash continuation;
-10. schema v2-to-v3 migration, newer-schema refusal, bounded cleanup, principal
-    provenance, and raw path/credential exclusion.
-
-This binding does not complete that matrix, authorize Watcher or Operator
-Station integration, or establish packaging, upgrade, or production-readiness
-claims.

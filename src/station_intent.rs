@@ -1238,7 +1238,8 @@ impl<T> BoundedPhase<T> {
 /// progress. Phases whose inner work has no deadline check of its own — a cursor write, an
 /// evidence rewrite — pass [`Duration::ZERO`], because for them the deadline *is* the hard bound.
 /// Callers must size `grace` into the pass budget: the true worst case of this call is
-/// `deadline + grace`.
+/// `deadline + grace`. For cancellable phases, permit acquisition and worker completion consume
+/// that same grace window rather than receiving one window each.
 pub async fn run_blocking_within<T, F>(
     deadline: PassDeadline,
     grace: Duration,
@@ -1283,8 +1284,19 @@ where
     let slot = FILESYSTEM_PHASE_SLOT
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
         .clone();
-    let permit = match deadline.remaining() {
-        Some(remaining) => match tokio::time::timeout(remaining, slot.acquire_owned()).await {
+    // Permit acquisition and cooperative completion share one absolute
+    // `deadline + grace` boundary. A spent cooperative deadline must still be
+    // able to acquire an immediately available slot and return its mandatory
+    // partial page, but contention must not receive one grace window for the
+    // slot and a second grace window for the work.
+    let completion_deadline = deadline.0.map(|deadline| deadline + grace);
+    let permit = match completion_deadline {
+        Some(completion_deadline) => match tokio::time::timeout(
+            completion_deadline.saturating_duration_since(Instant::now()),
+            slot.acquire_owned(),
+        )
+        .await
+        {
             Ok(Ok(permit)) => permit,
             Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
         },
@@ -1299,8 +1311,13 @@ where
         let _permit = permit;
         work(worker_cancelled)
     });
-    match deadline.remaining() {
-        Some(remaining) => match tokio::time::timeout(remaining + grace, handle).await {
+    match completion_deadline {
+        Some(completion_deadline) => match tokio::time::timeout(
+            completion_deadline.saturating_duration_since(Instant::now()),
+            handle,
+        )
+        .await
+        {
             Ok(Ok(value)) => BoundedPhase::Completed(value),
             Ok(Err(_)) => BoundedPhase::Overran,
             Err(_) => {

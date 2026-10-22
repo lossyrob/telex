@@ -218,6 +218,60 @@ fn release_publish_verifies_a_checksum_sidecar_for_every_archive() {
 }
 
 #[test]
+fn ci_requires_the_official_v021_to_exact_candidate_proof() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Released v0.2.1 upgrade proof (Windows)")
+            && ci.contains("TELEX_RELEASED_V021_EXE")
+            && ci.contains("TELEX_V021_EXPECTED_HEAD")
+            && ci.contains("released_v021_writer_installs_exact_candidate")
+            && ci.contains("released-v021-upgrade-proof-"),
+        "CI must retain the official released-v0.2.1 writer proof and its evidence artifact"
+    );
+    assert!(
+        !ci.contains("Remove-Item -LiteralPath $root -Recurse -Force"),
+        "the hosted proof must retain its disposable root for ephemeral runner teardown"
+    );
+}
+
+#[test]
+fn ci_retains_windows_heap_corruption_diagnostics() {
+    let ci = read(".github/workflows/ci.yml");
+    let capture = read("tests/capture_windows_crash_evidence.ps1");
+    assert!(
+        ci.contains("Windows heap diagnostics")
+            && ci.contains("Windows Error Reporting\\LocalDumps")
+            && ci.contains("PageHeapFlags")
+            && ci.contains("0x02000000")
+            && ci.contains("CARGO_PROFILE_DEV_DEBUG")
+            && ci.contains("CARGO_PROFILE_TEST_DEBUG")
+            && ci.contains("matching telex.exe and telex.pdb")
+            && ci.contains("Prebuild workspace test symbols")
+            && ci.contains("Fail on collected Windows crash dumps")
+            && ci.contains("capture_windows_crash_evidence.ps1")
+            && ci.contains("telex-crash-symbols")
+            && ci.contains("daemon_process_sqlite")
+            && ci.contains("windows-build-test-crash-")
+            && ci.contains("windows-heap-diagnostics-"),
+        "Windows CI must retain full-dump and PageHeap evidence for native heap failures"
+    );
+    assert!(
+        capture.contains("native crash dump:")
+            && capture.contains("$EvidenceName-telex.exe")
+            && capture.contains("$EvidenceName-telex.pdb"),
+        "crash collection must preserve a matching executable/PDB pair before failing"
+    );
+    assert!(
+        capture.contains("crash dump directory is unavailable")
+            && capture.contains("SnapshotSymbols")
+            && ci.contains("Snapshot SQLite process-test symbols")
+            && ci.contains("Snapshot Postgres process-test symbols")
+            && ci.contains("Settle and check final PageHeap dumps"),
+        "dump enumeration and final PageHeap settlement must fail closed"
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version

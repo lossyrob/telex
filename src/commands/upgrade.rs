@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use crate::cli::{Ctx, GcArgs, RollbackArgs, UpgradeArgs, VersionArgs};
 use crate::daemon::DaemonError;
-use crate::daemon_ipc::{Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED};
+use crate::daemon_ipc::{
+    IntentRecoveryState, Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED,
+};
 use crate::install;
 use crate::output::emit;
 
@@ -219,6 +221,32 @@ async fn perform_upgrade(
     plan: InstallPlan,
     args: &UpgradeArgs,
 ) -> Result<i32> {
+    install::prepare_install_root(&layout.root)
+        .map_err(|error| anyhow!("create install root before selector admission: {error}"))?;
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before upgrade: {error}"))?;
+    let canonical_layout = install::layout_for_root(canonical_root);
+    let layout = &canonical_layout;
+    // Serialize candidate installation as well as selector publication. A
+    // same-tag install can overwrite the currently selected target, so taking
+    // admission only around drain/switch would leave active readers exposed.
+    let selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| {
+                anyhow!("acquire exclusive selector admission before install/switch: {error}")
+            })?;
+    let selected_predecessor = if args.no_switch || args.skip_drain {
+        None
+    } else {
+        preflight_selected_predecessor_for_drain(layout)?
+    };
+    if layout.versions_dir.join(&plan.tag).exists() {
+        bail!(
+            "installed version {} is immutable; choose a new version tag or use rollback/switch",
+            plan.tag
+        );
+    }
     let source_metadata = source_metadata(&plan.source, &layout.root)?;
     // Release path only: the asset's self-reported version must match the tag it was published
     // under, so a mislabeled/renamed release asset cannot be installed under the wrong tag.
@@ -234,22 +262,36 @@ async fn perform_upgrade(
             );
         }
     }
-    let installed = install::install_binary(
+    let mut installed = install::install_binary_without_launcher(
         layout,
         &plan.tag,
         &plan.source,
         &plan.source_label,
-        false,
         Some(source_metadata),
     )?;
-    if !args.no_switch {
+    let validation = (|| -> Result<()> {
         let manifest = install::read_manifest(layout, &plan.tag)?;
         install::validate_manifest_for_current(&manifest)?;
+        crate::daemon_bootstrap::validate_installed_target_for_switch(layout, &plan.tag)
+            .map_err(|error| anyhow!("candidate is not safe for installed-current: {error}"))
+    })();
+    if let Err(error) = validation {
+        let cleanup = install::remove_rejected_candidate(layout, &plan.tag);
+        return match cleanup {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(anyhow!(
+                "{error}; additionally failed to remove rejected candidate: {cleanup_error}"
+            )),
+        };
     }
+    let installed_binary = PathBuf::from(&installed.binary);
+    installed
+        .warnings
+        .extend(install::refresh_launcher(layout, &installed_binary)?);
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms).await?
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_ref()).await?
     };
     for warning in &installed.warnings {
         eprintln!("warning: {warning}");
@@ -259,12 +301,19 @@ async fn perform_upgrade(
     } else {
         Some(install::switch_to(layout, &plan.tag)?)
     };
+    drop(selector_admission);
     // Post-switch successor (ADR 0052 decision 14c): spawn the daemon this switch just installed
     // and wait, bounded, for a reconcile pass, so an idle attached session regains push without
     // the user running anything. Skipped when nothing was drained or nothing is recoverable.
     let reconcile = match &switched {
         Some(switched) => {
-            verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await
+            verify_successor_reconcile(
+                ctx,
+                &drain,
+                Path::new(&switched.current_binary),
+                &layout.root,
+            )
+            .await
         }
         None => json!({
             "attempted": false,
@@ -370,6 +419,23 @@ fn sweep_stale_staging(base: &Path) {
 
 pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let layout = install::layout_from_optional_root(args.root)?;
+    if args.version.is_none() && !layout.root.exists() {
+        bail!("no previous installed version recorded; pass --version");
+    }
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before rollback: {error}"))?;
+    let layout = install::layout_for_root(canonical_root);
+    let selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| {
+                anyhow!("acquire exclusive selector admission before rollback resolution: {error}")
+            })?;
+    let selected_predecessor = if args.skip_drain {
+        None
+    } else {
+        preflight_selected_predecessor_for_drain(&layout)?
+    };
     let target = match args.version {
         Some(tag) => tag,
         None => install::version_info(Some(layout.root.clone()))?
@@ -379,12 +445,15 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     };
     let manifest = install::read_manifest(&layout, &target)?;
     install::validate_manifest_for_current(&manifest)?;
+    crate::daemon_bootstrap::validate_installed_target_for_switch(&layout, &target)
+        .map_err(|error| anyhow!("rollback target is not safe for installed-current: {error}"))?;
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms).await?
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_ref()).await?
     };
     let switched = install::switch_to(&layout, &target)?;
+    drop(selector_admission);
     // Rollback gets the same pre-flight report as upgrade, plus an explicit warning: a target
     // binary that predates station-intent reconciliation cannot restore these intents, and the
     // documented consequence is a return to manual `telex copilot resume`. Intents are never
@@ -395,8 +464,13 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     // The successor is the binary the rollback just selected, invoked as a child. Calling
     // `connect_or_spawn` here would have spawned the *new* binary this rollback is moving away
     // from, resurrecting exactly what the operator asked to roll back.
-    let reconcile =
-        verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await;
+    let reconcile = verify_successor_reconcile(
+        ctx,
+        &drain,
+        Path::new(&switched.current_binary),
+        &layout.root,
+    )
+    .await;
     let out = json!({
         "rollback": true,
         "drain": drain,
@@ -420,6 +494,15 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
 
 pub async fn gc(ctx: &Ctx, args: GcArgs) -> Result<i32> {
     let layout = install::layout_from_optional_root(args.root)?;
+    install::prepare_install_root(&layout.root)
+        .map_err(|error| anyhow!("create install root before selector admission: {error}"))?;
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before gc: {error}"))?;
+    let layout = install::layout_for_root(canonical_root);
+    let _selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| anyhow!("acquire exclusive selector admission before gc: {error}"))?;
     let report = install::gc(&layout, args.dry_run, args.force)?;
     emit(ctx.fmt, &report, || {
         println!("install_root {}", report.root);
@@ -550,6 +633,11 @@ fn parse_source_metadata(value: &serde_json::Value) -> Result<install::SourceMet
                     .ok_or_else(|| anyhow!("required_capabilities must be strings"))
             })
             .collect::<Result<Vec<_>>>()?,
+        application_bootstrap_admission_version: version
+            .get("application_bootstrap_admission_version")
+            .and_then(|value| value.as_u64())
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(0),
         copilot_bridge_protocol: required_u32(copilot, "bridge_protocol")?,
         min_compatible_plugin_version: required_str(copilot, "min_compatible_plugin_version")?
             .to_string(),
@@ -595,7 +683,65 @@ fn unauthorized_drain_message(message: &str, response_rejected: bool) -> String 
     )
 }
 
-async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
+fn validate_drain_caller_paths(caller: &Path, selected_executable: Option<&Path>) -> Result<()> {
+    let Some(selected_executable) = selected_executable else {
+        bail!(
+            "refusing ordinary daemon drain because the target install root has no selected \
+             current image; pass --skip-drain for an explicit break-glass transition"
+        );
+    };
+    if caller != selected_executable {
+        bail!(
+            "refusing ordinary daemon drain because the caller does not match the target install \
+             root's selected current image; run the selected binary or pass --skip-drain for the \
+             explicit break-glass transition"
+        );
+    }
+    Ok(())
+}
+
+fn validate_drain_caller(selected_executable: Option<&Path>) -> Result<()> {
+    let caller = std::env::current_exe()
+        .context("resolve the upgrade caller executable")?
+        .canonicalize()
+        .context("canonicalize the upgrade caller executable")?;
+    let Some(selected_executable) = selected_executable else {
+        return validate_drain_caller_paths(&caller, None);
+    };
+    let selected = selected_executable.canonicalize().with_context(|| {
+        format!(
+            "canonicalize selected predecessor {}",
+            selected_executable.display()
+        )
+    })?;
+    validate_drain_caller_paths(&caller, Some(&selected))
+}
+
+fn preflight_selected_predecessor_for_drain(
+    layout: &install::InstallLayout,
+) -> Result<Option<crate::daemon_bootstrap::SelectionToken>> {
+    let selected = crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
+        .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
+    if let Some(selected) = selected {
+        validate_drain_caller(Some(&selected.target_exe))?;
+        return Ok(Some(selected));
+    }
+    let paths = crate::daemon::DaemonPaths::current()?;
+    match crate::daemon::read_cap_file(&paths.cap_path) {
+        Err(DaemonError::NotRunning(_)) => Ok(None),
+        Ok(_) => {
+            validate_drain_caller(None)?;
+            unreachable!()
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn drain_daemon(
+    ctx: &Ctx,
+    timeout_ms: u64,
+    selected: Option<&crate::daemon_bootstrap::SelectionToken>,
+) -> Result<serde_json::Value> {
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
@@ -605,9 +751,19 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Err(e) => return Err(e.into()),
     };
+    let selected = selected.ok_or_else(|| {
+        anyhow!(
+            "refusing ordinary daemon drain because the target install root has no selected \
+             current image; pass --skip-drain for an explicit break-glass transition"
+        )
+    })?;
+    validate_drain_caller(Some(&selected.target_exe))?;
+    let server_pid = cap.server_pid;
+    let server_start_time = cap.server_start_time;
     let timeout = Duration::from_millis(timeout_ms.max(1));
     let response = match tokio::time::timeout(timeout, async {
-        let mut client = crate::daemon::connect_existing(&store_key).await?;
+        let mut client =
+            crate::daemon::connect_existing_with_selection(&store_key, selected).await?;
         client
             .request(&Request::Drain {
                 proof: Some(cap.admin_cap),
@@ -627,14 +783,25 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         Err(_) => bail!("daemon drain timed out after {timeout_ms}ms"),
     };
     match response {
-        Response::Ack { drain_intents, .. } => Ok(json!({
-            "drained": true,
-            "status": "draining",
-            // The pre-drain station-intent signal (issue #106), carried through so `upgrade` and
-            // `rollback` can report — and, for upgrade, verify — what a successor must restore.
-            // `null` means the drained daemon predates station-intent reporting.
-            "station_intents": drain_intents,
-        })),
+        Response::Ack { drain_intents, .. } => {
+            let Some(pid) = server_pid else {
+                bail!("daemon drain acknowledged without a reuse-safe server pid")
+            };
+            let deadline = Instant::now() + timeout;
+            while crate::session_watch::process_alive_with_start_time(pid, server_start_time) {
+                if Instant::now() >= deadline {
+                    bail!("daemon drain acknowledged but process {pid} did not exit in time");
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Ok(json!({
+                "drained": true,
+                "status": "stopped",
+                // Preserve the pre-drain station-intent signal for the
+                // successor reconciliation proof.
+                "station_intents": drain_intents,
+            }))
+        }
         Response::Error { code, message, .. } if code == ERROR_NOT_RUNNING => {
             Ok(json!({"drained": false, "status": "not_running", "message": message}))
         }
@@ -658,18 +825,23 @@ const SUCCESSOR_WAIT_TIMEOUT: Duration =
 
 /// How long a killed (or already exited) successor gets to close its pipes before we give up on
 /// its diagnostics. Never unbounded: a grandchild that inherited a pipe can hold it open forever.
+#[cfg(test)]
 const SUCCESSOR_PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// How long we wait to *reap* a successor we just killed, so the child never outlives this
 /// process as a zombie (Unix) or an unclosed handle (Windows).
+#[cfg(test)]
 const SUCCESSOR_REAP_GRACE: Duration = Duration::from_secs(5);
 
 /// Byte caps on what we capture from the successor's pipes. Follows the watcher's
 /// `MAX_STDOUT_BYTES` / `MAX_STDERR_BYTES` split: stdout carries a JSON report, stderr a message.
+#[cfg(test)]
 const SUCCESSOR_STDOUT_CAP: usize = 64 * 1024;
+#[cfg(test)]
 const SUCCESSOR_STDERR_CAP: usize = 16 * 1024;
 
 /// Character cap on any successor-provided text that reaches the result JSON.
+#[cfg(test)]
 const SUCCESSOR_DIAGNOSTIC_CHARS: usize = 512;
 
 /// Number of recoverable intents at drain time, or `None` when the daemon did not report any.
@@ -701,6 +873,7 @@ async fn verify_successor_reconcile(
     ctx: &Ctx,
     drain: &serde_json::Value,
     successor_binary: &Path,
+    trusted_root: &Path,
 ) -> serde_json::Value {
     let Some(recoverable) = recoverable_intent_count(drain) else {
         return json!({
@@ -725,29 +898,148 @@ async fn verify_successor_reconcile(
             "reason": format!("successor binary {} is missing", successor_binary.display()),
         });
     }
-    let mut command = tokio::process::Command::new(successor_binary);
-    command
-        .arg("--json")
-        .arg("daemon")
-        .arg("reconcile")
-        .arg("--timeout-ms")
-        .arg(SUCCESSOR_RECONCILE_TIMEOUT.as_millis().to_string())
-        // The successor binary lives under `versions/`, not `bin/`, so it would not re-dispatch
-        // anyway; the guard makes that explicit rather than incidental.
-        .env(crate::install::LAUNCHER_GUARD_ENV, "1");
-    if let Some(db) = ctx.cfg.db_override.as_deref() {
-        command.arg("--db").arg(db);
+    let policy = match crate::daemon_bootstrap::BootstrapPolicy::installed_current(
+        trusted_root.to_path_buf(),
+    ) {
+        Ok(policy) => policy,
+        Err(error) => {
+            return json!({
+                "attempted": true,
+                "successor_binary": successor_binary.to_string_lossy(),
+                "recoverable_at_drain": recoverable,
+                "reconciled": false,
+                "error": format!("successor bootstrap policy failed: {error}"),
+            });
+        }
+    };
+    let store_key = match ctx.store_key() {
+        Ok(store_key) => store_key,
+        Err(error) => {
+            return json!({
+                "attempted": true,
+                "successor_binary": successor_binary.to_string_lossy(),
+                "recoverable_at_drain": recoverable,
+                "reconciled": false,
+                "error": format!("successor store resolution failed: {error}"),
+            });
+        }
+    };
+    let deadline = Instant::now() + SUCCESSOR_WAIT_TIMEOUT;
+    let mut last_error = None;
+    loop {
+        let attempt = async {
+            let mut client =
+                crate::daemon::connect_or_spawn_with_bootstrap(&store_key, policy.as_ref())
+                    .await
+                    .map_err(|error| error.to_string())?;
+            let paths = crate::daemon::DaemonPaths::current().map_err(|error| error.to_string())?;
+            let cap =
+                crate::daemon::read_cap_file(&paths.cap_path).map_err(|error| error.to_string())?;
+            let proof = cap.admin_cap;
+            let response = client
+                .request(&Request::ReconcileIntents {
+                    proof: Some(proof),
+                    scope: None,
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+            let status = if matches!(
+                &response,
+                Response::Reconciled { report } if report.ran && report.restored == 0
+            ) {
+                drop(client);
+                let mut status_client =
+                    crate::daemon::connect_existing_with_bootstrap(&store_key, policy.as_ref())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                let paths =
+                    crate::daemon::DaemonPaths::current().map_err(|error| error.to_string())?;
+                let status_cap = crate::daemon::read_cap_file(&paths.cap_path)
+                    .map_err(|error| error.to_string())?;
+                match status_client
+                    .request(&Request::Status {
+                        store_key: Some(store_key.clone()),
+                        detail: true,
+                        proof: Some(status_cap.admin_cap),
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    Response::StatusReport { status } => Some(status),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            Ok((response, status))
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, attempt).await {
+            Ok(Ok((Response::Reconciled { report }, status))) if report.ran => {
+                let observed_restored = status
+                    .as_ref()
+                    .map(|status| {
+                        status
+                            .intents
+                            .iter()
+                            .filter(|intent| {
+                                intent.has_member
+                                    && matches!(
+                                        intent.state,
+                                        IntentRecoveryState::Live | IntentRecoveryState::Restored
+                                    )
+                            })
+                            .count()
+                    })
+                    .unwrap_or_default();
+                let restored = report
+                    .restored
+                    .max(observed_restored.min(recoverable as usize));
+                return json!({
+                    "attempted": true,
+                    "successor_binary": successor_binary.to_string_lossy(),
+                    "recoverable_at_drain": recoverable,
+                    "reconciled": true,
+                    "restored": restored,
+                    "refreshed_no_op": report.refreshed_no_op,
+                    "deferred_lease": report.deferred_lease,
+                    "failed": report.failed,
+                    "pass_seq": report.pass_seq,
+                });
+            }
+            Ok(Ok((Response::Reconciled { report }, _))) => {
+                last_error = Some(format!(
+                    "successor reconcile skipped: {}",
+                    report
+                        .skipped_reason
+                        .as_deref()
+                        .unwrap_or("no pass completed")
+                ));
+            }
+            Ok(Ok((Response::Error { code, message, .. }, _))) => {
+                last_error = Some(format!("{code}: {message}"));
+            }
+            Ok(Ok((other, _))) => {
+                last_error = Some(format!("unexpected daemon reconcile response: {other:?}"));
+            }
+            Ok(Err(error)) => last_error = Some(error),
+            Err(_) => last_error = Some("successor reconcile attempt timed out".to_string()),
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    if let Some(backend) = ctx.cfg.backend_selector.as_deref() {
-        command.arg("--backend").arg(backend);
-    }
-    run_successor_reconcile(
-        command,
-        successor_binary,
-        recoverable,
-        SUCCESSOR_WAIT_TIMEOUT,
-    )
-    .await
+    json!({
+        "attempted": true,
+        "successor_binary": successor_binary.to_string_lossy(),
+        "recoverable_at_drain": recoverable,
+        "reconciled": false,
+        "error": last_error.unwrap_or_else(|| "successor reconcile timed out".to_string()),
+    })
 }
 
 /// Run one successor `daemon reconcile` child to completion (or to a kill), bounded end to end.
@@ -761,6 +1053,7 @@ async fn verify_successor_reconcile(
 ///   successfully spawned is a separate detached service and remains governed by daemon lifecycle.
 /// * **A result on every path.** Every branch reports `successor_binary`, so a consumer can always
 ///   tell which binary the report is about.
+#[cfg(test)]
 async fn run_successor_reconcile(
     mut command: tokio::process::Command,
     successor_binary: &Path,
@@ -855,6 +1148,7 @@ async fn run_successor_reconcile(
 ///
 /// It keeps reading after the cap instead of stopping: the point is that the child never blocks on
 /// a full pipe, which is exactly what a capped-then-abandoned reader would cause.
+#[cfg(test)]
 async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize) -> Vec<u8> {
     use tokio::io::AsyncReadExt;
     let mut captured = Vec::new();
@@ -874,6 +1168,7 @@ async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize
 
 /// Collect a pipe-drain task, bounded. A reader still blocked after the grace is aborted rather
 /// than awaited: a grandchild holding the inherited pipe open must not extend `upgrade`.
+#[cfg(test)]
 async fn collect_capture(capture: Option<tokio::task::JoinHandle<Vec<u8>>>) -> Vec<u8> {
     let Some(mut capture) = capture else {
         return Vec::new();
@@ -889,10 +1184,12 @@ async fn collect_capture(capture: Option<tokio::task::JoinHandle<Vec<u8>>>) -> V
 }
 
 /// Trimmed, character-bounded rendering of captured child output for a diagnostic JSON field.
+#[cfg(test)]
 fn bounded_diagnostic(bytes: &[u8]) -> String {
     bounded_text(&String::from_utf8_lossy(bytes))
 }
 
+#[cfg(test)]
 fn bounded_text(text: &str) -> String {
     text.trim()
         .chars()
@@ -902,6 +1199,7 @@ fn bounded_text(text: &str) -> String {
 
 /// Render a bound for the operator-facing message: whole seconds normally, milliseconds for a
 /// sub-second bound, which would otherwise read as "within 0s".
+#[cfg(test)]
 fn render_bound(bound: Duration) -> String {
     if bound.subsec_millis() == 0 {
         format!("{}s", bound.as_secs())
@@ -920,6 +1218,7 @@ fn render_bound(bound: Duration) -> String {
 ///
 /// Every branch carries `successor_binary`, and every non-zero exit still carries `exit_code` and
 /// `min_daemon_minor`, so existing consumers see nothing removed.
+#[cfg(test)]
 fn successor_reconcile_result(
     recoverable: u64,
     success: bool,
@@ -1105,6 +1404,20 @@ mod tests {
             formatted.contains(&raw_message),
             "message should include original detail: {formatted}"
         );
+    }
+
+    #[test]
+    fn ordinary_drain_requires_the_target_roots_selected_image() {
+        let selected = Path::new("/install-b/versions/v1/telex");
+        assert!(validate_drain_caller_paths(selected, Some(selected)).is_ok());
+
+        let mismatch = validate_drain_caller_paths(Path::new("/install-a/telex"), Some(selected))
+            .expect_err("a caller from another install root must not drain");
+        assert!(mismatch.to_string().contains("does not match"));
+
+        let missing = validate_drain_caller_paths(Path::new("/install-a/telex"), None)
+            .expect_err("a root without current has no ordinary drain authority");
+        assert!(missing.to_string().contains("--skip-drain"));
     }
 
     #[test]
@@ -1318,13 +1631,14 @@ mod tests {
         let skipped = vec![
             (
                 "no station-intent report",
-                verify_successor_reconcile(&ctx, &json!({}), &missing).await,
+                verify_successor_reconcile(&ctx, &json!({}), &missing, &missing).await,
             ),
             (
                 "nothing recoverable",
                 verify_successor_reconcile(
                     &ctx,
                     &json!({"station_intents": {"recoverable": 0}}),
+                    &missing,
                     &missing,
                 )
                 .await,
@@ -1334,6 +1648,7 @@ mod tests {
                 verify_successor_reconcile(
                     &ctx,
                     &json!({"station_intents": {"recoverable": 2}}),
+                    &missing,
                     &missing,
                 )
                 .await,

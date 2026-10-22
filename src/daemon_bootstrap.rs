@@ -1,0 +1,3596 @@
+//! Application-client daemon bootstrap: installed-current or pinned-exact.
+//!
+//! This module owns the Application Client-side selector admission, trusted-root
+//! validation, InstalledCurrent selection freezing, and pre-Hello peer identity
+//! projection that the public `ApplicationDaemonBootstrap` policy relies on. It
+//! never opens a public raw IPC seam and never allows the consumer binary to
+//! host `daemon serve`. All lifecycle admissions are OS-backed and fail closed
+//! on unsupported semantics.
+//!
+//! See `.streamliner/workstreams/application-client/design/current-design.md`
+//! and `.streamliner/workstreams/local-daemon/design/current-design.md` for the
+//! promoted contract; this module is the load-bearing implementation.
+#![allow(clippy::result_large_err)]
+
+use crate::install::{self, InstallLayout, VersionManifest};
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use std::collections::{BTreeSet, HashMap};
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+/// Bounded selector-admission acquisition deadline. Callers (parent connect
+/// and upgrade/rollback) never block on the selector lock for longer than
+/// this. Exhaustion maps to [`DaemonBootstrapFailure::SelectionUnstable`].
+pub(crate) const SELECTOR_LOCK_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Per-attempt sleep between non-blocking retries. Small enough to keep
+/// worst-case admission latency close to the deadline, large enough to avoid
+/// spinning on the lock file.
+const SELECTOR_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
+
+/// Hidden env transport handing a resolved selection to a spawned daemon.
+///
+/// Not a bearer secret and not part of the public IPC surface: the token only
+/// witnesses one InstalledCurrent resolution and is validated by the child
+/// independently against a fresh resolution and its own process image before
+/// serving.
+pub(crate) const BOOTSTRAP_TOKEN_ENV: &str = "TELEX_DAEMON_SELECTION_TOKEN";
+pub(crate) const BOOTSTRAP_RESULT_ENV: &str = "TELEX_DAEMON_SELECTION_RESULT";
+#[cfg(windows)]
+pub(crate) const BOOTSTRAP_WITNESS_HANDLE_ENV: &str = "TELEX_DAEMON_EXECUTABLE_WITNESS_HANDLE";
+
+/// Public typed enumeration of installed-current / exact bootstrap failures.
+///
+/// Kept non-exhaustive on purpose so promoting new fail-closed reasons never
+/// breaks source compatibility. No variant carries raw authority paths as
+/// durable evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "kebab-case")]
+pub enum DaemonBootstrapFailure {
+    InvalidTrustedRoot,
+    UnsafeInstallAuthority,
+    MissingCurrent,
+    InvalidManifest,
+    IncompatibleManifest,
+    SelectionUnstable,
+    MissingExecutable,
+    ExecutableIdentityMismatch,
+    ForeignDaemon,
+}
+
+impl std::fmt::Display for DaemonBootstrapFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::InvalidTrustedRoot => "invalid trusted install root",
+            Self::UnsafeInstallAuthority => "unsafe install authority",
+            Self::MissingCurrent => "installed-current selector is missing",
+            Self::InvalidManifest => "installed-current manifest is invalid",
+            Self::IncompatibleManifest => "installed-current manifest is incompatible",
+            Self::SelectionUnstable => "installed-current selection is unstable",
+            Self::MissingExecutable => "installed-current executable is missing",
+            Self::ExecutableIdentityMismatch => "installed-current executable identity mismatch",
+            Self::ForeignDaemon => "prestarted daemon does not match the selected build",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::error::Error for DaemonBootstrapFailure {}
+
+/// Immutable, canonical bootstrap policy captured at configuration time.
+///
+/// The `InstalledCurrent` variant captures the canonical absolute root once,
+/// so a later working-directory change cannot reinterpret it. `ExactExecutable`
+/// captures the canonical target path and its platform file identity; it has
+/// no manifest authority and does not follow upgrade.
+#[derive(Debug, Clone)]
+pub(crate) enum BootstrapPolicy {
+    InstalledCurrent {
+        trusted_root: PathBuf,
+        root_identity: FileIdentity,
+    },
+    ExactExecutable {
+        executable: PathBuf,
+        file_identity: FileIdentity,
+    },
+}
+
+impl BootstrapPolicy {
+    /// Freeze an `InstalledCurrent { trusted_root }` policy: validate the root
+    /// path shape, canonicalize it, and record its owner-authority baseline.
+    pub(crate) fn installed_current(
+        trusted_root: PathBuf,
+    ) -> Result<Arc<Self>, DaemonBootstrapFailure> {
+        if trusted_root.as_os_str().is_empty() || !trusted_root.is_absolute() {
+            return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+        }
+        for component in trusted_root.components() {
+            if matches!(component, Component::ParentDir) {
+                return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+            }
+        }
+        let supplied = std::fs::symlink_metadata(&trusted_root)
+            .map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
+        if supplied.file_type().is_symlink() || is_reparse_point(&supplied) || !supplied.is_dir() {
+            return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+        }
+        let canonical = std::fs::canonicalize(&trusted_root)
+            .map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
+        if !canonical.is_dir() {
+            return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+        }
+        // Authority-chain check: fail closed if the trusted root is owned by a
+        // foreign principal or grants write/delete/ownership to another
+        // principal. Owner writability is permitted (same-user upgrade).
+        check_authority_dir(&canonical)?;
+        check_parent_authority_chain(&canonical)?;
+        let root_identity =
+            path_identity(&canonical).ok_or(DaemonBootstrapFailure::InvalidTrustedRoot)?;
+        Ok(Arc::new(BootstrapPolicy::InstalledCurrent {
+            trusted_root: canonical,
+            root_identity,
+        }))
+    }
+
+    /// Freeze an `ExactExecutable { executable }` policy.
+    pub(crate) fn exact_executable(
+        executable: PathBuf,
+    ) -> Result<Arc<Self>, DaemonBootstrapFailure> {
+        if executable.as_os_str().is_empty() || !executable.is_absolute() {
+            return Err(DaemonBootstrapFailure::MissingExecutable);
+        }
+        let supplied = std::fs::symlink_metadata(&executable)
+            .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+        if supplied.file_type().is_symlink() || is_reparse_point(&supplied) || !supplied.is_file() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let canonical = std::fs::canonicalize(&executable)
+            .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+        if !canonical.is_file() {
+            return Err(DaemonBootstrapFailure::MissingExecutable);
+        }
+        // ExactExecutable is a pinned dev/test seam. Apply the same
+        // untrusted-writability guard as InstalledCurrent so a dev binary in a
+        // world-writable location is rejected up-front, and capture the file
+        // identity for later pre-Hello peer authentication.
+        check_authority_file(&canonical)?;
+        check_parent_authority_chain(&canonical)?;
+        let file_identity = file_identity(&canonical)?;
+        Ok(Arc::new(BootstrapPolicy::ExactExecutable {
+            executable: canonical,
+            file_identity,
+        }))
+    }
+
+    /// Return the canonical trusted root of an `InstalledCurrent` policy, if any.
+    #[allow(dead_code)]
+    pub(crate) fn installed_current_root(&self) -> Option<&Path> {
+        match self {
+            BootstrapPolicy::InstalledCurrent { trusted_root, .. } => Some(trusted_root),
+            BootstrapPolicy::ExactExecutable { .. } => None,
+        }
+    }
+
+    /// Return the frozen exact executable path, if any.
+    #[allow(dead_code)]
+    pub(crate) fn exact_executable_path(&self) -> Option<&Path> {
+        match self {
+            BootstrapPolicy::ExactExecutable { executable, .. } => Some(executable),
+            BootstrapPolicy::InstalledCurrent { .. } => None,
+        }
+    }
+}
+
+/// Internal immutable resolved-selection token.
+///
+/// Not public, not a bearer secret. Carries the selected tag, load-bearing
+/// manifest identity, canonical target path, and platform file identity so one
+/// resolution is used for both spawn and pre-Hello peer verification.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SelectionToken {
+    pub trusted_root: PathBuf,
+    pub root_identity: FileIdentity,
+    pub tag: String,
+    pub package_version: String,
+    pub build_id: String,
+    pub schema_min: i64,
+    pub schema_max: i64,
+    pub protocol_major: u16,
+    pub protocol_minor: u16,
+    pub required_capabilities: Vec<String>,
+    pub application_bootstrap_admission_version: u16,
+    pub target_exe: PathBuf,
+    pub file_identity: FileIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_completion: Option<AdmissionCompletionBinding>,
+}
+
+impl SelectionToken {
+    /// Encode the token for hidden env-var handoff to a spawned daemon child.
+    pub(crate) fn to_env_value(&self) -> String {
+        serde_json::to_string(self).expect("SelectionToken serializes")
+    }
+
+    /// Parse a token from its hidden env-var encoding.
+    pub(crate) fn from_env_value(raw: &str) -> Option<Self> {
+        serde_json::from_str::<Self>(raw).ok()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AdmissionCompletionBinding {
+    trusted_root: PathBuf,
+    root_identity: FileIdentity,
+    tag: String,
+    package_version: String,
+    build_id: String,
+    schema_min: i64,
+    schema_max: i64,
+    protocol_major: u16,
+    protocol_minor: u16,
+    required_capabilities: Vec<String>,
+    selector_file_identity: Option<FileIdentity>,
+    manifest_bytes: Vec<u8>,
+    manifest_file_identity: FileIdentity,
+    target_exe: PathBuf,
+    target_file_identity: FileIdentity,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct AdmissionCompletionCacheKey {
+    trusted_root: PathBuf,
+    root_identity: FileIdentity,
+    tag: String,
+    package_version: String,
+    build_id: String,
+    schema_min: i64,
+    schema_max: i64,
+    protocol_major: u16,
+    protocol_minor: u16,
+    required_capabilities: Vec<String>,
+    target_exe: PathBuf,
+    file_identity: FileIdentity,
+    completion: AdmissionCompletionBinding,
+}
+
+impl AdmissionCompletionCacheKey {
+    fn from_candidate(candidate: &LegacyAdmissionProbeCandidate) -> Self {
+        let token = &candidate.token;
+        Self {
+            trusted_root: token.trusted_root.clone(),
+            root_identity: token.root_identity,
+            tag: token.tag.clone(),
+            package_version: token.package_version.clone(),
+            build_id: token.build_id.clone(),
+            schema_min: token.schema_min,
+            schema_max: token.schema_max,
+            protocol_major: token.protocol_major,
+            protocol_minor: token.protocol_minor,
+            required_capabilities: token.required_capabilities.clone(),
+            target_exe: token.target_exe.clone(),
+            file_identity: token.file_identity,
+            completion: candidate.completion.clone(),
+        }
+    }
+}
+
+fn admission_completion_cache(
+) -> &'static Mutex<HashMap<AdmissionCompletionCacheKey, AdmissionCompletionBinding>> {
+    static CACHE: OnceLock<
+        Mutex<HashMap<AdmissionCompletionCacheKey, AdmissionCompletionBinding>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LegacyAdmissionProbeCandidate {
+    token: SelectionToken,
+    completion: AdmissionCompletionBinding,
+    require_current_selector: bool,
+}
+
+enum AdmissionValidation<'a> {
+    Strict,
+    ProbeCandidate,
+    Apply(&'a AdmissionCompletionBinding),
+}
+
+struct ValidatedManifest {
+    manifest: VersionManifest,
+    admission_present: bool,
+    manifest_bytes: Vec<u8>,
+    manifest_file_identity: FileIdentity,
+}
+
+/// Platform file identity captured with the resolved target executable.
+///
+/// On Unix this is `(dev, ino)`; on Windows this is
+/// `(volume_serial, file_index)` from `BY_HANDLE_FILE_INFORMATION`. Both
+/// witness that a later replacement of the same path yields a different
+/// identity, closing selector movement races without claiming
+/// executable-content integrity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FileIdentity {
+    pub kind: FileIdentityKind,
+    pub high: u64,
+    pub low: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FileIdentityKind {
+    UnixDevIno,
+    WindowsVolumeFileId,
+}
+
+pub(crate) fn file_identity(path: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta =
+            std::fs::metadata(path).map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+        Ok(FileIdentity {
+            kind: FileIdentityKind::UnixDevIno,
+            high: meta.dev(),
+            low: meta.ino(),
+        })
+    }
+
+    #[cfg(windows)]
+    {
+        open_windows_witness(path).map(|witness| witness.identity)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(DaemonBootstrapFailure::UnsafeInstallAuthority)
+    }
+}
+
+#[cfg(unix)]
+fn path_identity(path: &Path) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).ok()?;
+    Some(FileIdentity {
+        kind: FileIdentityKind::UnixDevIno,
+        high: meta.dev(),
+        low: meta.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn path_identity(path: &Path) -> Option<FileIdentity> {
+    windows_path_identity(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn path_identity(_path: &Path) -> Option<FileIdentity> {
+    None
+}
+
+/// Resolve `<root>/current` -> `<root>/versions/<tag>/telex[.exe]` with full
+/// authority and containment validation, plus manifest binding/compatibility
+/// checks. Returns the frozen selection token used for both spawn and
+/// pre-Hello peer verification.
+pub(crate) fn resolve_installed_current(
+    trusted_root: &Path,
+) -> Result<SelectionToken, DaemonBootstrapFailure> {
+    resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict)
+        .map(|candidate| candidate.token)
+}
+
+/// Resolve the selected predecessor for upgrade/rollback drain while the
+/// caller already holds exclusive selector admission.
+///
+/// Missing admission metadata on the unpublished 0.3 lineage remains eligible
+/// as a predecessor without running the compatibility probe. All authority,
+/// selector, containment, manifest, and executable checks still apply.
+pub(crate) fn resolve_selected_current_for_drain(
+    trusted_root: &Path,
+) -> Result<Option<SelectionToken>, DaemonBootstrapFailure> {
+    match resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict) {
+        Ok(candidate) => Ok(Some(candidate.token)),
+        Err(DaemonBootstrapFailure::MissingCurrent) => Ok(None),
+        Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+            resolve_installed_current_with_admission(
+                trusted_root,
+                AdmissionValidation::ProbeCandidate,
+            )
+            .map(|candidate| Some(candidate.token))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) async fn resolve_installed_current_admitted(
+    trusted_root: &Path,
+) -> Result<(SelectionToken, SelectorAdmission), DaemonBootstrapFailure> {
+    let deadline = Instant::now() + SELECTOR_LOCK_DEADLINE;
+    loop {
+        let admission = SelectorAdmission::shared_async(trusted_root.to_path_buf()).await?;
+        match resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict) {
+            Ok(candidate) => return Ok((candidate.token, admission)),
+            Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+                let missing = resolve_installed_current_with_admission(
+                    trusted_root,
+                    AdmissionValidation::ProbeCandidate,
+                )?;
+                let key = AdmissionCompletionCacheKey::from_candidate(&missing);
+                let cached = admission_completion_cache()
+                    .lock()
+                    .unwrap()
+                    .get(&key)
+                    .cloned();
+                if let Some(completion) = cached {
+                    match resolve_installed_current_with_admission(
+                        trusted_root,
+                        AdmissionValidation::Apply(&completion),
+                    ) {
+                        Ok(candidate) => return Ok((candidate.token, admission)),
+                        Err(_) => {
+                            admission_completion_cache().lock().unwrap().remove(&key);
+                        }
+                    }
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        drop(admission);
+
+        let root = trusted_root.to_path_buf();
+        let completion =
+            tokio::task::spawn_blocking(move || complete_missing_admission_under_exclusive(&root))
+                .await
+                .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)??;
+
+        let admission = SelectorAdmission::shared_async(trusted_root.to_path_buf()).await?;
+        match resolve_installed_current_with_admission(
+            trusted_root,
+            AdmissionValidation::Apply(&completion),
+        ) {
+            Ok(candidate) => return Ok((candidate.token, admission)),
+            Err(error)
+                if Instant::now() < deadline
+                    && matches!(
+                        error,
+                        DaemonBootstrapFailure::SelectionUnstable
+                            | DaemonBootstrapFailure::IncompatibleManifest
+                    ) =>
+            {
+                drop(admission);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn complete_missing_admission_under_exclusive(
+    trusted_root: &Path,
+) -> Result<AdmissionCompletionBinding, DaemonBootstrapFailure> {
+    let _exclusive = SelectorAdmission::exclusive(trusted_root)?;
+    let before = resolve_installed_current_with_admission(
+        trusted_root,
+        AdmissionValidation::ProbeCandidate,
+    )?;
+    let key = AdmissionCompletionCacheKey::from_candidate(&before);
+    if let Some(completion) = admission_completion_cache()
+        .lock()
+        .unwrap()
+        .get(&key)
+        .cloned()
+    {
+        return Ok(completion);
+    }
+    probe_legacy_admission_candidate(&before, trusted_root)?;
+    let after = resolve_installed_current_with_admission(
+        trusted_root,
+        AdmissionValidation::ProbeCandidate,
+    )?;
+    if after != before {
+        return Err(DaemonBootstrapFailure::SelectionUnstable);
+    }
+    admission_completion_cache()
+        .lock()
+        .unwrap()
+        .insert(key, before.completion.clone());
+    Ok(before.completion)
+}
+
+fn resolve_installed_current_with_admission(
+    trusted_root: &Path,
+    admission: AdmissionValidation<'_>,
+) -> Result<LegacyAdmissionProbeCandidate, DaemonBootstrapFailure> {
+    // Re-canonicalize each connect cycle so any selector-authority movement is
+    // observed immediately. If the root disappeared or became unsafe, fail
+    // closed rather than reusing a stale resolution.
+    let supplied = std::fs::symlink_metadata(trusted_root)
+        .map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
+    if supplied.file_type().is_symlink() || is_reparse_point(&supplied) || !supplied.is_dir() {
+        return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+    }
+    let canonical_root = std::fs::canonicalize(trusted_root)
+        .map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
+    check_authority_dir(&canonical_root)?;
+    check_parent_authority_chain(&canonical_root)?;
+    let layout = install::layout_for_root(&canonical_root);
+    let tag = read_current_tag(&layout)?;
+    validate_installed_target(&layout, &canonical_root, &tag, true, admission)
+}
+
+pub(crate) fn validate_exact_executable_authority(
+    executable: &Path,
+) -> Result<(), DaemonBootstrapFailure> {
+    let supplied = std::fs::symlink_metadata(executable)
+        .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if supplied.file_type().is_symlink() || is_reparse_point(&supplied) || !supplied.is_file() {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    let canonical =
+        std::fs::canonicalize(executable).map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if !same_path(&canonical, executable) {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    check_authority_file(&canonical)?;
+    check_parent_authority_chain(&canonical)
+}
+
+/// Validate one versioned target before publishing it as `current`.
+///
+/// Upgrade and rollback use this same strict path as InstalledCurrent so they
+/// cannot atomically publish a selection that production clients must reject.
+/// The `current` selector is deliberately *not* required here: it names the
+/// predecessor (or nothing at all on a first install), and the candidate is
+/// validated on its own authority.
+pub(crate) fn validate_installed_target_for_switch(
+    layout: &InstallLayout,
+    tag: &str,
+) -> Result<(), DaemonBootstrapFailure> {
+    let canonical_root = validate_install_root_for_switch(&layout.root)?;
+    let canonical_layout = install::layout_for_root(&canonical_root);
+    match validate_installed_target(
+        &canonical_layout,
+        &canonical_root,
+        tag,
+        false,
+        AdmissionValidation::Strict,
+    ) {
+        Ok(_) => Ok(()),
+        Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+            let candidate = validate_installed_target(
+                &canonical_layout,
+                &canonical_root,
+                tag,
+                false,
+                AdmissionValidation::ProbeCandidate,
+            )?;
+            probe_legacy_admission_candidate(&candidate, &canonical_root)?;
+            validate_installed_target(
+                &canonical_layout,
+                &canonical_root,
+                tag,
+                false,
+                AdmissionValidation::Apply(&candidate.completion),
+            )
+            .map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn validate_install_root_for_switch(
+    root: &Path,
+) -> Result<PathBuf, DaemonBootstrapFailure> {
+    let policy = BootstrapPolicy::installed_current(root.to_path_buf())?;
+    match policy.as_ref() {
+        BootstrapPolicy::InstalledCurrent { trusted_root, .. } => Ok(trusted_root.clone()),
+        BootstrapPolicy::ExactExecutable { .. } => unreachable!(),
+    }
+}
+
+fn validate_installed_target(
+    layout: &InstallLayout,
+    canonical_root: &Path,
+    tag: &str,
+    require_current_selector: bool,
+    admission: AdmissionValidation<'_>,
+) -> Result<LegacyAdmissionProbeCandidate, DaemonBootstrapFailure> {
+    let root_identity =
+        path_identity(canonical_root).ok_or(DaemonBootstrapFailure::InvalidTrustedRoot)?;
+    // Enforce owner authority on every intermediate directory reachable from
+    // the trusted root up to and including the version tag directory before
+    // reading the manifest or executable. This fails closed on any component
+    // that a foreign principal could write, delete, or take ownership of.
+    check_authority_dir(&layout.versions_dir)?;
+    let tag_dir = layout.versions_dir.join(tag);
+    check_authority_dir(&tag_dir)?;
+    if require_current_selector {
+        check_authority_file(&layout.current_path)?;
+    }
+    let selector_file_identity = if require_current_selector {
+        Some(file_identity(&layout.current_path)?)
+    } else {
+        None
+    };
+    let manifest_path = tag_dir.join("manifest.json");
+    check_authority_file(&manifest_path)?;
+    let validated_manifest = read_and_validate_manifest(&manifest_path, tag)?;
+    let manifest = &validated_manifest.manifest;
+    let target_exe = derive_target_executable(layout, tag, manifest)?;
+    let canonical_target = std::fs::canonicalize(&target_exe)
+        .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    ensure_contained(canonical_root, &canonical_target)?;
+    check_authority_file(&canonical_target)?;
+    let identity = file_identity(&canonical_target)?;
+    let (schema_min, schema_max, protocol_major, protocol_minor, required_capabilities) = (
+        manifest.schema_min,
+        manifest.schema_max,
+        manifest.protocol_major,
+        manifest.protocol_minor,
+        manifest.required_capabilities.clone(),
+    );
+    let completion = AdmissionCompletionBinding {
+        trusted_root: canonical_root.to_path_buf(),
+        root_identity,
+        tag: manifest.tag.clone(),
+        package_version: manifest.package_version.clone(),
+        build_id: manifest.build_id.clone(),
+        schema_min,
+        schema_max,
+        protocol_major,
+        protocol_minor,
+        required_capabilities: required_capabilities.clone(),
+        selector_file_identity,
+        manifest_bytes: validated_manifest.manifest_bytes.clone(),
+        manifest_file_identity: validated_manifest.manifest_file_identity,
+        target_exe: canonical_target.clone(),
+        target_file_identity: identity,
+    };
+    let (application_bootstrap_admission_version, admission_completion) = match admission {
+        AdmissionValidation::Strict if validated_manifest.admission_present => {
+            (manifest.application_bootstrap_admission_version, None)
+        }
+        AdmissionValidation::Strict => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        AdmissionValidation::ProbeCandidate
+            if !validated_manifest.admission_present
+                && is_v0_3_lineage(&manifest.package_version) =>
+        {
+            (0, None)
+        }
+        AdmissionValidation::ProbeCandidate => {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest)
+        }
+        AdmissionValidation::Apply(expected)
+            if !validated_manifest.admission_present
+                && is_v0_3_lineage(&manifest.package_version)
+                && *expected == completion =>
+        {
+            (
+                install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
+                Some(completion.clone()),
+            )
+        }
+        AdmissionValidation::Apply(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+    };
+    Ok(LegacyAdmissionProbeCandidate {
+        token: SelectionToken {
+            trusted_root: canonical_root.to_path_buf(),
+            root_identity,
+            tag: manifest.tag.clone(),
+            package_version: manifest.package_version.clone(),
+            build_id: manifest.build_id.clone(),
+            schema_min,
+            schema_max,
+            protocol_major,
+            protocol_minor,
+            required_capabilities,
+            application_bootstrap_admission_version,
+            target_exe: canonical_target,
+            file_identity: identity,
+            admission_completion,
+        },
+        completion,
+        require_current_selector,
+    })
+}
+
+fn read_current_tag(layout: &InstallLayout) -> Result<String, DaemonBootstrapFailure> {
+    match std::fs::symlink_metadata(&layout.current_path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(DaemonBootstrapFailure::MissingCurrent)
+        }
+        Err(_) => return Err(DaemonBootstrapFailure::UnsafeInstallAuthority),
+    }
+    check_authority_file(&layout.current_path)?;
+    // The `previous` selector is never independently acceptable; even if
+    // present, InstalledCurrent must resolve only `current`. We deliberately
+    // do not read the previous file here.
+    let raw = std::fs::read_to_string(&layout.current_path)
+        .map_err(|_| DaemonBootstrapFailure::MissingCurrent)?;
+    let tag = raw.trim();
+    if tag.is_empty()
+        || tag.contains('/')
+        || tag.contains('\\')
+        || tag == "."
+        || tag == ".."
+        || tag.contains("..")
+    {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    Ok(tag.to_string())
+}
+
+struct UniqueManifestKeys;
+
+impl<'de> Visitor<'de> for UniqueManifestKeys {
+    type Value = BTreeSet<String>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a manifest object with unique top-level keys")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate manifest key `{key}`"
+                )));
+            }
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(keys)
+    }
+}
+
+fn read_and_validate_manifest(
+    manifest_path: &Path,
+    tag: &str,
+) -> Result<ValidatedManifest, DaemonBootstrapFailure> {
+    let raw = std::fs::read(manifest_path).map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let mut audit = serde_json::Deserializer::from_slice(&raw);
+    let keys = serde::de::Deserializer::deserialize_map(&mut audit, UniqueManifestKeys)
+        .map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    audit
+        .end()
+        .map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let manifest: VersionManifest =
+        serde_json::from_slice(&raw).map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let admission_present = keys.contains("application_bootstrap_admission_version");
+    // The manifest must bind the selected tag; a mismatched tag is a foreign
+    // manifest, not a compatibility skew.
+    if manifest.tag != tag {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    // Load-bearing identity fields must be non-empty and non-sentinel. Empty
+    // or `unknown` build identity forfeits the HelloAck build check; this is
+    // rejected as an incomplete binding rather than a compatibility skew.
+    if manifest.build_id.is_empty() || manifest.build_id == install::UNKNOWN_BUILD_ID {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    if manifest.package_version.is_empty() {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    if admission_present
+        && manifest.application_bootstrap_admission_version
+            != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+    {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    if manifest.protocol_major != crate::daemon_ipc::PROTOCOL_MAJOR {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    if !(manifest.schema_min..=manifest.schema_max).contains(&install::SUPPORTED_SCHEMA_MAX) {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    // Every required capability listed by the manifest must be a non-empty
+    // string, and the collection must be duplicate-free. A malformed
+    // capability list is a manifest defect, not a compatibility skew.
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for cap in &manifest.required_capabilities {
+        if cap.is_empty() {
+            return Err(DaemonBootstrapFailure::InvalidManifest);
+        }
+        if !seen.insert(cap.as_str()) {
+            return Err(DaemonBootstrapFailure::InvalidManifest);
+        }
+    }
+    // Every required daemon capability the current binary depends on must be
+    // present in the manifest metadata; the connected HelloAck still performs
+    // the peer capability negotiation.
+    for cap in crate::daemon_ipc::REQUIRED_CAPABILITIES {
+        if !manifest.required_capabilities.iter().any(|c| c == *cap) {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+    }
+    Ok(ValidatedManifest {
+        manifest,
+        admission_present,
+        manifest_bytes: raw,
+        manifest_file_identity: file_identity(manifest_path)?,
+    })
+}
+
+fn is_v0_3_lineage(version: &str) -> bool {
+    let core = version.split_once('+').map_or(version, |(core, _)| core);
+    let core = core.split_once('-').map_or(core, |(core, _)| core);
+    let mut parts = core.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some("0"), Some("3"), Some(patch), None)
+            if !patch.is_empty() && patch.chars().all(|ch| ch.is_ascii_digit())
+    )
+}
+
+fn probe_legacy_admission_candidate(
+    candidate: &LegacyAdmissionProbeCandidate,
+    trusted_root: &Path,
+) -> Result<(), DaemonBootstrapFailure> {
+    #[cfg(windows)]
+    let executable_witness = open_windows_witness(&candidate.token.target_exe)?;
+    #[cfg(windows)]
+    let probe_executable = candidate.token.target_exe.clone();
+
+    #[cfg(target_os = "linux")]
+    let executable_witness = open_linux_witness(&candidate.token.target_exe)?;
+    #[cfg(target_os = "linux")]
+    let probe_executable = executable_witness.exec_path().to_path_buf();
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = candidate;
+        let _ = trusted_root;
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        if executable_witness.identity != candidate.token.file_identity {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        let metadata = run_admission_version_probe(&probe_executable, trusted_root)?;
+        if metadata.package_version != candidate.token.package_version
+            || metadata.build_id != candidate.token.build_id
+            || metadata.schema_min != candidate.token.schema_min
+            || metadata.schema_max != candidate.token.schema_max
+            || metadata.protocol_major != candidate.token.protocol_major
+            || metadata.protocol_minor != candidate.token.protocol_minor
+            || metadata.required_capabilities != candidate.token.required_capabilities
+            || metadata.application_bootstrap_admission_version
+                != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let layout = install::layout_for_root(trusted_root);
+        let revalidated = validate_installed_target(
+            &layout,
+            trusted_root,
+            &candidate.token.tag,
+            candidate.require_current_selector,
+            AdmissionValidation::ProbeCandidate,
+        )?;
+        if revalidated != *candidate {
+            return Err(DaemonBootstrapFailure::SelectionUnstable);
+        }
+        #[cfg(debug_assertions)]
+        if let Some(marker) = std::env::var_os("TELEX_TEST_ADMISSION_PROBE_COUNTER") {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(marker)
+            {
+                let _ = file.write_all(b"probe\n");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn run_admission_version_probe(
+    executable: &Path,
+    trusted_root: &Path,
+) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
+    use std::process::{Command, Stdio};
+
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+    const PROBE_OUTPUT_LIMIT: usize = 1024 * 1024;
+
+    let mut command = Command::new(executable);
+    command
+        .env_clear()
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .args(["--json", "version", "--root"])
+        .arg(trusted_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in ["SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let output = run_bounded_probe_process(command, PROBE_TIMEOUT, PROBE_OUTPUT_LIMIT)?;
+    if !output.success {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    parse_probe_metadata(&value)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[derive(Debug)]
+struct ProbeOutput {
+    success: bool,
+    stdout: Vec<u8>,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+struct ProbePipe<R> {
+    reader: R,
+    captured: Vec<u8>,
+    eof: bool,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+impl<R> ProbePipe<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            captured: Vec::new(),
+            eof: false,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_probe_command(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_probe_command(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+    command.creation_flags(CREATE_SUSPENDED);
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeGroupOwnership {
+    Anchored,
+    Sealed,
+    Reaped,
+}
+
+#[cfg(target_os = "linux")]
+impl ProbeGroupOwnership {
+    fn seal(&mut self) -> bool {
+        if *self == Self::Anchored {
+            *self = Self::Sealed;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mark_reaped(&mut self) -> bool {
+        if *self == Self::Sealed {
+            *self = Self::Reaped;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct ProbeProcessGroup {
+    pid: i32,
+    ownership: ProbeGroupOwnership,
+}
+
+#[cfg(target_os = "linux")]
+impl ProbeProcessGroup {
+    fn attach(child: &std::process::Child) -> Result<Self, DaemonBootstrapFailure> {
+        Ok(Self {
+            pid: i32::try_from(child.id())
+                .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?,
+            ownership: ProbeGroupOwnership::Anchored,
+        })
+    }
+
+    fn signal_and_seal(
+        &mut self,
+        child: &mut std::process::Child,
+    ) -> Result<(), DaemonBootstrapFailure> {
+        if self.ownership == ProbeGroupOwnership::Sealed {
+            return Ok(());
+        }
+        // A cached exit observation is not current wait authority. Recheck
+        // both process-wide SIGCHLD policy and exact unreaped-leader
+        // ownership immediately before the sole nonzero group signal.
+        if check_probe_wait_ownership().is_err() {
+            self.seal_without_signal();
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let observed = observe_probe_leader(child);
+        if !probe_signal_authorized(&observed) {
+            self.seal_without_signal();
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let signaled = unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0;
+        self.ownership.seal();
+        if signaled {
+            Ok(())
+        } else {
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
+        }
+    }
+
+    fn seal_without_signal(&mut self) {
+        if self.ownership == ProbeGroupOwnership::Anchored {
+            self.ownership = ProbeGroupOwnership::Sealed;
+        }
+    }
+
+    fn mark_reaped(&mut self) {
+        self.ownership.mark_reaped();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn resume_probe_process(_child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    let mut found = None;
+    let mut ok = unsafe { Thread32First(snapshot, &mut entry) };
+    while ok != 0 {
+        if entry.th32OwnerProcessID == child.id() {
+            found = Some(entry.th32ThreadID);
+            break;
+        }
+        ok = unsafe { Thread32Next(snapshot, &mut entry) };
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    let thread_id = found.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread_id) };
+    if thread == 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let resumed = unsafe { ResumeThread(thread) };
+    unsafe {
+        CloseHandle(thread);
+    }
+    if resumed == u32::MAX {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ProbeProcessGroup {
+    fn drop(&mut self) {
+        if self.ownership == ProbeGroupOwnership::Anchored {
+            // Drop has no fresh child-ownership witness. Seal without
+            // signaling rather than risk a recycled numeric PGID.
+            self.seal_without_signal();
+        }
+    }
+}
+
+#[cfg(windows)]
+struct ProbeProcessGroup {
+    job: windows_sys::Win32::Foundation::HANDLE,
+    active: bool,
+}
+
+#[cfg(windows)]
+impl ProbeProcessGroup {
+    fn attach(child: &std::process::Child) -> Result<Self, DaemonBootstrapFailure> {
+        use std::mem::{size_of, zeroed};
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job == 0 {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let assigned = configured != 0
+            && unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) } != 0;
+        if !assigned {
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        Ok(Self { job, active: true })
+    }
+
+    fn signal_and_seal(
+        &mut self,
+        _child: &mut std::process::Child,
+    ) -> Result<(), DaemonBootstrapFailure> {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        if self.active {
+            unsafe {
+                TerminateJobObject(self.job, 1);
+            }
+            self.active = false;
+        }
+        Ok(())
+    }
+
+    fn mark_reaped(&mut self) {}
+}
+
+#[cfg(windows)]
+impl Drop for ProbeProcessGroup {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        if self.job != 0 {
+            if self.active {
+                use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+                unsafe {
+                    TerminateJobObject(self.job, 1);
+                }
+                self.active = false;
+            }
+            unsafe {
+                CloseHandle(self.job);
+            }
+        }
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+enum ProbeLeaderState {
+    Running,
+    Exited(bool),
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[derive(Debug, PartialEq, Eq)]
+enum ProbeObserveError {
+    #[cfg(target_os = "linux")]
+    OwnershipLost,
+    Failure,
+}
+
+#[cfg(target_os = "linux")]
+fn classify_probe_observe_error(error: &std::io::Error) -> ProbeObserveError {
+    if error.raw_os_error() == Some(libc::ECHILD) {
+        ProbeObserveError::OwnershipLost
+    } else {
+        ProbeObserveError::Failure
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn probe_signal_authorized(observed: &Result<ProbeLeaderState, ProbeObserveError>) -> bool {
+    matches!(
+        observed,
+        Ok(ProbeLeaderState::Running | ProbeLeaderState::Exited(_))
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
+    let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
+    if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) } != 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let handler = action.sa_sigaction;
+    if handler == libc::SIG_IGN || action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn observe_probe_leader(
+    child: &mut std::process::Child,
+) -> Result<ProbeLeaderState, ProbeObserveError> {
+    let pid = i32::try_from(child.id()).map_err(|_| ProbeObserveError::Failure)?;
+    let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result != 0 {
+        let error = std::io::Error::last_os_error();
+        return Err(classify_probe_observe_error(&error));
+    }
+    let observed_pid = unsafe { info.si_pid() };
+    if observed_pid == 0 {
+        return Ok(ProbeLeaderState::Running);
+    }
+    if observed_pid != pid {
+        return Err(ProbeObserveError::Failure);
+    }
+    match info.si_code {
+        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(unsafe { info.si_status() } == 0)),
+        libc::CLD_KILLED | libc::CLD_DUMPED => Ok(ProbeLeaderState::Exited(false)),
+        _ => Err(ProbeObserveError::Failure),
+    }
+}
+
+#[cfg(windows)]
+fn observe_probe_leader(
+    child: &mut std::process::Child,
+) -> Result<ProbeLeaderState, ProbeObserveError> {
+    match child.try_wait().map_err(|_| ProbeObserveError::Failure)? {
+        Some(status) => Ok(ProbeLeaderState::Exited(status.success())),
+        None => Ok(ProbeLeaderState::Running),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_probe_pipe<R: std::os::fd::AsRawFd>(pipe: &R) -> Result<(), DaemonBootstrapFailure> {
+    let fd = pipe.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn prepare_probe_pipe<R>(_pipe: &R) -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn drain_probe_pipe<R: std::io::Read>(
+    pipe: &mut ProbePipe<R>,
+    cap: usize,
+) -> Result<(), DaemonBootstrapFailure> {
+    if pipe.eof {
+        return Ok(());
+    }
+    let mut buffer = [0u8; 8192];
+    loop {
+        match pipe.reader.read(&mut buffer) {
+            Ok(0) => {
+                pipe.eof = true;
+                return Ok(());
+            }
+            Ok(read) => {
+                let remaining = cap.saturating_sub(pipe.captured.len());
+                pipe.captured
+                    .extend_from_slice(&buffer[..read.min(remaining)]);
+                if read > remaining {
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn drain_probe_pipe<R: std::io::Read + std::os::windows::io::AsRawHandle>(
+    pipe: &mut ProbePipe<R>,
+    cap: usize,
+) -> Result<(), DaemonBootstrapFailure> {
+    use windows_sys::Win32::Foundation::{ERROR_BROKEN_PIPE, HANDLE};
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+    if pipe.eof {
+        return Ok(());
+    }
+    loop {
+        let mut available = 0u32;
+        let ok = unsafe {
+            PeekNamedPipe(
+                pipe.reader.as_raw_handle() as HANDLE,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                pipe.eof = true;
+                return Ok(());
+            }
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        if available == 0 {
+            return Ok(());
+        }
+        let mut buffer = vec![0u8; (available as usize).min(8192)];
+        let read = pipe
+            .reader
+            .read(&mut buffer)
+            .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+        if read == 0 {
+            pipe.eof = true;
+            return Ok(());
+        }
+        let remaining = cap.saturating_sub(pipe.captured.len());
+        pipe.captured
+            .extend_from_slice(&buffer[..read.min(remaining)]);
+        if read > remaining {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn run_bounded_probe_process(
+    mut command: std::process::Command,
+    timeout: Duration,
+    output_cap: usize,
+) -> Result<ProbeOutput, DaemonBootstrapFailure> {
+    const CLEANUP_RESERVE: Duration = Duration::from_millis(500);
+    configure_probe_command(&mut command);
+    check_probe_wait_ownership()?;
+    let start = Instant::now();
+    let deadline = start + timeout;
+    let cleanup_at = deadline
+        .checked_sub(CLEANUP_RESERVE.min(timeout / 2))
+        .unwrap_or(start);
+    let mut child = command
+        .spawn()
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    let mut group = match ProbeProcessGroup::attach(&child) {
+        Ok(group) => group,
+        Err(error) => {
+            terminate_direct_probe_process(&mut child, deadline);
+            return Err(error);
+        }
+    };
+    if resume_probe_process(&child).is_err() {
+        terminate_probe_process(&mut child, &mut group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let Some(stdout) = child.stdout.take() else {
+        terminate_probe_process(&mut child, &mut group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_probe_process(&mut child, &mut group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    };
+    if prepare_probe_pipe(&stdout).is_err() || prepare_probe_pipe(&stderr).is_err() {
+        terminate_probe_process(&mut child, &mut group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let mut stdout = ProbePipe::new(stdout);
+    let mut stderr = ProbePipe::new(stderr);
+    let mut leader_success = None;
+    let mut timed_out = false;
+
+    loop {
+        if drain_probe_pipe(&mut stdout, output_cap).is_err()
+            || drain_probe_pipe(&mut stderr, output_cap).is_err()
+        {
+            terminate_probe_process(&mut child, &mut group, deadline);
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        if leader_success.is_none() {
+            leader_success = match observe_probe_leader(&mut child) {
+                Ok(ProbeLeaderState::Running) => None,
+                Ok(ProbeLeaderState::Exited(success)) => Some(success),
+                #[cfg(target_os = "linux")]
+                Err(ProbeObserveError::OwnershipLost) => {
+                    // Another waiter or automatic SIGCHLD policy destroyed
+                    // the unreaped leader anchor. Seal immediately so neither
+                    // this path nor Drop can signal a recycled numeric PGID.
+                    group.seal_without_signal();
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+                Err(ProbeObserveError::Failure) => {
+                    #[cfg(target_os = "linux")]
+                    {
+                        group.seal_without_signal();
+                        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                    }
+                    #[cfg(windows)]
+                    terminate_probe_process(&mut child, &mut group, deadline);
+                    #[cfg(windows)]
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+            };
+        }
+        if leader_success.is_some() && stdout.eof && stderr.eof {
+            break;
+        }
+        let now = Instant::now();
+        if !timed_out && now >= cleanup_at {
+            timed_out = true;
+            if group.signal_and_seal(&mut child).is_err() {
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            #[cfg(windows)]
+            let _ = child.kill();
+        }
+        if now >= deadline {
+            terminate_probe_process(&mut child, &mut group, deadline);
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if timed_out {
+        finalize_probe_process(&mut child, &mut group, deadline)?;
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    finalize_probe_process(&mut child, &mut group, deadline)?;
+    Ok(ProbeOutput {
+        success: leader_success.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
+        stdout: stdout.captured,
+    })
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn terminate_direct_probe_process(child: &mut std::process::Child, deadline: Instant) {
+    let _ = child.kill();
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    let _ = child.try_wait();
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn terminate_probe_process(
+    child: &mut std::process::Child,
+    group: &mut ProbeProcessGroup,
+    deadline: Instant,
+) {
+    if group.signal_and_seal(child).is_err() {
+        return;
+    }
+    #[cfg(windows)]
+    let _ = child.kill();
+    if reap_probe_leader(child, deadline).is_ok() {
+        group.mark_reaped();
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn finalize_probe_process(
+    child: &mut std::process::Child,
+    group: &mut ProbeProcessGroup,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    // Signal while the Linux leader remains an unreaped ownership anchor.
+    // `signal_and_seal` makes every later Drop path incapable of signaling a
+    // recycled numeric process-group id.
+    group.signal_and_seal(child)?;
+    reap_probe_leader(child, deadline)?;
+    group.mark_reaped();
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn reap_probe_leader(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    let pid =
+        i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    loop {
+        let mut status = 0;
+        let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if result == pid {
+            return Ok(());
+        }
+        if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        if Instant::now() >= deadline {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(windows)]
+fn reap_probe_leader(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        }
+    }
+    Err(DaemonBootstrapFailure::IncompatibleManifest)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn parse_probe_metadata(
+    value: &serde_json::Value,
+) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
+    let version = value
+        .get("version")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let daemon = value
+        .get("daemon_metadata")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let protocol = daemon
+        .get("protocol_version")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let required_str = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    let required_i64 = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    let required_u16 = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|raw| u16::try_from(raw).ok())
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    Ok(install::SourceMetadata {
+        package_version: required_str(version, "package_version")?,
+        build_id: required_str(version, "build_id")?,
+        schema_min: required_i64(version, "supported_schema_min")?,
+        schema_max: required_i64(version, "supported_schema_max")?,
+        protocol_major: required_u16(protocol, "major")?,
+        protocol_minor: required_u16(protocol, "minor")?,
+        required_capabilities: daemon
+            .get("required_capabilities")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        application_bootstrap_admission_version: required_u16(
+            version,
+            "application_bootstrap_admission_version",
+        )?,
+        copilot_bridge_protocol: 0,
+        min_compatible_plugin_version: String::new(),
+    })
+}
+
+fn derive_target_executable(
+    layout: &InstallLayout,
+    tag: &str,
+    manifest: &VersionManifest,
+) -> Result<PathBuf, DaemonBootstrapFailure> {
+    // Never trust the manifest's `binary` field as a path authority; only
+    // require it to bind the same versioned executable we derive here. An
+    // empty or unresolvable manifest binary is an incomplete binding.
+    let derived = layout.versions_dir.join(tag).join(install::exe_name());
+    let derived_metadata = std::fs::symlink_metadata(&derived)
+        .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if derived_metadata.file_type().is_symlink()
+        || is_reparse_point(&derived_metadata)
+        || !derived_metadata.is_file()
+    {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    if !derived.is_file() {
+        return Err(DaemonBootstrapFailure::MissingExecutable);
+    }
+    if manifest.binary.is_empty() {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    let manifest_path = PathBuf::from(&manifest.binary);
+    if !manifest_path.is_absolute() {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    let manifest_canonical = std::fs::canonicalize(&manifest_path)
+        .map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let derived_canonical =
+        std::fs::canonicalize(&derived).map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if !same_path(&manifest_canonical, &derived_canonical) {
+        return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    Ok(derived)
+}
+
+fn ensure_contained(root: &Path, target: &Path) -> Result<(), DaemonBootstrapFailure> {
+    if !target.starts_with(root) {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    Ok(())
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let na = a
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('/', r"\")
+            .to_ascii_lowercase();
+        let nb = b
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('/', r"\")
+            .to_ascii_lowercase();
+        na == nb
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
+/// Fail closed unless `path` is an ordinary file whose authority chain is
+/// entirely owned by the current OS principal and whose DACL (on Windows)
+/// grants write, delete, or ownership control only to the current principal
+/// or well-known privileged principals.
+fn check_authority_file(path: &Path) -> Result<(), DaemonBootstrapFailure> {
+    let meta =
+        std::fs::symlink_metadata(path).map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    if !meta.is_file() {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    check_authority_component(path, &meta)?;
+    Ok(())
+}
+
+/// Fail closed unless `path` is a directory owned by the current OS principal
+/// with a strict authority DACL, and every ancestor component up to the
+/// filesystem root satisfies the same guarantee. `..` components are rejected
+/// at policy freeze time; here we accept only fully canonical paths.
+fn check_authority_dir(path: &Path) -> Result<(), DaemonBootstrapFailure> {
+    let meta =
+        std::fs::symlink_metadata(path).map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
+    if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    if !meta.is_dir() {
+        return Err(DaemonBootstrapFailure::InvalidTrustedRoot);
+    }
+    check_authority_component(path, &meta)?;
+    Ok(())
+}
+
+fn check_parent_authority_chain(path: &Path) -> Result<(), DaemonBootstrapFailure> {
+    let mut ancestor = path.parent();
+    while let Some(directory) = ancestor {
+        let metadata = std::fs::symlink_metadata(directory)
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_dir() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        check_authority_ancestor(directory, &metadata)?;
+        ancestor = directory.parent();
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn check_authority_component(
+    _path: &Path,
+    meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    use std::os::unix::fs::MetadataExt;
+    // Fail closed if any principal other than the current OS user owns the
+    // authority artifact, or if group/world write is granted at this component.
+    let uid = unsafe { libc::geteuid() };
+    if meta.uid() != uid {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+
+    if meta.mode() & 0o022 != 0 {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn check_authority_ancestor(
+    _path: &Path,
+    meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = unsafe { libc::geteuid() };
+    if meta.uid() != uid && meta.uid() != 0 {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    let foreign_writable = meta.mode() & 0o022 != 0;
+    let sticky = meta.mode() & 0o1000 != 0;
+    if foreign_writable && !sticky {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_meta: &std::fs::Metadata) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn check_authority_component(
+    path: &Path,
+    _meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    windows_authority::check_owner_and_dacl(path)
+}
+
+#[cfg(windows)]
+fn check_authority_ancestor(
+    path: &Path,
+    _meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    windows_authority::check_ancestor_authority(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn check_authority_component(
+    _path: &Path,
+    _meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    Err(DaemonBootstrapFailure::UnsafeInstallAuthority)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn check_authority_ancestor(
+    _path: &Path,
+    _meta: &std::fs::Metadata,
+) -> Result<(), DaemonBootstrapFailure> {
+    Err(DaemonBootstrapFailure::UnsafeInstallAuthority)
+}
+
+#[cfg(windows)]
+mod windows_authority {
+    use super::DaemonBootstrapFailure;
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use windows_sys::Win32::Foundation::{LocalFree, PSID};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        AclSizeInformation, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+        ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, SE_DACL_PRESENT, SE_DACL_PROTECTED,
+    };
+
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+    const INHERIT_ONLY_ACE: u8 = 0x08;
+    const DELETE: u32 = 0x0001_0000;
+    const WRITE_DAC: u32 = 0x0004_0000;
+    const WRITE_OWNER: u32 = 0x0008_0000;
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_WRITE_DATA: u32 = 0x0000_0002;
+    const FILE_APPEND_DATA: u32 = 0x0000_0004;
+    const FILE_WRITE_EA: u32 = 0x0000_0010;
+    const FILE_DELETE_CHILD: u32 = 0x0000_0040;
+    const FILE_WRITE_ATTRIBUTES: u32 = 0x0000_0100;
+    const AUTHORITY_MUTATION_RIGHTS: u32 = DELETE
+        | WRITE_DAC
+        | WRITE_OWNER
+        | GENERIC_ALL
+        | GENERIC_WRITE
+        | FILE_WRITE_DATA
+        | FILE_APPEND_DATA
+        | FILE_WRITE_EA
+        | FILE_DELETE_CHILD
+        | FILE_WRITE_ATTRIBUTES;
+
+    /// Fail closed unless a SID this process token may own objects as owns
+    /// `path`, and its DACL grants mutation only to that same authority set,
+    /// `LocalSystem`, or local `BUILTIN\Administrators`.
+    pub(super) fn check_owner_and_dacl(path: &Path) -> Result<(), DaemonBootstrapFailure> {
+        let owner_sids = self_owner_sids()?;
+        let trusted = TrustedSidRefs {
+            owners: &owner_sids,
+        };
+        check_component(path, &trusted, true, AUTHORITY_MUTATION_RIGHTS)
+    }
+
+    pub(super) fn check_ancestor_authority(path: &Path) -> Result<(), DaemonBootstrapFailure> {
+        let owner_sids = self_owner_sids()?;
+        let trusted = TrustedSidRefs {
+            owners: &owner_sids,
+        };
+        check_component(
+            path,
+            &trusted,
+            false,
+            DELETE | WRITE_DAC | WRITE_OWNER | FILE_DELETE_CHILD | GENERIC_ALL | GENERIC_WRITE,
+        )
+    }
+
+    struct TrustedSidRefs<'a> {
+        owners: &'a [String],
+    }
+
+    fn check_component(
+        path: &Path,
+        trusted: &TrustedSidRefs<'_>,
+        require_self_owner: bool,
+        foreign_mutation_rights: u32,
+    ) -> Result<(), DaemonBootstrapFailure> {
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let _guard = LocalAllocGuard(sd);
+
+        let owner = sid_to_string(owner)?;
+        let owner_is_self = trusted.owners.contains(&owner);
+        let owner_is_system = owner == "S-1-5-18";
+        let owner_is_admins = owner == "S-1-5-32-544";
+        let owner_is_trusted_installer =
+            owner == "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+        if !owner_is_self
+            && (require_self_owner
+                || (!owner_is_system && !owner_is_admins && !owner_is_trusted_installer))
+        {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+
+        let mut control: u16 = 0;
+        let mut revision: u32 = 0;
+        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
+        if ok == 0 || control & SE_DACL_PRESENT == 0 {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        // We require the DACL to be either protected (explicit) OR entirely
+        // composed of ACEs pointing at the owner/SYSTEM/Administrators.
+        // Non-protected DACLs are permitted only when every ACE is trusted;
+        // otherwise inherited entries from an untrusted parent could grant
+        // write access to foreign principals.
+        if dacl.is_null() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+
+        let mut info = ACL_SIZE_INFORMATION {
+            AceCount: 0,
+            AclBytesInUse: 0,
+            AclBytesFree: 0,
+        };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        };
+        if ok == 0 || info.AceCount == 0 {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        for idx in 0..info.AceCount {
+            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
+            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
+            if ok == 0 || ace_ptr.is_null() {
+                return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+            }
+            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
+            if !require_self_owner && header.AceFlags & INHERIT_ONLY_ACE != 0 {
+                continue;
+            }
+            match header.AceType {
+                ACCESS_ALLOWED_ACE_TYPE => {
+                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
+                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
+                    let sid = sid_to_string(sid)?;
+                    let allowed = trusted.owners.contains(&sid)
+                        || matches!(
+                            sid.as_str(),
+                            "S-1-5-18"
+                                | "S-1-5-32-544"
+                                | "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+                                | "S-1-3-0"
+                        );
+                    if !allowed && ace.Mask & foreign_mutation_rights != 0 {
+                        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+                    }
+                }
+                ACCESS_DENIED_ACE_TYPE => {
+                    // Deny ACEs cannot grant mutation authority. Leave normal
+                    // access checks to file opening rather than rejecting a
+                    // safely restrictive descriptor.
+                }
+                _ => {
+                    return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+                }
+            }
+        }
+        let _ = control;
+        let _ = revision;
+        let _ = SE_DACL_PROTECTED;
+        Ok(())
+    }
+
+    fn self_owner_sids() -> Result<Vec<String>, DaemonBootstrapFailure> {
+        crate::platform_fs::windows_self_owner_sid_strings()
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)
+    }
+
+    fn sid_to_string(sid: PSID) -> Result<String, DaemonBootstrapFailure> {
+        if sid.is_null() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let mut wide: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe { ConvertSidToStringSidW(sid, &mut wide) };
+        if ok == 0 || wide.is_null() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let mut len = 0usize;
+        while unsafe { *wide.add(len) } != 0 {
+            len += 1;
+        }
+        let value = String::from_utf16(unsafe { std::slice::from_raw_parts(wide, len) })
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority);
+        unsafe {
+            LocalFree(wide.cast());
+        }
+        value
+    }
+
+    struct LocalAllocGuard(*mut c_void);
+    impl Drop for LocalAllocGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_token_self_owner_set_bootstrap_authority() {
+        assert!(!self_owner_sids()
+            .expect("bootstrap authority token owner set")
+            .is_empty());
+    }
+}
+
+/// Selector-coordination lock persistent under the trusted install root.
+///
+/// The lock file is created lazily on first use and is never deleted or
+/// replaced as part of selection. Unix uses an advisory flock; Windows uses a
+/// `LockFileEx` range lock on the first byte. Lock scope is one process; the
+/// guard releases automatically on drop or process crash.
+#[derive(Debug)]
+pub(crate) struct SelectorAdmission {
+    file: std::fs::File,
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    exclusive: bool,
+}
+
+impl SelectorAdmission {
+    /// Non-blocking, bounded-retry shared acquisition. Suitable for the
+    /// synchronous startup path (child pre-serve) that cannot borrow the
+    /// caller's async runtime.
+    #[allow(dead_code)]
+    pub(crate) fn shared(root: &Path) -> Result<Self, DaemonBootstrapFailure> {
+        acquire_with_deadline_sync(root, false, SELECTOR_LOCK_DEADLINE)
+    }
+
+    /// Non-blocking, bounded-retry exclusive acquisition. Callers that operate
+    /// on a Tokio runtime must prefer [`Self::exclusive_async`] to avoid
+    /// blocking a worker thread.
+    #[allow(dead_code)]
+    pub(crate) fn exclusive(root: &Path) -> Result<Self, DaemonBootstrapFailure> {
+        acquire_with_deadline_sync(root, true, SELECTOR_LOCK_DEADLINE)
+    }
+
+    /// Async bounded-retry shared acquisition. The underlying non-blocking
+    /// filesystem calls are trivially fast; the async wrapper only exists so
+    /// callers can compose the deadline with other async work without
+    /// occupying a Tokio worker thread.
+    pub(crate) async fn shared_async(root: PathBuf) -> Result<Self, DaemonBootstrapFailure> {
+        acquire_with_deadline_async(root, false, SELECTOR_LOCK_DEADLINE).await
+    }
+
+    /// Async bounded-retry exclusive acquisition.
+    pub(crate) async fn exclusive_async(root: PathBuf) -> Result<Self, DaemonBootstrapFailure> {
+        acquire_with_deadline_async(root, true, SELECTOR_LOCK_DEADLINE).await
+    }
+}
+
+impl Drop for SelectorAdmission {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
+fn selector_lock_path(root: &Path) -> PathBuf {
+    root.join(".telex-selector.lock")
+}
+
+#[allow(dead_code)]
+fn acquire_with_deadline_sync(
+    root: &Path,
+    exclusive: bool,
+    deadline: Duration,
+) -> Result<SelectorAdmission, DaemonBootstrapFailure> {
+    let deadline_at = Instant::now() + deadline;
+    loop {
+        match try_acquire_nonblocking(root, exclusive) {
+            Ok(guard) => return Ok(guard),
+            Err(NonBlockingLockError::WouldBlock) => {
+                if Instant::now() >= deadline_at {
+                    return Err(DaemonBootstrapFailure::SelectionUnstable);
+                }
+                std::thread::sleep(SELECTOR_LOCK_RETRY_INTERVAL);
+            }
+            Err(NonBlockingLockError::Unsafe) => {
+                return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+            }
+        }
+    }
+}
+
+async fn acquire_with_deadline_async(
+    root: PathBuf,
+    exclusive: bool,
+    deadline: Duration,
+) -> Result<SelectorAdmission, DaemonBootstrapFailure> {
+    let deadline_at = Instant::now() + deadline;
+    loop {
+        let root_owned = root.clone();
+        let attempt =
+            tokio::task::spawn_blocking(move || try_acquire_nonblocking(&root_owned, exclusive))
+                .await
+                .map_err(|_| DaemonBootstrapFailure::SelectionUnstable)?;
+        match attempt {
+            Ok(guard) => return Ok(guard),
+            Err(NonBlockingLockError::WouldBlock) => {
+                if Instant::now() >= deadline_at {
+                    return Err(DaemonBootstrapFailure::SelectionUnstable);
+                }
+                tokio::time::sleep(SELECTOR_LOCK_RETRY_INTERVAL).await;
+            }
+            Err(NonBlockingLockError::Unsafe) => {
+                return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum NonBlockingLockError {
+    WouldBlock,
+    Unsafe,
+}
+
+#[cfg(unix)]
+fn try_acquire_nonblocking(
+    root: &Path,
+    exclusive: bool,
+) -> Result<SelectorAdmission, NonBlockingLockError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let canonical_root = std::fs::canonicalize(root).map_err(|_| NonBlockingLockError::Unsafe)?;
+    let path = selector_lock_path(&canonical_root);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
+    let metadata = file.metadata().map_err(|_| NonBlockingLockError::Unsafe)?;
+    check_authority_component(&path, &metadata).map_err(|_| NonBlockingLockError::Unsafe)?;
+    crate::platform_fs::require_supported_local_filesystem(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
+    let result = if exclusive {
+        fs2::FileExt::try_lock_exclusive(&file)
+    } else {
+        fs2::FileExt::try_lock_shared(&file)
+    };
+    if let Err(error) = result {
+        if error.kind() == std::io::ErrorKind::WouldBlock
+            || error.raw_os_error() == Some(libc::EWOULDBLOCK)
+        {
+            return Err(NonBlockingLockError::WouldBlock);
+        }
+        return Err(NonBlockingLockError::Unsafe);
+    }
+    Ok(SelectorAdmission { file })
+}
+
+#[cfg(windows)]
+fn try_acquire_nonblocking(
+    root: &Path,
+    exclusive: bool,
+) -> Result<SelectorAdmission, NonBlockingLockError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    let canonical_root = std::fs::canonicalize(root).map_err(|_| NonBlockingLockError::Unsafe)?;
+    let path = selector_lock_path(&canonical_root);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
+    let metadata = std::fs::symlink_metadata(&path).map_err(|_| NonBlockingLockError::Unsafe)?;
+    if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_file() {
+        return Err(NonBlockingLockError::Unsafe);
+    }
+    check_authority_component(&path, &metadata).map_err(|_| NonBlockingLockError::Unsafe)?;
+    crate::platform_fs::require_supported_local_filesystem(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
+    let result = if exclusive {
+        fs2::FileExt::try_lock_exclusive(&file)
+    } else {
+        fs2::FileExt::try_lock_shared(&file)
+    };
+    if let Err(error) = result {
+        const ERROR_LOCK_VIOLATION: i32 = 33;
+        if error.kind() == std::io::ErrorKind::WouldBlock
+            || error.raw_os_error() == Some(ERROR_LOCK_VIOLATION)
+        {
+            return Err(NonBlockingLockError::WouldBlock);
+        }
+        return Err(NonBlockingLockError::Unsafe);
+    }
+    Ok(SelectorAdmission { file, exclusive })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn try_acquire_nonblocking(
+    _root: &Path,
+    _exclusive: bool,
+) -> Result<SelectorAdmission, NonBlockingLockError> {
+    Err(NonBlockingLockError::Unsafe)
+}
+
+#[cfg(windows)]
+/// Windows-only witness handle for a canonical executable path.
+///
+/// Kept alive across `CreateProcessW` so no writer can replace or delete the
+/// selected binary between selection and spawn. Sharing is set to
+/// `FILE_SHARE_READ` only, which denies concurrent openers write or delete
+/// access while the witness is alive; `CreateProcessW` still succeeds because
+/// its own opens request only read/execute-equivalent access.
+#[cfg(windows)]
+pub(crate) struct WindowsExecutableWitness {
+    pub(crate) identity: FileIdentity,
+    handle: isize,
+}
+
+#[cfg(windows)]
+impl WindowsExecutableWitness {
+    pub(crate) fn raw_handle(&self) -> isize {
+        self.handle
+    }
+
+    fn from_inherited_handle(handle: isize) -> Result<Self, DaemonBootstrapFailure> {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        if handle == 0 || handle == INVALID_HANDLE_VALUE {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0 {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        Ok(Self {
+            identity: FileIdentity {
+                kind: FileIdentityKind::WindowsVolumeFileId,
+                high: info.dwVolumeSerialNumber as u64,
+                low: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+            },
+            handle,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) struct LinuxExecutableWitness {
+    #[allow(dead_code)]
+    file: std::fs::File,
+    pub(crate) identity: FileIdentity,
+    exec_path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxExecutableWitness {
+    pub(crate) fn exec_path(&self) -> &Path {
+        &self.exec_path
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn open_linux_witness(
+    path: &Path,
+) -> Result<LinuxExecutableWitness, DaemonBootstrapFailure> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if !metadata.is_file() {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    let identity = FileIdentity {
+        kind: FileIdentityKind::UnixDevIno,
+        high: metadata.dev(),
+        low: metadata.ino(),
+    };
+    let exec_path = PathBuf::from(format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        file.as_raw_fd()
+    ));
+    Ok(LinuxExecutableWitness {
+        file,
+        identity,
+        exec_path,
+    })
+}
+
+#[cfg(windows)]
+impl Drop for WindowsExecutableWitness {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        if self.handle != 0 && self.handle != INVALID_HANDLE_VALUE {
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
+// SAFETY: `WindowsExecutableWitness` owns a HANDLE with no interior mutation.
+// Callers move it across `.await` points during connect-or-spawn.
+#[cfg(windows)]
+unsafe impl Send for WindowsExecutableWitness {}
+
+#[cfg(windows)]
+pub(crate) fn open_windows_witness(
+    path: &Path,
+) -> Result<WindowsExecutableWitness, DaemonBootstrapFailure> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ, OPEN_EXISTING,
+    };
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            0,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(handle, &mut info) };
+    if ok == 0 {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+        }
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    Ok(WindowsExecutableWitness {
+        identity: FileIdentity {
+            kind: FileIdentityKind::WindowsVolumeFileId,
+            high: info.dwVolumeSerialNumber as u64,
+            low: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+        },
+        handle,
+    })
+}
+
+#[cfg(windows)]
+fn windows_path_identity(path: &Path) -> Option<FileIdentity> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
+    };
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            0,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(handle, &mut info) };
+    unsafe {
+        CloseHandle(handle);
+    }
+    (ok != 0).then_some(FileIdentity {
+        kind: FileIdentityKind::WindowsVolumeFileId,
+        high: info.dwVolumeSerialNumber as u64,
+        low: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+    })
+}
+
+/// Child-side hook: when a spawned daemon sees `TELEX_DAEMON_SELECTION_TOKEN`,
+/// it must independently acquire shared selector admission, resolve a fresh
+/// InstalledCurrent selection, and verify its own image against the token
+/// before serving.
+///
+/// Returns `(None, None)` when no bootstrap token is present (the daemon was
+/// started outside a bootstrap-controlled parent, which is the legacy CLI
+/// path). On success it returns the shared guard plus token-backed startup
+/// evidence that must be published atomically with the capability record.
+/// After successful publication, callers must invoke
+/// [`release_after_readiness_publication`] before serving drain so upgrade or
+/// rollback exclusive waiters can proceed. Returns `Err` when validation
+/// failed and the child must not serve.
+pub(crate) async fn child_validate_bootstrap_env(
+) -> Result<Option<ChildBootstrapAdmission>, DaemonBootstrapFailure> {
+    let raw = match std::env::var(BOOTSTRAP_TOKEN_ENV) {
+        Ok(v) => v,
+        Err(_) => {
+            #[cfg(windows)]
+            {
+                let Ok(raw_handle) = std::env::var(BOOTSTRAP_WITNESS_HANDLE_ENV) else {
+                    return Ok(None);
+                };
+                std::env::remove_var(BOOTSTRAP_WITNESS_HANDLE_ENV);
+                let handle = raw_handle
+                    .parse::<isize>()
+                    .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+                let inherited_witness = WindowsExecutableWitness::from_inherited_handle(handle)?;
+                let own_exe = std::env::current_exe()
+                    .and_then(std::fs::canonicalize)
+                    .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+                if file_identity(&own_exe)? != inherited_witness.identity {
+                    return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+                }
+                return Ok(Some(ChildBootstrapAdmission {
+                    _guard: None,
+                    evidence: ChildBootstrapEvidence {
+                        admission_version: None,
+                        startup_executable_file_identity: inherited_witness.identity,
+                    },
+                    _inherited_witness: inherited_witness,
+                }));
+            }
+            #[cfg(not(windows))]
+            {
+                return Ok(None);
+            }
+        }
+    };
+    // Consume the env var immediately so any child of this daemon does not
+    // inherit a stale token that could re-run this validation elsewhere.
+    std::env::remove_var(BOOTSTRAP_TOKEN_ENV);
+    let token = SelectionToken::from_env_value(&raw)
+        .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    #[cfg(windows)]
+    let inherited_witness = {
+        let raw_handle = std::env::var(BOOTSTRAP_WITNESS_HANDLE_ENV)
+            .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+        std::env::remove_var(BOOTSTRAP_WITNESS_HANDLE_ENV);
+        let handle = raw_handle
+            .parse::<isize>()
+            .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+        let witness = WindowsExecutableWitness::from_inherited_handle(handle)?;
+        if witness.identity != token.file_identity {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        witness
+    };
+    let compiled_capabilities: BTreeSet<&str> = crate::daemon_ipc::REQUIRED_CAPABILITIES
+        .iter()
+        .copied()
+        .collect();
+    let selected_capabilities: BTreeSet<&str> = token
+        .required_capabilities
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if token.build_id != install::BUILD_ID
+        || token.package_version != env!("CARGO_PKG_VERSION")
+        || token.schema_min != install::SUPPORTED_SCHEMA_MIN
+        || token.schema_max != install::SUPPORTED_SCHEMA_MAX
+        || token.protocol_major != crate::daemon_ipc::PROTOCOL_MAJOR
+        || token.protocol_minor != crate::daemon_ipc::PROTOCOL_MINOR
+        || token.application_bootstrap_admission_version
+            != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        || selected_capabilities != compiled_capabilities
+    {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_CHILD_BEFORE_ADMISSION_DELAY_MS") {
+        if let Ok(marker) = std::env::var("TELEX_TEST_CHILD_BEFORE_ADMISSION_MARKER") {
+            let _ = std::fs::write(marker, b"waiting");
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
+    let guard = SelectorAdmission::shared_async(token.trusted_root.clone()).await?;
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_CHILD_ADMISSION_HELD_DELAY_MS") {
+        if let Ok(marker) = std::env::var("TELEX_TEST_CHILD_ADMISSION_HELD_MARKER") {
+            let _ = std::fs::write(marker, b"held");
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
+    let fresh = match token.admission_completion.as_ref() {
+        Some(completion) => {
+            resolve_installed_current_with_admission(
+                &token.trusted_root,
+                AdmissionValidation::Apply(completion),
+            )?
+            .token
+        }
+        None => resolve_installed_current(&token.trusted_root)?,
+    };
+    if fresh.tag != token.tag
+        || fresh.root_identity != token.root_identity
+        || fresh.build_id != token.build_id
+        || fresh.package_version != token.package_version
+        || fresh.schema_min != token.schema_min
+        || fresh.schema_max != token.schema_max
+        || fresh.protocol_major != token.protocol_major
+        || fresh.protocol_minor != token.protocol_minor
+        || fresh.required_capabilities != token.required_capabilities
+        || fresh.application_bootstrap_admission_version
+            != token.application_bootstrap_admission_version
+        || fresh.target_exe != token.target_exe
+        || fresh.file_identity != token.file_identity
+        || fresh.admission_completion != token.admission_completion
+    {
+        return Err(DaemonBootstrapFailure::SelectionUnstable);
+    }
+    // Own-image check: canonical current-exe path and platform file identity
+    // must match the frozen target. This closes the InstalledCurrent
+    // resolve -> spawn -> exec-replace race.
+    let own_exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if !same_path(&own_exe, &token.target_exe) {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    let own_identity =
+        file_identity(&own_exe).map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if own_identity != token.file_identity {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    std::env::remove_var(BOOTSTRAP_RESULT_ENV);
+    Ok(Some(ChildBootstrapAdmission {
+        _guard: Some(guard),
+        evidence: ChildBootstrapEvidence {
+            admission_version: Some(token.application_bootstrap_admission_version),
+            startup_executable_file_identity: {
+                #[cfg(windows)]
+                {
+                    inherited_witness.identity
+                }
+                #[cfg(not(windows))]
+                {
+                    own_identity
+                }
+            },
+        },
+        #[cfg(windows)]
+        _inherited_witness: inherited_witness,
+    }))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChildBootstrapEvidence {
+    pub admission_version: Option<u16>,
+    pub startup_executable_file_identity: FileIdentity,
+}
+
+pub(crate) struct ChildBootstrapAdmission {
+    _guard: Option<SelectorAdmission>,
+    evidence: ChildBootstrapEvidence,
+    #[cfg(windows)]
+    _inherited_witness: WindowsExecutableWitness,
+}
+
+impl ChildBootstrapAdmission {
+    pub(crate) fn evidence(&self) -> ChildBootstrapEvidence {
+        self.evidence
+    }
+}
+
+/// Explicit readiness publication boundary.
+///
+/// A spawned daemon must call this exactly once, after the serve endpoint is
+/// bound, the capability file is written, and the listener is armed for the
+/// next accept. Dropping the guard here releases the child's shared selector
+/// admission so upgrade or rollback exclusive waiters are not blocked for the
+/// remaining serve lifetime. The parent's own shared admission is unaffected.
+pub(crate) fn release_after_readiness_publication(admission: Option<ChildBootstrapAdmission>) {
+    drop(admission);
+}
+
+/// Compose a `Command` spawn environment carrying the selection token.
+///
+/// The parent uses this when spawning the resolved InstalledCurrent daemon
+/// target so the child can independently re-verify before serving.
+pub(crate) fn spawn_env(token: &SelectionToken, result_path: &Path) -> Vec<(OsString, OsString)> {
+    vec![
+        (
+            OsString::from(BOOTSTRAP_TOKEN_ENV),
+            OsString::from(token.to_env_value()),
+        ),
+        (
+            OsString::from(BOOTSTRAP_RESULT_ENV),
+            result_path.as_os_str().to_os_string(),
+        ),
+    ]
+}
+
+pub(crate) fn publish_child_bootstrap_failure(error: DaemonBootstrapFailure) {
+    let Some(path) = std::env::var_os(BOOTSTRAP_RESULT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    std::env::remove_var(BOOTSTRAP_RESULT_ENV);
+    if let Ok(encoded) = serde_json::to_vec(&error) {
+        let _ = std::fs::write(path, encoded);
+    }
+}
+
+pub(crate) fn take_child_bootstrap_failure(path: &Path) -> Option<DaemonBootstrapFailure> {
+    let encoded = std::fs::read(path).ok()?;
+    let _ = std::fs::remove_file(path);
+    serde_json::from_slice(&encoded).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+
+    #[cfg(windows)]
+    fn create_inheritable_authority_test_dir(path: &Path) {
+        use std::ffi::{c_void, OsStr};
+        use std::mem::{size_of, MaybeUninit};
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS,
+        };
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+            SDDL_REVISION_1,
+        };
+        use windows_sys::Win32::Security::{
+            GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        };
+        use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create authority-test parent");
+        }
+        fn wide_null(value: &OsStr) -> Vec<u16> {
+            value.encode_wide().chain(std::iter::once(0)).collect()
+        }
+        unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
+            let mut len = 0usize;
+            while unsafe { *ptr.add(len) } != 0 {
+                len += 1;
+            }
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+        }
+        let sid = {
+            let mut token = 0;
+            assert_ne!(
+                unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) },
+                0,
+                "open authority-test token"
+            );
+            let mut needed = 0u32;
+            unsafe {
+                GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            }
+            let mut storage = vec![
+                MaybeUninit::<TOKEN_USER>::uninit();
+                (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+            ];
+            assert_ne!(
+                unsafe {
+                    GetTokenInformation(
+                        token,
+                        TokenUser,
+                        storage.as_mut_ptr().cast(),
+                        needed,
+                        &mut needed,
+                    )
+                },
+                0,
+                "read authority-test token user"
+            );
+            let token_user = storage.as_ptr().cast::<TOKEN_USER>();
+            let mut sid_ptr: *mut u16 = std::ptr::null_mut();
+            assert_ne!(
+                unsafe { ConvertSidToStringSidW((*token_user).User.Sid, &mut sid_ptr) },
+                0,
+                "convert authority-test SID"
+            );
+            unsafe {
+                CloseHandle(token);
+            }
+            let sid = unsafe { wide_ptr_to_string(sid_ptr) };
+            unsafe {
+                LocalFree(sid_ptr.cast());
+            }
+            sid
+        };
+        let sddl = format!("O:{sid}G:{sid}D:P(A;OICI;GA;;;{sid})");
+        let sddl_wide = wide_null(OsStr::new(&sddl));
+        let mut descriptor: *mut c_void = std::ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl_wide.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    std::ptr::null_mut(),
+                )
+            },
+            0,
+            "build inheritable authority-test descriptor"
+        );
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        let path_wide = wide_null(path.as_os_str());
+        let created = unsafe { CreateDirectoryW(path_wide.as_ptr(), &attributes) };
+        unsafe {
+            LocalFree(descriptor);
+        }
+        if created == 0 {
+            assert_eq!(
+                unsafe { GetLastError() },
+                ERROR_ALREADY_EXISTS,
+                "create inheritable authority-test dir {}",
+                path.display()
+            );
+        }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let id = NEXT.fetch_add(1, Ordering::SeqCst);
+        #[cfg(windows)]
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .ancestors()
+            .last()
+            .expect("Windows local path has a volume root")
+            .to_path_buf();
+        #[cfg(not(windows))]
+        let base = std::env::temp_dir();
+        let dir = base.join(format!(
+            "telex-bootstrap-test-{}-{name}-{id}",
+            std::process::id()
+        ));
+        #[cfg(windows)]
+        create_inheritable_authority_test_dir(&dir);
+        #[cfg(not(windows))]
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_manifest(layout: &InstallLayout, tag: &str, manifest: &VersionManifest) {
+        let dir = layout.versions_dir.join(tag);
+        fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join(install::exe_name());
+        fs::write(&binary, b"fake-telex").unwrap();
+        // Update the manifest binary field to bind the derived path so
+        // stricter binding checks pass by default.
+        let mut concrete = manifest.clone();
+        if concrete.binary.is_empty() {
+            concrete.binary = binary.to_string_lossy().to_string();
+        }
+        let path = dir.join("manifest.json");
+        fs::write(path, serde_json::to_string_pretty(&concrete).unwrap()).unwrap();
+    }
+
+    fn write_current(layout: &InstallLayout, tag: &str) {
+        fs::create_dir_all(&layout.root).unwrap();
+        fs::write(&layout.current_path, tag).unwrap();
+    }
+
+    fn compat_manifest(tag: &str) -> VersionManifest {
+        VersionManifest {
+            tag: tag.to_string(),
+            package_version: "9.9.9".to_string(),
+            build_id: "test-build".to_string(),
+            binary: String::new(),
+            installed_at_ms: 0,
+            source: "test".to_string(),
+            schema_min: install::SUPPORTED_SCHEMA_MIN,
+            schema_max: install::SUPPORTED_SCHEMA_MAX,
+            protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
+            protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
+            required_capabilities: crate::daemon_ipc::REQUIRED_CAPABILITIES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+            application_bootstrap_admission_version:
+                install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
+            copilot_bridge_protocol: 0,
+            min_compatible_plugin_version: "0.0.0".to_string(),
+            previous_tag: None,
+        }
+    }
+
+    #[test]
+    fn relative_root_rejected_as_invalid() {
+        let err = BootstrapPolicy::installed_current(PathBuf::from("relative/path"))
+            .expect_err("relative root should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidTrustedRoot);
+    }
+
+    #[test]
+    fn validate_for_switch_does_not_require_an_existing_current_selector() {
+        // A first install has no `current` yet, and an upgrade's `current`
+        // names the *predecessor*. Candidate validation must judge the
+        // candidate on its own authority, while `resolve_installed_current`
+        // still requires the selector it just read.
+        let root = temp_dir("switch-without-current");
+        let layout = install::layout_for_root(&root);
+        write_manifest(&layout, "v1", &compat_manifest("v1"));
+        assert!(!layout.current_path.exists());
+        validate_installed_target_for_switch(&layout, "v1")
+            .expect("a candidate must validate before `current` exists");
+
+        assert_eq!(
+            resolve_installed_current(&root).expect_err("no selector yet"),
+            DaemonBootstrapFailure::MissingCurrent
+        );
+
+        // Once published, resolution succeeds and the candidate path stays
+        // strict about the rest of the authority chain.
+        write_current(&layout, "v1");
+        resolve_installed_current(&root).expect("published selection resolves");
+        validate_installed_target_for_switch(&layout, "v-missing")
+            .expect_err("an uninstalled candidate must still fail closed");
+    }
+
+    #[test]
+    fn empty_root_rejected_as_invalid() {
+        let err =
+            BootstrapPolicy::installed_current(PathBuf::new()).expect_err("empty root should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidTrustedRoot);
+    }
+
+    #[test]
+    fn nonexistent_absolute_root_rejected_as_invalid() {
+        let missing = std::env::temp_dir().join(format!(
+            "telex-bootstrap-does-not-exist-{}",
+            std::process::id()
+        ));
+        let err =
+            BootstrapPolicy::installed_current(missing).expect_err("missing root should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidTrustedRoot);
+    }
+
+    #[test]
+    fn root_with_parent_dir_component_rejected() {
+        let base = temp_dir("parent-dir");
+        let with_dotdot = base.join("nested").join("..").join("nested");
+        // Path shape check must reject `..` even when it would resolve.
+        let err =
+            BootstrapPolicy::installed_current(with_dotdot).expect_err(".. in path should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidTrustedRoot);
+        fs::remove_dir_all(base).ok();
+    }
+
+    #[test]
+    fn resolve_reports_missing_current_when_selector_absent() {
+        let root = temp_dir("no-current");
+        let err = resolve_installed_current(&root).expect_err("missing current should fail");
+        assert_eq!(err, DaemonBootstrapFailure::MissingCurrent);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_missing_executable_when_binary_absent() {
+        let root = temp_dir("no-binary");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let bin = layout.versions_dir.join("v1").join(install::exe_name());
+        fs::remove_file(&bin).unwrap();
+        let err = resolve_installed_current(&root).expect_err("missing binary should fail");
+        assert_eq!(err, DaemonBootstrapFailure::MissingExecutable);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_incompatible_manifest_when_protocol_major_wrong() {
+        let root = temp_dir("bad-proto");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.protocol_major = manifest.protocol_major.wrapping_add(1);
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("bad protocol should fail");
+        assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_incompatible_manifest_when_schema_range_excludes_current() {
+        let root = temp_dir("bad-schema");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.schema_min = install::SUPPORTED_SCHEMA_MAX + 5;
+        manifest.schema_max = install::SUPPORTED_SCHEMA_MAX + 6;
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("bad schema should fail");
+        assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_incompatible_manifest_without_child_admission_support() {
+        let root = temp_dir("legacy-admission");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.application_bootstrap_admission_version = 0;
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root)
+            .expect_err("legacy admission should fail before spawn");
+        assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn admission_manifest_presence_and_lineage_are_fail_closed() {
+        for (label, value, expected) in [
+            (
+                "explicit-zero",
+                serde_json::json!(0),
+                DaemonBootstrapFailure::IncompatibleManifest,
+            ),
+            (
+                "explicit-future",
+                serde_json::json!(2),
+                DaemonBootstrapFailure::IncompatibleManifest,
+            ),
+            (
+                "explicit-null",
+                serde_json::Value::Null,
+                DaemonBootstrapFailure::InvalidManifest,
+            ),
+            (
+                "explicit-string",
+                serde_json::json!("1"),
+                DaemonBootstrapFailure::InvalidManifest,
+            ),
+        ] {
+            let root = temp_dir(label);
+            let layout = install::layout_for_root(&root);
+            let manifest = compat_manifest("v1");
+            write_manifest(&layout, "v1", &manifest);
+            write_current(&layout, "v1");
+            let path = layout.versions_dir.join("v1").join("manifest.json");
+            let mut json: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            json["application_bootstrap_admission_version"] = value;
+            fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+            assert_eq!(
+                resolve_installed_current(&root).expect_err(label),
+                expected,
+                "{label}"
+            );
+            fs::remove_dir_all(root).ok();
+        }
+
+        for version in ["0.2.1", "0.4.0"] {
+            let root = temp_dir(&format!("missing-{}", version.replace('.', "-")));
+            let layout = install::layout_for_root(&root);
+            let mut manifest = compat_manifest("v1");
+            manifest.package_version = version.to_string();
+            write_manifest(&layout, "v1", &manifest);
+            write_current(&layout, "v1");
+            let path = layout.versions_dir.join("v1").join("manifest.json");
+            let mut json: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            json.as_object_mut()
+                .unwrap()
+                .remove("application_bootstrap_admission_version");
+            fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+            assert_eq!(
+                resolve_installed_current_with_admission(
+                    &root,
+                    AdmissionValidation::ProbeCandidate,
+                )
+                .expect_err("non-0.3 missing field must fail"),
+                DaemonBootstrapFailure::IncompatibleManifest
+            );
+            fs::remove_dir_all(root).ok();
+        }
+    }
+
+    #[test]
+    fn duplicate_admission_manifest_key_is_invalid() {
+        let root = temp_dir("duplicate-admission");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let path = layout.versions_dir.join("v1").join("manifest.json");
+        let raw = fs::read_to_string(&path).unwrap();
+        let needle = format!(
+            "\"application_bootstrap_admission_version\": {}",
+            install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        );
+        let duplicate = format!("{needle},\n  {needle}");
+        fs::write(&path, raw.replacen(&needle, &duplicate, 1)).unwrap();
+        assert_eq!(
+            resolve_installed_current(&root).expect_err("duplicate key"),
+            DaemonBootstrapFailure::InvalidManifest
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn admission_completion_is_bound_to_the_exact_target_identity() {
+        let root = temp_dir("admission-target-movement");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.package_version = "0.3.0".to_string();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let manifest_path = layout.versions_dir.join("v1").join("manifest.json");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("application_bootstrap_admission_version");
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+
+        let candidate =
+            resolve_installed_current_with_admission(&root, AdmissionValidation::ProbeCandidate)
+                .expect("0.3 missing field is probe-eligible");
+        let target = candidate.token.target_exe.clone();
+        let replacement = target.with_extension("replacement");
+        fs::copy(std::env::current_exe().unwrap(), &replacement).unwrap();
+        fs::remove_file(&target).unwrap();
+        fs::rename(&replacement, &target).unwrap();
+
+        assert_eq!(
+            resolve_installed_current_with_admission(
+                &root,
+                AdmissionValidation::Apply(&candidate.completion),
+            )
+            .expect_err("completion must not survive target replacement"),
+            DaemonBootstrapFailure::IncompatibleManifest
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_invalid_manifest_when_tag_does_not_bind() {
+        let root = temp_dir("mis-tag");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.tag = "different".to_string();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("mismatched tag should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_invalid_manifest_when_current_contains_path_escape() {
+        let root = temp_dir("escape-tag");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "..\\other");
+        let err = resolve_installed_current(&root).expect_err("current with .. should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_succeeds_and_produces_matching_selection_token() {
+        let root = temp_dir("happy-path");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let token = resolve_installed_current(&root).expect("happy path resolves");
+        assert_eq!(token.tag, "v1");
+        assert_eq!(token.build_id, "test-build");
+        assert_eq!(token.package_version, "9.9.9");
+        assert_eq!(token.protocol_major, crate::daemon_ipc::PROTOCOL_MAJOR);
+        let expected_exe = layout.versions_dir.join("v1").join(install::exe_name());
+        let expected_canonical = std::fs::canonicalize(&expected_exe).unwrap();
+        assert_eq!(token.target_exe, expected_canonical);
+        assert!(token
+            .target_exe
+            .starts_with(std::fs::canonicalize(&root).unwrap()));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn selection_token_env_roundtrip_preserves_load_bearing_fields() {
+        let root = temp_dir("env-roundtrip");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let token = resolve_installed_current(&root).unwrap();
+        let env = token.to_env_value();
+        let parsed = SelectionToken::from_env_value(&env).expect("token roundtrips through env");
+        assert_eq!(parsed, token);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn exact_executable_missing_path_rejected() {
+        let missing =
+            std::env::temp_dir().join(format!("telex-bootstrap-exact-{}", std::process::id()));
+        let err =
+            BootstrapPolicy::exact_executable(missing).expect_err("missing exact exe should fail");
+        assert_eq!(err, DaemonBootstrapFailure::MissingExecutable);
+    }
+
+    #[test]
+    fn exact_executable_relative_rejected() {
+        let err = BootstrapPolicy::exact_executable(PathBuf::from("telex"))
+            .expect_err("relative exact exe should fail");
+        assert_eq!(err, DaemonBootstrapFailure::MissingExecutable);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_executable_witness_blocks_write_and_delete_replacement() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, OPEN_EXISTING,
+        };
+
+        let executable = std::env::current_exe().expect("current test executable");
+        let _witness = open_windows_witness(&executable).expect("open executable witness");
+        let wide: Vec<u16> = executable
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        const DELETE_ACCESS: u32 = 0x0001_0000;
+        for access in [GENERIC_WRITE, DELETE_ACCESS] {
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    access,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    0,
+                )
+            };
+            if handle != INVALID_HANDLE_VALUE {
+                unsafe {
+                    CloseHandle(handle);
+                }
+                panic!("executable witness allowed replacement access {access:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn display_never_leaks_authority_paths() {
+        for variant in [
+            DaemonBootstrapFailure::InvalidTrustedRoot,
+            DaemonBootstrapFailure::UnsafeInstallAuthority,
+            DaemonBootstrapFailure::MissingCurrent,
+            DaemonBootstrapFailure::InvalidManifest,
+            DaemonBootstrapFailure::IncompatibleManifest,
+            DaemonBootstrapFailure::SelectionUnstable,
+            DaemonBootstrapFailure::MissingExecutable,
+            DaemonBootstrapFailure::ExecutableIdentityMismatch,
+            DaemonBootstrapFailure::ForeignDaemon,
+        ] {
+            let rendered = variant.to_string();
+            assert!(!rendered.contains('/'));
+            assert!(!rendered.contains('\\'));
+            assert!(!rendered.is_empty());
+        }
+    }
+
+    #[test]
+    fn resolve_rejects_empty_build_id() {
+        let root = temp_dir("empty-build-id");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.build_id = String::new();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("empty build id should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_unknown_sentinel_build_id() {
+        let root = temp_dir("unknown-build-id");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.build_id = install::UNKNOWN_BUILD_ID.to_string();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("unknown build id should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_empty_package_version() {
+        let root = temp_dir("empty-version");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.package_version = String::new();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("empty package version should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_empty_manifest_binary() {
+        let root = temp_dir("empty-binary");
+        let layout = install::layout_for_root(&root);
+        let dir = layout.versions_dir.join("v1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(install::exe_name()), b"fake-telex").unwrap();
+        // Intentionally leave binary empty and skip our write_manifest helper.
+        let mut manifest = compat_manifest("v1");
+        manifest.binary = String::new();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("empty binary should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_unresolvable_manifest_binary() {
+        let root = temp_dir("bad-binary");
+        let layout = install::layout_for_root(&root);
+        let dir = layout.versions_dir.join("v1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(install::exe_name()), b"fake-telex").unwrap();
+        let mut manifest = compat_manifest("v1");
+        manifest.binary = std::env::temp_dir()
+            .join(format!(
+                "telex-bootstrap-nonexistent-{}",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .to_string();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("unresolvable binary should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_duplicate_required_capabilities() {
+        let root = temp_dir("dup-caps");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        let first = manifest.required_capabilities[0].clone();
+        manifest.required_capabilities.push(first);
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("duplicate caps should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_empty_required_capability_entry() {
+        let root = temp_dir("empty-cap");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.required_capabilities.push(String::new());
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("empty cap entry should fail");
+        assert_eq!(err, DaemonBootstrapFailure::InvalidManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_rejects_missing_required_capability() {
+        let root = temp_dir("missing-cap");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.required_capabilities.pop().unwrap();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root).expect_err("missing cap should fail");
+        assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn selector_admission_shared_holders_coexist_and_release() {
+        let root = temp_dir("selector-lock");
+        let shared_one = SelectorAdmission::shared(&root).expect("shared admission");
+        let shared_two = SelectorAdmission::shared(&root).expect("second shared admission");
+        drop(shared_one);
+        drop(shared_two);
+        assert!(selector_lock_path(&root).is_file());
+        // After all shared holders release, exclusive becomes acquirable.
+        let excl = SelectorAdmission::exclusive(&root).expect("exclusive admission after release");
+        drop(excl);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn selector_admission_exclusive_blocked_by_shared_is_bounded_and_maps_to_unstable() {
+        let root = temp_dir("selector-exclusive-blocked");
+        let held_shared = SelectorAdmission::shared(&root).expect("shared admission");
+        let start = std::time::Instant::now();
+        // With SELECTOR_LOCK_DEADLINE=5s, we short-circuit via a shorter
+        // deadline through the internal helper to keep tests fast.
+        let err = acquire_with_deadline_sync(&root, true, Duration::from_millis(150))
+            .expect_err("exclusive should be blocked by live shared holder");
+        assert_eq!(err, DaemonBootstrapFailure::SelectionUnstable);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "acquisition must be bounded and non-blocking"
+        );
+        drop(held_shared);
+        // After release, exclusive succeeds within the deadline.
+        let excl = acquire_with_deadline_sync(&root, true, Duration::from_millis(200))
+            .expect("exclusive after release");
+        drop(excl);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn selector_admission_child_release_boundary_frees_upgrade_waiter() {
+        // Regression for the previously-observed deadlock where the child's
+        // shared lease lived for the daemon's entire `serve` lifetime and
+        // upgrade's exclusive acquisition blocked drain forever. The
+        // release-after-readiness-publication boundary drops the guard so
+        // upgrade/rollback exclusive acquisition succeeds while the daemon
+        // is still serving.
+        let root = temp_dir("child-release-boundary");
+        let guard = SelectorAdmission::shared(&root).expect("child shared admission");
+        drop(guard);
+        // After the child releases, upgrade's exclusive must succeed.
+        let excl = acquire_with_deadline_sync(&root, true, Duration::from_millis(500))
+            .expect("exclusive after child release");
+        drop(excl);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn probe_group_ownership_seals_before_reap_and_cannot_signal_twice() {
+        let mut ownership = ProbeGroupOwnership::Anchored;
+        assert!(ownership.seal(), "the owned group may be signaled once");
+        assert_eq!(ownership, ProbeGroupOwnership::Sealed);
+        assert!(
+            ownership.mark_reaped(),
+            "sealed ownership may be reaped once"
+        );
+        assert_eq!(ownership, ProbeGroupOwnership::Reaped);
+        assert!(
+            !ownership.seal(),
+            "normal, timeout, error, and Drop paths must not signal after sealing/reap"
+        );
+        assert!(!ownership.mark_reaped(), "exact reap is irreversible");
+
+        assert!(probe_signal_authorized(&Ok(ProbeLeaderState::Running)));
+        assert!(probe_signal_authorized(&Ok(ProbeLeaderState::Exited(true))));
+        assert!(!probe_signal_authorized(&Err(
+            ProbeObserveError::OwnershipLost
+        )));
+        assert!(!probe_signal_authorized(&Err(ProbeObserveError::Failure)));
+        assert_eq!(
+            classify_probe_observe_error(&std::io::Error::from_raw_os_error(libc::EINTR)),
+            ProbeObserveError::Failure,
+            "an interrupted waitid is not affirmative ownership evidence"
+        );
+        assert_eq!(
+            classify_probe_observe_error(&std::io::Error::from_raw_os_error(libc::ECHILD)),
+            ProbeObserveError::OwnershipLost
+        );
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    #[ignore = "subprocess role used by the bounded admission-probe regression"]
+    fn admission_probe_pipe_parent_fixture() {
+        if std::env::var_os("TELEX_TEST_PROBE_PIPE_PARENT").is_none() {
+            return;
+        }
+        let mut descendant =
+            std::process::Command::new(std::env::current_exe().expect("current test executable"));
+        descendant
+            .env("TELEX_TEST_PROBE_PIPE_DESCENDANT", "1")
+            .env(
+                "TELEX_TEST_PROBE_PIPE_PID_MARKER",
+                std::env::var_os("TELEX_TEST_PROBE_PIPE_PID_MARKER")
+                    .expect("descendant pid marker"),
+            )
+            .args([
+                "--ignored",
+                "--exact",
+                "daemon_bootstrap::tests::admission_probe_pipe_descendant_fixture",
+                "--nocapture",
+            ]);
+        descendant.spawn().expect("spawn pipe-holding descendant");
+        println!("{}", r#"{"parent":"complete"}"#);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    #[ignore = "subprocess role used by the bounded admission-probe regression"]
+    fn admission_probe_pipe_descendant_fixture() {
+        if std::env::var_os("TELEX_TEST_PROBE_PIPE_DESCENDANT").is_none() {
+            return;
+        }
+        let marker = PathBuf::from(std::env::var_os("TELEX_TEST_PROBE_PIPE_PID_MARKER").unwrap());
+        fs::write(marker, std::process::id().to_string()).expect("write descendant pid");
+        std::thread::sleep(Duration::from_millis(12_500));
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn admission_probe_deadline_covers_descendant_held_pipes_and_releases_selector() {
+        let root = temp_dir("probe-pipe-deadline");
+        let pid_marker = root.join("descendant.pid");
+        let guard = SelectorAdmission::exclusive(&root).expect("exclusive admission");
+        let mut command =
+            std::process::Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .env("TELEX_TEST_PROBE_PIPE_PARENT", "1")
+            .env("TELEX_TEST_PROBE_PIPE_PID_MARKER", &pid_marker)
+            .args([
+                "--ignored",
+                "--exact",
+                "daemon_bootstrap::tests::admission_probe_pipe_parent_fixture",
+                "--nocapture",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let started = Instant::now();
+        let error = run_bounded_probe_process(command, Duration::from_secs(2), 1024 * 1024)
+            .expect_err("descendant-held pipes must time out");
+        assert_eq!(error, DaemonBootstrapFailure::IncompatibleManifest);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "the whole probe lifecycle must stay inside its absolute bound"
+        );
+        drop(guard);
+        let reacquired = acquire_with_deadline_sync(&root, true, Duration::from_secs(1))
+            .expect("selector admission released after probe failure");
+        drop(reacquired);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !pid_marker.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid: u32 = fs::read_to_string(&pid_marker)
+            .expect("descendant pid marker")
+            .trim()
+            .parse()
+            .expect("descendant pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while crate::session_watch::process_alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !crate::session_watch::process_alive(pid),
+            "the probe's owned descendant must be terminated"
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn selector_admission_async_bounded_and_maps_to_unstable() {
+        let root = temp_dir("selector-async-blocked");
+        let held_shared = SelectorAdmission::shared(&root).expect("shared admission");
+        let start = std::time::Instant::now();
+        let err = acquire_with_deadline_async(root.clone(), true, Duration::from_millis(150))
+            .await
+            .expect_err("exclusive should be blocked");
+        assert_eq!(err, DaemonBootstrapFailure::SelectionUnstable);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "async acquisition must not block a worker beyond the deadline"
+        );
+        drop(held_shared);
+        let excl = acquire_with_deadline_async(root.clone(), true, Duration::from_millis(500))
+            .await
+            .expect("exclusive after release");
+        drop(excl);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn exact_executable_captures_file_identity_at_freeze_time() {
+        let dir = temp_dir("exact-identity");
+        let exe = dir.join(install::exe_name());
+        fs::write(&exe, b"exact-body").unwrap();
+        let policy =
+            BootstrapPolicy::exact_executable(exe.clone()).expect("exact executable freeze");
+        match policy.as_ref() {
+            BootstrapPolicy::ExactExecutable {
+                executable,
+                file_identity,
+            } => {
+                let canonical = std::fs::canonicalize(&exe).unwrap();
+                assert_eq!(executable, &canonical);
+                let observed = file_identity_pub(&canonical).expect("identity");
+                assert_eq!(&observed, file_identity);
+            }
+            _ => panic!("expected ExactExecutable"),
+        }
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// Test-only shim so the `super::file_identity` symbol used by the test
+    /// remains crate-private without an `allow(dead_code)` on the callable.
+    fn file_identity_pub(path: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+        file_identity(path)
+    }
+}
