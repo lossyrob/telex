@@ -136,6 +136,17 @@ jobs:
           --test installed_current_process
           -- -D warnings
 
+      - name: Fail on collected Windows crash dumps
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumps = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP "telex-crash-dumps") `
+            -Filter "*.dmp" -File -ErrorAction SilentlyContinue)
+          if ($dumps.Count -gt 0) {
+            $dumps | ForEach-Object { Write-Error "native crash dump: $($_.FullName)" }
+            throw "Windows child process produced $($dumps.Count) crash dump(s)"
+          }
+
       - name: Upload Windows crash evidence
         if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -565,6 +576,12 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               Start-Sleep -Seconds 10
               exit $LASTEXITCODE
+            }
+            $dumps = @(Get-ChildItem (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+              -Filter "*.dmp" -File -ErrorAction SilentlyContinue)
+            if ($dumps.Count -gt 0) {
+              $dumps | ForEach-Object { Write-Error "native crash dump: $($_.FullName)" }
+              throw "PageHeap attempt $attempt produced $($dumps.Count) crash dump(s)"
             }
           }
 
