@@ -528,9 +528,57 @@ backend operation failed (diagnostic `442fe890f96b80f8`). The log shows these
 symptoms but not their cause. Because required jobs failed, `745eaf28` receives
 no CI or readiness credit, and the Live Postgres timeout is not shown to be
 fixed. The Local and retained delta-review approvals of `745eaf28` remain
-source-only. A further successor is assigned; any new head will invalidate
-`745eaf28` current-head evidence and will need its own source review and passing
-required CI. Incident I161-1 and the withholding of E161-1 are unchanged.
+source-only. A further successor was assigned; its head needs its own source
+review and passing required CI. Incident I161-1 and the withholding of E161-1
+are unchanged.
+
+Successor head `0486beeb027ba787465a860f94eacc06a26f8170` (tree
+`d0052264b1d403ddfa31c5855f6f94cc6c827509`) is now the PR #161 head. It adds
+four commits on `745eaf28`; its immediate parent is `e6eb4a40`. The product
+merge base remains `e4f585a7`. Against baseline `745eaf28` it changes four
+paths, +188/-39: `src/backend/postgres.rs`, `src/daemon.rs`,
+`tests/application_client_conformance.rs`, and
+`tests/installed_current_process.rs`. It is intended to address both failures in
+run 39764752556. First, each conformance scenario, including the auxiliary
+migration store, now stops its daemon before its PostgreSQL schema is discarded.
+Second, the InstalledCurrent Postgres test writes the shared profile only once,
+under its process lock, so concurrent first-use tasks no longer truncate and
+rewrite the configuration file while peers read it. Third, the drain-release
+connection is now prepared eagerly and maintained proactively only for
+daemon-owned profile backends; public construction and ordinary activity use one
+connection, although an explicit lease release can still open the release
+connection lazily. The release connection owns its driver, uses server-side
+statement and lock timeouts, and keeps one absolute five-second budget for the
+fenced release. Its invalidation is guarded, and repair with fresh credentials
+is bounded and runs outside drain. Only daemon activity checks its health
+proactively. The retained delta review approved it. Its reviewers, agents
+`fd257b51` and `fb340fb6`, are recorded as gpt-6-astra with high reasoning and
+long context. Its validation was formatting, compilation, and lint only under
+the I161-1 freeze, with no runtime or database test. The review links the two
+failures to these causes from source and the CI log, and it states that CI must
+confirm both repairs. Local's source review then approved `0486beeb` against
+baseline `745eaf28` with no findings. It accepted the source as follows. Only
+the daemon's profile backends open the release connection eagerly; public
+construction and ordinary activity use one connection, although an explicit
+lease release can still open the release connection lazily. The connection
+driver is abort-owned through setup and publication. Each lease-release call has
+one absolute five-second deadline, with fencing, invalidation, and repair
+preserved; the deadline applies per call, not across a whole multi-member drain.
+Each scenario stops its daemon before its exact PostgreSQL schema is discarded,
+and the test profile is published once under a lock. Local recorded three
+qualifications. Dropping a connection is local cleanup and does not guarantee
+synchronous remote cancellation. The absence of a daemon capability file, which
+the teardown uses to skip the stop, does not prove that no daemon endpoint
+exists. Local did not verify the review's claim that these changes caused or fix
+the CI failures. Local reports L161-6 still resolved in source and D161 and
+earlier source authority conserved. Local's review was read-only and did not run
+the writer's validation. This is a source approval only. It gives no CI,
+runtime, consumer, design, merge, or closure credit. Required CI run 39770808804
+is in progress at the exact head; its result is not recorded here. `0486beeb`
+has no CI, readiness, consumer, design, merge, or closure credit yet. The move
+from `745eaf28` invalidates all `745eaf28` current-head evidence, and earlier
+approvals and CI results are historical. Incident I161-1 and the withholding of
+E161-1 are unchanged.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
