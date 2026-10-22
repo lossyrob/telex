@@ -146,7 +146,8 @@ Watcher send-only and Operator Station bidirectional fixtures, shared-semantic
 repairs, and guidance for replacing temporary consumer seams. Runtime fixtures
 use production `InstalledCurrent { trusted_root }` daemon bootstrap under the
 Local Daemon-owned selector-admission and process-authentication contract.
-Issue #152 remains open; this record does not close it.
+App, as owner, closed issue #152 as completed at 2026-10-22T17:59:33Z after
+verifying canonical completion commit `80adef08` on main.
 
 `consumer-integration-gate` passed on merged main `4d25fdff`. Watcher and
 Operator Station each attested the reviewed head before merge and then passed
@@ -1090,8 +1091,10 @@ integration gate. The implementer's field report states that the permanent
 hosted Windows proof using the official v0.2.1 asset resolves E161-1; this
 record attributes that resolution to the implementer and adds no independent
 acceptance. The I161-1 impact and isolation questions remain open, the I161-1
-workstation preservation and freeze are unchanged, issue #152 remains open, and
-no release, tag, fleet, issue-closure, or launch authority is granted.
+workstation preservation and freeze are unchanged, and no release, tag, fleet,
+issue-closure, or launch authority is granted. App, as owner, closed issue #152
+as completed at 2026-10-22T17:59:33Z after verifying canonical completion commit
+`80adef08` on main, without any release, tag, fleet, launch, or I161-1 change.
 
 The workstation run of the released-v0.2.1 upgrade proof (E161-1) was not
 accepted. At `d08e764c`, the official v0.2.1 executable staged the candidate
@@ -1116,8 +1119,9 @@ job; and the required CI run at head `52abb30e` passed, after which PR #161
 merged as `4d25fdff`. The implementer's field report states that the permanent
 hosted Windows proof using the official v0.2.1 asset resolves E161-1; this
 record attributes that resolution to the implementer and adds no independent
-acceptance. The node is complete; issue #152 remains open, and this record does
-not close it.
+acceptance. The node is complete. App, as owner, closed issue #152 as completed
+at 2026-10-22T17:59:33Z after verifying canonical completion commit `80adef08`
+on main.
 
 ## Decisions
 
@@ -1277,7 +1281,7 @@ not close it.
 - The Rust-first `first-binding` completed through issue #149 and PR #151.
   Issue #152 `client-conformance` completed through PR #161, merged as
   `4d25fdff`; the consumer gate and `supported-client` checkpoint are complete,
-  and issue #152 remains open.
+  and App closed issue #152 as completed at 2026-10-22T17:59:33Z.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the

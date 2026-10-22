@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned: its Application Client client-conformance and consumer-integration-gate holds were discharged on 2026-10-22, and it may advance toward ready once a reviewed and reconciled runtime tracker exists. By operator priority decision on 2026-10-22, Telex Watcher is to replace the waiter session in the operator workflow, and watcher-runtime-core is planned as the first owner under the operator workflow v2; this records sequencing only and grants no launch authority.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime core is ready but unlaunched: its Application Client holds were discharged on 2026-10-22, and issue #162 is its reviewed and reconciled tracker. Launch is held until the operator approves it through the Campaign-prepared Streamliner workflow v2 adapter. By operator priority decision on 2026-10-22, Telex Watcher is to replace the waiter session in the operator workflow, and watcher-runtime-core is the intended first owner under the operator workflow v2; this records sequencing only and grants no launch authority.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-22T17:52:35.797Z",
+  "updatedAt": "2026-10-22T18:01:49.602Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -151,11 +151,17 @@
       "type": "task",
       "title": "Minimal Watcher runtime core",
       "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract.",
-      "status": "planned",
-      "attention": "watch",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 162
+      },
       "dependsOn": [
         "dumb-watcher-contract-gate"
       ],
@@ -168,7 +174,8 @@
             "nodeId": "client-conformance"
           },
           "label": "Supported Application Client core/binding conformance accepted",
-          "url": "https://github.com/lossyrob/telex/issues/117"
+          "url": "https://github.com/lossyrob/telex/issues/117",
+          "status": "satisfied"
         },
         {
           "id": "application-client-consumer-integration-gate",
@@ -178,7 +185,8 @@
             "nodeId": "consumer-integration-gate"
           },
           "label": "Pre-product exact-revision Watcher and Operator Station attestations accept the public conformance bundle",
-          "url": "https://github.com/lossyrob/telex/issues/152"
+          "url": "https://github.com/lossyrob/telex/issues/152",
+          "status": "satisfied"
         }
       ]
     },

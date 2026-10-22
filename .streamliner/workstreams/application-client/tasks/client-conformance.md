@@ -7,8 +7,8 @@
   `4d25fdff` on 2026-10-22 after Local's and the implementer's source and design
   reviews, required CI, and both consumers' source and runtime attestations
   approved or passed that exact head; Watcher and Operator Station then passed
-  the post-merge consumer integration gate on merged main; issue #152 remains
-  open, and this record does not close it; proof-isolation incident I161-1 is
+  the post-merge consumer integration gate on merged main; App closed issue #152
+  as completed at 2026-10-22T17:59:33Z; proof-isolation incident I161-1 is
   unresolved while its user-directed read-only impact review continues
 - **Attention:** watch
 - **Depends on:** completed `client-core`, completed `first-binding`
@@ -1513,8 +1513,10 @@ integration gate. The implementer's field report states that the permanent
 hosted Windows proof using the official v0.2.1 asset resolves E161-1; this
 record attributes that resolution to the implementer and adds no independent
 acceptance. The I161-1 impact and isolation questions remain open, the I161-1
-workstation preservation and freeze are unchanged, issue #152 remains open, and
-no release, tag, fleet, issue-closure, or launch authority is granted.
+workstation preservation and freeze are unchanged, and no release, tag, fleet,
+issue-closure, or launch authority is granted. App, as owner, closed issue #152
+as completed at 2026-10-22T17:59:33Z after verifying canonical completion commit
+`80adef08` on main, without any release, tag, fleet, launch, or I161-1 change.
 
 The workstation run of the released-v0.2.1 upgrade proof (E161-1) was not
 accepted. Official v0.2.1 staging of the `d08e764c` candidate and public

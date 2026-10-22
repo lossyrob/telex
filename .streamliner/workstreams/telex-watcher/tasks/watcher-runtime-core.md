@@ -3,12 +3,13 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
-- **Status:** shaped; planned and unlaunched
-- **Attention:** watch
+- **Status:** ready; unlaunched, with launch held for operator approval
+- **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
-  passed and reconciled Application Client `consumer-integration-gate`
-- **Tracker:** not yet created
+  passed and reconciled Application Client `consumer-integration-gate`; both
+  satisfied on 2026-10-22
+- **Tracker:** [lossyrob/telex#162](https://github.com/lossyrob/telex/issues/162)
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -83,6 +84,19 @@ Do not create the implementation worker until all of these are true:
 
 Issue #144, Operator Station UI work, broad packaging, and optional examples
 are not prerequisites.
+
+On 2026-10-22, prerequisites 1 through 4 became true. PR #161 merged reviewed
+conformance head `52abb30e` as `4d25fdff`, and Watcher and Operator Station
+attested that exact head before the merge. Canonical commit `80adef08` recorded
+`consumer-integration-gate` as passed on `main`. Design steward session
+4745cca8-006f-4422-9d35-cf056f28c31f approved creating the runtime tracker, and
+issue #162 was created at 2026-10-22T17:55:36Z. Its body (11,039 bytes, SHA-256
+`1f06675a9a663b321ca3c4852dd263d01be99a7a373e3175d3b4e9a1fced9a4b`) matches the
+approved source after line-ending normalization, and this record reconciles it
+with this task specification. The node is therefore ready. The design steward
+held implementer launch, and Campaign is preparing the Streamliner workflow v2
+adapter and owns launch only after operator approval; prerequisite 5 applies to
+that launch. This record launches no worker.
 
 ## Deliverables
 

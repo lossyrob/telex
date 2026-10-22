@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The supported Application Client core, Rust-first binding, and conformance bundle are complete. Issue #152 client-conformance completed through PR #161 at exact reviewed head 52abb30e, merged as 4d25fdff on 2026-10-22, and Watcher and Operator Station passed the post-merge consumer-integration gate on that merged main, completing the supported-client checkpoint. Issue #152 remains open. Operational hardening and the closure gate remain planned; Watcher runtime still needs a reviewed runtime tracker, and the Station app still needs separate preparation and authorization.",
+  "summary": "The supported Application Client core, Rust-first binding, and conformance bundle are complete. Issue #152 client-conformance completed through PR #161 at exact reviewed head 52abb30e, merged as 4d25fdff on 2026-10-22, and Watcher and Operator Station passed the post-merge consumer-integration gate on that merged main, completing the supported-client checkpoint. App, as owner, closed issue #152 as completed at 2026-10-22T17:59:33Z. Operational hardening and the closure gate remain planned; Watcher runtime core is ready under tracker #162 with launch held for operator approval, and the Station app still needs separate preparation and authorization and waits for a usable Watcher.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-10-22T17:52:35.797Z",
+  "updatedAt": "2026-10-22T18:01:49.602Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -148,7 +148,7 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "Completed through issue #152 and PR #161 at exact reviewed head 52abb30e49dff54f9a9ce7b31c64584a871d11c3, merged as 4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb on 2026-10-22. Local's source review and design inspection, the implementer's source and design reviews, required CI run 39819692324 (all 18 jobs, including the official v0.2.1 proof and three PageHeap runs of the SQLite daemon process tests with no crash dump), and Watcher's and Operator Station's source and runtime attestations approved or passed that exact head, and App authorized the normal guarded merge. The merged bundle covers the ten accepted semantic families through the public Rust surface across SQLite and credentialed Postgres, public-only Watcher send-only and Station bidirectional fixtures, InstalledCurrent daemon bootstrap from a trusted root, temporary-seam replacement guidance, and the unpublished 0.3.0 source version. The implementer's field report states that the permanent hosted Windows proof using the official v0.2.1 asset resolves E161-1. Proof-isolation incident I161-1 remains open, with the operator's preservation directive and the local runtime freeze unchanged. Issue #152 remains open, and no release, tag, fleet, or launch authority follows.",
+      "summary": "Completed through issue #152 and PR #161 at exact reviewed head 52abb30e49dff54f9a9ce7b31c64584a871d11c3, merged as 4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb on 2026-10-22. Local's source review and design inspection, the implementer's source and design reviews, required CI run 39819692324 (all 18 jobs, including the official v0.2.1 proof and three PageHeap runs of the SQLite daemon process tests with no crash dump), and Watcher's and Operator Station's source and runtime attestations approved or passed that exact head, and App authorized the normal guarded merge. The merged bundle covers the ten accepted semantic families through the public Rust surface across SQLite and credentialed Postgres, public-only Watcher send-only and Station bidirectional fixtures, InstalledCurrent daemon bootstrap from a trusted root, temporary-seam replacement guidance, and the unpublished 0.3.0 source version. The implementer's field report states that the permanent hosted Windows proof using the official v0.2.1 asset resolves E161-1. Proof-isolation incident I161-1 remains open, with the operator's preservation directive and the local runtime freeze unchanged. App, as owner, closed issue #152 as completed at 2026-10-22T17:59:33Z; no release, tag, fleet, or launch authority follows.",
       "status": "completed",
       "attention": "watch",
       "repoIds": [

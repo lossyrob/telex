@@ -170,20 +170,22 @@ Issue [#144](https://github.com/lossyrob/telex/issues/144) and
 [`tasks/minimal-example-pack.md`](tasks/minimal-example-pack.md) now provide the
 fresh tracker and bounded task specification for `minimal-example-pack`. The
 node remains ready but unlaunched pending separate campaign authorization.
-`watcher-runtime-core` remains planned. Its Application Client holds are
+`watcher-runtime-core` is ready but unlaunched. Its Application Client holds are
 discharged: `client-conformance` merged through PR #161 as `4d25fdff` on
 2026-10-22, and Watcher's post-merge consumer integration gate receipt passed on
-that merged main. The node may advance toward ready once a reviewed and
-reconciled runtime tracker exists; no runtime launch is authorized. By operator
-priority decision on 2026-10-22, Telex Watcher is to replace the waiter session
-in the operator workflow, and `watcher-runtime-core` is planned as the first
-owner under the operator workflow v2; this records sequencing only and grants no
-launch authority. The merged core now provides authoritative
-exact-store/exact-operation `NotRecorded`, exact-same-operation retry after that
-result, and `RetentionBoundaryCrossed` when absence evidence is no longer
-available. Watcher's post-merge gate receipt found the merged bundle aligned
-with those requirements, including SQLite and credentialed PostgreSQL parity.
-The completed internal gate remains a historical dependency. There is no
+that merged main. Issue [#162](https://github.com/lossyrob/telex/issues/162) and
+[`tasks/watcher-runtime-core.md`](tasks/watcher-runtime-core.md) are its
+reviewed and reconciled tracker and task specification. Launch is held until the
+operator approves it through the Campaign-prepared Streamliner workflow v2
+adapter. By operator priority decision on 2026-10-22, Telex Watcher is to
+replace the waiter session in the operator workflow, and `watcher-runtime-core`
+is the intended first owner under the operator workflow v2; this records
+sequencing only and grants no launch authority. The merged core now provides
+authoritative exact-store/exact-operation `NotRecorded`, exact-same-operation
+retry after that result, and `RetentionBoundaryCrossed` when absence evidence is
+no longer available. Watcher's post-merge gate receipt found the merged bundle
+aligned with those requirements, including SQLite and credentialed PostgreSQL
+parity. The completed internal gate remains a historical dependency. There is no
 private-client or mandatory-template fallback, and
 `five-minute-custom-watch-gate` remains planned.
 
