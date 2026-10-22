@@ -278,6 +278,7 @@ async fn postgres_consumer_fixture_probes_execute_against_installed_current() {
     let station = run_probe(&iso, &binary, "fixture_pg", "station", "pg-station");
     assert_station_restart_evidence(&iso, &binary, "fixture_pg", "pg-station-restart");
     let cap_present = iso.cap_path().is_some();
+    iso.stop_daemon();
     admin_exec(format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).await;
 
     assert_probe_evidence(&watcher, "watcher", WATCHER_EVIDENCE);
@@ -285,5 +286,24 @@ async fn postgres_consumer_fixture_probes_execute_against_installed_current() {
     assert!(
         cap_present,
         "the fixture must have spawned the installed daemon"
+    );
+}
+
+#[test]
+fn postgres_fixture_stops_daemon_before_schema_drop() {
+    let source = include_str!("application_client_fixture.rs");
+    let function = source
+        .split("async fn postgres_consumer_fixture_probes_execute_against_installed_current()")
+        .nth(1)
+        .expect("postgres fixture function");
+    let stop = function
+        .find("iso.stop_daemon();")
+        .expect("explicit daemon stop");
+    let cleanup = function
+        .rfind("admin_exec(format!(\"DROP SCHEMA IF EXISTS {schema} CASCADE\"))")
+        .expect("final schema cleanup");
+    assert!(
+        stop < cleanup,
+        "the fixture must establish exact daemon termination before dropping its schema"
     );
 }
