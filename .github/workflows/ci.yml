@@ -410,6 +410,10 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Test bounded proof process and root ownership
+        shell: pwsh
+        run: tests/released_v021_process_test.ps1
+
       - name: Build the exact SQLite candidate
         env:
           TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -441,7 +445,9 @@ jobs:
           $expectedParent = $volumeRoot.TrimEnd("\")
           $actualParent = (Split-Path -Parent $root).TrimEnd("\")
           $leaf = Split-Path -Leaf $root
-          if (-not $report.isolation.cleanupSafe) {
+          if (-not $report.isolation.rootOwned -or
+              -not $report.isolation.processCleanupSafe -or
+              -not $report.isolation.cleanupSafe) {
             Write-Warning "Proof did not establish safe cleanup; runner teardown owns disposal."
             exit 0
           }

@@ -14,6 +14,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "released_v021_process_helpers.ps1")
+
 $releaseTag = "v0.2.1"
 $releaseCommit = "212b76a4c586101bdc2a53264e2a4c3e2326671a"
 $assetName = "telex-v0.2.1-x86_64-pc-windows-msvc.zip"
@@ -34,7 +36,8 @@ $installedCandidate = $null
 $cap = $null
 $runDir = $null
 $daemonExited = $false
-$cleanupSafe = $true
+$rootOwned = $false
+$processCleanupSafe = $true
 
 New-Item -ItemType Directory -Path $evidenceRoot, $logs, $downloads, $extract -Force |
     Out-Null
@@ -56,6 +59,8 @@ $result = [ordered]@{
         workstationState = $false
         sharedDb = $false
         userInstall = $false
+        rootOwned = $false
+        processCleanupSafe = $true
         cleanupSafe = $false
         cleanupCompleted = $false
     }
@@ -65,11 +70,7 @@ $result = [ordered]@{
     logsDirectory = $logs
 }
 
-function Protect-ProofRoot([string]$Path) {
-    if ((Split-Path -Parent $Path).TrimEnd("\") -ne $volumeRoot.TrimEnd("\")) {
-        throw "proof root must be a direct child of the volume root"
-    }
-    New-Item -ItemType Directory -Path $Path | Out-Null
+function Protect-ProofRootAcl([string]$Path) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     & icacls.exe $Path /inheritance:r /grant:r `
         "$($identity.Name):(OI)(CI)F" `
@@ -78,16 +79,6 @@ function Protect-ProofRoot([string]$Path) {
     if ($LASTEXITCODE -ne 0) {
         throw "failed to protect proof root $Path"
     }
-}
-
-function Format-Command([string]$Executable, [string[]]$Arguments) {
-    '"' + $Executable + '" ' + (($Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"' + ($_ -replace '"', '\"') + '"'
-        } else {
-            $_
-        }
-    }) -join " ")
 }
 
 function Invoke-Logged {
@@ -107,61 +98,15 @@ function Invoke-Logged {
         [int]$TimeoutSeconds = 120
     )
 
-    $stdout = Join-Path $logs "$Name.stdout.txt"
-    $stderr = Join-Path $logs "$Name.stderr.txt"
-    Add-Content -LiteralPath $commands `
-        -Value (Format-Command $Executable $Arguments) -Encoding utf8
-
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Executable
-    $start.UseShellExecute = $false
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $start.CreateNoWindow = $true
-    foreach ($argument in $Arguments) {
-        $start.ArgumentList.Add($argument)
-    }
-    if ($Isolated) {
-        $allowed = @(
-            "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
-            "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "PSMODULEPATH"
-        )
-        $start.Environment.Clear()
-        foreach ($name in $allowed) {
-            $value = [Environment]::GetEnvironmentVariable($name)
-            if ($null -ne $value) {
-                $start.Environment[$name] = $value
-            }
-        }
-    }
-    foreach ($entry in $Environment.GetEnumerator()) {
-        $start.Environment[$entry.Key] = [string]$entry.Value
-    }
-
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $start
-    if (-not $process.Start()) {
-        throw "failed to start $Name"
-    }
-    $stdoutRead = $process.StandardOutput.ReadToEndAsync()
-    $stderrRead = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-        $process.Kill($true)
-        $process.WaitForExit()
-        throw "$Name exceeded its ${TimeoutSeconds}s deadline"
-    }
-    $stdoutText = $stdoutRead.GetAwaiter().GetResult()
-    $stderrText = $stderrRead.GetAwaiter().GetResult()
-    [IO.File]::WriteAllText($stdout, $stdoutText, [Text.UTF8Encoding]::new($false))
-    [IO.File]::WriteAllText($stderr, $stderrText, [Text.UTF8Encoding]::new($false))
-    [pscustomobject]@{
-        Name = $Name
-        ExitCode = $process.ExitCode
-        Stdout = $stdoutText
-        Stderr = $stderrText
-        StdoutPath = $stdout
-        StderrPath = $stderr
-    }
+    Invoke-BoundedLoggedProcess `
+        -LogsDirectory $logs `
+        -CommandsFile $commands `
+        -Name $Name `
+        -Executable $Executable `
+        -Arguments $Arguments `
+        -Environment $Environment `
+        -Isolated:$Isolated `
+        -TimeoutSeconds $TimeoutSeconds
 }
 
 function Require-Success([object]$Run) {
@@ -183,21 +128,6 @@ function Get-FileIdentity([string]$Path) {
     }
 }
 
-function Wait-ExactProcessExit([int]$DaemonPid, [long]$StartTime, [int]$Seconds) {
-    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $process = Get-Process -Id $DaemonPid -ErrorAction SilentlyContinue
-        if ($null -eq $process) {
-            return $true
-        }
-        if ($process.StartTime.ToUniversalTime().ToFileTimeUtc() -ne $StartTime) {
-            return $true
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    return $false
-}
-
 try {
     $repositoryHead = (git -C $repoRoot rev-parse HEAD).Trim()
     if ($repositoryHead -ne $ExpectedHead) {
@@ -210,7 +140,9 @@ try {
         throw "proof root is not a direct child of the volume root"
     }
 
-    Protect-ProofRoot $executionRoot
+    New-ExclusiveProofRoot -Path $executionRoot -VolumeRoot $volumeRoot
+    $rootOwned = $true
+    Protect-ProofRootAcl $executionRoot
     $rootAcl = Get-Acl -LiteralPath $executionRoot
     $result.isolation.owner = $rootAcl.Owner
     $result.isolation.sddl = $rootAcl.GetSecurityDescriptorSddlForm(
@@ -339,7 +271,7 @@ try {
     $fixtureEnvironment.Remove("TELEX_LAUNCHER_ACTIVE")
     $fixtureEnvironment["TELEX_FIXTURE_TRUSTED_ROOT"] = $install
     $fixtureEnvironment["TELEX_FIXTURE_RUN_ID"] = "released-v021-ci"
-    $cleanupSafe = $false
+    $processCleanupSafe = $false
     $fixtureRun = Invoke-Logged "public-attach" $fixtureExe @("attach") `
         $fixtureEnvironment -Isolated
     Require-Success $fixtureRun
@@ -393,7 +325,7 @@ try {
     if (-not $daemonExited) {
         throw "proof daemon did not exit"
     }
-    $cleanupSafe = $true
+    $processCleanupSafe = $true
 
     $result.candidate = [ordered]@{
         commit = $ExpectedHead
@@ -462,7 +394,7 @@ try {
             }
         }
     }
-    if (-not $cleanupSafe -and $null -ne $installedCandidate -and
+    if (-not $processCleanupSafe -and $null -ne $installedCandidate -and
         (Test-Path -LiteralPath $installedCandidate)) {
         try {
             $recoveryStop = Invoke-Logged "daemon-stop-after-failure" $installedCandidate `
@@ -470,13 +402,15 @@ try {
             if ($recoveryStop.ExitCode -eq 0 -and $null -ne $cap) {
                 $daemonExited = Wait-ExactProcessExit `
                     ([int]$cap.server_pid) ([long]$cap.server_start_time) 20
-                $cleanupSafe = $daemonExited
+                $processCleanupSafe = $daemonExited
             }
         } catch {
             $result.cleanupError = $_.Exception.Message
         }
     }
-    $result.isolation.cleanupSafe = $cleanupSafe
+    $result.isolation.rootOwned = $rootOwned
+    $result.isolation.processCleanupSafe = $processCleanupSafe
+    $result.isolation.cleanupSafe = $rootOwned -and $processCleanupSafe
     [IO.File]::WriteAllText(
         $reportPath,
         ($result | ConvertTo-Json -Depth 12),
