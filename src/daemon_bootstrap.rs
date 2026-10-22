@@ -1793,9 +1793,11 @@ mod windows_authority {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use windows_sys::Win32::Foundation::{LocalFree, PSID};
-    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    };
     use windows_sys::Win32::Security::{
-        AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+        AclSizeInformation, GetAce, GetAclInformation, GetSecurityDescriptorControl,
         ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
         OWNER_SECURITY_INFORMATION, SE_DACL_PRESENT, SE_DACL_PROTECTED,
     };
@@ -1829,34 +1831,16 @@ mod windows_authority {
     /// `LocalSystem`, or local `BUILTIN\Administrators`.
     pub(super) fn check_owner_and_dacl(path: &Path) -> Result<(), DaemonBootstrapFailure> {
         let owner_sids = self_owner_sids()?;
-        let system_sid = SidBuf::from_str("S-1-5-18")?;
-        let admins_sid = SidBuf::from_str("S-1-5-32-544")?;
-        let trusted_installer_sid =
-            SidBuf::from_str("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")?;
-        let creator_owner_sid = SidBuf::from_str("S-1-3-0")?;
         let trusted = TrustedSidRefs {
             owners: &owner_sids,
-            system: system_sid.as_psid(),
-            admins: admins_sid.as_psid(),
-            trusted_installer: trusted_installer_sid.as_psid(),
-            creator_owner: creator_owner_sid.as_psid(),
         };
         check_component(path, &trusted, true, AUTHORITY_MUTATION_RIGHTS)
     }
 
     pub(super) fn check_ancestor_authority(path: &Path) -> Result<(), DaemonBootstrapFailure> {
         let owner_sids = self_owner_sids()?;
-        let system_sid = SidBuf::from_str("S-1-5-18")?;
-        let admins_sid = SidBuf::from_str("S-1-5-32-544")?;
-        let trusted_installer_sid =
-            SidBuf::from_str("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")?;
-        let creator_owner_sid = SidBuf::from_str("S-1-3-0")?;
         let trusted = TrustedSidRefs {
             owners: &owner_sids,
-            system: system_sid.as_psid(),
-            admins: admins_sid.as_psid(),
-            trusted_installer: trusted_installer_sid.as_psid(),
-            creator_owner: creator_owner_sid.as_psid(),
         };
         check_component(
             path,
@@ -1867,11 +1851,7 @@ mod windows_authority {
     }
 
     struct TrustedSidRefs<'a> {
-        owners: &'a [SidBuf],
-        system: PSID,
-        admins: PSID,
-        trusted_installer: PSID,
-        creator_owner: PSID,
+        owners: &'a [String],
     }
 
     fn check_component(
@@ -1905,15 +1885,12 @@ mod windows_authority {
         }
         let _guard = LocalAllocGuard(sd);
 
-        let owner_is_self = !owner.is_null()
-            && trusted
-                .owners
-                .iter()
-                .any(|sid| unsafe { EqualSid(owner, sid.as_psid()) } != 0);
-        let owner_is_system = !owner.is_null() && unsafe { EqualSid(owner, trusted.system) } != 0;
-        let owner_is_admins = !owner.is_null() && unsafe { EqualSid(owner, trusted.admins) } != 0;
+        let owner = sid_to_string(owner)?;
+        let owner_is_self = trusted.owners.contains(&owner);
+        let owner_is_system = owner == "S-1-5-18";
+        let owner_is_admins = owner == "S-1-5-32-544";
         let owner_is_trusted_installer =
-            !owner.is_null() && unsafe { EqualSid(owner, trusted.trusted_installer) } != 0;
+            owner == "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
         if !owner_is_self
             && (require_self_owner
                 || (!owner_is_system && !owner_is_admins && !owner_is_trusted_installer))
@@ -1966,16 +1943,15 @@ mod windows_authority {
                 ACCESS_ALLOWED_ACE_TYPE => {
                     let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
                     let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
-                    let allowed = unsafe {
-                        trusted
-                            .owners
-                            .iter()
-                            .any(|owner| EqualSid(sid, owner.as_psid()) != 0)
-                            || EqualSid(sid, trusted.system) != 0
-                            || EqualSid(sid, trusted.admins) != 0
-                            || EqualSid(sid, trusted.trusted_installer) != 0
-                            || EqualSid(sid, trusted.creator_owner) != 0
-                    };
+                    let sid = sid_to_string(sid)?;
+                    let allowed = trusted.owners.contains(&sid)
+                        || matches!(
+                            sid.as_str(),
+                            "S-1-5-18"
+                                | "S-1-5-32-544"
+                                | "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+                                | "S-1-3-0"
+                        );
                     if !allowed && ace.Mask & foreign_mutation_rights != 0 {
                         return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
                     }
@@ -1996,12 +1972,30 @@ mod windows_authority {
         Ok(())
     }
 
-    fn self_owner_sids() -> Result<Vec<SidBuf>, DaemonBootstrapFailure> {
+    fn self_owner_sids() -> Result<Vec<String>, DaemonBootstrapFailure> {
         crate::platform_fs::windows_self_owner_sid_strings()
-            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)?
-            .into_iter()
-            .map(|sid| SidBuf::from_str(&sid))
-            .collect()
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)
+    }
+
+    fn sid_to_string(sid: PSID) -> Result<String, DaemonBootstrapFailure> {
+        if sid.is_null() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let mut wide: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe { ConvertSidToStringSidW(sid, &mut wide) };
+        if ok == 0 || wide.is_null() {
+            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+        }
+        let mut len = 0usize;
+        while unsafe { *wide.add(len) } != 0 {
+            len += 1;
+        }
+        let value = String::from_utf16(unsafe { std::slice::from_raw_parts(wide, len) })
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority);
+        unsafe {
+            LocalFree(wide.cast());
+        }
+        value
     }
 
     struct LocalAllocGuard(*mut c_void);
@@ -2021,34 +2015,6 @@ mod windows_authority {
         assert!(!self_owner_sids()
             .expect("bootstrap authority token owner set")
             .is_empty());
-    }
-
-    /// Owned SID buffer allocated by `ConvertStringSidToSidW`.
-    struct SidBuf(PSID);
-    impl SidBuf {
-        fn from_str(s: &str) -> Result<Self, DaemonBootstrapFailure> {
-            use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
-            let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-            let mut sid: PSID = std::ptr::null_mut();
-            let ok = unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut sid) };
-            if ok == 0 || sid.is_null() {
-                return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
-            }
-            Ok(Self(sid))
-        }
-
-        fn as_psid(&self) -> PSID {
-            self.0
-        }
-    }
-    impl Drop for SidBuf {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
     }
 }
 
