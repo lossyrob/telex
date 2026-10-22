@@ -3,10 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at residual successor head
-  `689883e2`, which is intended to address the CI failures at `f02f0ee9`; the
-  retained delta review approved it, its required CI and Local source review are
-  under way, and proof-isolation incident I161-1 is unresolved
+- **Status:** in progress; PR #161 is open at head `745eaf28`, which is intended
+  to close the remaining part of Local finding L161-6; Local's source review and
+  the retained delta review approved it, its required CI is under way, and
+  proof-isolation incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -710,6 +710,102 @@ and states that CI must confirm it. Required CI run 39762898070 started at the
 exact head, and Local's source review is assigned; neither has a result. The
 head has no gate credit yet. Evidence from `f02f0ee9`, including its source
 approvals and failed CI, is historical and does not carry forward. Incident
+I161-1 and the withholding of E161-1 are unchanged.
+
+Local's source review of `689883e2` against baseline `f02f0ee9` required changes
+(report SHA-256
+`9cfd8d18b95b7d7e120daecb5f344da36ddf8d03a7b37e00cf67193e565d9232`). Finding
+L161-6 (P2) concerns the new auxiliary PostgreSQL repair task. The task waits
+for the release-client lock before its five-second timeout starts, and it waits
+for the publication locks after that timeout ends. Lease release holds the same
+release-client lock while its query runs. A PostgreSQL row-lock wait or stalled
+I/O can therefore keep the repair task, its shared state, and its single-flight
+flag alive indefinitely, which prevents any later repair from being scheduled.
+Healthy foreground calls still do not wait for the repair. Local established
+this wait path from source and did not reproduce it. The requested change is one
+absolute deadline over the whole repair attempt, or nonblocking inspection and
+publication that safely defers when busy. The single-flight flag must be
+released on completion, timeout, and cancellation, and any unpublished
+replacement connection must be cleaned up. Foreground calls must stay
+nonblocking, and drain must stay free of credential discovery. Local found no
+other source issue: it accepted the macOS cfg change in source and raised no
+further finding on the dedicated release client, credential handling, driver
+cancellation, or migration locking. Local reports the earlier D161 and L161-1
+through L161-5 source repairs conserved and the public client source unchanged.
+It also states that no runtime evidence shows that client-lock contention caused
+the earlier Live Postgres failure or that this head fixes it. The retained delta
+review's approval is historical and does not override Local's finding. Local's
+review was read-only and did not run the writer's compile-only validation.
+Required CI run 39762898070 at `689883e2` later completed with failure at
+2026-10-22T10:35:37Z. Two of its 16 jobs failed: the required Live Postgres
+parity job (119771171825) and the Windows build-and-test job (119771171806). The
+run is superseded by head movement and is diagnostic only. `689883e2` received
+no source, CI, readiness, consumer, design, merge, or closure credit, and the
+move to `0490f5e5` invalidates all `689883e2` current-head evidence.
+
+Successor head `0490f5e5936484868d03d19f70daf7b9e2ef4df3` (tree
+`61cdd28b44d71df1d02333f5f6eefbc09ffe207c`) is one commit directly on `689883e2`
+and became the PR #161 head. The product merge base remained `e4f585a7`. It
+changes only `src/backend/postgres.rs`, +97/-15, and was intended to address
+L161-6. One five-second budget covers the whole auxiliary repair attempt, a drop
+guard was intended to release the single-flight flag on every exit, and an
+unpublished replacement is dropped on timeout. Foreground calls stay
+nonblocking, and drain stays free of credential discovery. The head added
+deterministic unit tests, compiled but not run under the I161-1 freeze. The
+retained delta review approved it (`REVIEW-PR161-0490F5E-DELTA.md`, 3,893 bytes,
+SHA-256 `d9b1a1c3eddebb9989690e3c55bd20ddeb562eafe9e1d02531f8148303e50ad4`). Its
+reviewers, agents `2887b2b4` and `0d21e13e`, are recorded as gpt-6-astra with
+high reasoning and long context, and its validation was compile-only. Local's
+source review then required changes again (report SHA-256
+`1687ded371daf22ad744716264458c238983b02f26beeab76712054af76eea26`). It accepted
+the whole-attempt timeout, cleanup once the repair task has started, and the new
+tests for those paths. It found the foreground, credential, fencing, and
+migration code otherwise unchanged. A narrow part of L161-6 remained: the
+single-flight flag was set when the repair was scheduled, but the guard that
+clears it was created only when the spawned task first ran. If the queued task
+was dropped before then, for example during runtime shutdown, the flag stayed
+set and no later repair could be scheduled. Local required the guard to be
+created synchronously when the flag is acquired and moved into the task, plus a
+test that drops the unpolled task and confirms that the flag clears and can be
+acquired again. This finding is static and was not reproduced. Local reported
+D161, L161-1 through L161-5, the SID authority, the public API, and migration
+locking conserved. The retained delta review's approval does not override
+Local's finding. Local's review was read-only and did not run the writer's
+validation. Required CI run 39763861998 at `0490f5e5` was superseded by head
+movement while still in progress, after its required Live Postgres parity job
+had already failed. It is diagnostic only, and no terminal result is recorded
+here. `0490f5e5` received no source, CI, readiness, consumer, design, merge, or
+closure credit, and the move to `745eaf28` invalidates all `0490f5e5`
+current-head evidence.
+
+Successor head `745eaf28bb9d0abe70a79f8023dc7a98fa66d5da` (tree
+`6e61c22b1116b68965554da1bdafe5c36372b016`) is one commit directly on `0490f5e5`
+and is now the PR #161 head. The product merge base remains `e4f585a7`. It
+changes only `src/backend/postgres.rs`, +42/-13, and is intended to close the
+remaining part of L161-6. The repair guard is now created synchronously as soon
+as the single-flight flag is acquired and is moved into the scheduled task, so
+dropping the task before it first runs clears the flag. A new unit test drops
+the unpolled repair future and checks that the flag clears and can be acquired
+again. The retained delta review approved it (`REVIEW-PR161-745EAF2-DELTA.md`,
+3,118 bytes, SHA-256
+`cb21d30ac179c8fa6783bb94e7f577e89b2690444cdd1e6f35f1dcf3cc27f5e7`). Its
+reviewers, agents `9e3f3795` and `1cea26a6`, are recorded as gpt-6-astra with
+high reasoning and long context, and its validation was compile-only. Local's
+source review approved `745eaf28` against baseline `0490f5e5` with no findings
+(report SHA-256
+`fe9b60d4e03aac6b51967b86a68d329a75e1a5269f6508afbdded6b8ff8f1d8c`). Local
+accepted L161-6 as resolved in source, covering both the whole-attempt deadline
+and guard ownership before the first run. The repair body, connection setup,
+foreground path, reconnect, and backend implementation are otherwise unchanged.
+Local reports D161, L161-1 through L161-5, the SID authority, the public API,
+and transaction-scoped migration locking conserved. Local inspected the new test
+but did not run it; the test covers the repair future directly, and Local
+verified the outer task from source. Local's review was read-only and did not
+run the writer's validation. Local states that the approval does not show that
+the Live Postgres timeout is fixed or that CI will pass. This is a source
+approval only. It gives no CI, runtime, consumer, design, merge, or closure
+credit. Required CI run 39764752556 is in progress at the exact head; its result
+is not recorded here. Evidence from `0490f5e5` does not carry forward. Incident
 I161-1 and the withholding of E161-1 are unchanged.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
