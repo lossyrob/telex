@@ -512,9 +512,25 @@ the outer task from source. Local's review was read-only and did not run the
 writer's validation. Local states that the approval does not show that the Live
 Postgres timeout is fixed or that CI will pass. This is a source approval only.
 It gives no CI, runtime, consumer, design, merge, or closure credit. Required CI
-run 39764752556 is in progress at the exact head; its result is not recorded
-here. Evidence from `0490f5e5` does not carry forward. Incident I161-1 and the
-withholding of E161-1 are unchanged.
+run 39764752556 then ran at the exact head; its result follows. Evidence from
+`0490f5e5` does not carry forward. Incident I161-1 and the withholding of E161-1
+are unchanged.
+
+Required CI run 39764752556 at `745eaf28` completed with failure at
+2026-10-22T10:57:59Z. Two of its 16 jobs failed, and the other 14 succeeded. In
+the required Live Postgres parity job (119777319781), the PostgreSQL leg of the
+Application Client conformance battery failed: the daemon for `appconf-postgres`
+did not stop within the test deadline while the strict-recovery check restarted
+it, the same symptom seen at `f02f0ee9`. In the required Windows
+InstalledCurrent Postgres process-proof job (119777319882), the concurrent
+first-use test failed because a concurrent connect returned Unavailable after a
+backend operation failed (diagnostic `442fe890f96b80f8`). The log shows these
+symptoms but not their cause. Because required jobs failed, `745eaf28` receives
+no CI or readiness credit, and the Live Postgres timeout is not shown to be
+fixed. The Local and retained delta-review approvals of `745eaf28` remain
+source-only. A further successor is assigned; any new head will invalidate
+`745eaf28` current-head evidence and will need its own source review and passing
+required CI. Incident I161-1 and the withholding of E161-1 are unchanged.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
