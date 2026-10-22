@@ -3,8 +3,9 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `9cc23e67` with
-  implementation review passed and required CI failed, needing repair
+- **Status:** in progress; PR #161 is open at head `8bd3c330` with source
+  review approved, required CI not yet recorded, and proof-isolation incident
+  I161-1 unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -437,13 +438,41 @@ delivery PR. Scope, invalidation conditions, and the accepted trusted
 
 On 2026-10-22 (UTC) the writer published the sole delivery PR, PR #161, at
 exact head `9cc23e67a99440ee51e7b60fcf8d68f6b84edef3` (tree
-`b678e0cc4eca2b598e5a7cae0fe02488523532b4`). Implementation review passed at
-that head: two retained independent reviews of the full diff from merge base
-`e4f585a7` report no actionable findings. Required CI run 39716184110 then
-completed with failure at that head, so CI repair and an exact-head rerun,
-consumer attestations, design inspection, and merge remain outstanding. Scope,
-invalidation conditions, and the accepted trusted `InstalledCurrent` policy
-are unchanged.
+`b678e0cc4eca2b598e5a7cae0fe02488523532b4`). Two retained independent reviews
+of the full diff from merge base `e4f585a7` reported no actionable findings at
+that head. Local's trust and spawn review of the same head required changes
+(report SHA-256
+`3ef421c8bac6028bec601204b23e1c0660da3bfaa91264e5aacdbdcfc72b6ab5`), and
+required CI run 39716184110 completed with failure there.
+
+Repairs moved PR #161 through `d08e764c`, `5efe5bf9`, and `20fe13b4` to exact
+head `8bd3c330393409a79e88338d24e1174b1c7407b6` (tree
+`4d06daec9200db8de5196d85d5eb47a7d8f1a96a`). Local findings L161-1 through
+L161-5 covered probe pipe draining under the selector lock, stale capability
+evidence, Linux process-group signaling after reap, deliberate-detach
+precedence, and a cancellation-unsafe PostgreSQL migration lock. Local's
+bounded review approved `8bd3c330` with no findings (report SHA-256
+`1e535b95db8a77856d1a129374d4092fbde0633264ca8b342a225462a0f61b0f`), and the
+retained `gpt-6-astra` review of `5efe5bf9..8bd3c330` approved with no
+actionable findings (artifact SHA-256
+`e290edffee2cf0d5d17200944c0b7dc6ac8ced24e613e6aab3ec22bfdda8fe81`). Earlier
+retained approvals of `5efe5bf9` and `20fe13b4` were superseded by later
+Local findings. These approvals cover source only; Local ran no tests. CI runs
+39723759906 at `d08e764c` and 39726078689 at `5efe5bf9` failed and are
+diagnostic. CI run 39730569101 was started at `8bd3c330`; its result is not
+recorded here.
+
+The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
+staging of the `d08e764c` candidate and public attachment succeeded, but the
+proof script rewrote the access control list of the operator's real
+`AppData\Local` directory in several runs, with no prior descriptor or backup
+(incident I161-1, evidence SHA-256
+`0d50f4885a75f369ef218d18e907e0a01baeeb84171069af91ee34f1cec26e24`).
+Isolation certification is withheld pending an operator-impact disposition.
+No restoration or cleanup is authorized, and local runtime and proof replay
+are frozen. Consumer attestations, design inspection, and merge remain
+outstanding. Scope, invalidation conditions, and the accepted trusted
+`InstalledCurrent` policy are unchanged.
 
 ## Invalidation conditions
 

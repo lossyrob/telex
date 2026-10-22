@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-10-22T03:28:18.384Z",
+  "updatedAt": "2026-10-22T05:58:10.111Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -148,7 +148,7 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "In progress under issue #152 as the campaign main effort. The existing writer resumed on 2026-10-08 on feature/client-conformance at preserved head 5fdd95c2c32cde08a6c936171b208bbf14f6677c and integrated current main. PR #161 is open at exact head 9cc23e67a99440ee51e7b60fcf8d68f6b84edef3 (tree b678e0cc), and implementation review passed at that head on 2026-10-22. Required CI run 39716184110 completed with failure at that head, so CI repair, an exact-head rerun, consumer attestations, design inspection, and merge remain outstanding. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
+      "summary": "In progress under issue #152 as the campaign main effort. The existing writer resumed on 2026-10-08 on feature/client-conformance at preserved head 5fdd95c2c32cde08a6c936171b208bbf14f6677c and integrated current main. PR #161 was published on 2026-10-22 at 9cc23e67 and repaired to exact head 8bd3c330393409a79e88338d24e1174b1c7407b6 (tree 4d06daec). After Local findings L161-1 through L161-5, Local's source review approved that head with no findings and the retained gpt-6-astra delta review approved it. Earlier CI runs failed and are diagnostic; required CI at 8bd3c330 is not yet recorded. The released-v0.2.1 upgrade proof is not accepted: incident I161-1 rewrote the ACL of the operator's real LocalAppData directory without a backup, and isolation certification awaits an operator-impact disposition. Consumer attestations, design inspection, and merge remain outstanding. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
       "status": "in-progress",
       "attention": "focus",
       "repoIds": [

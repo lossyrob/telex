@@ -194,16 +194,41 @@ On 2026-10-22 (UTC) the issue #152 writer published PR #161 from
 `9cc23e67a99440ee51e7b60fcf8d68f6b84edef3` (tree
 `b678e0cc4eca2b598e5a7cae0fe02488523532b4`), based on main `2c2b9fb5`. The PR
 is open, non-draft, and mergeable, and its body has no closing reference.
-Implementation review passed at that exact head. Two retained independent
-reviews, each run with `gpt-6-astra`, high reasoning, and long context, cover
-the full diff from merge base `e4f585a7` and report no actionable findings; the
-review synthesis records all 14 earlier findings resolved. Main moved from
-`e4f585a7` to `2c2b9fb5` only in `.streamliner/**`. Required CI run
-39716184110 then completed with failure at that head: 11 jobs passed and 5
-failed, including both Build and test jobs and Live Postgres parity. CI repair
-and an exact-head rerun, Local's separate trust and spawn review, consumer
-attestations, design inspection, and merge remain outstanding. The node stays
-in progress and issue #152 stays open.
+Two retained independent reviews, each run with `gpt-6-astra`, high
+reasoning, and long context, covered the full diff from merge base `e4f585a7`
+at that head and reported no actionable findings; the review synthesis records
+all 14 earlier findings resolved. Main moved from `e4f585a7` to `2c2b9fb5`
+only in `.streamliner/**`. Local's separate trust and spawn review of the same
+head then required changes, and required CI run 39716184110 completed with
+failure there: 11 jobs passed and 5 failed, including both Build and test jobs
+and Live Postgres parity.
+
+The same writer repaired PR #161 through heads `d08e764c`, `5efe5bf9`,
+`20fe13b4`, and `8bd3c330`. Local's bounded reviews raised five source
+findings: a probe deadline that did not bound pipe draining while the selector
+lock was held (L161-1), stale capability evidence treated as a foreign daemon
+(L161-2), a Linux process-group signal that could follow the leader's reap
+(L161-3), a restart classification that bypassed deliberate detach (L161-4),
+and a PostgreSQL migration lock that was not cancellation-safe (L161-5).
+Earlier retained approvals of `5efe5bf9` and `20fe13b4` were superseded by
+later findings. At exact head `8bd3c330393409a79e88338d24e1174b1c7407b6` (tree
+`4d06daec9200db8de5196d85d5eb47a7d8f1a96a`), Local's source review approved
+with no findings, and the retained `gpt-6-astra` review of
+`5efe5bf9..8bd3c330` approved with no actionable findings. These are source
+approvals only. CI runs at `d08e764c` and `5efe5bf9` failed and are
+diagnostic. CI run 39730569101 was started at `8bd3c330`; its result is not
+recorded here.
+
+The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
+v0.2.1 executable staged the candidate into a fresh fixture root and public
+attachment succeeded. The proof script, however, also rewrote the access
+control list of the operator's real `AppData\Local` directory in several runs,
+and no prior descriptor or backup exists. That incident, I161-1, withholds
+isolation certification and awaits an operator-impact disposition. No
+restoration or cleanup is authorized, and local runtime and proof replay are
+frozen, so runtime validation relies on CI. Consumer attestations, design
+inspection, and merge remain outstanding. The node stays in progress, and
+issue #152 stays open.
 
 ## Decisions
 
