@@ -701,3 +701,108 @@ fn cadence_coalesces_missed_ticks_and_retention_has_positive_warning_thresholds(
     assert!(retention.rows > 0 && retention.bytes > 0);
     assert!(retention.warning_rows > 0 && retention.warning_bytes > 0);
 }
+
+#[test]
+fn pause_then_resume_cannot_accept_a_cancelled_attempt_even_at_the_same_wall_clock() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    let (_, attempt) = registry.begin_attempt("watch", "runtime", 1000).unwrap();
+    registry.change("watch", Change::Pause, 1000).unwrap();
+    registry.change("watch", Change::Resume, 1000).unwrap();
+    assert!(!registry.attempt_is_current(&attempt).unwrap());
+    assert!(registry
+        .finish_direct(&attempt.id, Value::Null, false, 1000)
+        .is_err());
+    assert!(registry.begin_attempt("watch", "runtime", 1000).is_err());
+}
+
+#[test]
+fn clock_adjustment_preserves_attempt_time_and_resume_preserves_last_success() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 3000)
+        .unwrap();
+    let (_, attempt) = registry.begin_attempt("watch", "runtime", 2000).unwrap();
+    registry
+        .finish_direct(&attempt.id, Value::Null, false, 1000)
+        .unwrap();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert_eq!(watch.last_success_at, Some(timestamp(2000)));
+    assert_eq!(watch.activated_at, timestamp(3000));
+    registry.change("watch", Change::Pause, 1000).unwrap();
+    registry.change("watch", Change::Resume, 500).unwrap();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert_eq!(watch.activated_at, timestamp(500));
+    assert_eq!(watch.last_success_at, Some(timestamp(2000)));
+}
+
+#[test]
+fn removed_transient_rejection_is_retained_as_rejection_not_absence() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let op = fixture.staged(&mut registry, "watch", false);
+    registry.change("watch", Change::Remove, 3000).unwrap();
+    registry
+        .evidence(&op.operation_id, rejected(false), 4000)
+        .unwrap();
+    assert_eq!(
+        registry
+            .operation(&op.operation_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        OperationStatus::RemovedRejected
+    );
+    assert_eq!(
+        registry
+            .receipt_evidence(&op.operation_id, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn recovery_deadline_expires_even_when_sender_is_unavailable() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let op = fixture.staged(&mut registry, "watch", false);
+    assert!(!registry.expire_recovery(&op.operation_id, 11000).unwrap());
+    assert_eq!(
+        registry.get("watch").unwrap().unwrap().blocked_reason,
+        Some(BlockedReason::SendRetryExhausted)
+    );
+    assert_eq!(
+        registry
+            .operation(&op.operation_id)
+            .unwrap()
+            .unwrap()
+            .send_budget
+            .used,
+        0
+    );
+}
+
+#[test]
+fn a_future_registry_version_is_refused_before_schema_mutation() {
+    let fixture = Fixture::new();
+    let connection = Connection::open(fixture.path()).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE watcher_v2_meta(singleton INTEGER PRIMARY KEY, version INTEGER);
+        INSERT INTO watcher_v2_meta VALUES(1,3);",
+        )
+        .unwrap();
+    drop(connection);
+    let before = std::fs::read(fixture.path()).unwrap();
+    assert!(Registry::open(&fixture.path(), 1, 1)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("unsupported-registry-version"));
+    assert_eq!(before, std::fs::read(fixture.path()).unwrap());
+}

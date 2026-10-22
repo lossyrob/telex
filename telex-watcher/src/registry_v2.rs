@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
+use telex::application_client::OperationReconciliation;
 use uuid::Uuid;
 
 pub(crate) const MAX_GRANT: u32 = 100;
@@ -248,6 +249,10 @@ impl Registry {
             .map(|id| get_operation(&tx, id))
             .transpose()?
             .flatten();
+        anyhow::ensure!(
+            watch.pending_operation_id.is_none() || pending.is_some(),
+            "pending operation record missing"
+        );
         let action = match &change {
             Change::Pause => "pause",
             Change::Resume => "resume",
@@ -751,7 +756,16 @@ impl Registry {
             Resolution::Retry => {
                 operation.status = OperationStatus::RetryPermitted;
                 if removed {
-                    operation.status = OperationStatus::RemovedNotRecorded;
+                    operation.status = if matches!(
+                        operation.last_evidence.as_ref(),
+                        Some(SendEvidence::Reconciliation(Ok(
+                            OperationReconciliation::NotRecorded(_)
+                        )))
+                    ) {
+                        OperationStatus::RemovedNotRecorded
+                    } else {
+                        OperationStatus::RemovedRejected
+                    };
                     watch.pending_operation_id = None;
                 } else if blocked
                     || operation.query_only

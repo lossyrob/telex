@@ -187,6 +187,9 @@ impl Runtime {
                 .context("runtime record missing")?;
             health.status = RuntimeStatus::Stopped;
             health.production_ready = false;
+            if result.is_err() {
+                health.diagnostics.push(RuntimeDiagnostic::RegistryFailure);
+            }
             health.heartbeat_at = timestamp(now_ms());
             health.detach = detach;
             registry.save_runtime(&health)?;
