@@ -954,7 +954,7 @@ async fn installed_current_existing_peer_handshake_is_bounded() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn installed_current_prestarted_peer_without_admission_evidence_is_refused_before_hello() {
     let _env = ENV_LOCK.lock().await;
-    let iso = Isolation::new("ic-missing-cap-evidence");
+    let iso = Isolation::new("ic-no-cap");
     let _restore = iso.apply_env();
     let db = iso.root.join("missing-cap-evidence.db");
     let hello_marker = iso.root.join("unexpected-hello");
