@@ -510,7 +510,7 @@ fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) ->
             stderr_path.display()
         )
     });
-    let (code, timed_out) = wait_status_with_timeout(child, timeout);
+    let (code, timed_out) = wait_status_with_timeout_raw(child, timeout);
     let stdout = read_capture(&mut stdout_file, &stdout_path);
     let stderr = read_capture(&mut stderr_file, &stderr_path);
     #[cfg(windows)]
@@ -652,7 +652,16 @@ fn wait_until_daemon_lists_waiter(env: &ProcessEnv, waiter_pid: u32, timeout: Du
     panic!("timed out waiting for daemon to list waiter pid {waiter_pid}");
 }
 
-fn wait_status_with_timeout(
+fn wait_status_with_timeout(child: std::process::Child, timeout: Duration) -> (Option<i32>, bool) {
+    let outcome = wait_status_with_timeout_raw(child, timeout);
+    #[cfg(windows)]
+    if let Some(exception) = windows_native_exception(outcome.0) {
+        panic!("direct child exited through native Windows exception 0x{exception:08x}");
+    }
+    outcome
+}
+
+fn wait_status_with_timeout_raw(
     mut child: std::process::Child,
     timeout: Duration,
 ) -> (Option<i32>, bool) {

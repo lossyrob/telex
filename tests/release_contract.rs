@@ -246,6 +246,7 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
             && ci.contains("CARGO_PROFILE_DEV_DEBUG")
             && ci.contains("CARGO_PROFILE_TEST_DEBUG")
             && ci.contains("matching telex.exe and telex.pdb")
+            && ci.contains("Prebuild workspace test symbols")
             && ci.contains("Fail on collected Windows crash dumps")
             && ci.contains("capture_windows_crash_evidence.ps1")
             && ci.contains("telex-crash-symbols")

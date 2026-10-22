@@ -73,6 +73,10 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
+      - name: Prebuild workspace test symbols
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --no-run --verbose
+
       - name: Configure Windows crash dumps
         if: runner.os == 'Windows'
         shell: pwsh
