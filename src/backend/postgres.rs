@@ -42,14 +42,13 @@ impl Drop for ReleaseRepairGate {
 }
 
 async fn run_bounded_release_repair<F, T>(
-    repairing: Arc<AtomicBool>,
+    _gate: ReleaseRepairGate,
     budget: Duration,
     repair: F,
 ) -> Option<T>
 where
     F: std::future::Future<Output = T>,
 {
-    let _gate = ReleaseRepairGate(repairing);
     tokio::time::timeout(budget, repair).await.ok()
 }
 
@@ -1065,7 +1064,7 @@ impl PgBackend {
             return;
         }
         let release = self.release.clone();
-        let repairing = release.repairing.clone();
+        let gate = ReleaseRepairGate(release.repairing.clone());
         tokio::spawn(async move {
             let repair = async {
                 {
@@ -1091,7 +1090,7 @@ impl PgBackend {
                 }
                 Ok(())
             };
-            let _ = run_bounded_release_repair(repairing, Duration::from_secs(5), repair).await;
+            let _ = run_bounded_release_repair(gate, Duration::from_secs(5), repair).await;
         });
     }
 
@@ -3526,7 +3525,9 @@ impl Backend for PgBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_wait_error, run_bounded_release_repair, sanitize_ident};
+    use super::{
+        classify_wait_error, run_bounded_release_repair, sanitize_ident, ReleaseRepairGate,
+    };
     use crate::backend::is_retryable_backend_error;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -3548,11 +3549,14 @@ mod tests {
         let held = mutex.lock().await;
         let waiting = mutex.clone();
 
-        let result =
-            run_bounded_release_repair(repairing.clone(), Duration::from_millis(10), async move {
+        let result = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_millis(10),
+            async move {
                 let _guard = waiting.lock().await;
-            })
-            .await;
+            },
+        )
+        .await;
 
         assert!(
             result.is_none(),
@@ -3579,17 +3583,42 @@ mod tests {
         let delayed = publication.clone();
         let evidence = unpublished_dropped.clone();
 
-        let result =
-            run_bounded_release_repair(repairing.clone(), Duration::from_millis(10), async move {
+        let result = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_millis(10),
+            async move {
                 let _unpublished = DropEvidence(evidence);
                 let _publication = delayed.lock().await;
-            })
-            .await;
+            },
+        )
+        .await;
 
         assert!(result.is_none());
         assert!(unpublished_dropped.load(Ordering::Acquire));
         assert!(!repairing.load(Ordering::Acquire));
         drop(held);
+    }
+
+    #[test]
+    fn dropping_unpolled_release_repair_clears_gate() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let repair = run_bounded_release_repair(
+            ReleaseRepairGate(repairing.clone()),
+            Duration::from_secs(5),
+            std::future::pending::<()>(),
+        );
+
+        drop(repair);
+
+        assert!(
+            !repairing.load(Ordering::Acquire),
+            "an unpolled repair future must still release single-flight ownership"
+        );
+        assert!(
+            !repairing.swap(true, Ordering::AcqRel),
+            "repair scheduling must recover after dropping an unpolled future"
+        );
+        repairing.store(false, Ordering::Release);
     }
 
     #[test]
