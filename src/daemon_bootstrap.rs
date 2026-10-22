@@ -2860,18 +2860,13 @@ mod tests {
     fn temp_dir(name: &str) -> PathBuf {
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
         #[cfg(windows)]
-        let base = {
-            static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-            BASE.get_or_init(|| {
-                let base = std::env::var_os("LOCALAPPDATA")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join("telex-bootstrap-tests-inheritable-v1");
-                create_inheritable_authority_test_dir(&base);
-                base
-            })
-            .clone()
-        };
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .ancestors()
+            .last()
+            .expect("Windows local path has a volume root")
+            .to_path_buf();
         #[cfg(not(windows))]
         let base = std::env::temp_dir();
         let dir = base.join(format!(

@@ -961,6 +961,10 @@ async fn installed_current_prestarted_peer_without_admission_evidence_is_refused
 
     let mut daemon_command = iso.command_for(&iso.current_binary());
     daemon_command
+        .env_remove(install::INSTALL_ROOT_ENV)
+        .env_remove("TELEX_DAEMON_SELECTION_TOKEN")
+        .env_remove("TELEX_DAEMON_SELECTION_RESULT")
+        .env_remove("TELEX_DAEMON_EXECUTABLE_WITNESS_HANDLE")
         .env("TELEX_TEST_HELLO_ACK_DELAY_MS", "1")
         .env("TELEX_TEST_HELLO_ACK_DELAY_MARKER", &hello_marker)
         .args(["daemon", "serve"])
@@ -1615,7 +1619,8 @@ async fn exact_executable_file_identity_change_is_refused() {
     iso.stop_daemon();
 
     // Replace the target so its platform file identity changes.
-    isolation::remove_file_when_free(&pinned, Duration::from_secs(20));
+    let displaced = pinned.with_extension("original-image");
+    std::fs::rename(&pinned, &displaced).expect("retain the original pinned file identity");
     std::fs::copy(isolation::branch_binary(), &pinned).expect("re-stage the pinned target");
 
     let outcome = client

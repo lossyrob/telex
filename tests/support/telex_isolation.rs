@@ -22,8 +22,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(windows)]
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -73,23 +71,20 @@ fn original_localappdata() -> Option<PathBuf> {
 }
 
 fn harness_base_dir() -> PathBuf {
-    // Keep every harness root under a short, owner-scoped base so Windows
-    // named-pipe/socket path limits and ACL inheritance stay predictable, and
-    // never under the ambient user Telex home.
     if let Some(base) = std::env::var_os("TELEX_TEST_BASE_DIR") {
         return PathBuf::from(base);
     }
     #[cfg(windows)]
     {
-        static BASE: OnceLock<PathBuf> = OnceLock::new();
-        BASE.get_or_init(|| {
-            let base = original_localappdata()
-                .unwrap_or_else(std::env::temp_dir)
-                .join("telex-app-client-tests");
-            create_owner_private_dir(&base);
-            base
-        })
-        .clone()
+        // Put each disposable authority root directly below the local volume.
+        // Hosted profile/temp ancestors can carry foreign mutation ACEs that
+        // the production authority-chain validator correctly rejects.
+        original_localappdata()
+            .unwrap_or_else(std::env::temp_dir)
+            .ancestors()
+            .last()
+            .expect("Windows local path has a volume root")
+            .to_path_buf()
     }
     #[cfg(not(windows))]
     {
@@ -376,7 +371,11 @@ impl Drop for Isolation {
 
 fn unique_root(label: &str) -> PathBuf {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    harness_base_dir().join(format!("{label}-{}-{}-{id}", std::process::id(), now_ms()))
+    harness_base_dir().join(format!(
+        "telex-app-{label}-{}-{}-{id}",
+        std::process::id(),
+        now_ms()
+    ))
 }
 
 /// Whether a process id still names a live process.
@@ -402,20 +401,6 @@ pub fn process_alive(pid: u32) -> bool {
         let ok = GetExitCodeProcess(handle, &mut code);
         CloseHandle(handle);
         ok != 0 && code == STILL_ACTIVE
-    }
-}
-
-/// Remove a file, retrying briefly while a terminating process still holds it.
-pub fn remove_file_when_free(path: &Path, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match std::fs::remove_file(path) {
-            Ok(()) => return,
-            Err(e) if Instant::now() >= deadline => {
-                panic!("removing {}: {e}", path.display())
-            }
-            Err(_) => std::thread::sleep(Duration::from_millis(50)),
-        }
     }
 }
 

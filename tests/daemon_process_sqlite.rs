@@ -253,16 +253,14 @@ fn telex_bin() -> PathBuf {
 
 #[cfg(windows)]
 fn process_test_root(id: usize) -> PathBuf {
-    static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    BASE.get_or_init(|| {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("telex-process-tests");
-        create_owner_private_daemon_fixture_dir(&base);
-        base
-    })
-    .join(format!("tx{}-{}", std::process::id(), id))
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    local
+        .ancestors()
+        .last()
+        .expect("Windows local path has a volume root")
+        .join(format!("telex-process-tx{}-{id}", std::process::id()))
 }
 
 #[cfg(not(windows))]
@@ -288,7 +286,7 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     let sid = current_user_sid_string();
-    let sddl = format!("O:{sid}G:{sid}D:P(A;;GA;;;{sid})");
+    let sddl = format!("O:{sid}G:{sid}D:P(A;OICI;GA;;;{sid})");
     let mut descriptor: *mut c_void = std::ptr::null_mut();
     let sddl_wide = wide_null(OsStr::new(&sddl));
     let ok = unsafe {

@@ -20,14 +20,14 @@
 use std::path::{Path, PathBuf};
 
 use telex::application_client::{
-    AckResult, AddressSpec, ApplicationCapability, ApplicationClient, ApplicationClientConfig,
-    ApplicationClientError, ApplicationDaemonBootstrap, ApplicationHealth,
+    AckResult, AddressLifecycleResult, AddressSpec, ApplicationCapability, ApplicationClient,
+    ApplicationClientConfig, ApplicationClientError, ApplicationDaemonBootstrap, ApplicationHealth,
     ApplicationLifecycleEvidence, ApplicationResponsibility, ApplicationStoreMaintenance,
     CompensationAction, CompoundDispositionRequest, CompoundStep, DeltaPage, EvidenceState,
     ExactDeliveryIdentity, HistoryItem, LifecycleCancellationEvidence, LifecycleOperationKind,
     LogicalStoreId, MultiAddressOutcome, OperationId, OperationReconciliation, PrincipalProvenance,
-    PrincipalVerification, ReceivedDelivery, RecoveryHandle, RecoveryPolicy, ReplyRequest,
-    SendRequest, SendResult, SourceReference, SourceResolution,
+    PrincipalVerification, ReceivedDelivery, RecoveryHandle, RecoveryPolicy, RejectionRetryability,
+    ReplyRequest, SendRequest, SendResult, SourceReference, SourceResolution,
 };
 use telex::model::{
     ApplicationStorageStats, CleanupReport, CompoundStepRecord, CompoundStepState, DeliveryRow,
@@ -80,6 +80,37 @@ impl ProbeConfig {
         )
         .await
         .map_err(|e| format!("connect {responsibility}: {e}"))
+    }
+}
+
+async fn attach_single_with_deadline(
+    client: &ApplicationClient,
+    spec: &AddressSpec,
+    context: &str,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let outcome = client.attach(std::slice::from_ref(spec)).await;
+        if outcome.ready {
+            return Ok(());
+        }
+        let retryable = matches!(
+            outcome.results.get(&spec.address),
+            Some(AddressLifecycleResult::Failed(
+                ApplicationClientError::RejectedBeforeAcceptance {
+                    retryability: RejectionRetryability::Transient,
+                    ..
+                }
+            ))
+        );
+        if !retryable {
+            return Err(format!("{context}: {outcome:?}"));
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("{context} timed out after transient refusal: {outcome:?}"));
+        }
+        tokio::time::sleep(remaining.min(std::time::Duration::from_millis(100))).await;
     }
 }
 
@@ -162,8 +193,7 @@ pub async fn run_attach_probe(config: &ProbeConfig) -> Result<ProbeReport, Strin
         ApplicationCapability::SendOnly,
         "minimal bootstrap attach",
     );
-    let outcome = client.attach(std::slice::from_ref(&address)).await;
-    require(outcome.ready, "minimal attach must be ready")?;
+    attach_single_with_deadline(&client, &address, "minimal attach must be ready").await?;
     report.record("attach=ready");
     Ok(report)
 }
@@ -201,15 +231,13 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
         ApplicationCapability::Bidirectional,
         "watcher target",
     );
-    let attach: MultiAddressOutcome = client.attach(std::slice::from_ref(&watcher)).await;
-    require(attach.ready, "watcher attach must be ready")?;
+    attach_single_with_deadline(&client, &watcher, "watcher attach must be ready").await?;
     report.record(format!("attached={}", watcher.address));
 
     // The target is attended by a separate responsibility, so occupancy at
     // acceptance is a real observation rather than an artifact.
     let target_client = config.connect("fixture-watcher-target").await?;
-    let target_attach = target_client.attach(std::slice::from_ref(&station)).await;
-    require(target_attach.ready, "target attach must be ready")?;
+    attach_single_with_deadline(&target_client, &station, "target attach must be ready").await?;
 
     // Prepare the exact-operation recovery handle *before* the first attempt.
     let request = SendRequest {
@@ -419,8 +447,8 @@ pub async fn run_operator_station_ingest_probe(
         ApplicationCapability::Bidirectional,
         "station restart target",
     );
-    let attached = client.attach(&[sender.clone(), station.clone()]).await;
-    require(attached.ready, "restart fixture attach must be ready")?;
+    attach_single_with_deadline(&client, &sender, "restart sender attach must be ready").await?;
+    attach_single_with_deadline(&client, &station, "restart station attach must be ready").await?;
 
     let sent = client
         .send(SendRequest {
