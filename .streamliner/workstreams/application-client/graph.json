@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-10-22T07:31:38.538Z",
+  "updatedAt": "2026-10-22T07:47:07.246Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -148,7 +148,7 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "In progress under issue #152 as the campaign main effort. The existing writer resumed on 2026-10-08 on feature/client-conformance at preserved head 5fdd95c2c32cde08a6c936171b208bbf14f6677c and integrated current main. PR #161 was published on 2026-10-22 at 9cc23e67 and repaired to exact head 7505568cc57a10300f94a2f1e8ab5c88af5cea3b (tree f532f986). After Local findings L161-1 through L161-5, failed CI at 8bd3c330 and 2b8ade1d, where three Windows jobs rejected install authority as unsafe, and failed CI at ec8b88f7, where the Windows application_client_conformance test process exited with heap corruption, Local's source review approved the new head with no findings and the retained gpt-6-astra delta review approved it. Required CI at 7505568c has started and its result is not recorded, so the head has source approval only. The released-v0.2.1 upgrade proof is not accepted: incident I161-1 rewrote the ACL of the operator's real LocalAppData directory without a backup, and isolation certification awaits an operator-impact disposition. Consumer attestations, design inspection, and merge remain outstanding. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
+      "summary": "In progress under issue #152 as the campaign main effort. The existing writer resumed on 2026-10-08 on feature/client-conformance at preserved head 5fdd95c2c32cde08a6c936171b208bbf14f6677c and integrated current main. PR #161 was published on 2026-10-22 at 9cc23e67 and repaired to exact head 7505568cc57a10300f94a2f1e8ab5c88af5cea3b (tree f532f986). After Local findings L161-1 through L161-5, failed CI at 8bd3c330 and 2b8ade1d, where three Windows jobs rejected install authority as unsafe, and failed CI at ec8b88f7, where the Windows application_client_conformance test process exited with heap corruption, Local's source review approved the new head with no findings and the retained gpt-6-astra delta review approved it. Required CI passed at 7505568c, so that exact head has source approval and passing required CI; consumer attestations have started and none has passed. The released-v0.2.1 upgrade proof is not accepted: incident I161-1 rewrote the ACL of the operator's real LocalAppData directory without a backup, and isolation certification awaits an operator-impact disposition. Consumer attestations, design inspection, and merge remain outstanding. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
       "status": "in-progress",
       "attention": "focus",
       "repoIds": [

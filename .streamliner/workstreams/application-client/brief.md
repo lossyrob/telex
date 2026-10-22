@@ -293,6 +293,15 @@ earlier source resolutions of L161-1 through L161-5 are conserved. These are
 source approvals only. CI run 39740654750 was started at `7505568c`; its result
 is not recorded here.
 
+Required CI run 39740654750 at `7505568c` completed with success at 07:45:05Z.
+All 16 jobs passed, including the required Live Postgres parity and Windows
+`InstalledCurrent` Postgres process proof jobs. The CI gate is met for
+`7505568c` only; any later head needs its own source review and passing required
+CI. Passing CI does not resolve incident I161-1 or certify proof isolation. App
+reports that consumer attestations have started; none is recorded as passed, and
+the formal consumer gate stays planned. Design inspection, campaign
+authorization, and merge remain outstanding.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access
