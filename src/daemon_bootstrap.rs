@@ -2522,10 +2522,18 @@ mod tests {
     fn temp_dir(name: &str) -> PathBuf {
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
         #[cfg(windows)]
-        let base = std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("telex-bootstrap-tests");
+        let base = {
+            static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+            BASE.get_or_init(|| {
+                let base = std::env::var_os("LOCALAPPDATA")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("telex-bootstrap-tests");
+                crate::platform_fs::ensure_owner_private_dir(&base).unwrap();
+                base
+            })
+            .clone()
+        };
         #[cfg(not(windows))]
         let base = std::env::temp_dir();
         let dir = base.join(format!(
@@ -2533,10 +2541,7 @@ mod tests {
             std::process::id()
         ));
         #[cfg(windows)]
-        {
-            crate::platform_fs::ensure_owner_private_dir(&base).unwrap();
-            crate::platform_fs::ensure_owner_private_dir(&dir).unwrap();
-        }
+        crate::platform_fs::ensure_owner_private_dir(&dir).unwrap();
         #[cfg(not(windows))]
         fs::create_dir_all(&dir).unwrap();
         dir

@@ -22,7 +22,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use telex::install::{self, InstallLayout};
@@ -79,9 +79,15 @@ fn harness_base_dir() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        original_localappdata()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("telex-app-client-tests")
+        static BASE: OnceLock<PathBuf> = OnceLock::new();
+        BASE.get_or_init(|| {
+            let base = original_localappdata()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("telex-app-client-tests");
+            create_owner_private_dir(&base);
+            base
+        })
+        .clone()
     }
     #[cfg(not(windows))]
     {
@@ -119,9 +125,6 @@ impl Isolation {
     fn with_root(label: &str, root: PathBuf, install_current: bool) -> Self {
         #[cfg(windows)]
         {
-            if let Some(base) = root.parent() {
-                create_owner_private_dir(base);
-            }
             create_owner_private_dir(&root);
         }
         #[cfg(not(windows))]

@@ -81,9 +81,6 @@ impl ProcessEnv {
         let run_dir = root.join("r");
         #[cfg(windows)]
         {
-            if let Some(base) = root.parent() {
-                create_owner_private_daemon_fixture_dir(base);
-            }
             create_owner_private_daemon_fixture_dir(&root);
             create_owner_private_daemon_fixture_dir(&home);
             create_owner_private_daemon_fixture_dir(&run_dir);
@@ -256,11 +253,16 @@ fn telex_bin() -> PathBuf {
 
 #[cfg(windows)]
 fn process_test_root(id: usize) -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("telex-process-tests")
-        .join(format!("tx{}-{}", std::process::id(), id))
+    static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("telex-process-tests");
+        create_owner_private_daemon_fixture_dir(&base);
+        base
+    })
+    .join(format!("tx{}-{}", std::process::id(), id))
 }
 
 #[cfg(not(windows))]
