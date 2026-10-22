@@ -6,9 +6,10 @@
 - **Status:** in progress; PR #161 is open at head `4cd34938`, which is intended
   to address Operator Station finding OS-PR161-0486BEE-1 at `0486beeb`; Local's
   source review and the retained delta review approved it, its required CI
-  passed, the Watcher and Operator Station pre-merge consumer attestations
-  approved it, design inspections are pending, and proof-isolation incident
-  I161-1 is unresolved
+  passed, the Watcher and Operator Station pre-merge consumer attestations and
+  the Local Daemon design inspection approved it, the Application Client design
+  inspection and its inspector-profile disposition are pending, and
+  proof-isolation incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -1003,11 +1004,41 @@ fixture. Station also found the earlier D161, L161, and PostgreSQL lifecycle
 source unchanged by blob. `4cd34938` therefore has bounded pre-merge consumer
 credit from both product authorities for this exact head only; any head movement
 invalidates it. This is not the formal post-merge consumer-integration gate,
-which remains planned and must attest the exact merged revision. App reports
-that the Local Daemon design inspection at `4cd34938` has started; its result is
-pending. The Application Client design inspector-profile disposition is also
-pending. `4cd34938` has no design, merge, or closure credit. I161-1 remains
-unresolved, and E161-1 remains withheld.
+which remains planned and must attest the exact merged revision. App reported
+that the Local Daemon design inspection at `4cd34938` had started; its result
+follows. The Application Client design inspector-profile disposition was also
+pending. I161-1 remains unresolved, and E161-1 remains withheld.
+
+The Local Daemon design inspection of `4cd34938` returned APPROVED on 2026-10-22
+(correlation `local-daemon-pr161-design-4cd3493-20261022`; artifact
+`pr161-local-design-inspection-4cd3493-20261022.md` in session
+af271672-5d33-418c-bb9c-0f4d4570c7d7, 28,991 bytes, SHA-256
+`3f71c77310f7cb64d5f19ed18c687fdc085c8342b0e570b6d1e7d07f44a47c39`). Its fresh
+read-only inspector covered the whole nine-path range from `7505568c` to
+`4cd34938`, not only the final fixture change, and the steward adjudicated the
+result. The verdict resolves D161-1, D161-2a, D161-2b, D161-3, and
+OS-PR161-0486BEE-1 in source, leaves no new material Local Daemon design
+finding, and accepts the current proof-cleanup and isolation source design
+independently of the historical incident. It preserves I161-1 as an external
+operator-impact and restoration disposition and keeps E161-1 withheld; it grants
+no overall isolation certification and no restoration, replay, cleanup, merge,
+release, or post-merge gate authority. It also preserves the earlier causal
+qualification: source approvals and passing CI do not establish the cause of the
+earlier Windows heap corruption. Provenance: the steward (session
+af271672-5d33-418c-bb9c-0f4d4570c7d7) and a separate fresh inspector (agent
+1792262a-dca4-4b30-8b11-7496e7e06744) each ran as gpt-6-astra with high
+reasoning and the long-context tier; these are distinct records. The verdict
+does not certify the separately required Application Client inspector profile.
+`4cd34938` therefore has Local Daemon design credit for this exact head only;
+any head movement invalidates it. The steward's last provider read after writing
+the verdict returned mergeability unknown, and the verdict carries no
+clean-merge claim forward; a later read for this record showed the PR mergeable
+and clean at the same head, but merge readiness still needs its own fresh
+guards. A fresh Application Client design inspection and the campaign's
+inspector-profile disposition remain pending, so `4cd34938` has no Application
+Client design credit and no merge or closure credit. I161-1 remains unresolved,
+E161-1 remains withheld, and the formal post-merge consumer gate remains
+planned.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
