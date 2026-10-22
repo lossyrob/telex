@@ -167,15 +167,30 @@ an operational five-minute workflow, or any later gate.
 launch through the Streamliner workflow v2 adapter. It runs under issue #162 and
 `.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md`, its
 reviewed and reconciled tracker and task specification. Both Application Client
-dependencies are satisfied. Its merge gate runs in shadow mode, so the operator
-merges. `minimal-example-pack` completed under issue #144 in PR #163. Campaign
-ran the first live merge-gate pilot and cleared exact head
+dependencies are satisfied. For this node only, the operator scoped process-tree
+containment proof to Windows and Linux. macOS remains a required Watcher product
+platform, but #162 must fail closed there before detector launch and must not
+claim macOS support. The connected `watcher-macos-containment` task may
+investigate immediately; implementation lands only after #162 merges. Any
+approach requiring privilege, entitlements, a helper service, a broker, or a VM
+returns to the operator before implementation. This host-scope decision does not
+clear #162's accepted store-binding lifecycle/recovery blocker or premature
+`productionReady` blocker. Both repairs, required CI, implementation review, and
+fresh exact-head design inspection still apply. Its merge gate runs in shadow
+mode, so the operator merges. `minimal-example-pack` completed under issue #144
+in PR #163. Campaign ran the first live merge-gate pilot and cleared exact head
 `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
 `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. Neither launch grants release, tag,
 publish, fleet, CLI, packaging, I161-1, or Operator Station authority. The
 downstream `five-minute-custom-watch-gate` still owns operational proof that an
 agent can create, register, leave running, and diagnose a custom watch in five
 minutes.
+
+`watcher-macos-containment` does not enter the dependency list of the
+Windows-path `five-minute-custom-watch-gate`. It does remain part of the
+product-level `usable-watcher` checkpoint and a dependency of `closure-gate`,
+because fail-closed macOS behavior is safe but does not satisfy the required
+macOS product outcome.
 
 ## Superseded assumptions
 
@@ -203,3 +218,7 @@ not unresolved Watcher core scope.
 
 - Whether an explicit v1 compatibility adapter is worth maintaining instead of
   documented re-registration.
+- Which macOS mechanism can prove abrupt Watcher-runtime-exit containment for
+  detector processes and detached descendants on supported Darwin architectures
+  without new privileged authority; if none can, which operator-reserved
+  privileged architecture, if any, should be selected?

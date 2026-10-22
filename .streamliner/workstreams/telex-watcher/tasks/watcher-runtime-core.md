@@ -31,6 +31,25 @@ This node does not deliver the management CLI, broad detector examples,
 packaging, service installation, provider actions, or later operational
 hardening. Those remain separate accepted nodes or gates.
 
+## Host-scope decision
+
+For this node only, process-tree containment proof is required on Windows and
+Linux. macOS remains a required Watcher product platform, but this node must
+fail closed there before detector launch and must not claim macOS support. The
+connected `watcher-macos-containment` node owns macOS investigation and later
+implementation after this node merges.
+
+Any macOS design requiring privilege, entitlements, a helper service, a broker,
+or a VM returns to the operator before implementation. This narrowing does not
+make the current implementation ready. Store-binding reconciliation must
+preserve terminal lifecycle and independent recovery blockers, and
+corrected-store recovery must require explicit audited action without automatic
+resume. `productionReady` must remain false with a typed diagnostic until the
+current required profile, sender, and logical-store membership is reconciled.
+Both fixes require regression coverage through the real management and
+runtime-actor paths. Required exact-head implementation review, CI, and design
+inspection remain unchanged.
+
 ## Authority
 
 - [`../../../../docs/design/watcher.md`](../../../../docs/design/watcher.md) -
@@ -163,7 +182,8 @@ merge for any item other than issue #144.
   coalescing.
 - One due execution after restart, not replay of every missed interval.
 - Process-tree containment with kill-on-runtime-exit behavior on Windows and
-  Unix.
+  Linux. On macOS and every other unclaimed host, the runtime fails closed
+  before starting a detector process.
 - Startup reconciliation that marks prior runtimes and unfinished attempts
   interrupted without allocating an event, sending, or committing state.
 - No affected watch becomes eligible until prior containment is proven ended.
@@ -324,6 +344,8 @@ Watcher-core contract change.
 - Operator Station UI or issue #153 bootstrap behavior.
 - Streamliner state, workflow records, or orchestration artifacts in the
   product diff.
+- macOS containment implementation and any privilege-, entitlement-,
+  helper-service-, broker-, or VM-based containment architecture.
 
 ## Success criteria
 
@@ -331,8 +353,9 @@ Watcher-core contract change.
   exclusive owner and no silent v1 execution.
 - All canonical schema examples and negative cases pass against the concrete
   v2 models.
-- Scheduling, output bounds, timeout, backoff, jitter, restart, and
-  process-tree containment are deterministic and tested on supported platforms.
+- Scheduling, output bounds, timeout, backoff, jitter, restart, and process-tree
+  containment are deterministic and tested on Windows and Linux; macOS and every
+  other unclaimed host fail closed before detector launch.
 - Event identity, staging, recovery, receipt-gated commit, recurrence, removal,
   and tombstone invariants survive restart and injected local commit failure.
 - The public Application Client is the only Telex seam. SQLite and credentialed
@@ -369,6 +392,15 @@ Watcher-core contract change.
   corresponding delta or full rerun under campaign policy.
 - The field report must distinguish product guarantees, detector policy,
   experimental-v1 learning, and remaining CLI/hardening work.
+- Destructively prove abrupt runtime-death cleanup, including detached
+  descendants, on Windows and Linux. Prove macOS and every other unclaimed host
+  reject execution before creating a detector process.
+- Regress store-binding lifecycle/recovery and readiness membership through the
+  real management and runtime-actor paths. Correcting the exact original store
+  may make a store-only mismatch eligible for explicit audited recovery, but it
+  must not overwrite another blocker or resume automatically. A newly required
+  sender/profile/store set keeps `productionReady = false` until reconciliation
+  completes.
 
 ## Invalidation conditions
 
@@ -385,5 +417,10 @@ Stop and report `decision-needed` if implementation requires:
 - a split without an independently useful boundary and explicit join
   conditions;
 - destructive testing against shared user or campaign coordination state; or
+- implementing or claiming macOS containment in this node instead of
+  fail-closing and handing the platform requirement to
+  `watcher-macos-containment`;
+- weakening or bypassing the accepted store-binding lifecycle/recovery or
+  readiness-membership repairs because of this host-scope decision;
 - launch before conformance merge, both exact-head attestations, and the
   reconciled consumer gate.
