@@ -395,3 +395,74 @@ jobs:
           if ($env:TELEX_PG_DATA) {
             pg_ctl -D $env:TELEX_PG_DATA -m immediate stop
           }
+
+  released-v021-upgrade-windows:
+    name: Released v0.2.1 upgrade proof (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout the exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build the exact SQLite candidate
+        env:
+          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: cargo build --no-default-features --features sqlite
+
+      - name: Prove the released v0.2.1 writer and exact candidate
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          tests/released_v021_upgrade_proof.ps1 `
+            -Candidate (Resolve-Path "target/debug/telex.exe") `
+            -ExpectedHead "${{ github.event.pull_request.head.sha || github.sha }}" `
+            -Report (Join-Path $evidence "report.json")
+
+      - name: Remove the exact disposable proof root
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
+          $reportPath = Join-Path $evidence "report.json"
+          if (-not (Test-Path -LiteralPath $reportPath)) {
+            Write-Warning "No report exists; runner teardown retains cleanup authority."
+            exit 0
+          }
+          $report = Get-Content -Raw $reportPath | ConvertFrom-Json
+          $root = [string]$report.isolation.executionRoot
+          $volumeRoot = [IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+          $expectedParent = $volumeRoot.TrimEnd("\")
+          $actualParent = (Split-Path -Parent $root).TrimEnd("\")
+          $leaf = Split-Path -Leaf $root
+          if (-not $report.isolation.cleanupSafe) {
+            Write-Warning "Proof did not establish safe cleanup; runner teardown owns disposal."
+            exit 0
+          }
+          if ($actualParent -ne $expectedParent -or
+              $leaf -notmatch '^telex-v021-ci-[0-9a-f]{32}$') {
+            throw "refusing cleanup outside the exact disposable proof-root shape"
+          }
+          if (Test-Path -LiteralPath $root) {
+            Remove-Item -LiteralPath $root -Recurse -Force
+          }
+          $report.isolation.cleanupCompleted = $true
+          [IO.File]::WriteAllText(
+            $reportPath,
+            ($report | ConvertTo-Json -Depth 12),
+            [Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Upload released-upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: released-v021-upgrade-proof-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}\telex-v021-proof
+          if-no-files-found: error

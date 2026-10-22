@@ -22,6 +22,22 @@ spec.loader.exec_module(proof)
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_released_v021_ci_proof_never_mutates_its_parent_acl(self):
+        script = Path(__file__).with_name("released_v021_upgrade_proof.ps1").read_text()
+        self.assertIn("Protect-ProofRoot $executionRoot", script)
+        self.assertIn("executionRootParentIsVolumeRoot", script)
+        self.assertIn("parentAclMutation = $false", script)
+        self.assertNotIn("Protect-ProofRoot $volumeRoot", script)
+        self.assertNotIn("Protect-ProofRoot $base", script)
+
+    def test_released_v021_ci_proof_cleanup_is_exact_and_fail_closed(self):
+        workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn("Released v0.2.1 upgrade proof (Windows)", workflow)
+        self.assertIn("if (-not $report.isolation.cleanupSafe)", workflow)
+        self.assertIn(r"^telex-v021-ci-[0-9a-f]{32}$", workflow)
+        self.assertIn("Remove-Item -LiteralPath $root -Recurse -Force", workflow)
+        self.assertNotIn("Remove-Item $root -Recurse", workflow)
+
     def test_native_sharing_retry_is_exact_owned_bounded_and_fail_closed(self):
         for code, operation, result in (
             (32, "CreateFileW", "recover"), (32, "CreateFileW", "expire"),

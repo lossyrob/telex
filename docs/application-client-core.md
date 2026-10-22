@@ -41,6 +41,13 @@ version. Source consumers evaluating the issue #152 conformance revision must
 replace the placeholder with its full reviewed commit ID; an unpinned Git
 dependency follows a moving branch and is outside the compatibility promise.
 
+Required Windows CI downloads the official v0.2.1 release asset and uses that
+released binary to install the exact candidate into a disposable volume-root
+fixture. The proof verifies absent-field manifest compatibility, exact-image
+admission, public Application Client attachment, immutable manifest bytes and
+file identity, and exact daemon shutdown. It never targets the operator's
+installed Telex state or workstation profile directories.
+
 ## Compatibility boundary
 
 The root `telex` crate version governs Rust source compatibility. The supported
