@@ -5,7 +5,8 @@
 - **Type:** implementation
 - **Status:** in progress; PR #161 is open at head `ec8b88f7` with source
   review approved after required CI failed at `2b8ade1d`, required CI at the
-  new head not yet recorded, and proof-isolation incident I161-1 unresolved
+  new head failed in one Windows job, and proof-isolation incident I161-1
+  unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -512,6 +513,18 @@ approved `2b8ade1d..ec8b88f7` with no actionable findings (artifact SHA-256
 merge base `e4f585a7`). The earlier source resolutions of L161-1 through L161-5
 are conserved. These are source approvals only. CI run 39737943130 was started
 at `ec8b88f7`; its result is not recorded here.
+
+Required CI run 39737943130 at `ec8b88f7` completed with failure at 07:19:29Z.
+Its only failed job was Build and test on Windows (job 119687972692). The
+`application_client_conformance` test binary started four tests: one was ignored
+and two reported ok. The process then exited with `STATUS_HEAP_CORRUPTION`
+(0xc0000374) before printing a result summary (log SHA-256
+`2f5719ade578737febd4304ebb0924a2ca28d9e5453b87bf1326ae5ff58502a4`). The other
+15 jobs passed, including the required Live Postgres parity (job 119687972631)
+and Windows `InstalledCurrent` Postgres process proof (job 119687972934) jobs.
+Those two results are diagnostic evidence only: the run failed, and the head has
+no CI or readiness credit. The `ec8b88f7` source approvals stand as source
+review only.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

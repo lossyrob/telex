@@ -259,6 +259,16 @@ Local's bounded review approved `ec8b88f7` with no findings, and two retained
 of L161-1 through L161-5 are conserved. These are source approvals only. CI run
 39737943130 was started at `ec8b88f7`; its result is not recorded here.
 
+Required CI run 39737943130 at `ec8b88f7` completed with failure at 07:19:29Z.
+Its only failed job was Build and test on Windows. The
+`application_client_conformance` test binary started four tests: one was ignored
+and two reported ok. The process then exited with `STATUS_HEAP_CORRUPTION`
+(0xc0000374) before printing a result summary. The other 15 jobs passed,
+including the required Live Postgres parity and Windows `InstalledCurrent`
+Postgres process proof jobs. Those two results are diagnostic evidence only: the
+run failed, and the head has no CI or readiness credit. The `ec8b88f7` source
+approvals stand as source review only.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access
