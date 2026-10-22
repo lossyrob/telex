@@ -27,6 +27,8 @@ class ReleaseProofTests(unittest.TestCase):
         self.assertIn("Protect-ProofRoot $executionRoot", script)
         self.assertIn("executionRootParentIsVolumeRoot", script)
         self.assertIn("parentAclMutation = $false", script)
+        self.assertIn("[int]$DaemonPid", script)
+        self.assertNotIn("[int]$Pid", script)
         self.assertNotIn("Protect-ProofRoot $volumeRoot", script)
         self.assertNotIn("Protect-ProofRoot $base", script)
 

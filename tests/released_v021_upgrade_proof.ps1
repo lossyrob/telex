@@ -183,10 +183,10 @@ function Get-FileIdentity([string]$Path) {
     }
 }
 
-function Wait-ExactProcessExit([int]$Pid, [long]$StartTime, [int]$Seconds) {
+function Wait-ExactProcessExit([int]$DaemonPid, [long]$StartTime, [int]$Seconds) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $process = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+        $process = Get-Process -Id $DaemonPid -ErrorAction SilentlyContinue
         if ($null -eq $process) {
             return $true
         }
