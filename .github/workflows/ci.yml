@@ -73,14 +73,6 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
-      - name: Verify Windows diagnostic symbols
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
-            throw "matching telex.pdb was not generated"
-          }
-
       - name: Configure Windows crash dumps
         if: runner.os == 'Windows'
         shell: pwsh
@@ -96,6 +88,16 @@ jobs:
           New-ItemProperty -Path $key -Name DumpCount -Value 10 `
             -PropertyType DWord -Force | Out-Null
 
+      - name: Verify Windows diagnostic symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
+            throw "matching telex.pdb was not generated"
+          }
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName workspace -SnapshotSymbols
+
       - name: Test
         run: cargo test --workspace --verbose
 
@@ -103,6 +105,25 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: tests/capture_windows_crash_evidence.ps1 -EvidenceName workspace
+
+      - name: Prebuild SQLite process-test symbols
+        if: runner.os == 'Windows'
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          --no-run
+
+      - name: Snapshot SQLite process-test symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/capture_windows_crash_evidence.ps1
+          -EvidenceName sqlite -SnapshotSymbols
 
       - name: Complete SQLite Application Client suite
         # The public Application Client battery, the executable external
@@ -123,6 +144,17 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: tests/capture_windows_crash_evidence.ps1 -EvidenceName sqlite
+
+      - name: Prebuild Postgres process-test symbols
+        if: runner.os == 'Windows'
+        run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process --no-run
+
+      - name: Snapshot Postgres process-test symbols
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/capture_windows_crash_evidence.ps1
+          -EvidenceName postgres -SnapshotSymbols
 
       - name: Credential invocation lifecycle
         run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
@@ -535,6 +567,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "2"
       CARGO_PROFILE_TEST_DEBUG: "2"
+      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout the exact candidate head
         uses: actions/checkout@v4
@@ -576,8 +609,14 @@ jobs:
         shell: pwsh
         env:
           RUST_BACKTRACE: "1"
-          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          cargo test --no-default-features --features sqlite `
+            --test daemon_process_sqlite --no-run
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName "pageheap" `
+            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols") `
+            -SnapshotSymbols
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\attempt-$attempt.txt"
             cargo test --no-default-features --features sqlite `

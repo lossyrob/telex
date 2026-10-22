@@ -262,6 +262,9 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
     );
     assert!(
         capture.contains("crash dump directory is unavailable")
+            && capture.contains("SnapshotSymbols")
+            && ci.contains("Snapshot SQLite process-test symbols")
+            && ci.contains("Snapshot Postgres process-test symbols")
             && ci.contains("Settle and check final PageHeap dumps"),
         "dump enumeration and final PageHeap settlement must fail closed"
     );

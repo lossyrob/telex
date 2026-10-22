@@ -513,12 +513,28 @@ fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) ->
     let (code, timed_out) = wait_status_with_timeout(child, timeout);
     let stdout = read_capture(&mut stdout_file, &stdout_path);
     let stderr = read_capture(&mut stderr_file, &stderr_path);
+    #[cfg(windows)]
+    if let Some(exception) = windows_native_exception(code) {
+        panic!(
+            "command exited through native Windows exception 0x{exception:08x}; \
+             stdout_path={} stderr_path={} stdout={} stderr={}",
+            stdout_path.display(),
+            stderr_path.display(),
+            stdout.trim(),
+            stderr.trim()
+        );
+    }
     CmdOutput {
         code,
         stdout: stdout.trim().to_string(),
         stderr: stderr.trim().to_string(),
         timed_out,
     }
+}
+
+#[cfg(windows)]
+fn windows_native_exception(code: Option<i32>) -> Option<u32> {
+    code.filter(|code| *code < 0).map(|code| code as u32)
 }
 
 fn read_capture(file: &mut std::fs::File, path: &Path) -> String {
@@ -570,6 +586,17 @@ fn copilot_turn_guard_state_path(env: &ProcessEnv, session: &str) -> PathBuf {
 
 fn configure_copilot_home(cmd: &mut Command, home: &Path) {
     cmd.env("HOME", home).env("USERPROFILE", home);
+}
+
+#[cfg(windows)]
+#[test]
+fn negative_windows_exit_is_always_a_native_exception() {
+    assert_eq!(
+        windows_native_exception(Some(-1_073_740_940)),
+        Some(0xc000_0374)
+    );
+    assert_eq!(windows_native_exception(Some(1)), None);
+    assert_eq!(windows_native_exception(None), None);
 }
 
 fn copilot_runtime_home(env: &ProcessEnv) -> PathBuf {
