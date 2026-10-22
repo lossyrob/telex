@@ -19,8 +19,9 @@ historical evidence and are not accepted by this runtime.
 
 This runtime delivery requires process containment on Windows and Linux.
 macOS and other unclaimed hosts reject detector execution. macOS remains a
-required Watcher product capability assigned to separate follow-up work; this
-delivery does not claim macOS containment.
+required Watcher product capability tracked in
+[#165](https://github.com/lossyrob/telex/issues/165); this delivery does not claim
+macOS containment.
 
 ## Local ownership and administration
 
