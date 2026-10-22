@@ -230,8 +230,17 @@ five `gpt-6-astra` invocations, run with high reasoning and long context,
 found defects that the writer corrected, then concluded with an approval of
 `8bd3c330..2b8ade1d`. These are also source approvals only. The writer
 reports that full-workspace all-target Clippy is blocked by warnings in
-unchanged targets, so it is not green. CI run 39734925308 was started at
-`2b8ade1d`; its result is not recorded here.
+unchanged targets, so it is not green.
+
+Required CI run 39734925308 at `2b8ade1d` completed with failure at
+06:50:27Z. Three required Windows jobs failed: `InstalledCurrent` Postgres
+process proofs, Copilot fallback end-to-end, and Build and test. The other 13
+jobs passed, including Live Postgres parity. Each failure reports unsafe
+install authority. The consumer fixtures' restart-sender and watcher attaches
+were rejected, the station-intent upgrade test failed at pre-upgrade
+install-root validation, and `daemon_bootstrap` unit tests failed. The
+`2b8ade1d` source approvals stand as source review only, and the head has no
+CI or readiness credit.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public

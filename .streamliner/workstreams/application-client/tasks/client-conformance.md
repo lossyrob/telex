@@ -4,8 +4,8 @@
 - **Node:** `client-conformance`
 - **Type:** implementation
 - **Status:** in progress; PR #161 is open at head `2b8ade1d` with source
-  review approved, required CI not yet recorded, and proof-isolation incident
-  I161-1 unresolved
+  review approved, required CI failed in three Windows jobs, and
+  proof-isolation incident I161-1 unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -478,8 +478,20 @@ concluded with an approval of `8bd3c330..2b8ade1d` (artifact SHA-256
 `d8c96183e0c2429065b3f7a61fed81d9051127e55a65a291f3a82317bb0da917`). These
 approvals cover source only; Local ran no tests. The writer reports that
 full-workspace all-target Clippy is blocked by warnings in unchanged targets;
-it is not green. CI run 39734925308 was started at `2b8ade1d`; its result is
-not recorded here.
+it is not green.
+
+Required CI run 39734925308 at `2b8ade1d` completed with failure at
+06:50:27Z. Three required Windows jobs failed: `InstalledCurrent` Postgres
+process proofs (job 119678269082), Copilot fallback end-to-end (job
+119678269115), and Build and test (job 119678269126). The other 13 jobs
+passed, including Live Postgres parity (job 119678269183). Each failure
+reports unsafe install authority. The consumer fixtures' restart-sender and
+watcher attaches were rejected, the station-intent upgrade test failed at
+pre-upgrade install-root validation, and `daemon_bootstrap` unit tests failed
+(log SHA-256
+`a370e7fe276901d004e717991571306291915268373264ea3c4472140c0d70f0`). The
+`2b8ade1d` source approvals stand as source review only, and the head has no
+CI or readiness credit.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
