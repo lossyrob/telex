@@ -29,7 +29,24 @@ pub struct PgBackend {
 struct PgReleaseClient {
     client: AsyncMutex<tokio_postgres::Client>,
     connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
+    profile: Option<crate::profiles::BackendProfile>,
     repairing: AtomicBool,
+}
+
+struct ConnectionTaskGuard(Option<tokio::task::JoinHandle<()>>);
+
+impl ConnectionTaskGuard {
+    fn disarm(&mut self) {
+        let _ = self.0.take();
+    }
+}
+
+impl Drop for ConnectionTaskGuard {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.abort();
+        }
+    }
 }
 
 enum PgConnector {
@@ -937,6 +954,7 @@ impl PgBackend {
             release: Arc::new(PgReleaseClient {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
+                profile: None,
                 repairing: AtomicBool::new(false),
             }),
             notify_channel,
@@ -949,12 +967,14 @@ impl PgBackend {
         let release_config = Self::release_config(&config);
         let release_client = Self::open_client(&release_config, schema.as_deref()).await?;
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
+        let release_profile = profile.clone();
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
             release: Arc::new(PgReleaseClient {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema)),
+                profile: Some(release_profile),
                 repairing: AtomicBool::new(false),
             }),
             notify_channel,
@@ -975,11 +995,12 @@ impl PgBackend {
             .connect(make_tls()?)
             .await
             .context("connecting to postgres")?;
-        tokio::spawn(async move {
+        let connection = tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("[telex] postgres connection ended: {e}");
             }
         });
+        let mut connection = ConnectionTaskGuard(Some(connection));
         // The holder's live drain (`fetch_undelivered`) is correct only if every poll re-snapshots
         // the latest committed state — i.e. each autocommit query runs under READ COMMITTED. A
         // server- or role-level `default_transaction_isolation` of REPEATABLE READ/SERIALIZABLE
@@ -1002,6 +1023,7 @@ impl PgBackend {
                 .await
                 .context("setting schema search_path")?;
         }
+        connection.disarm();
         Ok(client)
     }
 
@@ -1028,19 +1050,26 @@ impl PgBackend {
                 release.repairing.store(false, Ordering::Release);
                 return;
             }
-            let (config, schema) = {
-                let cached = release.connection.lock().await;
-                (cached.0.clone(), cached.1.clone())
+            let repair = async {
+                let (config, schema) = if let Some(profile) = &release.profile {
+                    let (config, schema) = crate::profiles::pg_connect_config(profile)
+                        .await
+                        .context("resolving release reconnect profile")?;
+                    (PgBackend::release_config(&config), schema)
+                } else {
+                    let cached = release.connection.lock().await;
+                    (cached.0.clone(), cached.1.clone())
+                };
+                let replacement = PgBackend::open_client(&config, schema.as_deref()).await?;
+                Ok::<_, anyhow::Error>((replacement, config, schema))
             };
-            if let Ok(Ok(replacement)) = tokio::time::timeout(
-                Duration::from_secs(5),
-                PgBackend::open_client(&config, schema.as_deref()),
-            )
-            .await
+            if let Ok(Ok((replacement, config, schema))) =
+                tokio::time::timeout(Duration::from_secs(5), repair).await
             {
                 let mut client = release.client.lock().await;
                 if client.is_closed() {
                     *client = replacement;
+                    *release.connection.lock().await = (config, schema);
                 }
             }
             release.repairing.store(false, Ordering::Release);
