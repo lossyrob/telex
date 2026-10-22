@@ -20,6 +20,7 @@ pub struct PgBackend {
     connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
     release_client: AsyncMutex<tokio_postgres::Client>,
+    release_connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
     notify_channel: String,
 }
 
@@ -916,7 +917,8 @@ impl PgBackend {
         schema: Option<&str>,
     ) -> Result<Self> {
         let client = Self::open_client(&config, schema).await?;
-        let release_client = Self::open_client(&config, schema).await?;
+        let release_config = Self::release_config(&config);
+        let release_client = Self::open_client(&release_config, schema).await?;
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
             connector: PgConnector::Static {
@@ -925,6 +927,7 @@ impl PgBackend {
             },
             client: AsyncMutex::new(client),
             release_client: AsyncMutex::new(release_client),
+            release_connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
             notify_channel,
         })
     }
@@ -932,14 +935,22 @@ impl PgBackend {
     pub async fn connect_profile(profile: crate::profiles::BackendProfile) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
-        let release_client = Self::open_client(&config, schema.as_deref()).await?;
+        let release_config = Self::release_config(&config);
+        let release_client = Self::open_client(&release_config, schema.as_deref()).await?;
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
             release_client: AsyncMutex::new(release_client),
+            release_connection: AsyncMutex::new((release_config, schema)),
             notify_channel,
         })
+    }
+
+    fn release_config(config: &tokio_postgres::Config) -> tokio_postgres::Config {
+        let mut release = config.clone();
+        release.application_name("telex-drain-release");
+        release
     }
 
     async fn open_client(
@@ -985,7 +996,28 @@ impl PgBackend {
         if client.is_closed() {
             *client = self.reconnect_client().await?;
         }
+        self.repair_release_client().await;
         Ok(client)
+    }
+
+    async fn repair_release_client(&self) {
+        {
+            let release = self.release_client.lock().await;
+            if !release.is_closed() {
+                return;
+            }
+        }
+        let (config, schema) = {
+            let cached = self.release_connection.lock().await;
+            (cached.0.clone(), cached.1.clone())
+        };
+        let Ok(replacement) = Self::open_client(&config, schema.as_deref()).await else {
+            return;
+        };
+        let mut release = self.release_client.lock().await;
+        if release.is_closed() {
+            *release = replacement;
+        }
     }
 
     async fn reconnect_client(&self) -> Result<tokio_postgres::Client> {
