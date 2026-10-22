@@ -6846,15 +6846,14 @@ async fn wait_for_message_with_idle_ttl(
                         "wait delivery proof: epoch heartbeat returned 0 rows",
                     );
                     waiter_guard.suppress_abnormal_on_drop();
-                    return needs_attach_for_missing_member(
-                        &state,
-                        &backend,
-                        &store_key,
-                        &session_id,
-                        &address,
-                        "wait delivery proof",
-                    )
-                    .await;
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "wait delivery proof lost ownership for session {session_id} \
+                             address {address} in {store_key} at epoch={} owner={}",
+                            current.lease_epoch, current.owner_instance_id
+                        ),
+                        NeedsAttachReason::RestartLost,
+                    );
                 }
                 backend_recovery_deadline = None;
                 backend_recovery_backoff = BACKOFF_INITIAL;

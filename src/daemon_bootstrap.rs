@@ -894,7 +894,7 @@ fn run_admission_version_probe(
         }
     }
     let output = run_bounded_probe_process(command, PROBE_TIMEOUT, PROBE_OUTPUT_LIMIT)?;
-    if !output.status.success() {
+    if !output.success {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout)
@@ -905,7 +905,7 @@ fn run_admission_version_probe(
 #[cfg(any(windows, target_os = "linux"))]
 #[derive(Debug)]
 struct ProbeOutput {
-    status: std::process::ExitStatus,
+    success: bool,
     stdout: Vec<u8>,
 }
 
@@ -941,9 +941,28 @@ fn configure_probe_command(command: &mut std::process::Command) {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeGroupOwnership {
+    Anchored,
+    Sealed,
+}
+
+#[cfg(target_os = "linux")]
+impl ProbeGroupOwnership {
+    fn seal(&mut self) -> bool {
+        if *self == Self::Anchored {
+            *self = Self::Sealed;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 struct ProbeProcessGroup {
     pid: i32,
-    active: bool,
+    ownership: ProbeGroupOwnership,
 }
 
 #[cfg(target_os = "linux")]
@@ -952,18 +971,16 @@ impl ProbeProcessGroup {
         Ok(Self {
             pid: i32::try_from(child.id())
                 .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?,
-            active: true,
+            ownership: ProbeGroupOwnership::Anchored,
         })
     }
 
-    fn terminate(&self) {
-        unsafe {
-            libc::kill(-self.pid, libc::SIGKILL);
+    fn signal_and_seal(&mut self) {
+        if self.ownership.seal() {
+            unsafe {
+                libc::kill(-self.pid, libc::SIGKILL);
+            }
         }
-    }
-
-    fn disarm(&mut self) {
-        self.active = false;
     }
 }
 
@@ -1015,8 +1032,8 @@ fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstr
 #[cfg(target_os = "linux")]
 impl Drop for ProbeProcessGroup {
     fn drop(&mut self) {
-        if self.active {
-            self.terminate();
+        if self.ownership == ProbeGroupOwnership::Anchored {
+            self.signal_and_seal();
         }
     }
 }
@@ -1063,15 +1080,14 @@ impl ProbeProcessGroup {
         Ok(Self { job, active: true })
     }
 
-    fn terminate(&self) {
+    fn signal_and_seal(&mut self) {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-        unsafe {
-            TerminateJobObject(self.job, 1);
+        if self.active {
+            unsafe {
+                TerminateJobObject(self.job, 1);
+            }
+            self.active = false;
         }
-    }
-
-    fn disarm(&mut self) {
-        self.active = false;
     }
 }
 
@@ -1081,12 +1097,65 @@ impl Drop for ProbeProcessGroup {
         use windows_sys::Win32::Foundation::CloseHandle;
         if self.job != 0 {
             if self.active {
-                self.terminate();
+                self.signal_and_seal();
             }
             unsafe {
                 CloseHandle(self.job);
             }
         }
+    }
+}
+
+enum ProbeLeaderState {
+    Running,
+    Exited(bool),
+}
+
+#[cfg(target_os = "linux")]
+fn observe_probe_leader(
+    child: &mut std::process::Child,
+) -> Result<ProbeLeaderState, DaemonBootstrapFailure> {
+    let pid =
+        i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result != 0 {
+        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+            return Ok(ProbeLeaderState::Running);
+        }
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let observed_pid = unsafe { info.si_pid() };
+    if observed_pid == 0 {
+        return Ok(ProbeLeaderState::Running);
+    }
+    if observed_pid != pid {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    match info.si_code {
+        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(unsafe { info.si_status() } == 0)),
+        libc::CLD_KILLED | libc::CLD_DUMPED => Ok(ProbeLeaderState::Exited(false)),
+        _ => Err(DaemonBootstrapFailure::IncompatibleManifest),
+    }
+}
+
+#[cfg(windows)]
+fn observe_probe_leader(
+    child: &mut std::process::Child,
+) -> Result<ProbeLeaderState, DaemonBootstrapFailure> {
+    match child
+        .try_wait()
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
+    {
+        Some(status) => Ok(ProbeLeaderState::Exited(status.success())),
+        None => Ok(ProbeLeaderState::Running),
     }
 }
 
@@ -1209,67 +1278,66 @@ fn run_bounded_probe_process(
         }
     };
     if resume_probe_process(&child).is_err() {
-        terminate_probe_process(&mut child, &group, deadline);
+        terminate_probe_process(&mut child, &mut group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let Some(stdout) = child.stdout.take() else {
-        terminate_probe_process(&mut child, &group, deadline);
+        terminate_probe_process(&mut child, &mut group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     };
     let Some(stderr) = child.stderr.take() else {
-        terminate_probe_process(&mut child, &group, deadline);
+        terminate_probe_process(&mut child, &mut group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     };
     if prepare_probe_pipe(&stdout).is_err() || prepare_probe_pipe(&stderr).is_err() {
-        terminate_probe_process(&mut child, &group, deadline);
+        terminate_probe_process(&mut child, &mut group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let mut stdout = ProbePipe::new(stdout);
     let mut stderr = ProbePipe::new(stderr);
-    let mut status = None;
+    let mut leader_success = None;
     let mut timed_out = false;
 
     loop {
         if drain_probe_pipe(&mut stdout, output_cap).is_err()
             || drain_probe_pipe(&mut stderr, output_cap).is_err()
         {
-            terminate_probe_process(&mut child, &group, deadline);
+            terminate_probe_process(&mut child, &mut group, deadline);
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
-        if status.is_none() {
-            status = match child.try_wait() {
-                Ok(status) => status,
+        if leader_success.is_none() {
+            leader_success = match observe_probe_leader(&mut child) {
+                Ok(ProbeLeaderState::Running) => None,
+                Ok(ProbeLeaderState::Exited(success)) => Some(success),
                 Err(_) => {
-                    terminate_probe_process(&mut child, &group, deadline);
+                    terminate_probe_process(&mut child, &mut group, deadline);
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
             };
         }
-        if status.is_some() && stdout.eof && stderr.eof {
+        if leader_success.is_some() && stdout.eof && stderr.eof {
             break;
         }
         let now = Instant::now();
         if !timed_out && now >= cleanup_at {
             timed_out = true;
-            group.terminate();
+            group.signal_and_seal();
+            #[cfg(windows)]
             let _ = child.kill();
         }
         if now >= deadline {
-            terminate_probe_process(&mut child, &group, deadline);
+            terminate_probe_process(&mut child, &mut group, deadline);
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     if timed_out {
+        finalize_probe_process(&mut child, &mut group, deadline)?;
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
-    // The version probe is not allowed to leave background work. Signal the
-    // owned group/job even after an ordinary leader exit so descendants that
-    // closed their inherited pipes cannot survive a successful probe.
-    group.terminate();
-    group.disarm();
+    finalize_probe_process(&mut child, &mut group, deadline)?;
     Ok(ProbeOutput {
-        status: status.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
+        success: leader_success.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
         stdout: stdout.captured,
     })
 }
@@ -1289,18 +1357,62 @@ fn terminate_direct_probe_process(child: &mut std::process::Child, deadline: Ins
 #[cfg(any(windows, target_os = "linux"))]
 fn terminate_probe_process(
     child: &mut std::process::Child,
-    group: &ProbeProcessGroup,
+    group: &mut ProbeProcessGroup,
     deadline: Instant,
 ) {
-    group.terminate();
+    group.signal_and_seal();
+    #[cfg(windows)]
     let _ = child.kill();
+    let _ = reap_probe_leader(child, deadline);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn finalize_probe_process(
+    child: &mut std::process::Child,
+    group: &mut ProbeProcessGroup,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    // Signal while the Linux leader remains an unreaped ownership anchor.
+    // `signal_and_seal` makes every later Drop path incapable of signaling a
+    // recycled numeric process-group id.
+    group.signal_and_seal();
+    reap_probe_leader(child, deadline)
+}
+
+#[cfg(target_os = "linux")]
+fn reap_probe_leader(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    let pid =
+        i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    while Instant::now() < deadline {
+        let mut status = 0;
+        let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if result == pid {
+            return Ok(());
+        }
+        if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Err(DaemonBootstrapFailure::IncompatibleManifest)
+}
+
+#[cfg(windows)]
+fn reap_probe_leader(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
     while Instant::now() < deadline {
         match child.try_wait() {
-            Ok(Some(_)) | Err(_) => return,
+            Ok(Some(_)) => return Ok(()),
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
         }
     }
-    let _ = child.try_wait();
+    Err(DaemonBootstrapFailure::IncompatibleManifest)
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -2519,6 +2631,116 @@ mod tests {
 
     static NEXT: AtomicUsize = AtomicUsize::new(1);
 
+    #[cfg(windows)]
+    fn create_inheritable_authority_test_dir(path: &Path) {
+        use std::ffi::{c_void, OsStr};
+        use std::mem::{size_of, MaybeUninit};
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS,
+        };
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+            SDDL_REVISION_1,
+        };
+        use windows_sys::Win32::Security::{
+            GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        };
+        use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create authority-test parent");
+        }
+        fn wide_null(value: &OsStr) -> Vec<u16> {
+            value.encode_wide().chain(std::iter::once(0)).collect()
+        }
+        unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
+            let mut len = 0usize;
+            while unsafe { *ptr.add(len) } != 0 {
+                len += 1;
+            }
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+        }
+        let sid = {
+            let mut token = 0;
+            assert_ne!(
+                unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) },
+                0,
+                "open authority-test token"
+            );
+            let mut needed = 0u32;
+            unsafe {
+                GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            }
+            let mut storage = vec![
+                MaybeUninit::<TOKEN_USER>::uninit();
+                (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+            ];
+            assert_ne!(
+                unsafe {
+                    GetTokenInformation(
+                        token,
+                        TokenUser,
+                        storage.as_mut_ptr().cast(),
+                        needed,
+                        &mut needed,
+                    )
+                },
+                0,
+                "read authority-test token user"
+            );
+            let token_user = storage.as_ptr().cast::<TOKEN_USER>();
+            let mut sid_ptr: *mut u16 = std::ptr::null_mut();
+            assert_ne!(
+                unsafe { ConvertSidToStringSidW((*token_user).User.Sid, &mut sid_ptr) },
+                0,
+                "convert authority-test SID"
+            );
+            unsafe {
+                CloseHandle(token);
+            }
+            let sid = unsafe { wide_ptr_to_string(sid_ptr) };
+            unsafe {
+                LocalFree(sid_ptr.cast());
+            }
+            sid
+        };
+        let sddl = format!("O:{sid}G:{sid}D:P(A;OICI;GA;;;{sid})");
+        let sddl_wide = wide_null(OsStr::new(&sddl));
+        let mut descriptor: *mut c_void = std::ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl_wide.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    std::ptr::null_mut(),
+                )
+            },
+            0,
+            "build inheritable authority-test descriptor"
+        );
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        let path_wide = wide_null(path.as_os_str());
+        let created = unsafe { CreateDirectoryW(path_wide.as_ptr(), &attributes) };
+        unsafe {
+            LocalFree(descriptor);
+        }
+        if created == 0 {
+            assert_eq!(
+                unsafe { GetLastError() },
+                ERROR_ALREADY_EXISTS,
+                "create inheritable authority-test dir {}",
+                path.display()
+            );
+        }
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
         #[cfg(windows)]
@@ -2528,8 +2750,8 @@ mod tests {
                 let base = std::env::var_os("LOCALAPPDATA")
                     .map(PathBuf::from)
                     .unwrap_or_else(std::env::temp_dir)
-                    .join("telex-bootstrap-tests");
-                crate::platform_fs::ensure_owner_private_dir(&base).unwrap();
+                    .join("telex-bootstrap-tests-inheritable-v1");
+                create_inheritable_authority_test_dir(&base);
                 base
             })
             .clone()
@@ -2541,7 +2763,7 @@ mod tests {
             std::process::id()
         ));
         #[cfg(windows)]
-        crate::platform_fs::ensure_owner_private_dir(&dir).unwrap();
+        create_inheritable_authority_test_dir(&dir);
         #[cfg(not(windows))]
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -3155,6 +3377,18 @@ mod tests {
             .expect("exclusive after child release");
         drop(excl);
         fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn probe_group_ownership_seals_before_reap_and_cannot_signal_twice() {
+        let mut ownership = ProbeGroupOwnership::Anchored;
+        assert!(ownership.seal(), "the owned group may be signaled once");
+        assert_eq!(ownership, ProbeGroupOwnership::Sealed);
+        assert!(
+            !ownership.seal(),
+            "normal, timeout, error, and Drop paths must not signal after sealing/reap"
+        );
     }
 
     #[cfg(any(windows, target_os = "linux"))]

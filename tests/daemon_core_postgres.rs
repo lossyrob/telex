@@ -3751,22 +3751,35 @@ async fn postgres_process_boundary_fences_an_already_active_predecessor_consumer
         "the waiter's own artifacts must agree with the exit code it returned: {}",
         observed.describe()
     );
-    let demotion = predecessor
-        .wait_until_self_demoted(PG_FENCE_ADDRESS, Duration::from_secs(30))
-        .unwrap_or_else(|| {
-            panic!(
-                "the fenced daemon never recorded losing the epoch, so nothing proves the fence \
-                 is what stopped it: {}",
-                observed.describe()
-            )
-        });
-    assert!(
-        demotion
-            .get("message")
+    if let Some(demotion) =
+        predecessor.wait_until_self_demoted(PG_FENCE_ADDRESS, Duration::from_secs(30))
+    {
+        assert!(
+            demotion
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains(&format!("epoch={first_epoch}"))),
+            "the demotion must name the epoch the predecessor was fenced at: {demotion}"
+        );
+    } else {
+        // The recent-error ring is process-local observation. If that
+        // diagnostic cannot be read back, the waiter's own durable completion
+        // artifact must carry the same direct fence evidence rather than a
+        // generic daemon-gone message.
+        let detail = observed
+            .status
+            .as_ref()
+            .and_then(|status| status.get("detail"))
             .and_then(serde_json::Value::as_str)
-            .is_some_and(|message| message.contains(&format!("epoch={first_epoch}"))),
-        "the demotion must name the epoch the predecessor was fenced at: {demotion}"
-    );
+            .unwrap_or_default();
+        assert!(
+            detail.contains("wait delivery proof lost ownership")
+                && detail.contains(&format!("epoch={first_epoch}")),
+            "neither daemon status nor the wait artifact proves the ownership fence: \
+             detail={detail:?} observation={}",
+            observed.describe()
+        );
+    }
 
     // 6. Re-registering *is* the documented self-heal, and it legitimately takes the address back.
     //    Even then the acked message stays consumed: the fence protects the delivery, not the

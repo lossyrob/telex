@@ -263,6 +263,7 @@ async fn wait_loop<C: WaitConnector>(
                 message,
                 needs_attach_reason,
             } if code == ERROR_NEEDS_ATTACH => {
+                let needs_attach_detail = format!("{code}: {message}");
                 if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
                     return Err(anyhow!("{code}: {message}"));
                 }
@@ -290,9 +291,9 @@ async fn wait_loop<C: WaitConnector>(
                         if remaining_wait_timeout_ms(wait_deadline) == Some(0) {
                             return Ok(WaitTerminal::Response(Response::Timeout));
                         }
-                        return Ok(WaitTerminal::DaemonGone(
-                            "reconnect grace expired before re-register completed".to_string(),
-                        ));
+                        return Ok(WaitTerminal::DaemonGone(format!(
+                            "{needs_attach_detail}; reconnect grace expired before re-register completed"
+                        )));
                     }
                 }
             }
