@@ -3,13 +3,16 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-macos-containment`
 - **Type:** investigation and implementation
-- **Status:** planned; investigation may start after tracker/task
-  reconciliation, implementation lands after #162 merges
+- **Status:** in progress; launched 2026-10-22 under Streamliner workflow v2 for
+  investigation and the operator decision packet; implementation lands
+  after #162 merges
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **Implementation sequencing:** issue #162 must merge before implementation
   lands
 - **Tracker:** [lossyrob/telex#165](https://github.com/lossyrob/telex/issues/165)
+- **Owner session:** d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b
+- **Merge gate:** shadow mode; Campaign runs the gate, and the operator merges
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -32,6 +35,28 @@ This node does not block the Windows-path `five-minute-custom-watch-gate`. It
 does block the product-level `usable-watcher` checkpoint and `closure-gate`,
 because macOS remains a required Watcher product platform and fail-closed
 behavior is not the completed product outcome.
+
+## Launch state
+
+On 2026-10-22 Campaign launched owner session
+d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b under the operator's macOS host-scope
+directive and the operator's standing approval to launch agreed work. The owner
+works in worktree `lossyrob-jubilant-bassoon` on branch
+`lossyrob-macos-watcher-containment` from base `ec98b3ee`. The worktree
+folder keeps the initial branch name; the owner renamed the branch. Campaign
+delivered the kickoff by reference to launch context
+`ctx-20261022210005-68299169` (`kickoff.md`, 9,764 bytes, SHA-256
+`b8e93e4fa5ffeb37557bb75cd260dff503eb0a771ce1225d4ed27832b0113dcd`). The merge
+gate runs in shadow mode with balanced care and craft posture, so the operator
+merges. The planning-repository binding record is
+`streamliner/telex/prompts/v2/launches/watcher-macos-containment-20261022.json`
+at commit `4bc38cef`, which corrected the branch recorded by commit `d0745a6`.
+
+The launch authorizes Phase 1 investigation and the operator decision packet
+now. Implementation still lands only after #162 merges. Any option that needs
+privilege, entitlements, a helper service, a broker, or a VM returns to the
+operator before implementation. The launch grants no release, tag, publish,
+fleet, I161-1, or live-merge authority.
 
 ## Authority
 
