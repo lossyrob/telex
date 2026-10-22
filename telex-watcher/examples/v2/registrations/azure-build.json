@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "id": "example-azure-build",
+  "command": ["pwsh", "-NoLogo", "-NoProfile", "-File", "C:\\watchers\\azure-build.ps1"],
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "backendProfile": "YOUR-PROFILE",
+  "sender": "service:watcher/examples",
+  "target": "project:example/inbox",
+  "environmentAllowlist": ["TELEX_EXAMPLE_ADO_TOKEN"],
+  "parameters": { "organization": "YOUR-ORG", "project": "YOUR-PROJECT", "buildId": 42 }
+}

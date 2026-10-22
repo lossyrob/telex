@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "id": "example-command",
+  "command": ["pwsh", "-NoLogo", "-NoProfile", "-File", "C:\\watchers\\command.ps1"],
+  "intervalSeconds": 60,
+  "timeoutSeconds": 30,
+  "backendProfile": "YOUR-PROFILE",
+  "sender": "service:watcher/examples",
+  "target": "project:example/inbox",
+  "parameters": {
+    "command": ["pwsh", "-NoLogo", "-NoProfile", "-File", "C:\\watchers\\condition.ps1"]
+  }
+}

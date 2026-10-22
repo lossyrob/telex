@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "id": "example-http-json",
+  "command": ["pwsh", "-NoLogo", "-NoProfile", "-File", "C:\\watchers\\http-json.ps1"],
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "backendProfile": "YOUR-PROFILE",
+  "sender": "service:watcher/examples",
+  "target": "project:example/inbox",
+  "parameters": { "url": "https://example.invalid/status.json" }
+}
