@@ -1793,16 +1793,12 @@ mod windows_authority {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use windows_sys::Win32::Foundation::{LocalFree, PSID};
-    use windows_sys::Win32::Security::Authorization::{
-        ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
-    };
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
     use windows_sys::Win32::Security::{
         AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-        GetTokenInformation, TokenUser, ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION,
-        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, SE_DACL_PRESENT, SE_DACL_PROTECTED,
-        TOKEN_QUERY, TOKEN_USER,
+        ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, SE_DACL_PRESENT, SE_DACL_PROTECTED,
     };
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
     const ACCESS_DENIED_ACE_TYPE: u8 = 1;
@@ -1828,20 +1824,18 @@ mod windows_authority {
         | FILE_DELETE_CHILD
         | FILE_WRITE_ATTRIBUTES;
 
-    /// Fail closed unless the current OS user's SID owns `path` and its DACL
-    /// grants access only to the owning user, `LocalSystem`, or the local
-    /// `BUILTIN\Administrators` group; every ACE must be a permit ACE for one
-    /// of those principals. Reparse points, missing DACLs, and unprotected or
-    /// inherited DACLs also fail closed.
+    /// Fail closed unless a SID this process token may own objects as owns
+    /// `path`, and its DACL grants mutation only to that same authority set,
+    /// `LocalSystem`, or local `BUILTIN\Administrators`.
     pub(super) fn check_owner_and_dacl(path: &Path) -> Result<(), DaemonBootstrapFailure> {
-        let owner_sid = current_user_sid()?;
+        let owner_sids = self_owner_sids()?;
         let system_sid = SidBuf::from_str("S-1-5-18")?;
         let admins_sid = SidBuf::from_str("S-1-5-32-544")?;
         let trusted_installer_sid =
             SidBuf::from_str("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")?;
         let creator_owner_sid = SidBuf::from_str("S-1-3-0")?;
         let trusted = TrustedSidRefs {
-            owner: owner_sid.as_psid(),
+            owners: &owner_sids,
             system: system_sid.as_psid(),
             admins: admins_sid.as_psid(),
             trusted_installer: trusted_installer_sid.as_psid(),
@@ -1851,14 +1845,14 @@ mod windows_authority {
     }
 
     pub(super) fn check_ancestor_authority(path: &Path) -> Result<(), DaemonBootstrapFailure> {
-        let owner_sid = current_user_sid()?;
+        let owner_sids = self_owner_sids()?;
         let system_sid = SidBuf::from_str("S-1-5-18")?;
         let admins_sid = SidBuf::from_str("S-1-5-32-544")?;
         let trusted_installer_sid =
             SidBuf::from_str("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")?;
         let creator_owner_sid = SidBuf::from_str("S-1-3-0")?;
         let trusted = TrustedSidRefs {
-            owner: owner_sid.as_psid(),
+            owners: &owner_sids,
             system: system_sid.as_psid(),
             admins: admins_sid.as_psid(),
             trusted_installer: trusted_installer_sid.as_psid(),
@@ -1872,8 +1866,8 @@ mod windows_authority {
         )
     }
 
-    struct TrustedSidRefs {
-        owner: PSID,
+    struct TrustedSidRefs<'a> {
+        owners: &'a [SidBuf],
         system: PSID,
         admins: PSID,
         trusted_installer: PSID,
@@ -1882,8 +1876,8 @@ mod windows_authority {
 
     fn check_component(
         path: &Path,
-        trusted: &TrustedSidRefs,
-        require_current_owner: bool,
+        trusted: &TrustedSidRefs<'_>,
+        require_self_owner: bool,
         foreign_mutation_rights: u32,
     ) -> Result<(), DaemonBootstrapFailure> {
         let wide: Vec<u16> = path
@@ -1911,13 +1905,17 @@ mod windows_authority {
         }
         let _guard = LocalAllocGuard(sd);
 
-        let owner_is_current = !owner.is_null() && unsafe { EqualSid(owner, trusted.owner) } != 0;
+        let owner_is_self = !owner.is_null()
+            && trusted
+                .owners
+                .iter()
+                .any(|sid| unsafe { EqualSid(owner, sid.as_psid()) } != 0);
         let owner_is_system = !owner.is_null() && unsafe { EqualSid(owner, trusted.system) } != 0;
         let owner_is_admins = !owner.is_null() && unsafe { EqualSid(owner, trusted.admins) } != 0;
         let owner_is_trusted_installer =
             !owner.is_null() && unsafe { EqualSid(owner, trusted.trusted_installer) } != 0;
-        if !owner_is_current
-            && (require_current_owner
+        if !owner_is_self
+            && (require_self_owner
                 || (!owner_is_system && !owner_is_admins && !owner_is_trusted_installer))
         {
             return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
@@ -1961,7 +1959,7 @@ mod windows_authority {
                 return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
             }
             let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
-            if !require_current_owner && header.AceFlags & INHERIT_ONLY_ACE != 0 {
+            if !require_self_owner && header.AceFlags & INHERIT_ONLY_ACE != 0 {
                 continue;
             }
             match header.AceType {
@@ -1969,7 +1967,10 @@ mod windows_authority {
                     let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
                     let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
                     let allowed = unsafe {
-                        EqualSid(sid, trusted.owner) != 0
+                        trusted
+                            .owners
+                            .iter()
+                            .any(|owner| EqualSid(sid, owner.as_psid()) != 0)
                             || EqualSid(sid, trusted.system) != 0
                             || EqualSid(sid, trusted.admins) != 0
                             || EqualSid(sid, trusted.trusted_installer) != 0
@@ -1995,62 +1996,12 @@ mod windows_authority {
         Ok(())
     }
 
-    fn current_user_sid() -> Result<SidBuf, DaemonBootstrapFailure> {
-        use std::mem::{size_of, MaybeUninit};
-
-        let mut token: isize = 0;
-        let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
-        if ok == 0 {
-            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
-        }
-        let _tguard = HandleGuard(token);
-        let mut needed: u32 = 0;
-        unsafe {
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-        }
-        if needed == 0 {
-            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
-        }
-        let mut buf = vec![
-            MaybeUninit::<TOKEN_USER>::uninit();
-            (needed as usize).div_ceil(size_of::<TOKEN_USER>())
-        ];
-        let ok = unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                buf.as_mut_ptr().cast::<c_void>(),
-                needed,
-                &mut needed,
-            )
-        };
-        if ok == 0 {
-            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
-        }
-        let user = buf.as_ptr().cast::<TOKEN_USER>();
-        #[cfg(test)]
-        assert!(user.is_aligned(), "TOKEN_USER pointer before dereference");
-        let user = unsafe { &*user };
-        SidBuf::from_str(&sid_to_string(user.User.Sid)?)
-    }
-
-    fn sid_to_string(sid: PSID) -> Result<String, DaemonBootstrapFailure> {
-        let mut wide: *mut u16 = std::ptr::null_mut();
-        let ok = unsafe { ConvertSidToStringSidW(sid, &mut wide) };
-        if ok == 0 || wide.is_null() {
-            return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
-        }
-        let mut len = 0usize;
-        while unsafe { *wide.add(len) } != 0 {
-            len += 1;
-        }
-        let slice = unsafe { std::slice::from_raw_parts(wide, len) };
-        let s = String::from_utf16(slice)
-            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)?;
-        unsafe {
-            LocalFree(wide as *mut c_void);
-        }
-        Ok(s)
+    fn self_owner_sids() -> Result<Vec<SidBuf>, DaemonBootstrapFailure> {
+        crate::platform_fs::windows_self_owner_sid_strings()
+            .map_err(|_| DaemonBootstrapFailure::UnsafeInstallAuthority)?
+            .into_iter()
+            .map(|sid| SidBuf::from_str(&sid))
+            .collect()
     }
 
     struct LocalAllocGuard(*mut c_void);
@@ -2064,21 +2015,12 @@ mod windows_authority {
         }
     }
 
-    struct HandleGuard(isize);
-    impl Drop for HandleGuard {
-        fn drop(&mut self) {
-            if self.0 != 0 {
-                unsafe {
-                    windows_sys::Win32::Foundation::CloseHandle(self.0);
-                }
-            }
-        }
-    }
-
     #[cfg(test)]
     #[test]
-    fn windows_token_user_alignment_bootstrap_authority() {
-        current_user_sid().expect("aligned bootstrap authority token reader");
+    fn windows_token_self_owner_set_bootstrap_authority() {
+        assert!(!self_owner_sids()
+            .expect("bootstrap authority token owner set")
+            .is_empty());
     }
 
     /// Owned SID buffer allocated by `ConvertStringSidToSidW`.

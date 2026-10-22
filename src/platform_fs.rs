@@ -453,6 +453,17 @@ pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
     imp::ensure_owner_private_dir(path)
 }
 
+/// Windows SIDs this process token may stamp as an object's owner.
+///
+/// Elevated tokens commonly use `Administrators` as their default owner even
+/// though the token user remains the interactive account. Authority checks
+/// must accept exactly the token user, token default owner, and owner-capable
+/// non-deny-only groups, while continuing to reject every foreign SID.
+#[cfg(windows)]
+pub(crate) fn windows_self_owner_sid_strings() -> Result<Vec<String>> {
+    imp::self_owner_sids().map(<[String]>::to_vec)
+}
+
 /// Ensure a **producer root** — a directory telex shares with an external same-user producer — is
 /// owner-private, and return its canonical path.
 ///
@@ -1386,7 +1397,7 @@ mod imp {
     ///
     /// Cached: a process token's identity does not change for the life of the process, and this is
     /// consulted on every owner-private read.
-    fn self_owner_sids() -> Result<&'static [String]> {
+    pub(super) fn self_owner_sids() -> Result<&'static [String]> {
         static CACHE: OnceLock<Vec<String>> = OnceLock::new();
         if let Some(cached) = CACHE.get() {
             return Ok(cached.as_slice());
