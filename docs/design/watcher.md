@@ -15,6 +15,10 @@ The minimal v2 authoring, registration, identity, and compatibility direction is
 recorded in
 [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
 
+The v2 Rust runtime and typed local administration boundary are documented in
+[Watcher runtime core](../watcher-runtime.md). Runtime implementation is not a
+claim of completed management CLI, service packaging, or operational hardening.
+
 Mechanism-level Telex membership, liveness, lease, delivery, receipt, and
 disposition semantics remain governed by [daemon.md](daemon.md). Telex core
 treats Watcher event metadata as opaque. The namespacing guidance in
@@ -985,10 +989,10 @@ Watcher uses query-only reconciliation and remains blocked. It never falls back
 to CLI subprocess parsing, raw daemon IPC, spike-private helpers, or a
 Watcher-private client.
 
-The Application Client owner must later reconcile normative
-`application-client.md` AC-C14 with the authoritative `not-recorded` result
-required here, then update the non-normative requirements crosswalk. ADR 0050
-records that follow-up; this node does not change shared client semantics.
+The supported public Rust Application Client now supplies authoritative
+exact-operation `NotRecorded`, identity-checkable retry, and
+`RetentionBoundaryCrossed`. Watcher consumes that conformance without changing
+shared client semantics.
 
 ## Schema and documentation conformance
 

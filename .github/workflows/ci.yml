@@ -45,6 +45,13 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_candidate_test.py
 
+      - name: Test Watcher GitHub observation fixtures
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pip install -r telex-watcher/tests/requirements.txt
+          python -m unittest discover -s telex-watcher/field-validation/github-pr -p "test_*.py"
+
       - name: Test native Windows capability publication observation
         if: runner.os == 'Windows'
         env:
@@ -326,6 +333,14 @@ jobs:
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,postgres"
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,entra"
 
+      - name: Check Watcher backend profiles
+        run: |
+          cargo check -p telex-watcher --no-default-features --features sqlite
+          cargo check -p telex-watcher --no-default-features --features postgres
+          cargo check -p telex-watcher --no-default-features --features entra
+          cargo check -p telex-watcher --no-default-features --features "sqlite,postgres"
+          cargo check -p telex-watcher --no-default-features --features "sqlite,entra"
+
       - name: Consumer fixture stays free of private seams
         # The external fixture is a public-surface consumer stand-in. Compiling
         # it is not enough: assert it never names daemon, install, backend, IPC,
@@ -419,6 +434,18 @@ jobs:
             --test application_client_fixture \
             -- --test-threads=1
 
+      - name: Run Watcher runtime matrix on live Postgres
+        env:
+          TELEX_PG_REQUIRE: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+          cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
+
       - name: Run InstalledCurrent process proofs on live Postgres
         env:
           TELEX_PG_REQUIRE: "1"
@@ -487,6 +514,13 @@ jobs:
           --test application_client_fixture
           --test installed_current_process
           -- --test-threads=1
+
+      - name: Run Watcher runtime matrix on Windows Postgres
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PG_URL: "postgres://postgres@127.0.0.1:55432/postgres?sslmode=disable"
+          TELEX_PG_PASSWORD: postgres
+        run: cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
 
       - name: Stop PostgreSQL
         if: always()
