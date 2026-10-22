@@ -3,14 +3,14 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `dacf3d18`, which replaces
-  the failed `5d21a63d` PowerShell proof of the official v0.2.1 upgrade for
-  E161-1 with an ignored Windows test in the existing Rust `InstalledCurrent`
-  harness and fixes Local finding L161-9 from `631aff22`; Local's source review
-  and design inspection approved it, but its required CI failed in a Windows
-  test job although the proof job passed, Watcher and Operator Station withheld
-  runtime credit, and the implementer owns completion; proof-isolation incident
-  I161-1 is unresolved while its user-directed read-only impact review continues
+- **Status:** in progress; PR #161 is open at head `52abb30e`, which follows the
+  failed `dacf3d18` CI run with a production fix to cooperative-grace timing in
+  `src/station_intent.rs`, rejection of abnormal Windows child exit statuses,
+  and Windows heap diagnostics in CI; Local's source review, the implementer's
+  source and design reviews, and both consumers' source attestations approved
+  it, but passing required CI is outstanding, and the implementer owns
+  completion; proof-isolation incident I161-1 is unresolved while its
+  user-directed read-only impact review continues
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -1304,12 +1304,15 @@ step: in `tests/daemon_process_sqlite.rs`,
 `real_process_copilot_fallback_cold_start` panicked at line 24 because the send
 to the cold-start fallback exited with code -1073740940 (0xC0000374, which
 Windows names STATUS_HEAP_CORRUPTION), and that test binary reported 47 passed
-and 1 failed. No root cause or relevance to this head is inferred, no rerun is
-recorded, and diagnosis belongs to the implementer. The run grants no gate or
-readiness credit, and the successful proof job alone does not accept E161-1.
-Watcher's pre-merge attestation
-(`watcher-pr161-dacf3d1-premerge-consumability-attestation.md` in session
-e00d296e-ffca-4477-b1c8-c4d340bd30be, 5,869 bytes, SHA-256
+and 1 failed. The App observer retained the failed job log
+(`pr161-ci39810406366-dacf3d1-failed.log` in session
+eaa99eef-33a6-40ff-8b8d-3168e6f2a805, 241,226 bytes, 1,112 lines, SHA-256
+`d6631b783116eb2b8a1991b43c6f7ad652349cd13b0d1bb8074cbbab8371bc65`). No root
+cause or relevance to this head is inferred, no rerun is recorded, and diagnosis
+belongs to the implementer. The run grants no gate or readiness credit, and the
+successful proof job alone does not accept E161-1. Watcher's pre-merge
+attestation (`watcher-pr161-dacf3d1-premerge-consumability-attestation.md` in
+session e00d296e-ffca-4477-b1c8-c4d340bd30be, 5,869 bytes, SHA-256
 `030e3d8f7841156caac9ea8554c5d1527e93a13fb64ddf490f2b617bb820507d`) approved
 source consumability at `dacf3d18` and returned changes required for runtime
 qualification because of that failed required job. It is not the post-merge
@@ -1327,10 +1330,98 @@ Windows test. It records that the public consumer fixtures and the
 incomplete-drop regression passed and that OS-PR161-0486BEE-1 remains closed.
 Neither consumer infers a cause or merge readiness. No `631aff22` or earlier
 evidence carries over. At `dacf3d18`, Local's source review and design
-inspection have approved; the Application Client design approval is reported by
+inspection had approved; the Application Client design approval is reported by
 the implementer without a supplied artifact; Watcher and Operator Station
 withheld runtime credit; and exact-head CI failed in a required Windows test
 job. E161-1 and the I161-1 impact and isolation questions remain open, the
+I161-1 workstation preservation and freeze are unchanged, and no merge, release,
+tag, or fleet action is authorized.
+
+The implementer then pushed head `52abb30e49dff54f9a9ce7b31c64584a871d11c3`
+(tree `e29d6b4028a5c732936424694bf908450deb2c9c`), nine commits over `dacf3d18`
+that change five paths (+359/-7): the CI workflow, `src/station_intent.rs`, a
+new Windows crash-evidence capture script under `tests/`, the SQLite daemon
+process test, and the release contract test. Relative to `4cd34938` the
+successor now changes eight paths (+851/-21), and `src/station_intent.rs` is its
+first production source change. That change makes slot acquisition and worker
+completion for a cancellable filesystem phase share one absolute
+deadline-plus-grace boundary, instead of giving each its own grace window; the
+implementer reports that it fixes a recurring race in cooperative grace. The
+SQLite process test now treats any Windows child exit status above 255 as
+abnormal and fails, and a unit test maps -1073740940 to 0xC0000374. CI adds
+Windows Error Reporting crash dumps, full debug symbols, symbol snapshots before
+each process-test profile runs, gates that fail on collected or delayed crash
+dumps, crash-evidence upload, and a separate Windows heap diagnostics job with a
+45-minute timeout that applies full PageHeap to the `telex.exe` image and runs
+the SQLite daemon process test target up to three times, stopping at the first
+failure. The implementer reports that it found no defensible source cause for
+the earlier 0xC0000374 exit at `dacf3d18`. It also reports compile-only
+validation on Rust 1.99 and 1.98, a clean YAML lint, and it requested Local's
+source and design reviews and fresh Watcher and Operator Station attestations.
+It then supplied its fresh gpt-6-astra receipts (high reasoning, long context):
+an exact-delta source review (`REVIEW-PR161-52ABB30-DELTA.md` in the implementer
+worktree review folder, 1,230 bytes, SHA-256
+`111f2aea8cf5d24b0c26f84025a4db719291bcd6eea91acf7061627488336568`) and a design
+revalidation (`REVIEW-PR161-52ABB30-DESIGN.md` in the same folder, 1,035 bytes,
+SHA-256 `e99b46aac27e7f6a7e7206f0d55268ffed40765cf00d7053e96dc5db18bf72a1`),
+both APPROVED with zero findings. Both grant static source or design credit only
+and establish no hosted CI success, heap-corruption cause or fix, merge
+readiness, or I161-1 closure. Watcher's attestation
+(`watcher-pr161-52abb30-source-consumability-attestation.md` in session
+e00d296e-ffca-4477-b1c8-c4d340bd30be, 8,463 bytes, SHA-256
+`0963acc8485c354d1dbbb118cbbbe4082d6bb71e4b678de705ac0227d582f105`) approved
+source consumability: all Watcher-facing public, fixture, backend, daemon, and
+contract files are unchanged; it treats the product change as an internal
+Station scheduling correction outside Watcher's public client seam; and it finds
+no change to the Watcher contract or accepted consumer semantics. Runtime
+qualification awaits all 18 jobs of exact-head CI, and the attestation grants no
+merge or post-merge credit. Local's source review
+(`pr161-local-delta-52abb30-20261022.json` in session
+aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, 11,328 bytes, SHA-256
+`76b93f0535e9d262ae0dbe3d097ab1c4bd4bf96b1e032c87195538580f8d5be6`) approved the
+`dacf3d18` to `52abb30e` delta with no findings. It accepts the single
+deadline-plus-grace boundary, the abnormal Windows exit handling, and the
+crash-dump, symbol-snapshot, PageHeap, dump-gate, and artifact-upload sources.
+It notes that the existing Windows build-and-test job checks out the provider's
+merge commit rather than the exact head and uploads its artifacts only on
+failure, that it did not independently verify that saved executables and symbol
+files match, and that it infers no heap cause or fix and no CI, E161, incident,
+runtime, or merge result. Local's design inspection
+(`pr161-local-design-inspection-52abb30-20261022.md` in session
+af271672-5d33-418c-bb9c-0f4d4570c7d7, 19,259 bytes, SHA-256
+`04006afd1959d4ae8755fd6b9be8feba32fec638f0158dd642dfb84237055d13`), run with
+gpt-6-astra at high reasoning and long context, approved the static delta with
+no findings: the grace repair preserves the accepted scheduling and cancellation
+boundary, and the Windows status checks and hosted crash-evidence workflow
+strengthen failure visibility without adding daemon authority or weakening the
+`InstalledCurrent` and cleanup contracts. It records that the Station change is
+production code; that PageHeap covers only the `telex.exe` image; that a
+ten-second wait before each dump check does not prove Windows Error Reporting
+has finished writing; that the existing build-and-test job uploads artifacts
+only on failure and its artifact name does not prove it built the exact head;
+that no independent check matched the saved symbol files to the executables; and
+that the 0xC0000374 cause and fix remain unproven. It grants static design
+credit only, with no runtime, E161, or merge credit. Operator Station's
+attestation
+(`operator-station-pr161-premerge-consumability-attestation-52abb30e-source.json`
+in session 002c5122-fc0d-403c-8f87-625d87385d44, 12,888 bytes, SHA-256
+`3a6aa306c27c43c1620d45c2dbb5b54de1af19e8ed2f3872f76ceed19f9045f2`) approved
+source consumability and the Station scheduling design with no blocking finding:
+the shared boundary preserves mandatory cooperative partial-page progress
+without granting contention a second grace period, and the remaining changes are
+fail-closed Windows test and CI diagnostics. It marks its `dacf3d18` runtime
+blocker OS-PR161-DACF3D1-R1 as superseded rather than closed, and it requires
+terminal run 39819692324 with all 18 jobs successful before runtime credit.
+Required CI run 39819692324 started at this head with 18 jobs, including the
+official v0.2.1 proof job 119967372167, the live PostgreSQL parity job
+119967372326, the Windows `InstalledCurrent` PostgreSQL process proof job
+119967372106, and the Windows heap diagnostics job 119967372231; it had no
+terminal result when this record was made. No `dacf3d18` or earlier evidence
+carries over. At `52abb30e`, Local's source review and design inspection, the
+implementer's source and design reviews, and Watcher's and Operator Station's
+source attestations have approved the head; passing required CI and both
+consumers' runtime qualification are outstanding, and the head has no gate
+credit. E161-1 and the I161-1 impact and isolation questions remain open, the
 I161-1 workstation preservation and freeze are unchanged, and no merge, release,
 tag, or fleet action is authorized.
 
@@ -1356,10 +1447,11 @@ proof replay remain frozen, so runtime validation relies on CI; ordinary source
 and CI work may continue within that freeze. It does not change the gate
 evidence for PR head `4cd34938`, which remains scoped to that exact head. E161-1
 validation and merge remain outstanding; the implementer is resolving E161-1
-through a hosted CI proof; the first attempt at `5d21a63d` failed, and the
+through a hosted CI proof; the first attempt at `5d21a63d` failed; the
 Rust-harness replacement proof job passed at `dacf3d18`, but that head's CI run
-failed in a required Windows test job. Scope, invalidation conditions, and the
-accepted trusted `InstalledCurrent` policy are unchanged.
+failed in a required Windows test job; and current head `52abb30e` awaits a
+passing exact-head CI run. Scope, invalidation conditions, and the accepted
+trusted `InstalledCurrent` policy are unchanged.
 
 ## Invalidation conditions
 
