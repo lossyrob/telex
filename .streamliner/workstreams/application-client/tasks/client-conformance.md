@@ -3,10 +3,11 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `0486beeb`, which is intended
-  to address the PostgreSQL CI failures at `745eaf28`; Local's source review and
-  the retained delta review approved it, its required CI is under way, and
-  proof-isolation incident I161-1 is unresolved
+- **Status:** in progress; PR #161 is open at head `4cd34938`, which is intended
+  to address Operator Station finding OS-PR161-0486BEE-1 at `0486beeb`; Local's
+  source review and the retained delta review approved it, its required CI is
+  under way, fresh consumer attestations are still needed, and proof-isolation
+  incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -871,11 +872,92 @@ claim that these changes caused or fix the CI failures. Local reports L161-6
 still resolved in source and D161 and earlier source authority conserved.
 Local's review was read-only and did not run the writer's validation. This is a
 source approval only. It gives no CI, runtime, consumer, design, merge, or
-closure credit. Required CI run 39770808804 is in progress at the exact head;
-its result is not recorded here. `0486beeb` has no CI, readiness, consumer,
-design, merge, or closure credit yet. The move from `745eaf28` invalidates all
-`745eaf28` current-head evidence, and earlier approvals and CI results are
-historical. Incident I161-1 and the withholding of E161-1 are unchanged.
+closure credit. Required CI run 39770808804 then ran at the exact head; its
+result follows. The move from `745eaf28` invalidates all `745eaf28` current-head
+evidence, and earlier approvals and CI results are historical. Incident I161-1
+and the withholding of E161-1 are unchanged.
+
+Required CI run 39770808804 at `0486beeb` completed with success at
+2026-10-22T11:48:08Z. All 16 jobs succeeded, including the required Live
+Postgres parity job (119797559542) and the required Windows InstalledCurrent
+Postgres process-proof job (119797559651). At completion, PR #161 was open and
+not a draft at the exact head, its base was `main` at `2c2b9fb5`, and GitHub
+reported the merge state as clean. `0486beeb` therefore receives required-CI
+credit for this exact head only; any head movement invalidates it. The passing
+run shows that the two PostgreSQL failures from run 39764752556 did not recur at
+this head; it does not by itself establish their cause. Passing CI is not
+isolation certification: incident I161-1 remains unresolved, and E161-1 remains
+withheld. App reported that fresh Watcher and Operator Station pre-merge
+consumer attestations at `0486beeb` had started; their results follow.
+`0486beeb` has no consumer, design, merge, or closure credit, and the formal
+post-merge consumer gate remains planned.
+
+Both fresh attestations at `0486beeb` returned on 2026-10-22, with different
+verdicts. Watcher APPROVED (session e00d296e-ffca-4477-b1c8-c4d340bd30be;
+gpt-5.6-sol, high reasoning, context tier unavailable; artifact
+`watcher-pr161-0486bee-premerge-consumability-attestation.md`, 15,537 bytes,
+SHA-256 `07880162da63e9c4cd3814c2ce141028d861eee3c4fb024c6d4dd38c807e6e22`). It
+found that Watcher can consume the client through supported public surfaces
+only, and that the D161 and L161 repairs and the PostgreSQL lifecycle changes
+add no Watcher-private seam and no new compatibility or design dependency.
+Operator Station returned CHANGES REQUIRED (session
+002c5122-fc0d-403c-8f87-625d87385d44; gpt-5.6-sol, high reasoning, context tier
+unavailable; artifact
+`operator-station-pr161-premerge-consumability-attestation-0486beeb.json`,
+13,035 bytes, SHA-256
+`c96ed005240d26972c99255bbeaf88835a9605c6932c1d43ddd377565a83559e`). Station
+found the public API and its fixture behavior compatible and found no private
+seam or new design dependency. Its blocker, OS-PR161-0486BEE-1, is a
+teardown-order defect: line 281 of `tests/application_client_fixture.rs` drops
+the PostgreSQL fixture schema after the probes without first stopping the
+InstalledCurrent daemon. That file was not part of the `0486beeb` delta; the
+earlier stop-before-discard change covered the conformance scenario store and
+the auxiliary migration store. In passing Live Postgres job 119797559542, the
+fixture binary started at 11:31:36Z and its PostgreSQL test reported ok at
+11:33:42Z. The PostgreSQL service log records 71 `relation "leases" does not
+exist` errors from 11:33:22 to 11:39:12 UTC, about every five seconds, ending
+just before the container was removed. The job passed because no assertion
+checks for daemon termination or database activity after the drop. Station
+requires the fixture to stop its exact daemon through the existing
+identity-bound stop path before dropping the schema, a rerun of the required
+PostgreSQL and InstalledCurrent proofs at the new head showing no surviving
+daemon or continued queries, and a fresh Station attestation at that head. Run
+39770808804 remains valid run evidence for `0486beeb`, but it does not waive
+this finding. App then reported that a surgical successor was assigned.
+Watcher's approval is bounded pre-merge evidence for `0486beeb` only, and head
+movement invalidates it. `0486beeb` has no combined consumer credit and no
+design, merge, or closure credit. I161-1 remains unresolved, E161-1 remains
+withheld, and the formal post-merge consumer gate remains planned.
+
+Successor head `4cd34938` (tree `16456905`), a direct child of `0486beeb`, is
+intended to address OS-PR161-0486BEE-1. Its only change adds 20 lines to
+`tests/application_client_fixture.rs`: the fixture keeps its capability-presence
+observation, calls the existing identity-bound `iso.stop_daemon()`, and only
+then runs the final `DROP SCHEMA`; a stop that cannot be verified panics before
+the drop. It also adds a static source-order regression check. The retained
+gpt-6-astra exact-delta review (artifact `REVIEW-PR161-4CD3493-DELTA.md`, 1,739
+bytes, SHA-256
+`0a06e1e3e47b747f87b7be2a98df014cb997791f89d91417774437b6ac3757d3`; high
+reasoning, long-context tier) approved it with no findings, using static
+inspection only. Local's exact-head source review (report
+`pr161-local-delta-4cd3493-20261022.json` in session
+aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, 5,078 bytes, SHA-256
+`b870fe063084a5224df82979954393d16fe0ec543d293afb1efa89cd46e0ef59`) also
+approved it with no findings and accepted OS-PR161-0486BEE-1 as resolved in
+source. Local qualified that approval: the later destructor stop remains best
+effort and is not a numeric-PID kill or root cleanup; the regression check is
+textual and protects only the current straight-line function, not arbitrary
+future control flow; Local inspected the check but did not run it; and source
+review does not establish runtime daemon termination. Local found all other
+tracked files identical to `0486beeb`, so the earlier D161, L161, SID-authority,
+public-API, and PostgreSQL lifecycle source authority is conserved. Both
+approvals are source-only. Required CI run 39775306925 is in progress at the
+exact head; its result is not recorded here. The head movement invalidates all
+`0486beeb` current-head evidence, including its CI credit and Watcher's
+approval, so `4cd34938` has no CI, consumer, design, merge, or closure credit
+yet; it needs passing required CI and fresh Watcher and Operator Station
+attestations. I161-1 remains unresolved, E161-1 remains withheld, and the formal
+post-merge consumer gate remains planned.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
