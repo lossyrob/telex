@@ -3,9 +3,9 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `2b8ade1d` with source
-  review approved, required CI failed in three Windows jobs, and
-  proof-isolation incident I161-1 unresolved
+- **Status:** in progress; PR #161 is open at head `ec8b88f7` with source
+  review approved after required CI failed at `2b8ade1d`, required CI at the
+  new head not yet recorded, and proof-isolation incident I161-1 unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -492,6 +492,26 @@ pre-upgrade install-root validation, and `daemon_bootstrap` unit tests failed
 `a370e7fe276901d004e717991571306291915268373264ea3c4472140c0d70f0`). The
 `2b8ade1d` source approvals stand as source review only, and the head has no
 CI or readiness credit.
+
+The writer then submitted a two-path, Windows-only source change at exact head
+`ec8b88f71ddb5aa8bea79704806e7895d7b4ad3a` (tree
+`a1a73573150fc8371553f09ba85b3d0776b9181b`), +48/-95 lines, intended to address
+that failure class. Windows may give objects created by an elevated process the
+token's default owner, often Administrators, rather than the token user, and
+bootstrap accepted only the token user. Bootstrap now reuses the self-owner set
+already defined in `platform_fs`: the token user, the token owner, and groups
+the token may assign as owner. Deny-only groups are excluded from that set; this
+does not newly reject every access-control entry that names such a group.
+Administrators remains an independently trusted access-control trustee, as
+before, and there is no new broad Administrators exemption for object owners.
+Local's bounded review approved `ec8b88f7` with no findings (report SHA-256
+`58a282d5bb264211b7bd26cd820a4efe09a55deb3bf93e0d252b3ac12098b482`), and two
+retained `gpt-6-astra` reviewers, run with high reasoning and long context,
+approved `2b8ade1d..ec8b88f7` with no actionable findings (artifact SHA-256
+`4d6b7dd73f8c5d307f43dbf86a6d0286cb7de71f8b795bb73f6b7c315baf3753`; product
+merge base `e4f585a7`). The earlier source resolutions of L161-1 through L161-5
+are conserved. These are source approvals only. CI run 39737943130 was started
+at `ec8b88f7`; its result is not recorded here.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

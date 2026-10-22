@@ -242,6 +242,23 @@ install-root validation, and `daemon_bootstrap` unit tests failed. The
 `2b8ade1d` source approvals stand as source review only, and the head has no
 CI or readiness credit.
 
+The writer then submitted a two-path, Windows-only source change at exact head
+`ec8b88f71ddb5aa8bea79704806e7895d7b4ad3a` (tree
+`a1a73573150fc8371553f09ba85b3d0776b9181b`), +48/-95 lines, intended to address
+that failure class. Windows may give objects created by an elevated process the
+token's default owner, often Administrators, rather than the token user, and
+bootstrap accepted only the token user. Bootstrap now reuses the self-owner set
+already defined in `platform_fs`: the token user, the token owner, and groups
+the token may assign as owner. Deny-only groups are excluded from that set; this
+does not newly reject every access-control entry that names such a group.
+Administrators remains an independently trusted access-control trustee, as
+before, and there is no new broad Administrators exemption for object owners.
+Local's bounded review approved `ec8b88f7` with no findings, and two retained
+`gpt-6-astra` reviewers, run with high reasoning and long context, approved
+`2b8ade1d..ec8b88f7` with no actionable findings. The earlier source resolutions
+of L161-1 through L161-5 are conserved. These are source approvals only. CI run
+39737943130 was started at `ec8b88f7`; its result is not recorded here.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access
