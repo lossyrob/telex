@@ -934,7 +934,11 @@ fn configure_probe_command(command: &mut std::process::Command) {
 }
 
 #[cfg(windows)]
-fn configure_probe_command(_command: &mut std::process::Command) {}
+fn configure_probe_command(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+    command.creation_flags(CREATE_SUSPENDED);
+}
 
 #[cfg(target_os = "linux")]
 struct ProbeProcessGroup {
@@ -961,6 +965,51 @@ impl ProbeProcessGroup {
     fn disarm(&mut self) {
         self.active = false;
     }
+}
+
+#[cfg(target_os = "linux")]
+fn resume_probe_process(_child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    let mut found = None;
+    let mut ok = unsafe { Thread32First(snapshot, &mut entry) };
+    while ok != 0 {
+        if entry.th32OwnerProcessID == child.id() {
+            found = Some(entry.th32ThreadID);
+            break;
+        }
+        ok = unsafe { Thread32Next(snapshot, &mut entry) };
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    let thread_id = found.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread_id) };
+    if thread == 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let resumed = unsafe { ResumeThread(thread) };
+    unsafe {
+        CloseHandle(thread);
+    }
+    if resumed == u32::MAX {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -1155,11 +1204,14 @@ fn run_bounded_probe_process(
     let mut group = match ProbeProcessGroup::attach(&child) {
         Ok(group) => group,
         Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_direct_probe_process(&mut child, deadline);
             return Err(error);
         }
     };
+    if resume_probe_process(&child).is_err() {
+        terminate_probe_process(&mut child, &group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
     let Some(stdout) = child.stdout.take() else {
         terminate_probe_process(&mut child, &group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
@@ -1211,11 +1263,27 @@ fn run_bounded_probe_process(
     if timed_out {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
+    // The version probe is not allowed to leave background work. Signal the
+    // owned group/job even after an ordinary leader exit so descendants that
+    // closed their inherited pipes cannot survive a successful probe.
+    group.terminate();
     group.disarm();
     Ok(ProbeOutput {
         status: status.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
         stdout: stdout.captured,
     })
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn terminate_direct_probe_process(child: &mut std::process::Child, deadline: Instant) {
+    let _ = child.kill();
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    let _ = child.try_wait();
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -3091,7 +3159,6 @@ mod tests {
         if std::env::var_os("TELEX_TEST_PROBE_PIPE_PARENT").is_none() {
             return;
         }
-        std::thread::sleep(Duration::from_millis(300));
         let mut descendant =
             std::process::Command::new(std::env::current_exe().expect("current test executable"));
         descendant
