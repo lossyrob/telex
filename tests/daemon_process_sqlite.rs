@@ -284,20 +284,56 @@ fn process_test_root(id: usize) -> PathBuf {
     let local = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    local
+    let base = local
         .ancestors()
         .last()
-        .expect("Windows local path has a volume root")
-        .join(format!("telex-process-tx{}-{id}", std::process::id()))
+        .expect("Windows local path has a volume root");
+    for attempt in 0..100 {
+        let root = base.join(format!(
+            "telex-process-tx{}-{:x}-{id}-{attempt}",
+            std::process::id(),
+            process_run_nonce()
+        ));
+        if create_owner_private_daemon_fixture_dir(&root) {
+            return root;
+        }
+    }
+    panic!("could not allocate a unique Windows process-test root");
 }
 
 #[cfg(not(windows))]
 fn process_test_root(id: usize) -> PathBuf {
-    PathBuf::from("/tmp").join(format!("tx{}-{id}", std::process::id()))
+    use std::os::unix::fs::DirBuilderExt;
+    for attempt in 0..100 {
+        let root = PathBuf::from("/tmp").join(format!(
+            "tx{}-{:x}-{id}-{attempt}",
+            std::process::id(),
+            process_run_nonce()
+        ));
+        match std::fs::DirBuilder::new().mode(0o700).create(&root) {
+            Ok(()) => return root,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => panic!(
+                "creating unique process-test root {}: {error}",
+                root.display()
+            ),
+        }
+    }
+    panic!("could not allocate a unique Unix process-test root");
+}
+
+fn process_run_nonce() -> u128 {
+    static NONCE: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *NONCE.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time is after Unix epoch")
+            .as_nanos()
+    })
 }
 
 #[cfg(windows)]
-fn create_owner_private_daemon_fixture_dir(path: &Path) {
+fn create_owner_private_daemon_fixture_dir(path: &Path) -> bool {
     use std::ffi::{c_void, OsStr};
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{
@@ -342,7 +378,7 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
     unsafe {
         LocalFree(descriptor);
     }
-    if ok == 0 {
+    let created = if ok == 0 {
         let err = unsafe { GetLastError() };
         assert_eq!(
             err,
@@ -351,7 +387,10 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
             path.display(),
             std::io::Error::last_os_error()
         );
-    }
+        false
+    } else {
+        true
+    };
 
     fn current_user_sid_string() -> String {
         use std::mem::{size_of, MaybeUninit};
@@ -432,6 +471,8 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
         }
         String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
     }
+
+    created
 }
 
 fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) -> CmdOutput {
