@@ -34,8 +34,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use telex::application_client::{
     AddressSpec, ApplicationCapability, ApplicationClient, ApplicationClientConfig,
     ApplicationClientError, ApplicationDaemonBootstrap, ApplicationResponsibility,
@@ -257,6 +258,117 @@ fn build_public_fixture() -> PathBuf {
 
 fn process_postgres_enabled() -> bool {
     std::env::var("TELEX_PROCESS_PG_URL").is_ok_and(|url| !url.trim().is_empty())
+}
+
+#[cfg(windows)]
+fn proof_sha256(path: &Path) -> String {
+    Sha256::digest(std::fs::read(path).expect("read proof input"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[cfg(windows)]
+fn run_released_proof_command(
+    mut command: Command,
+    evidence_dir: &Path,
+    name: &str,
+    timeout: Duration,
+) -> isolation::CliOutput {
+    let stdout_path = evidence_dir.join(format!("{name}.stdout.txt"));
+    let stderr_path = evidence_dir.join(format!("{name}.stderr.txt"));
+    let metadata_path = evidence_dir.join(format!("{name}.metadata.json"));
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(
+            std::fs::File::create(&stdout_path).expect("create proof stdout"),
+        ))
+        .stderr(Stdio::from(
+            std::fs::File::create(&stderr_path).expect("create proof stderr"),
+        ));
+
+    let started = Instant::now();
+    let deadline = started + timeout;
+    let cleanup_reserve =
+        Duration::from_millis((timeout.as_millis() / 10).clamp(1_000, 5_000) as u64);
+    let run_deadline = deadline - cleanup_reserve;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let output = isolation::CliOutput {
+                code: None,
+                stdout: String::new(),
+                stderr: format!("spawn failed: {error}"),
+                timed_out: false,
+            };
+            std::fs::write(
+                metadata_path,
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "name": name,
+                    "spawned": false,
+                    "timedOut": false,
+                    "directTerminationConfirmed": false,
+                    "error": output.stderr,
+                }))
+                .expect("serialize spawn failure"),
+            )
+            .expect("write spawn failure");
+            return output;
+        }
+    };
+
+    let mut status = None;
+    let mut timed_out = false;
+    let mut kill_requested = false;
+    while Instant::now() < run_deadline {
+        status = child.try_wait().expect("observe proof child");
+        if status.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    if status.is_none() {
+        timed_out = true;
+        kill_requested = child.kill().is_ok();
+        while Instant::now() < deadline {
+            status = child.try_wait().expect("observe killed proof child");
+            if status.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    let stdout = String::from_utf8_lossy(&std::fs::read(&stdout_path).unwrap_or_default())
+        .trim()
+        .to_string();
+    let stderr = String::from_utf8_lossy(&std::fs::read(&stderr_path).unwrap_or_default())
+        .trim()
+        .to_string();
+    std::fs::write(
+        metadata_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "name": name,
+            "spawned": true,
+            "timedOut": timed_out,
+            "killRequested": kill_requested,
+            "directTerminationConfirmed": status.is_some(),
+            "exitCode": status.and_then(|status| status.code()),
+            "elapsedMilliseconds": started.elapsed().as_millis(),
+            "stdoutBytes": stdout.len(),
+            "stderrBytes": stderr.len(),
+            "rootDisposition": "retained for ephemeral runner teardown",
+        }))
+        .expect("serialize command metadata"),
+    )
+    .expect("write command metadata");
+
+    isolation::CliOutput {
+        code: status.and_then(|status| status.code()),
+        stdout,
+        stderr,
+        timed_out,
+    }
 }
 
 fn write_fixture_profile(iso: &Isolation, profile_name: &str) {
@@ -1454,6 +1566,255 @@ async fn installed_current_child_rejects_mismatched_build_before_readiness() {
         !iso.daemon_running(),
         "a mismatched child must not remain serving"
     );
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "required hosted proof using the official released v0.2.1 Windows asset"]
+async fn released_v021_writer_installs_exact_candidate() {
+    let _env = ENV_LOCK.lock().await;
+    let released = PathBuf::from(
+        std::env::var_os("TELEX_RELEASED_V021_EXE")
+            .expect("TELEX_RELEASED_V021_EXE must name the verified release asset"),
+    );
+    let expected_head = std::env::var("TELEX_V021_EXPECTED_HEAD").expect("exact candidate head");
+    let archive_sha = std::env::var("TELEX_RELEASED_V021_ARCHIVE_SHA256")
+        .expect("verified release archive digest");
+    let report_path =
+        PathBuf::from(std::env::var_os("TELEX_V021_PROOF_REPORT").expect("proof report path"));
+    let evidence_dir = report_path.parent().expect("proof evidence directory");
+    std::fs::create_dir_all(evidence_dir).expect("create proof evidence directory");
+    assert!(released.is_absolute() && released.is_file());
+    assert_eq!(
+        archive_sha,
+        "f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0"
+    );
+
+    let iso = Isolation::new_empty("ic-released-v021");
+    let mut restore = iso.apply_env();
+    let candidate = isolation::branch_binary();
+    let tag = format!("v0.3.0-ci-{}", &expected_head[..8]);
+    let probe_counter = iso.root.join("admission-probes");
+    let parent_marker = iso.root.join("parent-admission-held.marker");
+    let child_marker = iso.root.join("child-admission-held.marker");
+    restore.set("TELEX_TEST_ADMISSION_PROBE_COUNTER", &probe_counter);
+    restore.set("TELEX_TEST_PARENT_ADMISSION_MARKER", &parent_marker);
+    restore.set("TELEX_TEST_CHILD_ADMISSION_HELD_DELAY_MS", "1");
+    restore.set("TELEX_TEST_CHILD_ADMISSION_HELD_MARKER", &child_marker);
+
+    let mut released_version = iso.command_for(&released);
+    released_version
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .args(["--json", "version", "--root"])
+        .arg(&iso.install_root);
+    let released_version = run_released_proof_command(
+        released_version,
+        evidence_dir,
+        "released-version",
+        Duration::from_secs(30),
+    );
+    released_version.assert_success("released v0.2.1 version");
+    let released_json: serde_json::Value =
+        serde_json::from_str(&released_version.stdout).expect("released version JSON");
+    assert_eq!(released_json["version"]["package_version"], "0.2.1");
+    assert_eq!(
+        released_json["version"]["build_id"],
+        "212b76a4c586101bdc2a53264e2a4c3e2326671a"
+    );
+
+    let mut candidate_version = iso.command_for(&candidate);
+    candidate_version
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .args(["--json", "version", "--root"])
+        .arg(&iso.install_root);
+    let candidate_version = run_released_proof_command(
+        candidate_version,
+        evidence_dir,
+        "candidate-version",
+        Duration::from_secs(30),
+    );
+    candidate_version.assert_success("exact candidate version");
+    let candidate_json: serde_json::Value =
+        serde_json::from_str(&candidate_version.stdout).expect("candidate version JSON");
+    assert_eq!(candidate_json["version"]["package_version"], "0.3.0");
+    assert_eq!(candidate_json["version"]["build_id"], expected_head);
+    assert_eq!(
+        candidate_json["version"]["application_bootstrap_admission_version"],
+        1
+    );
+
+    let mut upgrade = iso.command_for(&released);
+    upgrade
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .args(["--json", "upgrade", "--from"])
+        .arg(&candidate)
+        .args(["--version", &tag, "--root"])
+        .arg(&iso.install_root)
+        .args(["--skip-drain", "--force"]);
+    let upgrade = run_released_proof_command(
+        upgrade,
+        evidence_dir,
+        "released-upgrade",
+        Duration::from_secs(60),
+    );
+    upgrade.assert_success("released v0.2.1 writer installs exact candidate");
+
+    let manifest_path = iso
+        .install_root
+        .join("versions")
+        .join(&tag)
+        .join("manifest.json");
+    let installed_candidate = iso
+        .install_root
+        .join("versions")
+        .join(&tag)
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    let manifest_before = std::fs::read(&manifest_path).expect("old-writer manifest bytes");
+    let manifest_mtime_before = std::fs::metadata(&manifest_path)
+        .expect("old-writer manifest metadata")
+        .modified()
+        .expect("old-writer manifest mtime");
+    let manifest_identity_before = platform_file_identity(&manifest_path);
+    let manifest_sha_before = proof_sha256(&manifest_path);
+    let manifest_json: serde_json::Value =
+        serde_json::from_slice(&manifest_before).expect("old-writer manifest JSON");
+    assert!(
+        manifest_json
+            .get("application_bootstrap_admission_version")
+            .is_none(),
+        "the official v0.2.1 writer must produce the compatibility shape"
+    );
+    assert_eq!(manifest_json["package_version"], "0.3.0");
+    assert_eq!(manifest_json["build_id"], expected_head);
+    assert_eq!(
+        std::fs::read(&installed_candidate).expect("installed candidate bytes"),
+        std::fs::read(&candidate).expect("exact candidate bytes")
+    );
+
+    let fixture = build_public_fixture();
+    let mut attach = iso.command_for(&fixture);
+    attach
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", &iso.install_root)
+        .env("TELEX_FIXTURE_RUN_ID", "released-v021-ci")
+        .arg("attach");
+    let attach = run_released_proof_command(
+        attach,
+        evidence_dir,
+        "public-attach",
+        Duration::from_secs(180),
+    );
+    attach.assert_success("public Application Client attach through released writer");
+    assert!(attach.stdout.contains("attach=ready"));
+    assert!(attach.stdout.contains("probe-result=ok"));
+
+    assert_eq!(
+        std::fs::read(&manifest_path).expect("manifest bytes after admission"),
+        manifest_before
+    );
+    assert_eq!(
+        std::fs::metadata(&manifest_path)
+            .expect("manifest metadata after admission")
+            .modified()
+            .expect("manifest mtime after admission"),
+        manifest_mtime_before
+    );
+    assert_eq!(
+        platform_file_identity(&manifest_path),
+        manifest_identity_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(&probe_counter)
+            .expect("admission probe counter")
+            .lines()
+            .count(),
+        1
+    );
+    assert!(parent_marker.is_file());
+    assert!(child_marker.is_file());
+
+    let cap_path = iso.cap_path().expect("admitted capability record");
+    let cap = iso.cap_json().expect("capability JSON");
+    assert_eq!(cap["bootstrap_admission_version"], 1);
+    assert!(cap["startup_executable_file_identity"].is_object());
+    let daemon_pid = cap["server_pid"].as_u64().expect("daemon pid");
+    let daemon_start_time = cap["server_start_time"]
+        .as_u64()
+        .expect("daemon start time");
+    iso.stop_daemon_with_executable(&installed_candidate);
+
+    let volume_root = iso
+        .root
+        .ancestors()
+        .last()
+        .expect("proof volume root")
+        .to_path_buf();
+    assert_eq!(iso.root.parent(), Some(volume_root.as_path()));
+    let report = serde_json::json!({
+        "schemaVersion": 1,
+        "result": "pass",
+        "candidate": {
+            "commit": expected_head,
+            "packageVersion": candidate_json["version"]["package_version"],
+            "buildId": candidate_json["version"]["build_id"],
+            "executable": candidate.display().to_string(),
+            "sha256": proof_sha256(&candidate),
+            "installedExecutable": installed_candidate.display().to_string(),
+            "installedSha256": proof_sha256(&installed_candidate),
+        },
+        "releasedWriter": {
+            "release": "https://github.com/lossyrob/telex/releases/tag/v0.2.1",
+            "tag": "v0.2.1",
+            "commit": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
+            "asset": "telex-v0.2.1-x86_64-pc-windows-msvc.zip",
+            "assetSha256": archive_sha,
+            "executable": released.display().to_string(),
+            "executableSha256": proof_sha256(&released),
+        },
+        "isolation": {
+            "executionRoot": iso.root.display().to_string(),
+            "executionRootParentIsVolumeRoot": true,
+            "telexHome": iso.home.display().to_string(),
+            "runDir": iso.run_dir.display().to_string(),
+            "db": iso.db_path.display().to_string(),
+            "installRoot": iso.install_root.display().to_string(),
+            "localAppData": iso.state_dir.display().to_string(),
+            "parentAclMutation": false,
+            "workstationState": false,
+            "sharedDb": false,
+            "userInstall": false,
+            "rootDisposition": "retained for ephemeral runner teardown",
+        },
+        "oldWriterManifest": {
+            "path": manifest_path.display().to_string(),
+            "tag": tag,
+            "packageVersion": manifest_json["package_version"],
+            "buildId": manifest_json["build_id"],
+            "admissionFieldPresent": false,
+            "sha256Before": manifest_sha_before,
+            "sha256After": proof_sha256(&manifest_path),
+            "mtimeUnchanged": true,
+            "fileIdentityBefore": manifest_identity_before,
+            "fileIdentityAfter": platform_file_identity(&manifest_path),
+            "bytesUnchanged": true,
+        },
+        "runtimeProof": {
+            "preSpawnProbeCount": 1,
+            "parentAdmissionObserved": true,
+            "childAdmissionObserved": true,
+            "capPath": cap_path.display().to_string(),
+            "capBootstrapAdmissionVersion": cap["bootstrap_admission_version"],
+            "capStartupExecutableFileIdentity": cap["startup_executable_file_identity"],
+            "capServerPid": daemon_pid,
+            "capServerStartTime": daemon_start_time,
+            "publicAttachReady": true,
+            "daemonExited": true,
+        },
+    });
+    std::fs::write(
+        report_path,
+        serde_json::to_vec_pretty(&report).expect("serialize proof report"),
+    )
+    .expect("write proof report");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

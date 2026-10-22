@@ -399,6 +399,7 @@ jobs:
   released-v021-upgrade-windows:
     name: Released v0.2.1 upgrade proof (Windows)
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout the exact candidate head
         uses: actions/checkout@v4
@@ -410,60 +411,50 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Test bounded proof process and root ownership
+      - name: Download and verify the official v0.2.1 asset
         shell: pwsh
-        run: tests/released_v021_process_test.ps1
-
-      - name: Build the exact SQLite candidate
-        env:
-          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: cargo build --no-default-features --features sqlite
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
+          $downloads = Join-Path $evidence "downloads"
+          $extract = Join-Path $evidence "released"
+          New-Item -ItemType Directory -Path $downloads, $extract -Force | Out-Null
+          $asset = "telex-v0.2.1-x86_64-pc-windows-msvc.zip"
+          $archive = Join-Path $downloads $asset
+          $sidecar = "$archive.sha256"
+          $url = "https://github.com/lossyrob/telex/releases/download/v0.2.1/$asset"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Invoke-WebRequest -Uri "$url.sha256" -OutFile $sidecar
+          $expected = "f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0"
+          $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $sidecarHash = ((Get-Content -Raw $sidecar).Trim() -split "\s+")[0].ToLowerInvariant()
+          if ($archiveHash -ne $expected -or $sidecarHash -ne $expected) {
+            throw "official v0.2.1 asset checksum mismatch"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          "TELEX_RELEASED_V021_EXE=$(Join-Path $extract 'telex.exe')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_RELEASED_V021_ARCHIVE_SHA256=$archiveHash" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_PROOF_REPORT=$(Join-Path $evidence 'report.json')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_PROOF_EVIDENCE=$evidence" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prove the released v0.2.1 writer and exact candidate
         shell: pwsh
+        env:
+          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+          TELEX_V021_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
-          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-          tests/released_v021_upgrade_proof.ps1 `
-            -Candidate (Resolve-Path "target/debug/telex.exe") `
-            -ExpectedHead "${{ github.event.pull_request.head.sha || github.sha }}" `
-            -Report (Join-Path $evidence "report.json")
-
-      - name: Remove the exact disposable proof root
-        if: always()
-        shell: pwsh
-        run: |
-          $evidence = Join-Path $env:RUNNER_TEMP "telex-v021-proof"
-          $reportPath = Join-Path $evidence "report.json"
-          if (-not (Test-Path -LiteralPath $reportPath)) {
-            Write-Warning "No report exists; runner teardown retains cleanup authority."
-            exit 0
+          $log = Join-Path $env:TELEX_V021_PROOF_EVIDENCE "cargo-test.log"
+          cargo test --no-default-features --features sqlite `
+            --test installed_current_process `
+            released_v021_writer_installs_exact_candidate `
+            -- --ignored --exact --nocapture 2>&1 |
+            Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
           }
-          $report = Get-Content -Raw $reportPath | ConvertFrom-Json
-          $root = [string]$report.isolation.executionRoot
-          $volumeRoot = [IO.Path]::GetPathRoot($env:RUNNER_TEMP)
-          $expectedParent = $volumeRoot.TrimEnd("\")
-          $actualParent = (Split-Path -Parent $root).TrimEnd("\")
-          $leaf = Split-Path -Leaf $root
-          if (-not $report.isolation.rootOwned -or
-              -not $report.isolation.processCleanupSafe -or
-              -not $report.isolation.cleanupSafe) {
-            Write-Warning "Proof did not establish safe cleanup; runner teardown owns disposal."
-            exit 0
-          }
-          if ($actualParent -ne $expectedParent -or
-              $leaf -notmatch '^telex-v021-ci-[0-9a-f]{32}$') {
-            throw "refusing cleanup outside the exact disposable proof-root shape"
-          }
-          if (Test-Path -LiteralPath $root) {
-            Remove-Item -LiteralPath $root -Recurse -Force
-          }
-          $report.isolation.cleanupCompleted = $true
-          [IO.File]::WriteAllText(
-            $reportPath,
-            ($report | ConvertTo-Json -Depth 12),
-            [Text.UTF8Encoding]::new($false)
-          )
 
       - name: Upload released-upgrade evidence
         if: always()

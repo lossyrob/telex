@@ -651,9 +651,7 @@ pub fn create_owner_private_dir(path: &Path) {
         use std::ffi::{c_void, OsStr};
         use std::mem::{size_of, MaybeUninit};
         use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Foundation::{
-            CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS,
-        };
+        use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, LocalFree};
         use windows_sys::Win32::Security::Authorization::{
             ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
             SDDL_REVISION_1,
@@ -746,16 +744,14 @@ pub fn create_owner_private_dir(path: &Path) {
         unsafe {
             LocalFree(descriptor);
         }
-        if ok == 0 {
-            let err = unsafe { GetLastError() };
-            assert_eq!(
-                err,
-                ERROR_ALREADY_EXISTS,
-                "creating owner-private dir {}: {}",
-                path.display(),
-                std::io::Error::last_os_error()
-            );
-        }
+        assert_ne!(
+            ok,
+            0,
+            "creating exclusive owner-private dir {} failed with native error {}: {}",
+            path.display(),
+            unsafe { GetLastError() },
+            std::io::Error::last_os_error()
+        );
     }
 }
 
@@ -784,6 +780,17 @@ pub fn postgres_url_or_fail_closed(context: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn owner_private_directory_creation_refuses_an_existing_path() {
+        let root = unique_root("exclusive-existing");
+        std::fs::create_dir(&root).expect("create pre-existing proof root");
+        let refused = std::panic::catch_unwind(|| create_owner_private_dir(&root));
+        assert!(refused.is_err(), "existing proof root must not be claimed");
+        assert!(root.is_dir(), "refusal must not modify the existing root");
+        std::fs::remove_dir(&root).expect("remove exact pre-existing proof root");
+    }
 
     #[test]
     #[ignore = "subprocess role used by the pipe-drain regression"]

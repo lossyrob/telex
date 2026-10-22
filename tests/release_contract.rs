@@ -218,6 +218,23 @@ fn release_publish_verifies_a_checksum_sidecar_for_every_archive() {
 }
 
 #[test]
+fn ci_requires_the_official_v021_to_exact_candidate_proof() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Released v0.2.1 upgrade proof (Windows)")
+            && ci.contains("TELEX_RELEASED_V021_EXE")
+            && ci.contains("TELEX_V021_EXPECTED_HEAD")
+            && ci.contains("released_v021_writer_installs_exact_candidate")
+            && ci.contains("released-v021-upgrade-proof-"),
+        "CI must retain the official released-v0.2.1 writer proof and its evidence artifact"
+    );
+    assert!(
+        !ci.contains("Remove-Item -LiteralPath $root -Recurse -Force"),
+        "the hosted proof must retain its disposable root for ephemeral runner teardown"
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version
