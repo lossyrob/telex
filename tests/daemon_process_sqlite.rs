@@ -79,12 +79,17 @@ impl ProcessEnv {
     fn with_paths(name: &str, root: PathBuf, db: PathBuf, state_dir: PathBuf) -> Self {
         let home = root.join("h");
         let run_dir = root.join("r");
-        std::fs::create_dir_all(&root).expect("create test root");
         #[cfg(windows)]
         {
+            if let Some(base) = root.parent() {
+                create_owner_private_daemon_fixture_dir(base);
+            }
+            create_owner_private_daemon_fixture_dir(&root);
             create_owner_private_daemon_fixture_dir(&home);
             create_owner_private_daemon_fixture_dir(&run_dir);
         }
+        #[cfg(not(windows))]
+        std::fs::create_dir_all(&root).expect("create test root");
         std::fs::create_dir_all(&state_dir).expect("create lock state dir");
         Self {
             bin: telex_bin(),

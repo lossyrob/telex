@@ -368,7 +368,7 @@ async fn installed_current_concurrent_first_use_converges_on_one_daemon() {
 async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     let _env = ENV_LOCK.lock().await;
     let iso = Isolation::new("ic-crash");
-    let _restore = iso.apply_env();
+    let mut restore = iso.apply_env();
     let db = iso.root.join("crash.db");
 
     let client = connect(&iso, "proof", &db).await;
@@ -379,6 +379,17 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     // Hard-kill the daemon: no drain, no graceful release.
     terminate_pid(pid);
     wait_until_gone(&iso, pid, Duration::from_secs(15));
+
+    // Force the successor endpoint to become connectable while the stale
+    // predecessor capability record is still present. The client must
+    // authenticate the selected process image, observe that cap generation as
+    // pending, and retry without sending Hello or spawning beside the child.
+    let publication_marker = iso.root.join("cap-publication-delayed");
+    restore.set("TELEX_TEST_CAP_PUBLICATION_DELAY_MS", "750");
+    restore.set(
+        "TELEX_TEST_CAP_PUBLICATION_DELAY_MARKER",
+        &publication_marker,
+    );
 
     // The next spawning call restarts the daemon, and bounded repair recovers
     // the membership.
@@ -394,6 +405,10 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     );
     let restarted = iso.daemon_pid().expect("restarted daemon pid");
     assert_ne!(restarted, pid, "a crashed daemon must be replaced");
+    assert!(
+        publication_marker.is_file(),
+        "the restart proof must exercise the endpoint-before-cap publication window"
+    );
 }
 
 // ----------------------------------------------------------------------------------------

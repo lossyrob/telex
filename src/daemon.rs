@@ -92,6 +92,11 @@ pub enum DaemonError {
     Unauthorized(String),
     NotRunning(String),
     AlreadyRunning(String),
+    /// A selected peer is connected and its OS image is authenticated, but
+    /// the owner-private capability record has not caught up to that exact
+    /// process generation yet. Callers may retry before sending Hello, but
+    /// must never spawn beside this already-authenticated peer.
+    PeerCapabilityPending(String),
     Timeout(String),
     Unsupported {
         capability: &'static str,
@@ -146,6 +151,9 @@ impl fmt::Display for DaemonError {
             DaemonError::NotRunning(msg) => write!(f, "daemon is not running: {msg}"),
             DaemonError::AlreadyRunning(msg) => {
                 write!(f, "daemon singleton already running: {msg}")
+            }
+            DaemonError::PeerCapabilityPending(msg) => {
+                write!(f, "daemon capability publication is pending: {msg}")
             }
             DaemonError::Timeout(msg) => write!(f, "daemon readiness timed out: {msg}"),
             DaemonError::Unsupported {
@@ -2070,9 +2078,30 @@ async fn connect_existing_against_resolved(
         }
     }
     let paths = DaemonPaths::current()?;
-    let cap = read_cap_file(&paths.cap_path)?;
-    let (server_pid, server_start_time) = cap_required_peer_identity(&cap)?;
     let conn = platform::connect(&paths.endpoint).await?;
+    // First authenticate the connected OS peer against the frozen executable
+    // selection without trusting a capability record that may still name the
+    // predecessor. A true foreign binder fails terminally here.
+    platform::verify_server_peer_bootstrap(
+        &conn,
+        &resolved.expected_exe,
+        None,
+        None,
+        Some(&resolved.expected_identity),
+    )
+    .map_err(bootstrap_error_from_peer)?;
+    // The endpoint can become connectable just before the successor publishes
+    // its fresh capability record. Read the record only after connecting and
+    // treat a generation mismatch as bounded readiness, not as foreign peer
+    // authorization and not as permission to spawn another daemon.
+    let cap = read_cap_file(&paths.cap_path).map_err(|error| {
+        DaemonError::PeerCapabilityPending(format!("capability record is not readable: {error}"))
+    })?;
+    let (server_pid, server_start_time) = cap_required_peer_identity(&cap).map_err(|error| {
+        DaemonError::PeerCapabilityPending(format!(
+            "capability record lacks peer generation: {error}"
+        ))
+    })?;
     platform::verify_server_peer_bootstrap(
         &conn,
         &resolved.expected_exe,
@@ -2080,7 +2109,11 @@ async fn connect_existing_against_resolved(
         Some(server_start_time),
         Some(&resolved.expected_identity),
     )
-    .map_err(bootstrap_error_from_peer)?;
+    .map_err(|error| {
+        DaemonError::PeerCapabilityPending(format!(
+            "capability record does not match connected peer: {error}"
+        ))
+    })?;
     verify_cap_bootstrap_evidence(&cap, &paths, resolved).map_err(bootstrap_error_from_peer)?;
     let hello = proto::client_hello(store_key);
     let client = handshake_connected(conn, paths, &hello).await?;
@@ -2125,6 +2158,15 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
                 return Err(e)
             }
             Ok(Err(e @ DaemonError::Bootstrap(_))) => return Err(e),
+            Ok(Err(e @ DaemonError::PeerCapabilityPending(_))) => {
+                last_err = Some(e);
+                if Instant::now() >= deadline {
+                    return Err(last_err.unwrap());
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff.saturating_mul(2), BACKOFF_MAX);
+                continue;
+            }
             Ok(Err(e)) => last_err = Some(e),
             Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
         }
@@ -2835,6 +2877,15 @@ pub async fn serve() -> Result<()> {
         .map(crate::daemon_bootstrap::ChildBootstrapAdmission::evidence);
     let paths = DaemonPaths::current()?;
     let mut listener = platform::Listener::bind(&paths.endpoint)?;
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_CAP_PUBLICATION_DELAY_MS") {
+        if let Ok(marker) = std::env::var("TELEX_TEST_CAP_PUBLICATION_DELAY_MARKER") {
+            let _ = std::fs::write(marker, b"endpoint-bound");
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
     let state = Arc::new(new_state(paths, bootstrap_evidence)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));

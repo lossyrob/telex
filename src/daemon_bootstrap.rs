@@ -875,27 +875,10 @@ fn run_admission_version_probe(
     executable: &Path,
     trusted_root: &Path,
 ) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
-    use std::io::Read;
     use std::process::{Command, Stdio};
 
     const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
-    const PROBE_OUTPUT_LIMIT: u64 = 1024 * 1024;
-
-    fn read_capped<R: Read + Send + 'static>(
-        mut reader: R,
-    ) -> std::thread::JoinHandle<Result<Vec<u8>, ()>> {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            reader
-                .by_ref()
-                .take(PROBE_OUTPUT_LIMIT + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|_| ())?;
-            (bytes.len() as u64 <= PROBE_OUTPUT_LIMIT)
-                .then_some(bytes)
-                .ok_or(())
-        })
-    }
+    const PROBE_OUTPUT_LIMIT: usize = 1024 * 1024;
 
     let mut command = Command::new(executable);
     command
@@ -910,48 +893,346 @@ fn run_admission_version_probe(
             command.env(key, value);
         }
     }
+    let output = run_bounded_probe_process(command, PROBE_TIMEOUT, PROBE_OUTPUT_LIMIT)?;
+    if !output.status.success() {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    parse_probe_metadata(&value)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[derive(Debug)]
+struct ProbeOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+struct ProbePipe<R> {
+    reader: R,
+    captured: Vec<u8>,
+    eof: bool,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+impl<R> ProbePipe<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            captured: Vec::new(),
+            eof: false,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_probe_command(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_probe_command(_command: &mut std::process::Command) {}
+
+#[cfg(target_os = "linux")]
+struct ProbeProcessGroup {
+    pid: i32,
+    active: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl ProbeProcessGroup {
+    fn attach(child: &std::process::Child) -> Result<Self, DaemonBootstrapFailure> {
+        Ok(Self {
+            pid: i32::try_from(child.id())
+                .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?,
+            active: true,
+        })
+    }
+
+    fn terminate(&self) {
+        unsafe {
+            libc::kill(-self.pid, libc::SIGKILL);
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ProbeProcessGroup {
+    fn drop(&mut self) {
+        if self.active {
+            self.terminate();
+        }
+    }
+}
+
+#[cfg(windows)]
+struct ProbeProcessGroup {
+    job: windows_sys::Win32::Foundation::HANDLE,
+    active: bool,
+}
+
+#[cfg(windows)]
+impl ProbeProcessGroup {
+    fn attach(child: &std::process::Child) -> Result<Self, DaemonBootstrapFailure> {
+        use std::mem::{size_of, zeroed};
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job == 0 {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let assigned = configured != 0
+            && unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) } != 0;
+        if !assigned {
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        Ok(Self { job, active: true })
+    }
+
+    fn terminate(&self) {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        unsafe {
+            TerminateJobObject(self.job, 1);
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProbeProcessGroup {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        if self.job != 0 {
+            if self.active {
+                self.terminate();
+            }
+            unsafe {
+                CloseHandle(self.job);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_probe_pipe<R: std::os::fd::AsRawFd>(pipe: &R) -> Result<(), DaemonBootstrapFailure> {
+    let fd = pipe.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn prepare_probe_pipe<R>(_pipe: &R) -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn drain_probe_pipe<R: std::io::Read>(
+    pipe: &mut ProbePipe<R>,
+    cap: usize,
+) -> Result<(), DaemonBootstrapFailure> {
+    if pipe.eof {
+        return Ok(());
+    }
+    let mut buffer = [0u8; 8192];
+    loop {
+        match pipe.reader.read(&mut buffer) {
+            Ok(0) => {
+                pipe.eof = true;
+                return Ok(());
+            }
+            Ok(read) => {
+                let remaining = cap.saturating_sub(pipe.captured.len());
+                pipe.captured
+                    .extend_from_slice(&buffer[..read.min(remaining)]);
+                if read > remaining {
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn drain_probe_pipe<R: std::io::Read + std::os::windows::io::AsRawHandle>(
+    pipe: &mut ProbePipe<R>,
+    cap: usize,
+) -> Result<(), DaemonBootstrapFailure> {
+    use windows_sys::Win32::Foundation::{ERROR_BROKEN_PIPE, HANDLE};
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+    if pipe.eof {
+        return Ok(());
+    }
+    loop {
+        let mut available = 0u32;
+        let ok = unsafe {
+            PeekNamedPipe(
+                pipe.reader.as_raw_handle() as HANDLE,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                pipe.eof = true;
+                return Ok(());
+            }
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        if available == 0 {
+            return Ok(());
+        }
+        let mut buffer = vec![0u8; (available as usize).min(8192)];
+        let read = pipe
+            .reader
+            .read(&mut buffer)
+            .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+        if read == 0 {
+            pipe.eof = true;
+            return Ok(());
+        }
+        let remaining = cap.saturating_sub(pipe.captured.len());
+        pipe.captured
+            .extend_from_slice(&buffer[..read.min(remaining)]);
+        if read > remaining {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn run_bounded_probe_process(
+    mut command: std::process::Command,
+    timeout: Duration,
+    output_cap: usize,
+) -> Result<ProbeOutput, DaemonBootstrapFailure> {
+    const CLEANUP_RESERVE: Duration = Duration::from_millis(500);
+    configure_probe_command(&mut command);
+    let start = Instant::now();
+    let deadline = start + timeout;
+    let cleanup_at = deadline
+        .checked_sub(CLEANUP_RESERVE.min(timeout / 2))
+        .unwrap_or(start);
     let mut child = command
         .spawn()
         .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
-    let stdout = read_capped(
-        child
-            .stdout
-            .take()
-            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
-    );
-    let stderr = read_capped(
-        child
-            .stderr
-            .take()
-            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
-    );
-    let deadline = Instant::now() + PROBE_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(DaemonBootstrapFailure::IncompatibleManifest);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+    let mut group = match ProbeProcessGroup::attach(&child) {
+        Ok(group) => group,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
         }
     };
-    let stdout = stdout
-        .join()
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
-    let _stderr = stderr
-        .join()
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
-    if !status.success() {
+    let Some(stdout) = child.stdout.take() else {
+        terminate_probe_process(&mut child, &group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_probe_process(&mut child, &group, deadline);
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    };
+    if prepare_probe_pipe(&stdout).is_err() || prepare_probe_pipe(&stderr).is_err() {
+        terminate_probe_process(&mut child, &group, deadline);
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
-    let value: serde_json::Value = serde_json::from_slice(&stdout)
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
-    parse_probe_metadata(&value)
+    let mut stdout = ProbePipe::new(stdout);
+    let mut stderr = ProbePipe::new(stderr);
+    let mut status = None;
+    let mut timed_out = false;
+
+    loop {
+        if drain_probe_pipe(&mut stdout, output_cap).is_err()
+            || drain_probe_pipe(&mut stderr, output_cap).is_err()
+        {
+            terminate_probe_process(&mut child, &group, deadline);
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        if status.is_none() {
+            status = match child.try_wait() {
+                Ok(status) => status,
+                Err(_) => {
+                    terminate_probe_process(&mut child, &group, deadline);
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+            };
+        }
+        if status.is_some() && stdout.eof && stderr.eof {
+            break;
+        }
+        let now = Instant::now();
+        if !timed_out && now >= cleanup_at {
+            timed_out = true;
+            group.terminate();
+            let _ = child.kill();
+        }
+        if now >= deadline {
+            terminate_probe_process(&mut child, &group, deadline);
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if timed_out {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    group.disarm();
+    Ok(ProbeOutput {
+        status: status.ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
+        stdout: stdout.captured,
+    })
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn terminate_probe_process(
+    child: &mut std::process::Child,
+    group: &ProbeProcessGroup,
+    deadline: Instant,
+) {
+    group.terminate();
+    let _ = child.kill();
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    let _ = child.try_wait();
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -2172,10 +2453,23 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
+        #[cfg(windows)]
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("telex-bootstrap-tests");
+        #[cfg(not(windows))]
+        let base = std::env::temp_dir();
+        let dir = base.join(format!(
             "telex-bootstrap-test-{}-{name}-{id}",
             std::process::id()
         ));
+        #[cfg(windows)]
+        {
+            crate::platform_fs::ensure_owner_private_dir(&base).unwrap();
+            crate::platform_fs::ensure_owner_private_dir(&dir).unwrap();
+        }
+        #[cfg(not(windows))]
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -2787,6 +3081,97 @@ mod tests {
         let excl = acquire_with_deadline_sync(&root, true, Duration::from_millis(500))
             .expect("exclusive after child release");
         drop(excl);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    #[ignore = "subprocess role used by the bounded admission-probe regression"]
+    fn admission_probe_pipe_parent_fixture() {
+        if std::env::var_os("TELEX_TEST_PROBE_PIPE_PARENT").is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        let mut descendant =
+            std::process::Command::new(std::env::current_exe().expect("current test executable"));
+        descendant
+            .env("TELEX_TEST_PROBE_PIPE_DESCENDANT", "1")
+            .env(
+                "TELEX_TEST_PROBE_PIPE_PID_MARKER",
+                std::env::var_os("TELEX_TEST_PROBE_PIPE_PID_MARKER")
+                    .expect("descendant pid marker"),
+            )
+            .args([
+                "--ignored",
+                "--exact",
+                "daemon_bootstrap::tests::admission_probe_pipe_descendant_fixture",
+                "--nocapture",
+            ]);
+        descendant.spawn().expect("spawn pipe-holding descendant");
+        println!("{}", r#"{"parent":"complete"}"#);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    #[ignore = "subprocess role used by the bounded admission-probe regression"]
+    fn admission_probe_pipe_descendant_fixture() {
+        if std::env::var_os("TELEX_TEST_PROBE_PIPE_DESCENDANT").is_none() {
+            return;
+        }
+        let marker = PathBuf::from(std::env::var_os("TELEX_TEST_PROBE_PIPE_PID_MARKER").unwrap());
+        fs::write(marker, std::process::id().to_string()).expect("write descendant pid");
+        std::thread::sleep(Duration::from_millis(12_500));
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn admission_probe_deadline_covers_descendant_held_pipes_and_releases_selector() {
+        let root = temp_dir("probe-pipe-deadline");
+        let pid_marker = root.join("descendant.pid");
+        let guard = SelectorAdmission::exclusive(&root).expect("exclusive admission");
+        let mut command =
+            std::process::Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .env("TELEX_TEST_PROBE_PIPE_PARENT", "1")
+            .env("TELEX_TEST_PROBE_PIPE_PID_MARKER", &pid_marker)
+            .args([
+                "--ignored",
+                "--exact",
+                "daemon_bootstrap::tests::admission_probe_pipe_parent_fixture",
+                "--nocapture",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let started = Instant::now();
+        let error = run_bounded_probe_process(command, Duration::from_secs(2), 1024 * 1024)
+            .expect_err("descendant-held pipes must time out");
+        assert_eq!(error, DaemonBootstrapFailure::IncompatibleManifest);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "the whole probe lifecycle must stay inside its absolute bound"
+        );
+        drop(guard);
+        let reacquired = acquire_with_deadline_sync(&root, true, Duration::from_secs(1))
+            .expect("selector admission released after probe failure");
+        drop(reacquired);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !pid_marker.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid: u32 = fs::read_to_string(&pid_marker)
+            .expect("descendant pid marker")
+            .trim()
+            .parse()
+            .expect("descendant pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while crate::session_watch::process_alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !crate::session_watch::process_alive(pid),
+            "the probe's owned descendant must be terminated"
+        );
         fs::remove_dir_all(root).ok();
     }
 
