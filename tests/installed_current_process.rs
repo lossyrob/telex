@@ -1572,6 +1572,17 @@ async fn installed_current_child_rejects_mismatched_build_before_readiness() {
 }
 
 #[cfg(windows)]
+#[test]
+fn incomplete_installed_current_isolation_drops_without_a_second_panic() {
+    let iso = Isolation::new_empty("ic-incomplete-drop");
+    assert!(
+        !iso.stop_daemon_best_effort(),
+        "an incomplete install has no verified executable authority for teardown"
+    );
+    drop(iso);
+}
+
+#[cfg(windows)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "required hosted proof using the official released v0.2.1 Windows asset"]
 async fn released_v021_writer_installs_exact_candidate() {

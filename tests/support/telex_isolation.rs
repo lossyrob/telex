@@ -357,7 +357,11 @@ impl Isolation {
     }
 
     pub fn stop_daemon_best_effort(&self) -> bool {
-        self.stop_daemon_with_executable_within(&self.current_binary(), Duration::from_secs(20))
+        let executable = match install::current_binary(&self.layout()) {
+            Ok(Some(executable)) => executable,
+            Ok(None) | Err(_) => return false,
+        };
+        self.stop_daemon_with_executable_within(&executable, Duration::from_secs(20))
     }
 
     fn stop_daemon_with_executable_within(&self, executable: &Path, timeout: Duration) -> bool {
