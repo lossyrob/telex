@@ -96,6 +96,7 @@ acceptance evidence.
 | **Runtime** | One Watcher process incarnation. Each process has a fresh, never-reused runtime ID. |
 | **Watch** | A durable local registration containing a detector command and generic Watcher policy. |
 | **Detector** | A trusted local command that observes a source and returns one structured result. |
+| **Non-detaching detector** | On macOS, a trusted detector whose root and every local descendant remain in the Watcher-assigned attempt process group for the full attempt. It does not daemonize, create another session or group, or delegate attempt-scoped local background work outside that group. |
 | **Attempt** | One bounded detector execution against one committed prior state. |
 | **Pending operation** | A durably staged event transition that has not yet been proven accepted or rejected. |
 | **Event sequence** | A strictly increasing, never-reused integer allocated within one permanent watch ID. |
@@ -200,6 +201,14 @@ Watcher executes the argv directly and never inserts a shell. A supplied working
 directory must be canonical and absolute; when omitted, registration captures
 the command's current absolute directory. The persisted value is inspectable
 through management status.
+
+On macOS, the command runs under the non-detaching detector contract. Ordinary
+fork/exec that preserves the assigned attempt process group is supported.
+`daemon`, `setsid`, process-group changes, spawn attributes that create another
+group or session, and attempt-scoped local background work outside that group
+are nonconforming. Provider network calls are not local descendant processes
+and are unaffected. No registration field selects this behavior; it is the
+macOS host execution contract.
 
 An absolute `argv[0]` names the executable directly. A non-absolute value is
 resolved on each attempt through the controlled launch baseline: platform
@@ -439,6 +448,8 @@ Telex core continues to carry kind without interpreting it.
 | Command, working directory, environment names, cadence, timeout | Registration/Watcher |
 | Backend, sender, target, attention, disposition | Registration/Watcher |
 | Process timeout, output caps, single-flight, concurrency, jitter, backoff | Watcher |
+| macOS attempt process-group assignment and cleanup | Watcher |
+| Keeping detector-created local processes in the assigned macOS group | Detector |
 | Event sequence, event ID, operation ID, normalized envelope | Watcher |
 | Durable send, receipt reconciliation, receipt-gated state commit | Watcher + Application Client |
 | Consequential downstream action | Telex recipient |
@@ -594,6 +605,13 @@ Detector commands are arbitrary trusted same-user code. Environment clearing,
 timeouts, output bounds, and process containment reduce accidents; they do not
 create a sandbox or authorization boundary.
 
+The macOS non-detaching rule is part of that trusted-code boundary. Watcher may
+not detect every escape and does not claim to contain work that a nonconforming
+detector moves outside the assigned group. A successful macOS containment
+receipt therefore attests only to the assigned group, not to arbitrary work
+started outside it. Windows and Linux retain the stronger detached-descendant
+containment guarantee.
+
 Registration is local-only. A Telex message cannot register, update, or replace
 an executable.
 
@@ -652,24 +670,82 @@ a window-only detector is safe after downtime.
 
 ## Process containment and restart
 
-The detector process tree must not outlive abrupt Watcher death.
-Platform-specific implementation may use different primitives, but the behavior
-is fixed:
+Watcher applies an explicit host-specific containment guarantee:
 
-1. Detector descendants are placed in containment with kill-on-runtime-exit
-   semantics.
-2. Runtime startup marks prior `running` runtimes `interrupted`.
-3. Unfinished detector attempts close as `runtime-interrupted` with no event
+- Windows contains the detector process tree with a kill-on-close Job Object,
+  including descendants that create another process group or session.
+- Linux contains the detector process tree with the private pipe-owned
+  subreaper guardian, including descendants that change groups or sessions.
+- macOS supports conforming non-detaching detectors. Watcher assigns one
+  process group to the attempt, and the detector root plus every process it
+  creates must remain in that group until the attempt ends. Work moved outside
+  the group is outside the cleanup guarantee.
+- Every other host fails closed before detector launch until a documented and
+  tested containment contract is accepted for that host.
+
+Before detector release, Watcher MUST persist a versioned containment identity
+sufficient to distinguish the current boot, containment owner, assigned scope,
+and terminal receipt. The launch gate opens only after the containment owner
+handshake and durable identity recording succeed. Setup, handshake, or identity
+recording failure starts no detector.
+
+On macOS the containment identity MUST name the boot session, guard process and
+start identity, assigned process-group ID, PID- and PGID-reuse-safe group
+anchor, receipt path, nonce, and `assigned-process-group` scope. The containment
+owner remains outside the detector group and observes a private runtime-liveness
+channel. Normal root exit, timeout, cancellation, bounded-output termination,
+explicit cleanup, or runtime-liveness EOF triggers cleanup of the entire
+assigned group.
+
+The implementation MUST NOT infer cleanup from the detector leader exiting. It
+MUST retain a reuse-safe ownership anchor until cleanup is checked and MUST
+write and durably sync terminal evidence only after proving that no process
+remains in the assigned group without signaling an unrelated reused identity.
+The exact guard, anchor, and empty-group algorithm are implementation choices
+and require native race evidence; an unreaped group leader is only a candidate,
+not design proof. If cleanup cannot be proved, the containment owner MUST NOT
+write a successful receipt.
+
+An ordinary per-attempt private guard is Watcher runtime machinery, not a helper
+service, only when it is unprivileged, ephemeral, shipped with the runtime,
+controlled by inherited private handles, exposes no reusable endpoint, and
+exits after evidence finalization. A privileged, entitled, installed,
+persistent, shared, launchd-managed, brokered, or VM-backed component requires a
+new operator decision.
+
+Guard failure before detector release starts no detector. Guard failure after
+release is never successful cleanup. Watcher may attempt bounded cleanup only
+while the persisted ownership identity is still verified. Without an
+identity-matched durable terminal receipt, the watch enters
+`orphan-containment-unproven`, remains paused, and starts no replacement
+attempt.
+
+After restart, Watcher clears containment automatically only from an
+identity-matched durable terminal receipt or a changed boot-session identity
+that proves the old processes cannot still exist. A missing guard, missing or
+malformed receipt, stale nonce, identity mismatch, or ambiguous assigned-group
+state remains `orphan-containment-unproven`. Watcher MUST NOT signal a persisted
+numeric PID or PGID without current reuse-safe identity verification.
+
+Runtime restart also preserves the existing durable lifecycle requirements:
+
+1. Runtime startup marks prior `running` runtimes `interrupted`.
+2. Unfinished detector attempts close as `runtime-interrupted` with no event
    allocation, state commit, or send.
-4. Pending operations survive restart and reconcile before that watch becomes
+3. Pending operations survive restart and reconcile before that watch becomes
    eligible.
-5. An affected watch remains ineligible until the new runtime proves prior
+4. An affected watch remains ineligible until the new runtime proves prior
    containment ended.
-6. If containment proof cannot be made, the watch is paused with
+5. If containment proof cannot be made, the watch is paused with
    `blockedReason = orphan-containment-unproven`.
 
-Runtime and hardening nodes own Windows/Unix mechanisms and destructive evidence.
-The default Telex coordination daemon is never used for destructive proof.
+Containment evidence never authorizes a Telex send retry, detector-state commit,
+automatic resume, or bypass of sender, receipt, store-binding, or readiness
+fences. A macOS terminal receipt proves only that the assigned process group
+ended. It does not attest to work that violated the non-detaching contract.
+
+Runtime and hardening nodes own native mechanisms and destructive evidence. The
+default Telex coordination daemon is never used for destructive proof.
 
 ## Failure and recovery
 
@@ -690,7 +766,7 @@ The default Telex coordination daemon is never used for destructive proof.
 | duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
 | receipt/result logical-store mismatch | no retry/send/state commit | paused/inactive/blocked (`logical-store-mismatch`) | correct backend selection or evidence source; reconcile only against the staged store, otherwise remove |
 | unsupported v1 registration | no execution | paused/inactive/blocked | explicit v2 re-registration/migration |
-| unproven orphan containment | no execution | paused/inactive/blocked | operator proof/cleanup + resume |
+| missing, stale, malformed, or ambiguous containment evidence; unexpected guard loss; or unproved assigned-group cleanup | no execution, replacement attempt, event allocation, state commit, or send | paused/inactive/blocked (`orphan-containment-unproven`) | authoritative platform-specific proof or cleanup, including identity-matched durable terminal evidence or changed boot-session evidence where applicable, followed by explicit resume |
 | sender partial/unready | no affected watch execution/send | runtime degraded | reconcile/compensate |
 | registry already owned | no sender attach, scheduling, or registry mutation | runtime startup fails | stop owning runtime or select another registry |
 | actionable inbound backlog on a send-only sender | no inbound consume/ack | runtime degraded, `productionReady = false` | repair routing through owning Telex workflow |
@@ -1049,7 +1125,10 @@ prerequisites for Watcher registration.
   through registration, membership, receipts, evidence, and health?
 - How are v2 metadata and health projections made machine-readable and checked
   alongside the three canonical schemas?
-- Which platform mechanisms prove detector-tree death after abrupt runtime exit?
+- Does each supported host prove its declared containment scope: arbitrary
+  descendants on Windows/Linux and the assigned group of a conforming
+  non-detaching detector on macOS, including abrupt runtime death, guard
+  failure, PID/PGID reuse, restart, and unrelated-process survival?
 - How does service supervision consume health and detect staleness?
 - How are register, show/list, pause, resume, update/state replacement,
   reconcile-now, finite reconciliation grant, finite send-retry grant,
@@ -1080,6 +1159,7 @@ may ignore them and author a detector directly.
 | Templates/manifests/preflight/tests | Optional project/tooling choices, absent from v2 registration/runtime semantics. |
 | V1 migration | Explicit new watch ID, detector update/wrapper, and reviewed state decision. Optional adapter deferred. |
 | Shared Application Client | Required; no private fallback. |
+| macOS detached-descendant containment | Closed by ADR 0054. macOS uses the non-detaching detector and assigned-process-group contract. The specific ordinary-user guard and group-empty mechanism remain implementation proof in issue #165, not an open product-contract decision. |
 
 ## Test isolation
 

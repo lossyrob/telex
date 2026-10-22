@@ -2572,3 +2572,78 @@ packaging or operational hardening, or authorize consumer launch. ADR
 0049 remains the load-bearing shared-client boundary; this decision
 narrows how a consumer reaches that supported client without weakening
 its semantics or introducing a new language, ABI, or process boundary.
+
+## 0054 - macOS Watcher containment uses a non-detaching detector contract
+
+- **Date:** 2026-10-22
+- **Status:** Accepted through issue #165
+
+### Context
+
+The production Watcher contract requires a supported host to clean up detector
+work after timeout, cancellation, ordinary completion, or abrupt Watcher
+runtime exit. Windows Job Objects and the Linux pipe-owned subreaper guardian
+provide ownership of descendants even when they change process groups or
+sessions. Native ARM64 and x64 macOS investigation found no equivalent
+ordinary-user primitive: recursive kqueue tracking is unsupported, and process
+groups do not contain a descendant that calls `setsid`, changes group, or
+daemonizes. A privileged helper, installed service, broker, entitlement, or VM
+would require separate operator authority.
+
+### Decision
+
+Windows and Linux retain the existing detached-descendant containment
+guarantee.
+
+macOS supports trusted non-detaching detectors. Watcher assigns one process
+group to each attempt. The detector root and every process it creates directly
+or indirectly must remain in that group until the attempt ends. Ordinary
+fork/exec that preserves the group is supported. A detector is nonconforming if
+it daemonizes, creates another session or process group, moves a descendant out
+of the assigned group, or starts or delegates attempt-scoped local background
+work outside the group. Work that escapes the assigned group is outside the
+macOS cleanup guarantee.
+
+This is a trusted behavioral precondition, not a sandbox or a claim that
+Watcher can detect every violation. A macOS containment receipt proves only
+that the assigned process group ended. Registration remains the minimal v2
+command contract; no platform-specific registration field or schema version is
+added.
+
+A macOS implementation must durably record containment identity before detector
+release, keep a PID- and PGID-reuse-safe ownership anchor, observe runtime death
+through a private liveness channel, terminate the whole assigned group on every
+cleanup path, and write terminal evidence only after race-safe proof that the
+group is empty. Restart may clear containment automatically only from
+identity-matched durable terminal evidence or a changed boot-session identity.
+Ambiguity remains `orphan-containment-unproven`, blocks replacement execution,
+and requires authoritative cleanup/proof plus explicit resume.
+
+An ordinary per-attempt private guard may implement this contract as Watcher
+runtime machinery when it is unprivileged, ephemeral, shipped with the runtime,
+controlled only through inherited private handles, exposes no reusable service
+endpoint, and exits after evidence finalization. This decision does not approve
+a particular guard, anchor, or group-empty algorithm. It does not authorize a
+privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
+or VM-backed component.
+
+The Windows/Linux-only runtime in issue #162 continues to fail closed on macOS.
+macOS support begins only after issue #165 implements and proves this decision,
+sequenced after #162 merges.
+
+### Consequences
+
+- macOS detector authors must keep all attempt-scoped local work in the assigned
+  process group.
+- Watcher does not claim cleanup of work a nonconforming detector moves outside
+  that group.
+- Windows and Linux behavior and detached-descendant evidence are unchanged.
+- Runtime restart still marks prior runtimes interrupted, closes unfinished
+  attempts as `runtime-interrupted` without event/state/send effects, and
+  reconciles pending operations before eligibility.
+- The macOS implementation must prove launch gating, durable ownership,
+  abrupt-runtime-death cleanup, guard-failure behavior, group-empty evidence,
+  PID/PGID reuse safety, and restart recovery on native ARM64 and x64 hosts.
+- If ordinary-user process-group machinery cannot provide race-safe terminal
+  proof, issue #165 returns `decision-needed`; the contract revision does not
+  permit an unproven success claim.
