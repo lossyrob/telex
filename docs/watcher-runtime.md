@@ -146,6 +146,11 @@ conflict, late outcomes, grants, removal, and containment uncertainty.
 the same transactions through the public client against isolated real stores.
 `TELEX_PG_REQUIRE=1` makes missing PostgreSQL configuration a failure.
 
+Before running a library-only runtime matrix, build the branch's Telex,
+detector fixture, and guardian binaries with
+`cargo build -p telex -p telex-watcher --all-features --bins`. `cargo test --lib`
+does not build those executable targets itself.
+
 The first practical detector is under
 `telex-watcher/field-validation/github-pr`. It is an observe-only, fixture-first
 GitHub PR detector, separate from the optional example pack. Its README states

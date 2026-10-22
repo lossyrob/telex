@@ -3,10 +3,12 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `minimal-example-pack`
 - **Type:** implementation
-- **Status:** ready, unlaunched
+- **Status:** in progress; launched 2026-10-22 under Streamliner workflow v2
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **Tracker:** [lossyrob/telex#144](https://github.com/lossyrob/telex/issues/144)
+- **Owner session:** 76a56ac2-dd56-403f-99e7-9eadb3458ffe
+- **Merge gate:** live pilot; the owner merges only at a Campaign-cleared SHA
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -124,9 +126,26 @@ links, and any executable scripts. Keep generated PAW, Streamliner, and scratch
 artifacts out of the product diff. Apply the campaign clear-writing policy to
 the PR description, durable documentation, and field report. Final acceptance
 requires exact-head review, green required checks, resolved actionable threads,
-and separate operator merge authorization.
+and merge-gate clearance at the exact head SHA, as described below.
 
-The node remains ready but unlaunched until the campaign separately authorizes
-launch. Its implementation must not change `watcher-runtime-core`,
+On 2026-10-22, the operator approved launching this node in parallel with
+`watcher-runtime-core` through the Streamliner workflow v2 adapter, as the first
+live merge-gate pilot. Campaign launched owner session
+76a56ac2-dd56-403f-99e7-9eadb3458ffe in worktree `lossyrob-refactored-eureka` on
+branch `lossyrob-minimal-watcher-examples`, from base `7a94ce19`. The gate runs
+in live mode with balanced care and prototype posture. Campaign runs it at the
+exact head SHA. On a merge verdict, Campaign comments `Merge cleared at <sha>`
+on the PR, and the owner merges with `gh pr merge <n> --merge
+--match-head-commit <sha>`. A hard stop, an operator verdict, or a human-review
+verdict returns the merge decision to the operator. If the operator says "pause
+auto-merge", the PR returns to shadow mode. The authority is Campaign operator
+directive `telex-v2-launch-and-merge-gate-directive-20261022.json` (1,188 bytes,
+SHA-256 `94fe1a334cd4dded0d609627eef253c120615cbe20a4142788d094dc4966f1dd`)
+under merge-gate policy `streamliner/telex/prompts/v2/telex-v2-merge-gate.md` in
+the planning repository (commit `c213a5e3`, blob `b10277f8`). The directive
+grants no release, tag, publish, or fleet authority, no I161-1 change, and no
+live merge for any item other than issue #144.
+
+Its implementation must not change `watcher-runtime-core`,
 Application Client `client-conformance`, or
 `five-minute-custom-watch-gate` status.

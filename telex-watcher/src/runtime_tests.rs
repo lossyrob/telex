@@ -342,7 +342,10 @@ async fn actor_lifecycle(iso: &isolation::Isolation) {
     let owner = tokio::spawn(runtime.run());
     let detector = isolation::branch_binary()
         .with_file_name(format!("fake_detector{}", std::env::consts::EXE_SUFFIX));
-    assert!(detector.is_absolute() && detector.is_file());
+    assert!(
+        detector.is_absolute() && detector.is_file(),
+        "build Watcher fixture and guardian binaries before the library-only matrix: cargo build -p telex-watcher --all-features --bins"
+    );
     let input = iso.root.join("actor-detector.json");
     std::fs::write(
         &input,

@@ -88,6 +88,11 @@ Manifests, hashes, pinning, provider preflight, downtime declarations, fixtures,
 and deeper conformance tests are project choices. They are not prerequisites for
 ordinary registration.
 
+The [optional v2 examples](../../telex-watcher/examples/v2/README.md) provide
+copyable GitHub, Azure DevOps, HTTP/JSON, file, and command observations with
+local fixture checks. They are teaching material, not runtime or operational
+acceptance evidence.
+
 ## Terms
 
 | Term | Meaning |
@@ -936,9 +941,11 @@ detector results. Mixed registries remain usable: unsupported v1 registrations
 are visibly paused/blocked with `unsupported-registration-version`, while valid
 v2 watches continue.
 
-The in-repository spike-era `telex-watcher` crate and example detectors remain
-historical v1 implementation evidence until the runtime and example nodes replace
-or reclassify them. Their presence does not claim v2 conformance.
+The `telex-watcher` crate contains the v2 runtime implementation. Detectors under
+`telex-watcher/examples/detectors` remain historical v1 evidence and are not v2
+runtime inputs. The separate `telex-watcher/examples/v2` pack provides optional
+teaching examples and exercises the v2 schemas independently of runtime
+execution. Neither example pack establishes runtime conformance.
 
 Baseline migration is explicit:
 
