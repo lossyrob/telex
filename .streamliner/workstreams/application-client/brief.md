@@ -302,16 +302,40 @@ reports that consumer attestations have started; none is recorded as passed, and
 the formal consumer gate stays planned. Design inspection, campaign
 authorization, and merge remain outstanding.
 
+Both pre-merge consumer attestations approved exact head `7505568c` (tree
+`f532f986`) on 2026-10-22, and neither found a private fallback or an unaccepted
+dependency. The Watcher attestation found that a public-only consumer, built
+with default features disabled, connects through the `InstalledCurrent` trusted
+root and that attach, restart, durability, recovery, send-only, health, and
+backend-parity semantics align. The Operator Station attestation found that
+multi-address attach, readiness, compensation, exact-recipient ingest before
+acknowledgment, restart reconciliation, reply, disposition, source, health, and
+backend-parity semantics align through public surfaces. These attestations meet
+the task's attestation requirement for `7505568c` only, and any head movement
+invalidates them. After merge they become evidence for
+`consumer-integration-gate`, which stays planned; they do not pass that gate or
+authorize consumer launch.
+
+The Application Client design inspection approved `7505568c` against merge base
+`e4f585a7` on 2026-10-22. It ran `gpt-5.6-sol` with high reasoning, and its
+context tier was not recorded. The task specifies a Claude Opus 4.8,
+high-reasoning, long-context inspector, so whether this inspection satisfies the
+fresh design inspection requirement needs a campaign disposition; it receives no
+design credit until then. The inspection judged that incident I161-1 does not
+block its design verdict, and it states that the incident remains unresolved,
+with isolation acceptance, causality, and closure withheld. The Local Daemon
+design inspection is pending. I161-1 still needs a disposition before merge, and
+merge authorization, merge, and closure remain outstanding.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
-attachment succeeded. The proof script, however, also rewrote the access
-control list of the operator's real `AppData\Local` directory in several runs,
-and no prior descriptor or backup exists. That incident, I161-1, withholds
-isolation certification and awaits an operator-impact disposition. No
-restoration or cleanup is authorized, and local runtime and proof replay are
-frozen, so runtime validation relies on CI. Consumer attestations, design
-inspection, and merge remain outstanding. The node stays in progress, and
-issue #152 stays open.
+attachment succeeded. The proof script, however, also rewrote the access control
+list of the operator's real `AppData\Local` directory in several runs, and no
+prior descriptor or backup exists. That incident, I161-1, withholds isolation
+certification and awaits an operator-impact disposition. No restoration or
+cleanup is authorized, and local runtime and proof replay are frozen, so runtime
+validation relies on CI. Design inspection acceptance, merge authorization, and
+merge remain outstanding. The node stays in progress, and issue #152 stays open.
 
 ## Decisions
 

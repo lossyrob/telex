@@ -3,9 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `7505568c` with source
-  review approved and required CI passed, consumer attestations started, and
-  proof-isolation incident I161-1 unresolved
+- **Status:** in progress; PR #161 is open at head `7505568c` with source review
+  approved, required CI passed, and both consumer attestations approved; design
+  inspection acceptance is pending, and proof-isolation incident I161-1 is
+  unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -565,17 +566,48 @@ consumer attestations have started; none is recorded as passed, and the formal
 consumer gate stays planned. Design inspection, campaign authorization, and
 merge remain outstanding.
 
+Both pre-merge consumer attestations approved exact head `7505568c` (tree
+`f532f986`) on 2026-10-22, and neither found a private fallback or an unaccepted
+dependency. The Watcher attestation (session `e00d296e`, artifact SHA-256
+`8c6a96dfa18a98f77f76777081d36949dd71847e37d19e8823338e5a8ae53667`) found that a
+public-only consumer, built with default features disabled, connects through the
+`InstalledCurrent` trusted root and that attach, restart, durability, recovery,
+send-only, health, and backend-parity semantics align. The Operator Station
+attestation (session `002c5122`, artifact SHA-256
+`ea9a9a137d717747e958b866a5b2bb5ec0f4987c19b36837bb81cf16606bbb41`) found that
+multi-address attach, readiness, compensation, exact-recipient ingest before
+acknowledgment, restart reconciliation, reply, disposition, source, health, and
+backend-parity semantics align through public surfaces. Both attesters ran
+`gpt-5.6-sol` with high reasoning; their context tier was not recorded. These
+attestations meet this task's attestation requirement for `7505568c` only, and
+any head movement invalidates them. After merge they become evidence for
+`consumer-integration-gate`, which stays planned; they do not pass that gate or
+authorize consumer launch.
+
+The Application Client design inspection (session `074125a5`, artifact SHA-256
+`31c02030ad752a56c0e6a557a7a1fbbab23ad1178c105ffa031729be4b02f27a`) approved
+`7505568c` against merge base `e4f585a7` on 2026-10-22. It ran `gpt-5.6-sol`
+with high reasoning, and its context tier was not recorded. This task specifies
+a Claude Opus 4.8, high-reasoning, long-context inspector, so whether this
+inspection satisfies the fresh design inspection requirement needs a campaign
+disposition; it receives no design credit until then. The inspection judged that
+incident I161-1 does not block its design verdict, and it states that the
+incident remains unresolved, with isolation acceptance, causality, and closure
+withheld. The Local Daemon design inspection is pending. I161-1 still needs a
+disposition before merge, and merge authorization, merge, and closure remain
+outstanding.
+
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
 proof script rewrote the access control list of the operator's real
 `AppData\Local` directory in several runs, with no prior descriptor or backup
 (incident I161-1, evidence SHA-256
-`0d50f4885a75f369ef218d18e907e0a01baeeb84171069af91ee34f1cec26e24`).
-Isolation certification is withheld pending an operator-impact disposition.
-No restoration or cleanup is authorized, and local runtime and proof replay
-are frozen. Consumer attestations, design inspection, and merge remain
-outstanding. Scope, invalidation conditions, and the accepted trusted
-`InstalledCurrent` policy are unchanged.
+`0d50f4885a75f369ef218d18e907e0a01baeeb84171069af91ee34f1cec26e24`). Isolation
+certification is withheld pending an operator-impact disposition. No restoration
+or cleanup is authorized, and local runtime and proof replay are frozen. Design
+inspection acceptance, merge authorization, and merge remain outstanding. Scope,
+invalidation conditions, and the accepted trusted `InstalledCurrent` policy are
+unchanged.
 
 ## Invalidation conditions
 
