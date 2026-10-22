@@ -741,8 +741,11 @@ Runtime restart also preserves the existing durable lifecycle requirements:
 
 Containment evidence never authorizes a Telex send retry, detector-state commit,
 automatic resume, or bypass of sender, receipt, store-binding, or readiness
-fences. A macOS terminal receipt proves only that the assigned process group
-ended. It does not attest to work that violated the non-detaching contract.
+fences. Existing pending operations continue to reconcile under their own
+receipt/store evidence while the watch remains ineligible; any same-operation
+retry or state commit follows those independent fences. A macOS terminal
+receipt proves only that the assigned process group ended. It does not attest to
+work that violated the non-detaching contract.
 
 Runtime and hardening nodes own native mechanisms and destructive evidence. The
 default Telex coordination daemon is never used for destructive proof.
@@ -766,7 +769,7 @@ default Telex coordination daemon is never used for destructive proof.
 | duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
 | receipt/result logical-store mismatch | no retry/send/state commit | paused/inactive/blocked (`logical-store-mismatch`) | correct backend selection or evidence source; reconcile only against the staged store, otherwise remove |
 | unsupported v1 registration | no execution | paused/inactive/blocked | explicit v2 re-registration/migration |
-| missing, stale, malformed, or ambiguous containment evidence; unexpected guard loss; or unproved assigned-group cleanup | no execution, replacement attempt, event allocation, state commit, or send | paused/inactive/blocked (`orphan-containment-unproven`) | authoritative platform-specific proof or cleanup, including identity-matched durable terminal evidence or changed boot-session evidence where applicable, followed by explicit resume |
+| missing, stale, malformed, or ambiguous containment evidence; unexpected guard loss; or unproved assigned-group cleanup | no detector execution or replacement attempt; existing pending operations continue receipt/store reconciliation, with any same-operation retry or state commit governed only by their existing evidence rules | paused/inactive/blocked (`orphan-containment-unproven`) | authoritative platform-specific proof or cleanup, including identity-matched durable terminal evidence or changed boot-session evidence where applicable, followed by explicit resume |
 | sender partial/unready | no affected watch execution/send | runtime degraded | reconcile/compensate |
 | registry already owned | no sender attach, scheduling, or registry mutation | runtime startup fails | stop owning runtime or select another registry |
 | actionable inbound backlog on a send-only sender | no inbound consume/ack | runtime degraded, `productionReady = false` | repair routing through owning Telex workflow |
