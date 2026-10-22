@@ -821,6 +821,48 @@ async fn backfill_delivery_rows_once(client: &mut tokio_postgres::Client) -> Res
     Ok(())
 }
 
+async fn backfill_terminal_disposition_consumption_once(
+    client: &mut tokio_postgres::Client,
+) -> Result<()> {
+    let tx = client.transaction().await?;
+    let complete: bool = tx
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM telex_schema_meta
+                WHERE key='terminal_disposition_consumption_v1_complete' AND value='1'
+             )",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !complete {
+        let sql = format!(
+            "UPDATE deliveries d
+             SET consumed_at_ms = terminal.at_ms
+             FROM (
+                 SELECT disp.message_id, disp.recipient, MAX(disp.at_ms) AS at_ms
+                 FROM dispositions disp
+                 WHERE disp.state IN ({})
+                 GROUP BY disp.message_id, disp.recipient
+             ) terminal
+             WHERE d.message_id=terminal.message_id
+               AND d.recipient=terminal.recipient
+               AND d.consumed_at_ms IS NULL",
+            terminal_dispositions_sql_list()
+        );
+        tx.execute(&sql, &[]).await?;
+        tx.execute(
+            "INSERT INTO telex_schema_meta(key, value)
+             VALUES ('terminal_disposition_consumption_v1_complete', '1')
+             ON CONFLICT(key) DO UPDATE SET value='1'",
+            &[],
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> {
     let exists: bool = client
         .query_one(
@@ -1018,8 +1060,9 @@ impl Backend for PgBackend {
                 &[&now],
             )
             .await?;
-        backfill_delivery_rows_once(&mut client).await?;
         backfill_existing_deliveries_consumed_once(&mut client).await?;
+        backfill_delivery_rows_once(&mut client).await?;
+        backfill_terminal_disposition_consumption_once(&mut client).await?;
         raise_clock_hwm_to_existing_timestamps(&client).await?;
         publish_schema_version(&client).await?;
         Ok(())

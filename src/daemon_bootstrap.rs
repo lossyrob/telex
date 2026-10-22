@@ -1165,10 +1165,20 @@ enum ProbeLeaderState {
 }
 
 #[cfg(any(windows, target_os = "linux"))]
+#[derive(Debug, PartialEq, Eq)]
 enum ProbeObserveError {
     #[cfg(target_os = "linux")]
     OwnershipLost,
     Failure,
+}
+
+#[cfg(target_os = "linux")]
+fn classify_probe_observe_error(error: &std::io::Error) -> ProbeObserveError {
+    if error.raw_os_error() == Some(libc::ECHILD) {
+        ProbeObserveError::OwnershipLost
+    } else {
+        ProbeObserveError::Failure
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1213,14 +1223,7 @@ fn observe_probe_leader(
     };
     if result != 0 {
         let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::EINTR) {
-            return Ok(ProbeLeaderState::Running);
-        }
-        return if error.raw_os_error() == Some(libc::ECHILD) {
-            Err(ProbeObserveError::OwnershipLost)
-        } else {
-            Err(ProbeObserveError::Failure)
-        };
+        return Err(classify_probe_observe_error(&error));
     }
     let observed_pid = unsafe { info.si_pid() };
     if observed_pid == 0 {
@@ -3508,6 +3511,15 @@ mod tests {
             ProbeObserveError::OwnershipLost
         )));
         assert!(!probe_signal_authorized(&Err(ProbeObserveError::Failure)));
+        assert_eq!(
+            classify_probe_observe_error(&std::io::Error::from_raw_os_error(libc::EINTR)),
+            ProbeObserveError::Failure,
+            "an interrupted waitid is not affirmative ownership evidence"
+        );
+        assert_eq!(
+            classify_probe_observe_error(&std::io::Error::from_raw_os_error(libc::ECHILD)),
+            ProbeObserveError::OwnershipLost
+        );
     }
 
     #[cfg(any(windows, target_os = "linux"))]
