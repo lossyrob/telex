@@ -99,6 +99,11 @@ jobs:
       - name: Test
         run: cargo test --workspace --verbose
 
+      - name: Check Windows crashes after workspace tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName workspace
+
       - name: Complete SQLite Application Client suite
         # The public Application Client battery, the executable external
         # consumer fixture, and the isolated InstalledCurrent process proofs all
@@ -114,8 +119,18 @@ jobs:
           --test installed_current_process
           -- --test-threads=1
 
+      - name: Check Windows crashes after SQLite process tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName sqlite
+
       - name: Credential invocation lifecycle
         run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
+
+      - name: Check Windows crashes after Postgres process tests
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName postgres
 
       - name: Check formatting
         run: cargo fmt --check
@@ -139,13 +154,7 @@ jobs:
       - name: Fail on collected Windows crash dumps
         if: always() && runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $dumps = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP "telex-crash-dumps") `
-            -Filter "*.dmp" -File -ErrorAction SilentlyContinue)
-          if ($dumps.Count -gt 0) {
-            $dumps | ForEach-Object { Write-Error "native crash dump: $($_.FullName)" }
-            throw "Windows child process produced $($dumps.Count) crash dump(s)"
-          }
+        run: tests/capture_windows_crash_evidence.ps1 -EvidenceName final
 
       - name: Upload Windows crash evidence
         if: failure() && runner.os == 'Windows'
@@ -154,6 +163,7 @@ jobs:
           name: windows-build-test-crash-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}\telex-crash-dumps
+            ${{ runner.temp }}\telex-crash-symbols
             target\debug\telex.exe
             target\debug\telex.pdb
           if-no-files-found: error
@@ -573,15 +583,16 @@ jobs:
             cargo test --no-default-features --features sqlite `
               --test daemon_process_sqlite -- --nocapture 2>&1 |
               Tee-Object -FilePath $log
-            if ($LASTEXITCODE -ne 0) {
+            $cargoExit = $LASTEXITCODE
+            if ($cargoExit -ne 0) {
               Start-Sleep -Seconds 10
-              exit $LASTEXITCODE
             }
-            $dumps = @(Get-ChildItem (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
-              -Filter "*.dmp" -File -ErrorAction SilentlyContinue)
-            if ($dumps.Count -gt 0) {
-              $dumps | ForEach-Object { Write-Error "native crash dump: $($_.FullName)" }
-              throw "PageHeap attempt $attempt produced $($dumps.Count) crash dump(s)"
+            tests/capture_windows_crash_evidence.ps1 `
+              -EvidenceName "pageheap-$attempt" `
+              -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+              -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols")
+            if ($cargoExit -ne 0) {
+              exit $cargoExit
             }
           }
 

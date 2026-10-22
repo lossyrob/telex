@@ -237,6 +237,7 @@ fn ci_requires_the_official_v021_to_exact_candidate_proof() {
 #[test]
 fn ci_retains_windows_heap_corruption_diagnostics() {
     let ci = read(".github/workflows/ci.yml");
+    let capture = read("tests/capture_windows_crash_evidence.ps1");
     assert!(
         ci.contains("Windows heap diagnostics")
             && ci.contains("Windows Error Reporting\\LocalDumps")
@@ -246,11 +247,18 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
             && ci.contains("CARGO_PROFILE_TEST_DEBUG")
             && ci.contains("matching telex.exe and telex.pdb")
             && ci.contains("Fail on collected Windows crash dumps")
-            && ci.contains("native crash dump:")
+            && ci.contains("capture_windows_crash_evidence.ps1")
+            && ci.contains("telex-crash-symbols")
             && ci.contains("daemon_process_sqlite")
             && ci.contains("windows-build-test-crash-")
             && ci.contains("windows-heap-diagnostics-"),
         "Windows CI must retain full-dump and PageHeap evidence for native heap failures"
+    );
+    assert!(
+        capture.contains("native crash dump:")
+            && capture.contains("$EvidenceName-telex.exe")
+            && capture.contains("$EvidenceName-telex.pdb"),
+        "crash collection must preserve a matching executable/PDB pair before failing"
     );
 }
 
