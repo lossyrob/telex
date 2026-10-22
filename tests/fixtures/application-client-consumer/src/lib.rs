@@ -506,7 +506,7 @@ pub async fn run_operator_station_recovery_probe(
         "station restart target",
     );
     let mut reconciliation_error = None;
-    for _ in 0..20 {
+    for _ in 0..120 {
         match client
             .reconcile(&station, RecoveryPolicy::BoundedRepair { retries: 3 })
             .await

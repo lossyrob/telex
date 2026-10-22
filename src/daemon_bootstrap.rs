@@ -1158,11 +1158,13 @@ impl Drop for ProbeProcessGroup {
     }
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 enum ProbeLeaderState {
     Running,
     Exited(bool),
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 enum ProbeObserveError {
     #[cfg(target_os = "linux")]
     OwnershipLost,

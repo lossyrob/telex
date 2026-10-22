@@ -773,6 +773,50 @@ async fn backfill_existing_deliveries_consumed_once(
         )
         .await?;
     }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn backfill_delivery_rows_once(client: &mut tokio_postgres::Client) -> Result<()> {
+    let tx = client.transaction().await?;
+    let complete: bool = tx
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM telex_schema_meta
+                WHERE key='delivery_backfill_v2_complete' AND value='1'
+             )",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !complete {
+        tx.execute(
+            "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+             SELECT m.id, m.to_addr, m.created_at_ms, NULL
+             FROM messages m
+             ON CONFLICT(message_id, recipient) DO NOTHING",
+            &[],
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+             SELECT m.id, btrim(cc_addr), m.created_at_ms, m.created_at_ms
+             FROM messages m
+             CROSS JOIN LATERAL unnest(string_to_array(COALESCE(m.cc, ''), ',')) AS cc_addr
+             WHERE btrim(cc_addr) <> '' AND btrim(cc_addr) <> m.to_addr
+             ON CONFLICT(message_id, recipient) DO NOTHING",
+            &[],
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO telex_schema_meta(key, value)
+             VALUES ('delivery_backfill_v2_complete', '1')
+             ON CONFLICT(key) DO UPDATE SET value='1'",
+            &[],
+        )
+        .await?;
+    }
     tx.commit().await?;
     Ok(())
 }
@@ -974,6 +1018,7 @@ impl Backend for PgBackend {
                 &[&now],
             )
             .await?;
+        backfill_delivery_rows_once(&mut client).await?;
         backfill_existing_deliveries_consumed_once(&mut client).await?;
         raise_clock_hwm_to_existing_timestamps(&client).await?;
         publish_schema_version(&client).await?;
