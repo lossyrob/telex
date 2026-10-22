@@ -323,9 +323,33 @@ high-reasoning, long-context inspector, so whether this inspection satisfies the
 fresh design inspection requirement needs a campaign disposition; it receives no
 design credit until then. The inspection judged that incident I161-1 does not
 block its design verdict, and it states that the incident remains unresolved,
-with isolation acceptance, causality, and closure withheld. The Local Daemon
-design inspection is pending. I161-1 still needs a disposition before merge, and
-merge authorization, merge, and closure remain outstanding.
+with isolation acceptance, causality, and closure withheld.
+
+The Local Daemon design inspection required changes at `7505568c` on 2026-10-22.
+It found four reachable design-boundary defects by static analysis; none was
+reproduced at runtime.
+
+- D161-1: upgrade and rollback drain the daemon that the calling executable
+  authenticates, not the current selection of the install root they have locked.
+- D161-2a: conformance setup drops other runs' PostgreSQL schemas based only on
+  name prefix and age.
+- D161-2b: forced fixture teardown can kill a process by numeric PID without
+  proof that the PID still belongs to the original daemon.
+- D161-3: on non-Linux Unix, the bootstrap exact-executable check reads metadata
+  from the executable's path instead of failing closed when the running image's
+  identity is unavailable.
+
+The inspection also found that D161-2a and D161-2b independently prevent
+accepting the current proof-isolation design. I161-1 remains a separate,
+unresolved external operator incident; no restoration, proof replay, or cleanup
+is authorized. The source review, CI, and attestation evidence for `7505568c`
+stays valid in its original scope but does not waive these findings, and that
+head receives no design credit. A successor head is assigned to make the
+corrections. Any head movement invalidates all `7505568c` evidence, and the
+successor needs fresh source review, passing required CI, both consumer
+attestations, and both design inspections. The campaign disposition on the
+Application Client inspector profile remains open. Merge authorization, merge,
+and closure remain outstanding.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public

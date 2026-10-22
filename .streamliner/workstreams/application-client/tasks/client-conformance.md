@@ -3,10 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `7505568c` with source review
-  approved, required CI passed, and both consumer attestations approved; design
-  inspection acceptance is pending, and proof-isolation incident I161-1 is
-  unresolved
+- **Status:** in progress; PR #161 is open at head `7505568c`, which has source
+  review approval, passing required CI, and both consumer attestations approved,
+  but the Local Daemon design inspection required changes; a successor head is
+  assigned, and proof-isolation incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -593,9 +593,36 @@ inspection satisfies the fresh design inspection requirement needs a campaign
 disposition; it receives no design credit until then. The inspection judged that
 incident I161-1 does not block its design verdict, and it states that the
 incident remains unresolved, with isolation acceptance, causality, and closure
-withheld. The Local Daemon design inspection is pending. I161-1 still needs a
-disposition before merge, and merge authorization, merge, and closure remain
-outstanding.
+withheld.
+
+The Local Daemon design inspection (steward session `af271672`, artifact SHA-256
+`537cdf0b379c11b4c023544ee50f81f0d6b7e59d7f22a3441601c32f9fba8752`) required
+changes at `7505568c` on 2026-10-22. It found four reachable design-boundary
+defects by static analysis; none was reproduced at runtime. The steward and a
+separate fresh inspector agent (`a618a9e4`) each ran `gpt-6-astra` with high
+reasoning and long context.
+
+- D161-1: upgrade and rollback drain the daemon that the calling executable
+  authenticates, not the current selection of the install root they have locked.
+- D161-2a: conformance setup drops other runs' PostgreSQL schemas based only on
+  name prefix and age.
+- D161-2b: forced fixture teardown can kill a process by numeric PID without
+  proof that the PID still belongs to the original daemon.
+- D161-3: on non-Linux Unix, the bootstrap exact-executable check reads metadata
+  from the executable's path instead of failing closed when the running image's
+  identity is unavailable.
+
+The inspection also found that D161-2a and D161-2b independently prevent
+accepting the current proof-isolation design. I161-1 remains a separate,
+unresolved external operator incident; no restoration, proof replay, or cleanup
+is authorized. The source review, CI, and attestation evidence for `7505568c`
+stays valid in its original scope but does not waive these findings, and that
+head receives no design credit. A successor head is assigned to make the
+corrections. Any head movement invalidates all `7505568c` evidence, and the
+successor needs fresh source review, passing required CI, both consumer
+attestations, and both design inspections. The campaign disposition on the
+Application Client inspector profile remains open. Merge authorization, merge,
+and closure remain outstanding.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
