@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "The builder accepted the merged direct human-attended Station boundary, ADR 0051 supersession, external-only mediation, shared-client dependency, and downstream geometry. The direction gate and design checkpoint are complete; station-app remains planned and unlaunched while Application Client client-conformance and the pre-product consumer-integration gate remain pending, after which launch still requires separate preparation and authorization.",
+  "summary": "The builder accepted the merged direct human-attended Station boundary, ADR 0051 supersession, external-only mediation, shared-client dependency, and downstream geometry. The direction gate and design checkpoint are complete; Application Client client-conformance and the pre-product consumer-integration gate completed on 2026-10-22, satisfying station-app's Application Client dependencies, but station-app remains planned and unlaunched until separately prepared and authorized. By operator sequencing decision on 2026-10-22, which is a priority choice and not a technical dependency, station-app also does not launch until Telex Watcher passes five-minute-custom-watch-gate and reaches its usable-watcher checkpoint.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-09-02T14:28:35Z",
+  "updatedAt": "2026-10-22T17:52:35.797Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -198,7 +198,7 @@
           },
           "label": "Supported/conformant Application Client implementation",
           "url": "https://github.com/lossyrob/telex/issues/117",
-          "status": "pending"
+          "status": "satisfied"
         },
         {
           "id": "application-client-consumer-integration-gate",
@@ -209,6 +209,17 @@
           },
           "label": "Pre-product exact-revision consumer attestation of the completed Application Client conformance bundle",
           "url": "https://github.com/lossyrob/telex/issues/152",
+          "status": "satisfied"
+        },
+        {
+          "id": "operator-sequencing-usable-watcher",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "telex-watcher",
+            "nodeId": "five-minute-custom-watch-gate"
+          },
+          "label": "Operator sequencing decision on 2026-10-22, not a technical dependency: station-app does not launch until Telex Watcher passes five-minute-custom-watch-gate and reaches its usable-watcher checkpoint",
+          "url": "https://github.com/lossyrob/telex/issues/100",
           "status": "pending"
         }
       ]

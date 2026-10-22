@@ -23,12 +23,15 @@ shared-client dependency, and downstream geometry at
 `direct-station-direction-gate`.
 
 Gate acceptance closes the design checkpoint but does not launch or make
-`station-app` ready to write. The current hold point is Application Client
-`client-conformance`. After conformance completes, a separately prepared and
-authorized `station-app` launch is still required. A later direct usability gate
-validates the human experience, followed by operational hardening for Postgres,
-restart/offline behavior, notification pressure, provenance, security,
-packaging, and cleanup.
+`station-app` ready to write. Its Application Client holds, `client-conformance`
+and `consumer-integration-gate`, completed on 2026-10-22; a separately prepared
+and authorized `station-app` launch is still required. By operator sequencing
+decision on 2026-10-22, which is a priority choice and not a technical
+dependency, `station-app` also does not launch until Telex Watcher passes
+`five-minute-custom-watch-gate` and reaches its `usable-watcher` checkpoint. A
+later direct usability gate validates the human experience, followed by
+operational hardening for Postgres, restart/offline behavior, notification
+pressure, provenance, security, packaging, and cleanup.
 
 Mediation remains possible as an external user-developed convention over
 ordinary Telex messages. It is not shipped, interpreted, or required by Telex
@@ -105,7 +108,8 @@ Historical confidence:
   `d3d64370b4481f10e1fa0b48ea026a9c060d15b1`, issue #12 revision 3, bundle
   integrity repair `c67946ec494cdedb7defa638d953b831d76d6ec5`, and first-binding
   reconciliation `8b8ecf39781c1281a30605745299fc0a44e91ead` all precede the Station
-  merge. `station-app` still waits on Application Client `client-conformance`.
+  merge. `station-app` then waited on Application Client `client-conformance`,
+  which completed on 2026-10-22.
 
 Superseded scope:
 
@@ -154,9 +158,12 @@ Completed design transition:
   downstream geometry at `direct-station-direction-gate`.
 - The accepted gate closes `direct-station-contract-ready` but does not launch
   or make `station-app` ready to write. `station-app` remains planned and
-  unlaunched while Application Client `client-conformance` remains pending.
-  After conformance, launch still requires separate preparation and
-  authorization.
+  unlaunched. Application Client `client-conformance` and
+  `consumer-integration-gate` completed on 2026-10-22, and launch still requires
+  separate preparation and authorization. By operator sequencing decision on
+  2026-10-22, which is a priority choice and not a technical dependency,
+  `station-app` also does not launch until Telex Watcher passes
+  `five-minute-custom-watch-gate` and reaches its `usable-watcher` checkpoint.
 
 Historical execution:
 
@@ -281,8 +288,12 @@ Historical execution:
 ## Open Questions
 
 - None for the accepted product direction. Application Client
-  `client-conformance` is the current hold; after it completes, `station-app`
-  still requires separate launch preparation and authorization.
+  `client-conformance` and `consumer-integration-gate` have completed;
+  `station-app` still requires separate launch preparation and authorization. By
+  operator sequencing decision on 2026-10-22, which is a priority choice and not
+  a technical dependency, `station-app` also does not launch until Telex Watcher
+  passes `five-minute-custom-watch-gate` and reaches its `usable-watcher`
+  checkpoint.
 
 ## Imports and Exports
 

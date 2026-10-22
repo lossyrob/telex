@@ -61,9 +61,9 @@ writers do not edit `.streamliner/**`.
 
 Conditional follow-through, each after its own prerequisites:
 
-1. After `client-conformance` completes, Watcher and Operator Station
-   independently attest the same exact reviewed public client revision at
-   `consumer-integration-gate`.
+1. Completed on 2026-10-22: `client-conformance` merged through PR #161 as
+   `4d25fdff`, and Watcher and Operator Station then passed
+   `consumer-integration-gate` on that merged main.
 2. After both complete, the accepted Watcher runtime and CLI and the direct
    Windows Station implementation are promoted and prepared, without a
    premature product launch.
@@ -173,28 +173,26 @@ supported Rust binding completed through issue
 [#149](https://github.com/lossyrob/telex/issues/149) and PR #151 at exact reviewed
 head `c03db454781164f47a20e997665fe1251e07bd15`, merged as
 `ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Issue #12 publication revision 4
-records that binding publication. Application Client `client-conformance` is
-tracked by [#152](https://github.com/lossyrob/telex/issues/152) and is in progress
-as the campaign main effort; its existing writer resumed on 2026-10-08 and is
-integrating current main. One bundle must prove the ten accepted semantic
-families through the public Rust surface across SQLite and credentialed
-Postgres, provide
-public-only send-only and bidirectional consumer fixtures, and repair any
-missing shared semantic without splitting by backend or test family.
-`consumer-integration-gate` remains planned until the same reviewed and green
-conformance head receives independent Watcher and Operator Station
-consumability attestations. No product implementation evidence belongs in that
-gate. Watcher runtime and Operator Station retain direct conformance holds and
-also wait on the gate. Later runtime/usability gates remain planned. Operator
+records that binding publication. Application Client `client-conformance`
+completed through [#152](https://github.com/lossyrob/telex/issues/152) and
+PR #161 at exact reviewed head `52abb30e49dff54f9a9ce7b31c64584a871d11c3`,
+merged as `4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb` on 2026-10-22; issue #152
+remains open. One bundle covers the ten accepted semantic families through the
+public Rust surface across SQLite and credentialed Postgres, with public-only
+send-only and bidirectional consumer fixtures. Watcher and Operator Station then
+passed `consumer-integration-gate` on that merged main, confirming that their
+consumers need no private seam, and the `supported-client` checkpoint is
+complete. Later runtime/usability gates remain planned. Operator
 Station's direct-Station contract reset
 completed through issue #134 and PR #136, merged as
 `e071e3170c19ab1b8a753b502c67be2ee80688ec`. The builder accepted the
 direct human-attended product boundary, ADR 0051 supersession, external-only
 mediation, shared-client dependency, and downstream geometry at
 `direct-station-direction-gate`. This closes the design checkpoint without
-launching `station-app`, which remains planned and waits directly on Application
-Client `client-conformance` and on `consumer-integration-gate`. A separately
-prepared and authorized launch is still required after both complete. Telex
+launching `station-app`, which remains planned and unlaunched; its Application
+Client `client-conformance` and `consumer-integration-gate` dependencies are
+satisfied, and a separately prepared and authorized launch is still required.
+Telex
 Watcher's minimal v2
 authoring/registration reset completed through issue #133 and PR #135, merged as
 `b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
@@ -202,10 +200,10 @@ authoring/registration reset completed through issue #133 and PR #135, merged as
 complete. Issue [#144](https://github.com/lossyrob/telex/issues/144) and its
 bounded task specification now provide the optional example pack's launch
 prerequisite. The node remains ready but unlaunched pending separate campaign
-authorization. Runtime remains planned and waits on completed Application
-Client `client-conformance` and the pre-integration
-`consumer-integration-gate`, which attests the exact public conformance revision
-without requiring Watcher runtime implementation.
+authorization. Runtime remains planned: Watcher's post-merge gate receipt
+discharged its Application Client holds on `client-conformance` and the
+pre-integration `consumer-integration-gate`, but launch still needs a reviewed
+and reconciled runtime tracker, which does not yet exist.
 Operator Station issue #146 separately preserves
 [PR #143 Postgres and UI/UX lessons](../workstreams/operator-station/docs/postgres-dogfood-evidence.md)
 as completed, non-gating evidence. The report does not promote spike mechanisms,
@@ -223,9 +221,9 @@ corrective v0.2.1 was published on 2026-09-30.
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
-| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its single delivery PR #161 is open at head `52abb30e`. The predecessor head `7505568c` had Local and retained source review approval after repairs, including source changes intended to address failed CI at `8bd3c330`, `2b8ade1d`, and `ec8b88f7`. It passed required CI, and on 2026-10-22 the Watcher and Operator Station pre-merge consumer attestations approved it. The Application Client design inspection also approved it, but with an inspector profile that differed from the task's; the campaign later declined to credit it. The Local Daemon design inspection required changes for four static design findings (D161-1, D161-2a, D161-2b, D161-3), so that head received no design credit. Successor `f02f0ee9` is intended to address those findings; Local's source review and the retained gpt-6-astra delta review approved it with no findings, its required CI failed in the required Live Postgres parity job, and it has no CI, consumer, or design credit. Residual successor `689883e2` was intended to address those CI failures, but Local's source review required changes for finding L161-6. Successor `0490f5e5` was intended to address L161-6; the retained gpt-6-astra delta review approved it, but Local's source review found a narrow remaining part of L161-6. Head `745eaf28` was intended to close that remaining part; Local's source review and the retained gpt-6-astra delta review approved it with no findings, but its required CI failed in the Live Postgres parity and Windows InstalledCurrent Postgres process-proof jobs. Head `0486beeb` was intended to address both failures; Local's source review and the retained gpt-6-astra delta review approved it with no findings, and its required CI passed. Watcher's fresh pre-merge consumer attestation approved it, but Operator Station's returned changes required because its PostgreSQL consumer fixture dropped the schema before stopping its daemon. Head `4cd34938` was intended to address that finding; Local's source review and the retained gpt-6-astra delta review approved it with no findings, and its required CI passed at that exact head. Fresh Watcher and Operator Station pre-merge consumer attestations both approved it, and Operator Station closed OS-PR161-0486BEE-1. The Local Daemon design inspection approved `4cd34938`, resolving D161-1, D161-2a, D161-2b, D161-3, and OS-PR161-0486BEE-1; the campaign resolved the inspector profile by enforcing the operator's standing instruction that new sessions use gpt-6-astra with high reasoning and long context, and a fresh Application Client design inspection with that profile approved `4cd34938` with no blocking design finding. That evidence did not carry over to head `5d21a63d`, which added an ephemeral Windows CI proof of the official v0.2.1 upgrade for E161-1; the implementer reported fresh source and design approvals, but its required CI failed in the new released-v0.2.1 proof job and the Windows build-and-test job, Local's source and design reviews returned changes required for proof-script findings L161-7, L161-8, P161-1, and P161-2, and Watcher and Operator Station approved its source consumability but withheld runtime credit, so it received no gate credit. Head `631aff22` replaced that PowerShell proof with an ignored Windows test in the existing Rust `InstalledCurrent` harness, without production source changes; Local's design inspection approved it, but Local's source review returned changes required for L161-9, a second panic in teardown after an early proof failure. Head `dacf3d18` fixed L161-9; Local's source review and design inspection approved it, and the implementer reported a fresh Application Client design approval, but its required CI failed in a Windows test job, where a cold-start fallback child exited with 0xC0000374, although the official v0.2.1 proof job passed, and Watcher and Operator Station approved its source consumability but withheld runtime credit, so it received no gate credit. Current head `52abb30e` makes the first production source change since `4cd34938`: in `src/station_intent.rs`, slot acquisition and worker completion for a cancellable filesystem phase now share one deadline-plus-grace window, which the implementer reports fixes a recurring cooperative-grace race. It also fails any Windows child exit status above 255 as abnormal and adds a Windows heap diagnostics CI job with full PageHeap and crash dumps. The implementer reports no defensible source cause for the earlier 0xC0000374 exit. Local's source review and design inspection, the implementer's fresh source and design reviews, and Watcher's and Operator Station's source attestations approved it; passing required CI and the consumers' runtime qualification are outstanding. Proof-isolation incident I161-1 withholds acceptance of the v0.2.1 upgrade proof; the operator directed that current host permissions and evidence be preserved while the existing owners continue a bounded read-only impact review, and impact assessment and isolation acceptance remain open. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
+| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched; its `client-conformance` and `consumer-integration-gate` dependencies are satisfied, and launch still requires separate preparation and authorization. By operator sequencing decision on 2026-10-22, which is a priority choice and not a technical dependency, `station-app` also does not launch until Telex Watcher passes `five-minute-custom-watch-gate` and reaches its `usable-watcher` checkpoint. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned: Watcher's post-merge gate receipt discharged its Application Client `client-conformance` and `consumer-integration-gate` holds, but launch still needs a reviewed and reconciled runtime tracker. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` completed through its single delivery PR #161, merged at reviewed head `52abb30e` as `4d25fdff`; the issue remains open. The predecessor head `7505568c` had Local and retained source review approval after repairs, including source changes intended to address failed CI at `8bd3c330`, `2b8ade1d`, and `ec8b88f7`. It passed required CI, and on 2026-10-22 the Watcher and Operator Station pre-merge consumer attestations approved it. The Application Client design inspection also approved it, but with an inspector profile that differed from the task's; the campaign later declined to credit it. The Local Daemon design inspection required changes for four static design findings (D161-1, D161-2a, D161-2b, D161-3), so that head received no design credit. Successor `f02f0ee9` is intended to address those findings; Local's source review and the retained gpt-6-astra delta review approved it with no findings, its required CI failed in the required Live Postgres parity job, and it has no CI, consumer, or design credit. Residual successor `689883e2` was intended to address those CI failures, but Local's source review required changes for finding L161-6. Successor `0490f5e5` was intended to address L161-6; the retained gpt-6-astra delta review approved it, but Local's source review found a narrow remaining part of L161-6. Head `745eaf28` was intended to close that remaining part; Local's source review and the retained gpt-6-astra delta review approved it with no findings, but its required CI failed in the Live Postgres parity and Windows InstalledCurrent Postgres process-proof jobs. Head `0486beeb` was intended to address both failures; Local's source review and the retained gpt-6-astra delta review approved it with no findings, and its required CI passed. Watcher's fresh pre-merge consumer attestation approved it, but Operator Station's returned changes required because its PostgreSQL consumer fixture dropped the schema before stopping its daemon. Head `4cd34938` was intended to address that finding; Local's source review and the retained gpt-6-astra delta review approved it with no findings, and its required CI passed at that exact head. Fresh Watcher and Operator Station pre-merge consumer attestations both approved it, and Operator Station closed OS-PR161-0486BEE-1. The Local Daemon design inspection approved `4cd34938`, resolving D161-1, D161-2a, D161-2b, D161-3, and OS-PR161-0486BEE-1; the campaign resolved the inspector profile by enforcing the operator's standing instruction that new sessions use gpt-6-astra with high reasoning and long context, and a fresh Application Client design inspection with that profile approved `4cd34938` with no blocking design finding. That evidence did not carry over to head `5d21a63d`, which added an ephemeral Windows CI proof of the official v0.2.1 upgrade for E161-1; the implementer reported fresh source and design approvals, but its required CI failed in the new released-v0.2.1 proof job and the Windows build-and-test job, Local's source and design reviews returned changes required for proof-script findings L161-7, L161-8, P161-1, and P161-2, and Watcher and Operator Station approved its source consumability but withheld runtime credit, so it received no gate credit. Head `631aff22` replaced that PowerShell proof with an ignored Windows test in the existing Rust `InstalledCurrent` harness, without production source changes; Local's design inspection approved it, but Local's source review returned changes required for L161-9, a second panic in teardown after an early proof failure. Head `dacf3d18` fixed L161-9; Local's source review and design inspection approved it, and the implementer reported a fresh Application Client design approval, but its required CI failed in a Windows test job, where a cold-start fallback child exited with 0xC0000374, although the official v0.2.1 proof job passed, and Watcher and Operator Station approved its source consumability but withheld runtime credit, so it received no gate credit. Final head `52abb30e` makes the first production source change since `4cd34938`: in `src/station_intent.rs`, slot acquisition and worker completion for a cancellable filesystem phase now share one deadline-plus-grace window, which the implementer reports fixes a recurring cooperative-grace race. It also fails any Windows child exit status above 255 as abnormal and adds a Windows heap diagnostics CI job with full PageHeap and crash dumps. The implementer reports no defensible source cause for the earlier 0xC0000374 exit. Local's source review and design inspection, the implementer's fresh source and design reviews, and Watcher's and Operator Station's source attestations approved it, its required CI passed, both consumers qualified it at runtime, and the PR merged as `4d25fdff` under App's normal guarded merge authorization; Watcher and Operator Station then passed the post-merge consumer integration gate, completing the `supported-client` checkpoint. The implementer's field report states that the permanent hosted Windows proof using the official v0.2.1 asset resolves E161-1. Proof-isolation incident I161-1 remains open: the operator directed that current host permissions and evidence be preserved while the existing owners continue a bounded read-only impact review, and impact assessment and isolation acceptance remain open. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` merged on 2026-10-08 and is complete. Isolated both-backend evidence goes to the separate hardening gate, and issue #153 must complete before Local Daemon closure; its prepared worker is held until Streamliner preparation passes the long-context tier to its initializer. |
 
 ## Shared seam
@@ -304,15 +302,14 @@ checkpoint is complete.
 Application Client convergence, client-core implementation, and the Rust-first
 binding are complete. Issue #149 and PR #151 landed the binding at
 `telex::application_client`; issue #12 publication revision 4 records the
-transition. Issue #152 and its reviewed bundle-first task govern
-`client-conformance`, which is in progress as the campaign main effort. The node
-must deliver all ten
-conformance families, public-only Watcher and Station fixtures, and
-temporary-seam replacement guidance in one PR. The planned
-`consumer-integration-gate` then requires independent exact-head attestations
-before product implementation continues. Operator issue #134 and PR #136
-completed the direct product contract reset without changing the generic
-Application Client ownership boundary.
+transition. Issue #152 and its reviewed bundle-first task governed
+`client-conformance`, which completed through PR #161, merged as `4d25fdff` on
+2026-10-22, with all ten conformance families, public-only Watcher and Station
+fixtures, and temporary-seam replacement guidance in one PR. Watcher and
+Operator Station then passed `consumer-integration-gate` on that merged main, so
+product implementation may be prepared under separate authorization. Operator
+issue #134 and PR #136 completed the direct product contract reset without
+changing the generic Application Client ownership boundary.
 
 ### Stage 4 — Production applications under accepted contracts
 
@@ -320,17 +317,20 @@ After the shared semantic checkpoint:
 
 - Operator Station completed its design reset around direct human attendance.
   The builder accepted the direction gate and closed the design checkpoint.
-  The desktop app remains planned and unlaunched while it waits on Application
-  Client `client-conformance` and `consumer-integration-gate`; it retains the
-  direct conformance dependency, and launch still requires separate preparation
-  and authorization after both holds complete.
+  The desktop app remains planned and unlaunched; its Application Client
+  `client-conformance` and `consumer-integration-gate` dependencies are
+  satisfied, and launch still requires separate preparation and authorization.
+  By operator sequencing decision on 2026-10-22, which is a priority choice and
+  not a technical dependency, `station-app` also does not launch until Telex
+  Watcher passes `five-minute-custom-watch-gate` and reaches its
+  `usable-watcher` checkpoint.
 - Telex Watcher's minimal command-plus-policy contract and builder usability
   gate are accepted. Issue #144 and its task specification prepare the optional
   examples, which remain ready but unlaunched pending separate campaign
-  authorization. Runtime and CLI remain planned until Application Client
-  `client-conformance` completes and `consumer-integration-gate` accepts the
-  same exact public revision without a private seam. The gate requires no
-  Watcher runtime implementation.
+  authorization. Runtime and CLI remain planned: Application Client
+  `client-conformance` completed and `consumer-integration-gate` accepted the
+  merged public revision without a private seam, but runtime launch still needs
+  a reviewed and reconciled tracker.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -398,77 +398,19 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Complete issue #152 `client-conformance` through PR #161. The Local Daemon
-   design inspection required changes at `7505568c` (D161-1, D161-2a, D161-2b,
-   D161-3). Successor `f02f0ee9` is intended to address them and received source
-   approval, but its required CI failed. Residual successor `689883e2` was
-   intended to address those CI failures, but Local's source review required
-   changes for finding L161-6, a lock wait outside the PostgreSQL release-client
-   repair budget. Successor `0490f5e5` narrowed L161-6 but still left a gap
-   before the repair task first runs. Head `745eaf28` is intended to close that
-   gap, and Local's source review and the retained gpt-6-astra delta review
-   approved it with no findings, but its required CI failed in the Live Postgres
-   parity and Windows InstalledCurrent Postgres process-proof jobs. Head
-   `0486beeb` was intended to address both CI failures; Local's source review
-   and the retained gpt-6-astra delta review approved it with no findings, and
-   its required CI passed. Watcher approved `0486beeb`, but Operator Station
-   returned changes required (finding OS-PR161-0486BEE-1: the PostgreSQL
-   consumer fixture dropped its schema before stopping its daemon). Head
-   `4cd34938` was intended to address that finding; Local's source review and
-   the retained gpt-6-astra delta review approved it with no findings, and its
-   required CI passed at that exact head. Fresh Watcher and Operator Station
-   pre-merge consumer attestations both approved it at that exact head, and
-   Station closed OS-PR161-0486BEE-1. The Local Daemon design inspection
-   approved `4cd34938` and resolved D161-1, D161-2a, D161-2b, D161-3, and
-   OS-PR161-0486BEE-1. A fresh Application Client design inspection also
-   approved `4cd34938`, so source approval, required CI, both consumer
-   attestations, and both design inspections held for that exact head. Head
-   `5d21a63d` added an ephemeral Windows CI proof of the official v0.2.1 upgrade
-   for E161-1 in a disposable root, with no workstation or parent access-control
-   change. The implementer reported fresh gpt-6-astra source and design
-   approvals with no findings, but required CI run 39805183080 failed in the new
-   released-v0.2.1 proof job and the Windows build-and-test job, Local's source
-   and design reviews returned changes required for proof-script findings
-   L161-7, L161-8, P161-1, and P161-2, and Watcher and Operator Station approved
-   source consumability but withheld runtime credit, so that head received no
-   gate credit. Head `631aff22` replaced that PowerShell proof with an ignored
-   Windows test in the existing Rust `InstalledCurrent` harness, without
-   production source changes; Local's design inspection approved it, but Local's
-   source review returned changes required for L161-9, a second panic in
-   teardown after an early proof failure. Head `dacf3d18` fixed L161-9; Local's
-   source review and design inspection approved it, and the implementer reported
-   a fresh Application Client design approval, but its required CI failed in a
-   Windows test job, where a cold-start fallback child exited with 0xC0000374,
-   although the official v0.2.1 proof job passed, and Watcher and Operator
-   Station approved its source consumability but withheld runtime credit, so it
-   received no gate credit. Current head `52abb30e` makes the first production
-   source change since `4cd34938`: in `src/station_intent.rs`, slot acquisition
-   and worker completion for a cancellable filesystem phase now share one
-   deadline-plus-grace window, which the implementer reports fixes a recurring
-   cooperative-grace race. It also fails any Windows child exit status above 255
-   as abnormal and adds a Windows heap diagnostics CI job with full PageHeap and
-   crash dumps. The implementer reports no defensible source cause for the
-   earlier 0xC0000374 exit. Local's source review and design inspection, the
-   implementer's fresh source and design reviews, and Watcher's and Operator
-   Station's source attestations approved it; passing required CI and the
-   consumers' runtime qualification are outstanding. No earlier evidence carries
-   over, so `52abb30e` has no gate credit until required CI passes and both
-   consumers qualify it at runtime with durable receipts. The implementer owns
-   completion. The campaign declined to credit the `7505568c` Application Client
-   inspection, which used a `gpt-5.6-sol` inspector, and resolved the inspector
-   profile by enforcing the operator's standing instruction: the fresh
-   inspection ran gpt-6-astra with high reasoning and long context, with no
-   silent substitution. For proof-isolation incident I161-1, the operator
-   directed that current host permissions and evidence be preserved while the
-   existing owners continue a bounded read-only impact review; that choice
-   authorizes no restoration, permission change, proof rerun, or cleanup. The
-   merge candidate still needs E161-1 validation and an I161-1 impact and
-   isolation-acceptance disposition. Under a 2026-10-22 user correction, the
-   retained implementer, supported by App, owns resolving that evidence and
-   completing the normal guarded delivery and merge flow; the campaign's E161-1
-   options prompt and added merge-floor certification are withdrawn, not
-   answered or waived, and no campaign readiness certificate replaces them. Keep
-   the consumer gate and `supported-client` checkpoint planned.
+1. Issue #152 `client-conformance` is complete. PR #161 merged at reviewed head
+   `52abb30e` as `4d25fdff` on 2026-10-22 after source review, design
+   inspection, required CI, and both consumers' runtime qualification of that
+   exact head, and Watcher and Operator Station then passed the post-merge
+   consumer integration gate, completing the `supported-client` checkpoint. The
+   Application Client brief and task keep the full head history. Issue #152
+   remains open; this record does not close it. The implementer's field report
+   states that the permanent hosted Windows proof using the official v0.2.1
+   asset resolves E161-1. Proof-isolation incident I161-1 remains open: the
+   operator's preservation directive and the local runtime and proof-replay
+   freeze are unchanged, and impact assessment and isolation acceptance remain
+   open. No release, tag, fleet, or launch authority follows. Application Client
+   `operational-hardening` remains planned.
 2. Local Daemon PR #138 for issue #106 merged on 2026-10-08 as `6ab6143a`.
    Keep the hardening gate a separate builder decision that needs isolated
    restart, drain, upgrade, and push-recovery evidence.
@@ -480,13 +422,13 @@ collapse into noise, and no session-bound polling task is required.
    2026-10-12; no repair has merged, and no restart or initializer has run.
 4. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-5. Keep `watcher-runtime-core` planned until `client-conformance` uses the
-   completed first binding to prove merged exact-store/exact-operation
-   `NotRecorded`, exact-same-operation retry, and retention-boundary failure
-   across both backends, and `consumer-integration-gate` accepts the same exact
-   public revision for Watcher without a private seam. The gate requires no
-   Watcher runtime implementation; recovery remains reconciliation-first and
-   query-only under uncertainty. After both holds complete, promote and prepare
-   Watcher runtime and CLI and the direct Station app without a premature launch.
+5. Keep `watcher-runtime-core` planned until a reviewed and reconciled runtime
+   tracker exists. Its Application Client holds are discharged:
+   `client-conformance` merged, and Watcher's post-merge gate receipt accepted
+   the merged public revision without a private seam. Recovery remains
+   reconciliation-first and query-only under uncertainty. Promote and prepare
+   Watcher runtime and CLI first, without a premature launch; the direct Station
+   app follows under the operator sequencing decision recorded for Operator
+   Station.
 6. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.

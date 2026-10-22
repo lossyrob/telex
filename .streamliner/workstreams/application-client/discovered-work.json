@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "application-client",
-  "updatedAt": "2026-10-08T20:28:47.310Z",
+  "updatedAt": "2026-10-22T17:52:35.797Z",
   "items": [
     {
       "id": "application-client-daemon-bootstrap-gap-v1",
@@ -32,7 +32,15 @@
       },
       "owner": "Application Client workstream orchestrator with Local Daemon trust authority",
       "terminalPath": "Complete InstalledCurrent implementation and product-design promotion in issue #152, prove the exact head on Windows and Linux against SQLite and credentialed Postgres with public Watcher and Station fixtures, then pass final implementation review, required CI, consumer attestations, and exact-head design inspection.",
-      "status": "routed",
+      "status": "completed",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/161",
+        "reviewedHead": "52abb30e49dff54f9a9ce7b31c64584a871d11c3",
+        "mergeCommit": "4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb",
+        "mergedAt": "2026-10-22T17:36:38Z",
+        "requiredCiRun": "39819692324",
+        "details": "PR #161 merged the InstalledCurrent implementation and product-design promotion after exact-head source review, Local design inspection, the implementer's design review, required CI on Windows and Linux against SQLite and credentialed PostgreSQL, and Watcher and Operator Station consumer attestations. Local Daemon item application-client-daemon-bootstrap-trust-v1 is not changed here and remains with its owner."
+      },
       "decisionState": "accepted",
       "dispositionAuthority": "Operator decision from campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c after joint Application Client and Local Daemon adjudication."
     },
@@ -66,7 +74,23 @@
       },
       "owner": "Application Client workstream orchestrator with Watcher and Operator Station consumer authorities",
       "terminalPath": "The complete issue #152 PR merges after exact-head review, required CI, both consumer attestations, and design inspection; the gate later passes through separate reconciliation using that same-head evidence.",
-      "status": "routed",
+      "status": "completed",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/161",
+        "reviewedHead": "52abb30e49dff54f9a9ce7b31c64584a871d11c3",
+        "mergeCommit": "4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb",
+        "mergedAt": "2026-10-22T17:36:38Z",
+        "requiredCiRun": "39819692324",
+        "preMergeAttestations": [
+          "watcher-pr161-52abb30-premerge-consumability-attestation.md SHA-256 e938504e1baff83ea02a19c6e318dff128abbdc3f0e897a1865342c4ba623c18",
+          "operator-station-pr161-premerge-consumability-attestation-52abb30e-runtime.json SHA-256 f9cf152e10cc778bd41554cac5fcda4dc10aaf28822662312cee8a4e28fd8f07"
+        ],
+        "postMergeGateReceipts": [
+          "watcher-application-client-postmerge-gate-4d25fdf.md SHA-256 3fc149b6f6cab0401bdecf661686efed9666b52a3413a2207fc5bcc1d771a961",
+          "operator-station-application-client-consumer-integration-gate-4d25fdff.json SHA-256 18d7b486d87d521393537741143364a1336ff278aa6a37a6d8f03458ea373b64"
+        ],
+        "details": "The complete issue #152 PR merged after exact-head review, required CI, both consumer attestations, and design inspection. Both consumers then passed the formal post-merge gate on the merge commit, whose second parent is the reviewed head; this reconciliation marks consumer-integration-gate completed."
+      },
       "decisionState": "accepted",
       "dispositionAuthority": "Joint consumer-gate adjudication accepted by campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c."
     },
@@ -169,7 +193,16 @@
       },
       "owner": "Application Client workstream orchestrator",
       "terminalPath": "The issue #152 PR merges with the coupled 0.3.0 source version and migration documentation after exact-head review, required CI, consumer attestations, design inspection, and campaign authorization. Any later tag or publication requires a separate operator decision.",
-      "status": "routed",
+      "status": "completed",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/161",
+        "reviewedHead": "52abb30e49dff54f9a9ce7b31c64584a871d11c3",
+        "mergeCommit": "4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb",
+        "mergedAt": "2026-10-22T17:36:38Z",
+        "requiredCiRun": "39819692324",
+        "cargoVersion": "0.3.0",
+        "details": "PR #161 merged the coupled unpublished 0.3.0 source version and migration documentation after exact-head review, required CI, consumer attestations, and design inspection, under App's normal guarded merge authorization. Under the 2026-10-22 user correction, the implementer, supported by App, owns the merge flow, and the campaign's added merge-floor certification was withdrawn. No tag or publication occurred; any later tag or publication still requires a separate operator decision."
+      },
       "decisionState": "accepted",
       "dispositionAuthority": "Operator response 'Authorize source-only 0.3.0 transition in #152 (Recommended)' on 2026-10-08, recorded by campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c."
     }

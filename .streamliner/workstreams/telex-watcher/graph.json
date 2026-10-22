@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned and blocked on Application Client client-conformance and the subsequent consumer-integration gate.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned: its Application Client client-conformance and consumer-integration-gate holds were discharged on 2026-10-22, and it may advance toward ready once a reviewed and reconciled runtime tracker exists. By operator priority decision on 2026-10-22, Telex Watcher is to replace the waiter session in the operator workflow, and watcher-runtime-core is planned as the first owner under the operator workflow v2; this records sequencing only and grants no launch authority.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-09-02T14:27:00Z",
+  "updatedAt": "2026-10-22T17:52:35.797Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",

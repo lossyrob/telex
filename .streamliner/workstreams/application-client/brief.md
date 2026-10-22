@@ -136,25 +136,27 @@ remained unresolved. The
 records the implementation and validation evidence. Issue #149 closed as
 completed at `2026-09-02T13:56:22Z`.
 
-`client-conformance` is tracked by
-[#152](https://github.com/lossyrob/telex/issues/152) and is in progress as the
-campaign main effort. One node, tracker, and delivery PR must prove all ten
-conformance
-families through the public Rust surface across SQLite and credentialed
-Postgres. The same PR owns public-only Watcher send-only and Operator Station
-bidirectional fixtures, any missing shared-semantic repair, and guidance for
-replacing temporary consumer seams. Runtime fixtures use production
-`InstalledCurrent { trusted_root }` daemon bootstrap under the Local
-Daemon-owned selector-admission and process-authentication contract; compile-only
-fixtures are insufficient.
+`client-conformance` completed through
+[#152](https://github.com/lossyrob/telex/issues/152) and PR #161 at exact
+reviewed head `52abb30e49dff54f9a9ce7b31c64584a871d11c3`, merged as
+`4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb` on 2026-10-22. One node, tracker, and
+delivery PR covers all ten conformance families through the public Rust surface
+across SQLite and credentialed Postgres. The same PR delivered public-only
+Watcher send-only and Operator Station bidirectional fixtures, shared-semantic
+repairs, and guidance for replacing temporary consumer seams. Runtime fixtures
+use production `InstalledCurrent { trusted_root }` daemon bootstrap under the
+Local Daemon-owned selector-admission and process-authentication contract.
+Issue #152 remains open; this record does not close it.
 
-`consumer-integration-gate` remains planned. After conformance review and
-required CI pass on one exact head, Watcher and Operator Station independently
-attest that same bundle against their merged contracts and confirm no private
-seam is required. Product implementation, usability, packaging, and operational
-evidence remain downstream. Watcher runtime and Station app retain direct
-conformance dependencies and also wait on the consumer gate. No checkpoint or
-gate advances with this shaping reconciliation.
+`consumer-integration-gate` passed on merged main `4d25fdff`. Watcher and
+Operator Station each attested the reviewed head before merge and then passed
+the formal post-merge gate, confirming that their consumers need no private
+seam; the receipts are in the PR #161 record below. The `supported-client`
+checkpoint is complete. Product implementation, usability, packaging, and
+operational evidence remain downstream. Watcher runtime's Application Client
+hold is discharged, but it needs a reviewed and reconciled runtime tracker
+before launch. The Station app's Application Client dependencies are satisfied,
+but it remains planned and unlaunched until separately prepared and authorized.
 
 On 2026-10-08 the operator approved issue #152 as the campaign main effort,
 recorded in campaign directive
@@ -989,37 +991,133 @@ terminal run 39819692324 with all 18 jobs successful before runtime credit.
 Required CI run 39819692324 started at this head with 18 jobs, including the
 official v0.2.1 proof job 119967372167, the live PostgreSQL parity job
 119967372326, the Windows `InstalledCurrent` PostgreSQL process proof job
-119967372106, and the Windows heap diagnostics job 119967372231; it had no
-terminal result when this record was made. No `dacf3d18` or earlier evidence
-carries over. At `52abb30e`, Local's source review and design inspection, the
-implementer's source and design reviews, and Watcher's and Operator Station's
-source attestations have approved the head; passing required CI and both
-consumers' runtime qualification are outstanding, and the head has no gate
-credit. E161-1 and the I161-1 impact and isolation questions remain open, the
-I161-1 workstation preservation and freeze are unchanged, and no merge, release,
-tag, or fleet action is authorized.
+119967372106, and the Windows heap diagnostics job 119967372231. The run
+completed successfully at 2026-10-22T17:33:08Z with all 18 jobs passing while
+the PR stayed open and non-draft at this exact head, and GitHub then reported
+the PR as mergeable with a clean merge state. The official v0.2.1 proof artifact
+(ID 12443976768, digest
+`sha256:8bb7557f0525c7b5e9fd657b890c78b6d07675f4fd1be81f6de4eeaa97044af7`) holds
+a passing report (`report.json`, 3,012 bytes, SHA-256
+`bfecda7380007cf617c00227c429cd150006787c27e75635eecb18248ab864be`). In it, the
+candidate built from this head was installed with SHA-256
+`da80f28e13d73f9fd54f2925ed4acd0aa937aa2a742f8725d49d20d62ebb7a0c`; the released
+writer came from the official v0.2.1 Windows asset (SHA-256
+`f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0`); the old
+writer's manifest had no admission field and kept its hash, modification time,
+and file identity; and the proof made one probe before spawning, observed parent
+and child admission and public attach, and saw the daemon exit. The heap
+diagnostics artifact (ID 12444406553, digest
+`sha256:2a9888132e1354fee55e4bc4a3cffb618e369a3e9e0e85d871f03a7da8cfe0db`) holds
+three complete runs of the SQLite daemon process test target, each passing 49 of
+49 tests (log SHA-256
+`06f4eeba69ecefcc6b36ef3eb0163ff308f3fc5185a17551281bf9cc0b075f8f`,
+`6823343a6fec42bd74ab8f33de7539d54f658a093b3fc63926c834998d21e0c6`, and
+`e0eda4a712b2b223bda4d991345f5827a9d5f5df517dbeb4b0a73000710461b8`), and no
+crash dump. These results give this head CI credit only: they identify no cause
+for the earlier 0xC0000374 exit, the passing proof does not by itself accept
+E161-1, and runtime consumer credit still requires Watcher and Operator Station
+to qualify the head. The implementer's completion report attributes the repeated
+partial-page failures to slot admission spending the cooperative deadline before
+grace applied, which the shared deadline-plus-grace boundary fixes without a
+second grace window. It claims no heap-overwrite cause and no heap-corruption
+fix, and it reports passing local formatting and diff checks, Rust 1.99 and 1.98
+compile-only builds, warnings-denied Clippy on the affected code, a PowerShell
+syntax check, and YAML lint, with no workstation actions. App's merge preflight
+found that main is 27 commits ahead of the PR's recorded base `2c2b9fb5`, all of
+them changes to six `.streamliner` bookkeeping files and none to product paths,
+so the head needs no rebase for them; the PR has no review threads, and its
+issue remains open. Watcher's runtime-qualified pre-merge attestation
+(`watcher-pr161-52abb30-premerge-consumability-attestation.md` in session
+e00d296e-ffca-4477-b1c8-c4d340bd30be, 10,121 bytes, SHA-256
+`e938504e1baff83ea02a19c6e318dff128abbdc3f0e897a1865342c4ba623c18`) then
+approved the head: Watcher can consume the Application Client through supported
+public surfaces alone, and all 18 jobs passed. Operator Station's runtime
+attestation
+(`operator-station-pr161-premerge-consumability-attestation-52abb30e-runtime.json`
+in session 002c5122-fc0d-403c-8f87-625d87385d44, 12,018 bytes, SHA-256
+`f9cf152e10cc778bd41554cac5fcda4dc10aaf28822662312cee8a4e28fd8f07`) also
+approved it and granted runtime consumer credit, citing the Windows
+build-and-test job's passing partial-page regression, previously failing
+cold-start fallback test, and Windows exit-status test. It keeps
+OS-PR161-DACF3D1-R1 superseded rather than closed and OS-PR161-0486BEE-1 closed
+at this head. Both are pre-merge attestations; neither is the post-merge
+consumer integration gate or a merge-readiness finding. App then authorized a
+normal guarded merge of exact head `52abb30e` after a final live check at
+2026-10-22T17:35:51Z found the PR open, non-draft, and mergeable with a clean
+state, all 18 checks passing, no review threads, and the issue open. The
+authorization is bound to that head and its guards and covers only the normal PR
+merge; it grants no release, tag, fleet, issue-closure, Station application, or
+post-merge gate authority, and it does not record acceptance of E161-1 or an
+I161-1 impact and isolation disposition. PR #161 then merged at
+2026-10-22T17:36:38Z as merge commit `4d25fdff375dcfd55b4a7b4613a5b5ecb8241bdb`
+(tree `c57cdbd7b4ece031a01e6a04d4d740fd21ae8b62`), whose parents are main
+`2b1ceb4c` and the reviewed head `52abb30e`; outside `.streamliner`, its tree
+matches the reviewed head. The implementer posted a field report (issue comment
+6347164525) and a merge receipt (issue comment 6347180924), and the issue
+remains open. Push CI run 39824226010 for the merge commit was in progress when
+this record was made. App has asked Watcher and Operator Station for the formal
+post-merge consumer integration gate attestations. Operator Station then
+approved the formal post-merge consumer integration gate for its side on exact
+merged main `4d25fdff`
+(`operator-station-application-client-consumer-integration-gate-4d25fdff.json`
+in session 002c5122-fc0d-403c-8f87-625d87385d44, 10,372 bytes, SHA-256
+`18d7b486d87d521393537741143364a1336ff278aa6a37a6d8f03458ea373b64`): it marks
+its side of the gate satisfied, finds that the merge rewrote no reviewed public
+consumer path, and requires no private fallback. It conditions any advance of
+`station-app` on canonical completion of `client-conformance`, completion of the
+combined consumer integration gate with all required receipts, and
+reconciliation of both Operator Station graph dependencies; `station-app`
+remains planned and unlaunched. Watcher then passed the formal post-merge
+consumer integration gate for its side on the same merged main
+(`watcher-application-client-postmerge-gate-4d25fdf.md` in session
+e00d296e-ffca-4477-b1c8-c4d340bd30be, 9,021 bytes, SHA-256
+`3fc149b6f6cab0401bdecf661686efed9666b52a3413a2207fc5bcc1d771a961`). It verified
+that the merge's second parent is the reviewed head and that every load-bearing
+public consumer byte is identical in the merge tree, and it discharged the
+Application Client hold on `watcher-runtime-core`. It authorizes no
+implementation launch, because the Watcher runtime task also requires a reviewed
+and reconciled runtime tracker, which does not yet exist. With both required
+consumer receipts recorded, App directed that the consumer integration gate be
+marked passed and `client-conformance` completed on main. This record does both
+and completes the `supported-client` checkpoint, whose four nodes are now
+complete. No release, tag, fleet, or launch action followed the merge. No
+`dacf3d18` or earlier evidence carries over. At `52abb30e`, Local's source
+review and design inspection, the implementer's source and design reviews, and
+Watcher's and Operator Station's source and runtime attestations have approved
+the head, its required CI passed, the PR merged as `4d25fdff` under App's normal
+guarded merge authorization, and both consumers passed the post-merge consumer
+integration gate. The implementer's field report states that the permanent
+hosted Windows proof using the official v0.2.1 asset resolves E161-1; this
+record attributes that resolution to the implementer and adds no independent
+acceptance. The I161-1 impact and isolation questions remain open, the I161-1
+workstation preservation and freeze are unchanged, issue #152 remains open, and
+no release, tag, fleet, issue-closure, or launch authority is granted.
 
-The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
-v0.2.1 executable staged the candidate into a fresh fixture root and public
-attachment succeeded. The proof script, however, also rewrote the access control
-list of the operator's real `AppData\Local` directory in several runs, and no
-prior descriptor or backup exists. That incident, I161-1, withholds isolation
-certification. On 2026-10-22 the operator chose to preserve the current host
-access control lists and evidence and to have the existing owners continue a
-bounded read-only impact review. That choice resolves only the initial operator
-response. It authorizes no restoration, inferred default, inheritance change,
-recursive reset, other access-control change, proof rerun, or cleanup. Impact
-assessment and isolation acceptance remain open and E161-1 remains withheld; the
-choice does not establish an absence of impact, close the incident, or grant
-merge credit. Local runtime and proof replay remain frozen, so runtime
-validation relies on CI; ordinary source and CI work may continue within that
-freeze. It does not change the gate evidence for PR head `4cd34938`, which
-remains scoped to that exact head. E161-1 validation and merge remain
-outstanding; the implementer is resolving E161-1 through a hosted CI proof; the
+The workstation run of the released-v0.2.1 upgrade proof (E161-1) was not
+accepted. At `d08e764c`, the official v0.2.1 executable staged the candidate
+into a fresh fixture root and public attachment succeeded. The proof script,
+however, also rewrote the access control list of the operator's real
+`AppData\Local` directory in several runs, and no prior descriptor or backup
+exists. That incident, I161-1, withholds isolation certification. On 2026-10-22
+the operator chose to preserve the current host access control lists and
+evidence and to have the existing owners continue a bounded read-only impact
+review. That choice resolves only the initial operator response. It authorizes
+no restoration, inferred default, inheritance change, recursive reset, other
+access-control change, proof rerun, or cleanup. Impact assessment and isolation
+acceptance remain open; the choice did not accept E161-1, and it does not
+establish an absence of impact, close the incident, or grant merge credit. Local
+runtime and proof replay remain frozen, so runtime validation relies on CI;
+ordinary source and CI work may continue within that freeze. It does not change
+the gate evidence for PR head `4cd34938`, which remains scoped to that exact
+head. The implementer pursued E161-1 through a hosted CI proof instead: the
 first attempt at `5d21a63d` failed; the Rust-harness replacement proof job
 passed at `dacf3d18`, but that head's CI run failed in a required Windows test
-job; and current head `52abb30e` awaits a passing exact-head CI run. The node
-stays in progress, and issue #152 stays open.
+job; and the required CI run at head `52abb30e` passed, after which PR #161
+merged as `4d25fdff`. The implementer's field report states that the permanent
+hosted Windows proof using the official v0.2.1 asset resolves E161-1; this
+record attributes that resolution to the implementer and adds no independent
+acceptance. The node is complete; issue #152 remains open, and this record does
+not close it.
 
 ## Decisions
 
@@ -1167,8 +1265,8 @@ stays in progress, and issue #152 stays open.
   product integration.
 - Explicit migration guidance away from temporary CLI, raw-IPC, and spike
   integration seams.
-- Exact-head public-seam attestations from Watcher and Operator Station for the
-  planned `consumer-integration-gate`.
+- Exact-head public-seam attestations and post-merge gate receipts from Watcher
+  and Operator Station for the completed `consumer-integration-gate`.
 
 ## Closeout Observations
 
@@ -1177,8 +1275,9 @@ stays in progress, and issue #152 stays open.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
   and merged through PR #132.
 - The Rust-first `first-binding` completed through issue #149 and PR #151.
-  Issue #152 `client-conformance` is in progress as the campaign main effort;
-  the consumer gate and `supported-client` remain planned.
+  Issue #152 `client-conformance` completed through PR #161, merged as
+  `4d25fdff`; the consumer gate and `supported-client` checkpoint are complete,
+  and issue #152 remains open.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the
