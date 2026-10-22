@@ -514,9 +514,9 @@ fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) ->
     let stdout = read_capture(&mut stdout_file, &stdout_path);
     let stderr = read_capture(&mut stderr_file, &stderr_path);
     #[cfg(windows)]
-    if let Some(exception) = windows_native_exception(code) {
+    if let Some(exception) = windows_abnormal_exit_status(code) {
         panic!(
-            "command exited through native Windows exception 0x{exception:08x}; \
+            "command exited through abnormal Windows status 0x{exception:08x}; \
              stdout_path={} stderr_path={} stdout={} stderr={}",
             stdout_path.display(),
             stderr_path.display(),
@@ -533,8 +533,9 @@ fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) ->
 }
 
 #[cfg(windows)]
-fn windows_native_exception(code: Option<i32>) -> Option<u32> {
-    code.filter(|code| *code < 0).map(|code| code as u32)
+fn windows_abnormal_exit_status(code: Option<i32>) -> Option<u32> {
+    let raw = code? as u32;
+    (raw > u8::MAX as u32).then_some(raw)
 }
 
 fn read_capture(file: &mut std::fs::File, path: &Path) -> String {
@@ -590,13 +591,18 @@ fn configure_copilot_home(cmd: &mut Command, home: &Path) {
 
 #[cfg(windows)]
 #[test]
-fn negative_windows_exit_is_always_a_native_exception() {
+fn windows_exit_status_must_be_an_ordinary_application_code() {
     assert_eq!(
-        windows_native_exception(Some(-1_073_740_940)),
+        windows_abnormal_exit_status(Some(-1_073_740_940)),
         Some(0xc000_0374)
     );
-    assert_eq!(windows_native_exception(Some(1)), None);
-    assert_eq!(windows_native_exception(None), None);
+    assert_eq!(
+        windows_abnormal_exit_status(Some(0x4000_0015)),
+        Some(0x4000_0015)
+    );
+    assert_eq!(windows_abnormal_exit_status(Some(255)), None);
+    assert_eq!(windows_abnormal_exit_status(Some(256)), Some(256));
+    assert_eq!(windows_abnormal_exit_status(None), None);
 }
 
 fn copilot_runtime_home(env: &ProcessEnv) -> PathBuf {
@@ -655,8 +661,8 @@ fn wait_until_daemon_lists_waiter(env: &ProcessEnv, waiter_pid: u32, timeout: Du
 fn wait_status_with_timeout(child: std::process::Child, timeout: Duration) -> (Option<i32>, bool) {
     let outcome = wait_status_with_timeout_raw(child, timeout);
     #[cfg(windows)]
-    if let Some(exception) = windows_native_exception(outcome.0) {
-        panic!("direct child exited through native Windows exception 0x{exception:08x}");
+    if let Some(exception) = windows_abnormal_exit_status(outcome.0) {
+        panic!("direct child exited through abnormal Windows status 0x{exception:08x}");
     }
     outcome
 }
