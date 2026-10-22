@@ -3208,13 +3208,14 @@ async fn open_store_entry(
         #[cfg(feature = "postgres")]
         {
             let (profile_name, profile) = resolve_postgres_profile_for_store_key(store_key)?;
-            let backend = crate::backend::postgres::PgBackend::connect_profile(profile.clone())
-                .await
-                .map_err(|e| {
-                    proto::unsupported(format!(
-                        "opening Postgres backend profile '{profile_name}': {e:#}"
-                    ))
-                })?;
+            let backend =
+                crate::backend::postgres::PgBackend::connect_profile_for_daemon(profile.clone())
+                    .await
+                    .map_err(|e| {
+                        proto::unsupported(format!(
+                            "opening Postgres backend profile '{profile_name}': {e:#}"
+                        ))
+                    })?;
             backend
                 .init_schema()
                 .await

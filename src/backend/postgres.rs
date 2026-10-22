@@ -27,10 +27,21 @@ pub struct PgBackend {
 }
 
 struct PgReleaseClient {
-    client: AsyncMutex<Option<tokio_postgres::Client>>,
+    client: AsyncMutex<Option<ManagedPgClient>>,
     connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
     profile: Option<crate::profiles::BackendProfile>,
     repairing: Arc<AtomicBool>,
+}
+
+struct ManagedPgClient {
+    client: tokio_postgres::Client,
+    driver: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for ManagedPgClient {
+    fn drop(&mut self) {
+        self.driver.abort();
+    }
 }
 
 struct ReleaseRepairGate(Arc<AtomicBool>);
@@ -980,16 +991,34 @@ impl PgBackend {
     }
 
     pub async fn connect_profile(profile: crate::profiles::BackendProfile) -> Result<Self> {
+        Self::connect_profile_inner(profile, false).await
+    }
+
+    pub(crate) async fn connect_profile_for_daemon(
+        profile: crate::profiles::BackendProfile,
+    ) -> Result<Self> {
+        Self::connect_profile_inner(profile, true).await
+    }
+
+    async fn connect_profile_inner(
+        profile: crate::profiles::BackendProfile,
+        prepare_release: bool,
+    ) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
         let release_config = Self::release_config(&config);
+        let release_client = if prepare_release {
+            Some(Self::open_release_client(&release_config, schema.as_deref()).await?)
+        } else {
+            None
+        };
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
         let release_profile = profile.clone();
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
             release: Arc::new(PgReleaseClient {
-                client: AsyncMutex::new(None),
+                client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema)),
                 profile: Some(release_profile),
                 repairing: Arc::new(AtomicBool::new(false)),
@@ -1044,6 +1073,41 @@ impl PgBackend {
         Ok(client)
     }
 
+    async fn open_release_client(
+        config: &tokio_postgres::Config,
+        schema: Option<&str>,
+    ) -> Result<ManagedPgClient> {
+        let (client, connection) = config
+            .connect(make_tls()?)
+            .await
+            .context("connecting PostgreSQL release client")?;
+        let driver = tokio::spawn(async move {
+            if let Err(error) = connection.await {
+                eprintln!("[telex] postgres release connection ended: {error}");
+            }
+        });
+        let mut driver = ConnectionTaskGuard(Some(driver));
+        client
+            .batch_execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED;
+                 SET statement_timeout TO '4000ms';
+                 SET lock_timeout TO '4000ms';",
+            )
+            .await
+            .context("initializing PostgreSQL release session")?;
+        if let Some(schema) = schema {
+            let schema = sanitize_ident(schema)?;
+            client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA IF NOT EXISTS {schema}; SET search_path TO {schema}, public;"
+                ))
+                .await
+                .context("setting PostgreSQL release schema search_path")?;
+        }
+        let driver = driver.0.take().expect("release driver remains owned");
+        Ok(ManagedPgClient { client, driver })
+    }
+
     async fn client(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>> {
         let mut client = self.client.lock().await;
         if client.is_closed() {
@@ -1067,7 +1131,10 @@ impl PgBackend {
             let repair = async {
                 {
                     let client = release.client.lock().await;
-                    if client.as_ref().is_some_and(|client| !client.is_closed()) {
+                    if client
+                        .as_ref()
+                        .is_some_and(|client| !client.client.is_closed())
+                    {
                         return Ok::<_, anyhow::Error>(());
                     }
                 }
@@ -1080,11 +1147,12 @@ impl PgBackend {
                     let cached = release.connection.lock().await;
                     (cached.0.clone(), cached.1.clone())
                 };
-                let replacement = PgBackend::open_client(&config, schema.as_deref()).await?;
+                let replacement =
+                    PgBackend::open_release_client(&config, schema.as_deref()).await?;
                 let mut client = release.client.lock().await;
                 if client
                     .as_ref()
-                    .is_none_or(tokio_postgres::Client::is_closed)
+                    .is_none_or(|client| client.client.is_closed())
                 {
                     *client = Some(replacement);
                     *release.connection.lock().await = (config, schema);
@@ -1584,38 +1652,52 @@ impl Backend for PgBackend {
         // release connection from the cached resolved config, then reuse it
         // for the backend's remaining members. The full acquisition + fenced
         // update shares one bound.
-        let release = async {
-            let mut client = self.release.client.lock().await;
-            if client
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut client = tokio::time::timeout_at(deadline, self.release.client.lock())
+            .await
+            .map_err(|_| anyhow!("postgres lease release could not acquire its client in 5s"))?;
+        if client
+            .as_ref()
+            .is_none_or(|client| client.client.is_closed())
+        {
+            let (config, schema) =
+                tokio::time::timeout_at(deadline, self.release.connection.lock())
+                    .await
+                    .map(|cached| (cached.0.clone(), cached.1.clone()))
+                    .map_err(|_| anyhow!("postgres lease release config wait exceeded 5s"))?;
+            let replacement = tokio::time::timeout_at(
+                deadline,
+                Self::open_release_client(&config, schema.as_deref()),
+            )
+            .await
+            .map_err(|_| anyhow!("postgres lease release connection exceeded 5s"))??;
+            *client = Some(replacement);
+        }
+        let result = tokio::time::timeout_at(
+            deadline,
+            client
                 .as_ref()
-                .is_none_or(tokio_postgres::Client::is_closed)
-            {
-                let (config, schema) = {
-                    let cached = self.release.connection.lock().await;
-                    (cached.0.clone(), cached.1.clone())
-                };
-                *client = Some(Self::open_client(&config, schema.as_deref()).await?);
-            }
-            let client = client.as_ref().expect("release client initialized");
-            let n = client
+                .expect("release client initialized")
+                .client
                 .execute(
                     "UPDATE leases
                         SET owner_instance_id = NULL
                       WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
                     &[&address, &owner_instance_id, &lease_epoch],
-                )
-                .await?;
-            Ok::<_, anyhow::Error>(n > 0)
-        };
-        match tokio::time::timeout(Duration::from_secs(5), release).await {
-            Ok(Ok(released)) => Ok(released),
+                ),
+        )
+        .await;
+        match result {
+            Ok(Ok(count)) => Ok(count > 0),
             Ok(Err(error)) => {
-                *self.release.client.lock().await = None;
+                *client = None;
+                drop(client);
                 self.schedule_release_repair();
-                Err(error)
+                Err(error.into())
             }
             Err(_) => {
-                *self.release.client.lock().await = None;
+                *client = None;
+                drop(client);
                 self.schedule_release_repair();
                 Err(anyhow!(
                     "postgres lease release exceeded its 5s shutdown budget"
