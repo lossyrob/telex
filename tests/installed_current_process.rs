@@ -1616,7 +1616,7 @@ async fn exact_executable_file_identity_change_is_refused() {
             .ready,
         "the pinned target must serve"
     );
-    iso.stop_daemon();
+    iso.stop_daemon_with_executable(&pinned);
 
     // Replace the target so its platform file identity changes.
     let displaced = pinned.with_extension("original-image");
@@ -1680,6 +1680,7 @@ async fn exact_executable_fresh_policy_refuses_stale_running_image() {
         DaemonBootstrapFailure::ForeignDaemon,
         "fresh exact policy must reject the stale mapped peer before Hello"
     );
+    iso.stop_daemon_with_executable(&displaced);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

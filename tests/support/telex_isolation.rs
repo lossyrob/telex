@@ -107,6 +107,13 @@ pub struct Isolation {
     binary: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DaemonIdentityEvidence {
+    Absent,
+    Exact { pid: u32, start_time: u64 },
+    Unverifiable,
+}
+
 impl Isolation {
     /// Create the isolated tree and install the branch binary as `current`.
     pub fn new(label: &str) -> Self {
@@ -282,68 +289,99 @@ impl Isolation {
             .map(str::to_string)
     }
 
-    fn daemon_identity_from_cap(cap: &serde_json::Value) -> Option<(u32, u64)> {
-        let pid = cap
+    fn daemon_identity_from_cap(cap: &serde_json::Value) -> DaemonIdentityEvidence {
+        let Some(pid) = cap
             .get("server_pid")
             .and_then(|v| v.as_u64())
-            .and_then(|pid| u32::try_from(pid).ok())?;
-        let start_time = cap.get("server_start_time").and_then(|v| v.as_u64())?;
-        Some((pid, start_time))
+            .and_then(|pid| u32::try_from(pid).ok())
+        else {
+            return DaemonIdentityEvidence::Unverifiable;
+        };
+        let Some(start_time) = cap.get("server_start_time").and_then(|v| v.as_u64()) else {
+            return DaemonIdentityEvidence::Unverifiable;
+        };
+        DaemonIdentityEvidence::Exact { pid, start_time }
     }
 
-    fn daemon_identity(&self) -> Option<(u32, u64)> {
-        Self::daemon_identity_from_cap(&self.cap_json()?)
+    fn daemon_identity(&self) -> DaemonIdentityEvidence {
+        let Some(path) = self.cap_path() else {
+            return DaemonIdentityEvidence::Absent;
+        };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return DaemonIdentityEvidence::Unverifiable;
+        };
+        let Ok(cap) = serde_json::from_str(&text) else {
+            return DaemonIdentityEvidence::Unverifiable;
+        };
+        Self::daemon_identity_from_cap(&cap)
     }
 
     pub fn daemon_pid(&self) -> Option<u32> {
-        self.daemon_identity().map(|(pid, _)| pid)
+        match self.daemon_identity() {
+            DaemonIdentityEvidence::Exact { pid, .. } => Some(pid),
+            DaemonIdentityEvidence::Absent | DaemonIdentityEvidence::Unverifiable => None,
+        }
+    }
+
+    fn daemon_running_observation(&self) -> Option<bool> {
+        let out = self.run_cli(["--json", "daemon", "status"], Duration::from_secs(20));
+        (out.code == Some(0))
+            .then(|| serde_json::from_str::<serde_json::Value>(&out.stdout).ok())
+            .flatten()
+            .and_then(|json| json.get("running").and_then(|v| v.as_bool()))
     }
 
     pub fn daemon_running(&self) -> bool {
-        let out = self.run_cli(["--json", "daemon", "status"], Duration::from_secs(20));
-        out.code == Some(0)
-            && serde_json::from_str::<serde_json::Value>(&out.stdout)
-                .ok()
-                .and_then(|json| json.get("running").and_then(|v| v.as_bool()))
-                .unwrap_or(false)
+        self.daemon_running_observation() == Some(true)
     }
 
     /// Stop the daemon and wait until it is no longer serving.
     pub fn stop_daemon(&self) {
         assert!(
-            self.stop_daemon_within(Duration::from_secs(30)),
+            self.stop_daemon_with_executable_within(
+                &self.current_binary(),
+                Duration::from_secs(30)
+            ),
+            "daemon for {} did not stop within the deadline",
+            self.label
+        );
+    }
+
+    pub fn stop_daemon_with_executable(&self, executable: &Path) {
+        assert!(
+            self.stop_daemon_with_executable_within(executable, Duration::from_secs(30)),
             "daemon for {} did not stop within the deadline",
             self.label
         );
     }
 
     pub fn stop_daemon_best_effort(&self) -> bool {
-        self.stop_daemon_within(Duration::from_secs(20))
+        self.stop_daemon_with_executable_within(&self.current_binary(), Duration::from_secs(20))
     }
 
-    fn stop_daemon_within(&self, timeout: Duration) -> bool {
+    fn stop_daemon_with_executable_within(&self, executable: &Path, timeout: Duration) -> bool {
         let identity = self.daemon_identity();
-        let _ = self.run_cli(
-            ["--json", "daemon", "stop", "--drain"],
-            Duration::from_secs(20),
-        );
+        let mut command = self.command_for(executable);
+        command.args(["--json", "daemon", "stop", "--drain"]);
+        let _ = run_with_timeout(command, Duration::from_secs(20));
         self.wait_until_stopped(identity, timeout)
     }
 
-    fn wait_until_stopped(&self, identity: Option<(u32, u64)>, timeout: Duration) -> bool {
+    fn wait_until_stopped(&self, identity: DaemonIdentityEvidence, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            // Wait for the endpoint to go away *and* for the recorded process
-            // to actually exit: a still-terminating daemon keeps its image
-            // mapped and can still answer a racing connect.
-            if identity
-                .map(|(pid, start_time)| {
-                    !telex::session_watch::process_alive_with_start_time(pid, Some(start_time))
-                })
-                .unwrap_or(true)
-                && !self.daemon_running()
-            {
-                return true;
+            match identity {
+                DaemonIdentityEvidence::Exact { pid, start_time } => {
+                    if !telex::session_watch::process_alive_with_start_time(pid, Some(start_time)) {
+                        return true;
+                    }
+                }
+                DaemonIdentityEvidence::Absent => {
+                    if self.daemon_running_observation() == Some(false) {
+                        return true;
+                    }
+                }
+                DaemonIdentityEvidence::Unverifiable => return false,
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -786,15 +824,18 @@ mod tests {
                 "server_pid": 42,
                 "server_start_time": 99
             })),
-            Some((42, 99))
+            DaemonIdentityEvidence::Exact {
+                pid: 42,
+                start_time: 99
+            }
         );
         assert_eq!(
             Isolation::daemon_identity_from_cap(&serde_json::json!({"server_pid": 42})),
-            None
+            DaemonIdentityEvidence::Unverifiable
         );
         assert_eq!(
             Isolation::daemon_identity_from_cap(&serde_json::json!({"server_start_time": 99})),
-            None
+            DaemonIdentityEvidence::Unverifiable
         );
     }
 }
