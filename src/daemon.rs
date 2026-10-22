@@ -2564,7 +2564,7 @@ pub async fn connect_or_spawn(store_key: &str) -> Result<DaemonClient> {
             )));
         }
         launches.push(Instant::now());
-        spawn_daemon()?;
+        let _spawn_admission = spawn_daemon().await?;
 
         loop {
             if Instant::now() >= deadline {
@@ -2616,9 +2616,52 @@ pub async fn request_connect_or_spawn(store_key: &str, request: &Request) -> Res
     }
 }
 
-fn spawn_daemon() -> Result<()> {
+async fn spawn_daemon() -> Result<Option<crate::daemon_bootstrap::SelectorAdmission>> {
     let exe = canonical_current_exe()?;
-    spawn_daemon_process(&exe)
+    let Some(root) = std::env::var_os(crate::install::INSTALL_ROOT_ENV).map(PathBuf::from) else {
+        spawn_daemon_process(&exe)?;
+        return Ok(None);
+    };
+    let Ok(policy) = crate::daemon_bootstrap::BootstrapPolicy::installed_current(root) else {
+        spawn_daemon_process(&exe)?;
+        return Ok(None);
+    };
+    let Some(trusted_root) = policy.installed_current_root() else {
+        spawn_daemon_process(&exe)?;
+        return Ok(None);
+    };
+    let Ok((selection, admission)) =
+        crate::daemon_bootstrap::resolve_installed_current_admitted(trusted_root).await
+    else {
+        spawn_daemon_process(&exe)?;
+        return Ok(None);
+    };
+    if !same_canonical_path(&exe, &selection.target_exe) {
+        drop(admission);
+        spawn_daemon_process(&exe)?;
+        return Ok(None);
+    }
+    let paths = DaemonPaths::current()?;
+    let result_path = paths
+        .run_dir
+        .join(format!("{}.json", random_token("bootstrap-result")?));
+    let _ = std::fs::remove_file(&result_path);
+    #[cfg(windows)]
+    let witness = crate::daemon_bootstrap::open_windows_witness(&selection.target_exe)
+        .map_err(DaemonError::Bootstrap)?;
+    #[cfg(windows)]
+    if witness.identity != selection.file_identity {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+        ));
+    }
+    spawn_daemon_process_bootstrap(
+        &selection.target_exe,
+        &bootstrap_spawn_env(Some(&selection), Some(&result_path)),
+        #[cfg(windows)]
+        Some(&witness),
+    )?;
+    Ok(Some(admission))
 }
 
 #[cfg(not(windows))]
