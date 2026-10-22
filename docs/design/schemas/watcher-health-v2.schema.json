@@ -64,9 +64,10 @@
     "sender": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["backendProfile", "logicalStoreId", "ready", "membership", "lifecycle", "compensation", "error"],
+      "required": ["backendProfile", "requiredSenders", "logicalStoreId", "ready", "membership", "lifecycle", "compensation", "error"],
       "properties": {
         "backendProfile": { "type": "string", "minLength": 1 },
+        "requiredSenders": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "logicalStoreId": { "$ref": "#/$defs/optionalString" },
         "ready": { "type": "boolean" },
         "membership": {
@@ -85,7 +86,17 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "runtimeId", "pid", "startedAt", "heartbeatAt", "status", "productionReady", "registryRevision", "restartReconciled", "senders", "retention", "diagnostics", "detach"],
+      "allOf": [{
+        "if": { "properties": { "productionReady": { "const": true } }, "required": ["productionReady"] },
+        "then": { "properties": {
+          "status": { "const": "running" },
+          "restartReconciled": { "const": true },
+          "reconciledRegistryRevision": { "type": "integer", "minimum": 0 },
+          "diagnostics": { "maxItems": 0 },
+          "senders": { "items": { "properties": { "ready": { "const": true } } } }
+        } }
+      }],
+      "required": ["schemaVersion", "runtimeId", "pid", "startedAt", "heartbeatAt", "status", "productionReady", "registryRevision", "reconciledRegistryRevision", "restartReconciled", "senders", "retention", "diagnostics", "detach"],
       "properties": {
         "schemaVersion": { "const": 2 },
         "runtimeId": { "type": "string", "minLength": 1 },
@@ -95,12 +106,13 @@
         "status": { "enum": ["running", "stopped", "interrupted"] },
         "productionReady": { "type": "boolean" },
         "registryRevision": { "$ref": "#/$defs/count" },
+        "reconciledRegistryRevision": { "type": ["integer", "null"], "minimum": 0 },
         "restartReconciled": { "type": "boolean" },
         "senders": { "type": "array", "items": { "$ref": "#/$defs/sender" } },
         "retention": { "$ref": "#/$defs/retention" },
         "diagnostics": {
           "type": "array",
-          "items": { "enum": ["sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "containment-unproven", "registry-failure"] }
+          "items": { "enum": ["membership-reconciliation-pending", "sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "containment-unproven", "registry-failure"] }
         },
         "detach": { "type": "array", "items": { "type": "object" } }
       }
@@ -108,7 +120,7 @@
     "watch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "id", "registrationRevision", "detectorSchemaVersion", "activatedAt", "lifecycle", "eligibility", "health", "blockedReason", "lastAllocatedEventSequence", "lastCommittedEventSequence", "pending", "lastAttemptId", "lastSuccessAt", "lastEventAt", "nextAttemptMs", "latestAttemptDurationMs", "suppressedDueCount", "consecutiveFailures", "diagnosticCategory", "recurrence", "senderReady", "retention"],
+      "required": ["schemaVersion", "id", "registrationRevision", "detectorSchemaVersion", "activatedAt", "lifecycle", "eligibility", "health", "blockedReason", "lastAllocatedEventSequence", "lastCommittedEventSequence", "pending", "lastAttemptId", "lastSuccessAt", "lastEventAt", "nextAttemptMs", "latestAttemptDurationMs", "suppressedDueCount", "consecutiveFailures", "diagnosticCategory", "recurrence", "senderReady", "logicalStoreId", "observedLogicalStoreId", "retention"],
       "properties": {
         "schemaVersion": { "const": 2 },
         "id": { "type": "string", "minLength": 1 },
@@ -136,6 +148,8 @@
         },
         "recurrence": { "$ref": "#/$defs/recurrence" },
         "senderReady": { "type": "boolean" },
+        "logicalStoreId": { "$ref": "#/$defs/optionalString" },
+        "observedLogicalStoreId": { "$ref": "#/$defs/optionalString" },
         "retention": { "$ref": "#/$defs/retention" }
       }
     }

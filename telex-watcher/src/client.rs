@@ -108,6 +108,7 @@ impl Clients {
                     profile.clone(),
                     SenderHealth {
                         backend_profile: profile.clone(),
+                        required_senders: desired[profile].iter().cloned().collect(),
                         logical_store_id: None,
                         ready: false,
                         membership: Vec::new(),
@@ -243,6 +244,7 @@ impl Clients {
                     alias.clone(),
                     SenderHealth {
                         backend_profile: alias,
+                        required_senders: addresses.iter().cloned().collect(),
                         logical_store_id: Some(store.clone()),
                         ready,
                         membership: membership.clone(),

@@ -344,7 +344,7 @@ async fn actor_lifecycle(iso: &isolation::Isolation) {
         .with_file_name(format!("fake_detector{}", std::env::consts::EXE_SUFFIX));
     assert!(
         detector.is_absolute() && detector.is_file(),
-        "build Watcher fixture and guardian binaries before the library-only matrix: cargo build -p telex-watcher --all-features --bins"
+        "build Telex, Watcher fixture, and guardian binaries before the library-only matrix: cargo build -p telex -p telex-watcher --all-features --bins"
     );
     let input = iso.root.join("actor-detector.json");
     std::fs::write(

@@ -91,6 +91,11 @@ class SchemaConformanceTests(unittest.TestCase):
         invalid = copy.deepcopy(corpus["metadata"])
         invalid["state"] = {"mustNotLeak": True}
         self.assertFalse(metadata.is_valid(invalid))
+        invalid = copy.deepcopy(corpus["runtime"])
+        invalid["reconciledRegistryRevision"] = None
+        self.assertFalse(health.is_valid(invalid))
+        invalid["productionReady"] = False
+        self.assertTrue(health.is_valid(invalid))
 
     def test_all_watcher_v2_schemas_are_valid_draft202012(self):
         paths = sorted(SCHEMA_DIRECTORY.glob("watcher-*-v2.schema.json"))

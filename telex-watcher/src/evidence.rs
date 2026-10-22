@@ -90,6 +90,8 @@ pub struct Watch {
     pub running_cancelled: bool,
     pub state: Value,
     pub logical_store_id: Option<String>,
+    #[serde(default)]
+    pub observed_logical_store_id: Option<String>,
     pub last_allocated_event_sequence: u64,
     pub last_committed_event_sequence: u64,
     pub pending_operation_id: Option<String>,
@@ -105,12 +107,18 @@ pub struct Watch {
 
 impl Watch {
     pub(crate) fn block(&mut self, reason: BlockedReason) {
-        if self.lifecycle != Lifecycle::Removed {
+        if matches!(self.lifecycle, Lifecycle::Active | Lifecycle::Paused) {
             self.lifecycle = Lifecycle::Paused;
             self.eligibility = Eligibility::Inactive;
             self.health = Health::Blocked;
             self.blocked_reason = Some(reason);
         }
+    }
+
+    pub(crate) fn store_verified(&self) -> bool {
+        self.logical_store_id
+            .as_deref()
+            .is_none_or(|bound| self.observed_logical_store_id.as_deref() == Some(bound))
     }
 
     pub(crate) fn pending(&mut self) {
@@ -270,6 +278,8 @@ pub struct Retention {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SenderHealth {
     pub backend_profile: String,
+    #[serde(default)]
+    pub required_senders: Vec<String>,
     pub logical_store_id: Option<String>,
     pub ready: bool,
     pub membership: Vec<ApplicationHealth>,
@@ -289,6 +299,8 @@ pub struct RuntimeHealth {
     pub status: RuntimeStatus,
     pub production_ready: bool,
     pub registry_revision: u64,
+    #[serde(default)]
+    pub reconciled_registry_revision: Option<u64>,
     pub restart_reconciled: bool,
     pub senders: Vec<SenderHealth>,
     pub retention: Retention,
@@ -307,6 +319,7 @@ pub enum RuntimeStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeDiagnostic {
+    MembershipReconciliationPending,
     SenderUnready,
     PartialMembership,
     InboundActionableBacklog,
@@ -340,6 +353,8 @@ pub struct WatchHealth {
     pub diagnostic_category: Option<DiagnosticCategory>,
     pub recurrence: Recurrence,
     pub sender_ready: bool,
+    pub logical_store_id: Option<String>,
+    pub observed_logical_store_id: Option<String>,
     pub retention: Retention,
 }
 

@@ -47,6 +47,7 @@ pub struct Runtime {
     attempts: JoinSet<CompletedAttempt>,
     cancellations: BTreeMap<String, oneshot::Sender<()>>,
     containment_directory: PathBuf,
+    reconciled_registry_revision: Option<u64>,
     stopping: bool,
 }
 
@@ -97,6 +98,7 @@ impl Runtime {
                 attempts: JoinSet::new(),
                 cancellations: BTreeMap::new(),
                 containment_directory,
+                reconciled_registry_revision: None,
                 stopping: false,
             },
             management,
@@ -132,6 +134,17 @@ impl Runtime {
                     let mut health = registry.runtime(&id)?.context("runtime record missing")?;
                     health.heartbeat_at = timestamp(now_ms());
                     health.registry_revision = registry.revision()?;
+                    if health.reconciled_registry_revision != Some(health.registry_revision) {
+                        health.production_ready = false;
+                        if !health
+                            .diagnostics
+                            .contains(&RuntimeDiagnostic::MembershipReconciliationPending)
+                        {
+                            health
+                                .diagnostics
+                                .push(RuntimeDiagnostic::MembershipReconciliationPending);
+                        }
+                    }
                     health.retention = registry.retention(None)?;
                     registry.save_runtime(&health)
                 })();
@@ -204,7 +217,6 @@ impl Runtime {
         let mut tick = tokio::time::interval(Duration::from_millis(200));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut next_membership = 0_i64;
-        let mut known_revision = u64::MAX;
         while !self.stopping {
             tokio::select! {
                 error = heartbeat_failure.recv() => {
@@ -227,8 +239,10 @@ impl Runtime {
                 _ = tick.tick() => {
                     let now = now_ms();
                     let revision = lock(&self.registry)?.revision()?;
-                    if now >= next_membership || revision != known_revision || self.clients.reconciliation_needed {
+                    if now >= next_membership || Some(revision) != self.reconciled_registry_revision || self.clients.reconciliation_needed {
                         let watches = lock(&self.registry)?.list()?;
+                        self.reconciled_registry_revision = None;
+                        self.refresh_health()?;
                         self.clients.reconcile(&watches).await;
                         for watch in watches {
                             if let Some(registration) = &watch.registration {
@@ -237,7 +251,7 @@ impl Runtime {
                                 }
                             }
                         }
-                        known_revision = revision;
+                        self.reconciled_registry_revision = Some(revision);
                         next_membership = now_ms().saturating_add(30_000);
                     }
                     lock(&self.registry)?.coalesce(now)?;
@@ -494,7 +508,57 @@ impl Runtime {
         health.senders = self.clients.health.values().cloned().collect();
         health.retention = registry.retention(None)?;
         health.registry_revision = registry.revision()?;
+        health.reconciled_registry_revision = self.reconciled_registry_revision;
         health.diagnostics.clear();
+        let watches = registry.list()?;
+        if self.reconciled_registry_revision != Some(health.registry_revision)
+            || self.clients.reconciliation_needed
+        {
+            health
+                .diagnostics
+                .push(RuntimeDiagnostic::MembershipReconciliationPending);
+        }
+        for watch in &watches {
+            let Some(registration) = &watch.registration else {
+                continue;
+            };
+            if watch.lifecycle == Lifecycle::Removed && watch.pending_operation_id.is_none() {
+                continue;
+            }
+            let ready = self.clients.ready(
+                &registration.backend_profile,
+                &registration.sender,
+                watch.logical_store_id.as_deref(),
+            );
+            let position = health
+                .senders
+                .iter()
+                .position(|sender| sender.backend_profile == registration.backend_profile);
+            let sender = if let Some(position) = position {
+                &mut health.senders[position]
+            } else {
+                health.senders.push(SenderHealth {
+                    backend_profile: registration.backend_profile.clone(),
+                    required_senders: Vec::new(),
+                    logical_store_id: None,
+                    ready: false,
+                    membership: Vec::new(),
+                    lifecycle: None,
+                    compensation: Vec::new(),
+                    error: None,
+                });
+                health
+                    .senders
+                    .last_mut()
+                    .expect("inserted required sender profile")
+            };
+            sender.required_senders.push(registration.sender.clone());
+            sender.ready &= ready;
+        }
+        for sender in &mut health.senders {
+            sender.required_senders.sort();
+            sender.required_senders.dedup();
+        }
         if health.senders.iter().any(|sender| !sender.ready) {
             health.diagnostics.push(RuntimeDiagnostic::SenderUnready);
         }
@@ -519,8 +583,7 @@ impl Runtime {
         if health.retention.warning {
             health.diagnostics.push(RuntimeDiagnostic::RetentionWarning);
         }
-        if registry
-            .list()?
+        if watches
             .iter()
             .any(|watch| watch.blocked_reason == Some(BlockedReason::OrphanContainmentUnproven))
         {
@@ -784,6 +847,11 @@ fn protocol_category(error: &protocol_v2::ProtocolError) -> DiagnosticCategory {
         protocol_v2::ProtocolError::Canonicalization(_) => {
             DiagnosticCategory::CanonicalizationFailed
         }
+
         protocol_v2::ProtocolError::OutputLimit(_) => DiagnosticCategory::OutputLimit,
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_management_tests.rs"]
+mod tests;

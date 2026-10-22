@@ -17,6 +17,11 @@ CLI, service installation, and automatic upgrades are separate work. The
 experimental v1 CLI adapter is retired; v1 example detectors and schemas remain
 historical evidence and are not accepted by this runtime.
 
+This runtime delivery requires process containment on Windows and Linux.
+macOS and other unclaimed hosts reject detector execution. macOS remains a
+required Watcher product capability assigned to separate follow-up work; this
+delivery does not claim macOS containment.
+
 ## Local ownership and administration
 
 `Runtime::open` acquires a process-lifetime OS lock on the physical registry file
@@ -105,6 +110,19 @@ repair without force takeover. Graceful shutdown detaches known senders.
 Watcher never receives, acknowledges, or dispositions inbound messages. An
 actionable backlog on a sender address degrades runtime health and sets
 `productionReady` to false.
+
+Readiness requires membership reconciliation for the current registry revision
+and verified bindings for every required sender. Health exposes
+`reconciledRegistryRevision` and each profile's `requiredSenders`; startup and a
+new registration remain non-ready until their membership is checked. An empty
+sender snapshot is not evidence that a newly registered watch is ready.
+
+The watch retains its original logical store and the last observed store
+separately. A mismatched observation cannot demote a terminal watch or erase a
+containment or pending-receipt blocker. After the original store is verified, a
+non-pending store-mismatch block becomes eligible for explicit resume; it does
+not resume automatically. Every remaining fence must still be cleared. If a
+profile was corrected, restart the runtime to select its corrected client.
 
 ## Execution and evidence
 

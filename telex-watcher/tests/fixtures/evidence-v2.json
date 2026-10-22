@@ -23,6 +23,7 @@
     "status": "running",
     "productionReady": true,
     "registryRevision": 1,
+    "reconciledRegistryRevision": 1,
     "restartReconciled": true,
     "senders": [],
     "retention": { "rows": 1, "bytes": 1024, "warningRows": 100000, "warningBytes": 268435456, "warning": false },
@@ -67,6 +68,8 @@
       "lastIdenticalEventSequence": null
     },
     "senderReady": true,
+    "logicalStoreId": "store-fixture",
+    "observedLogicalStoreId": "store-fixture",
     "retention": { "rows": 1, "bytes": 1024, "warningRows": 100000, "warningBytes": 268435456, "warning": false }
   }
 }

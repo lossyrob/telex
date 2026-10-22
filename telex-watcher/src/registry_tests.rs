@@ -806,3 +806,202 @@ fn a_future_registry_version_is_refused_before_schema_mutation() {
         .contains("unsupported-registry-version"));
     assert_eq!(before, std::fs::read(fixture.path()).unwrap());
 }
+
+#[test]
+fn restoring_the_original_store_allows_only_explicit_audited_resume() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    assert!(registry.bind_store("watch", "store-a").unwrap());
+    assert!(!registry.bind_store("watch", "store-b").unwrap());
+    assert_eq!(
+        registry
+            .change("watch", Change::Resume, 2000)
+            .unwrap()
+            .refusal,
+        Some(Refusal::BlockedReasonUncorrected)
+    );
+    assert!(registry.bind_store("watch", "store-a").unwrap());
+    let restored = registry.get("watch").unwrap().unwrap();
+    assert_eq!(restored.lifecycle, Lifecycle::Paused);
+    assert_eq!(restored.health, Health::Inactive);
+    assert_eq!(restored.blocked_reason, None);
+    assert_eq!(restored.activated_at, timestamp(1000));
+    assert_eq!(restored.logical_store_id.as_deref(), Some("store-a"));
+    assert_eq!(
+        restored.observed_logical_store_id.as_deref(),
+        Some("store-a")
+    );
+    let observations: u64 = registry
+        .connection
+        .query_row(
+            "SELECT count(*) FROM watcher_v2_audits WHERE action='store-binding-observed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(observations, 3);
+    let resumed = registry.change("watch", Change::Resume, 3000).unwrap();
+    assert_eq!(resumed.refusal, None);
+    assert_eq!(resumed.watch.unwrap().lifecycle, Lifecycle::Active);
+}
+
+#[test]
+fn store_observations_cannot_demote_terminal_or_removed_watches() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    registry.bind_store("watch", "store-a").unwrap();
+    let (_, attempt) = registry.begin_attempt("watch", "runtime", 2000).unwrap();
+    registry
+        .finish_direct(&attempt.id, Value::Null, true, 3000)
+        .unwrap();
+    assert!(!registry.bind_store("watch", "store-b").unwrap());
+    let terminal = registry.get("watch").unwrap().unwrap();
+    assert_eq!(terminal.lifecycle, Lifecycle::Terminal);
+    assert_eq!(terminal.eligibility, Eligibility::Inactive);
+    assert_eq!(terminal.health, Health::Inactive);
+    assert_eq!(terminal.blocked_reason, None);
+    registry.change("watch", Change::Remove, 4000).unwrap();
+    registry.bind_store("watch", "store-b").unwrap();
+    assert_eq!(
+        registry.get("watch").unwrap().unwrap().lifecycle,
+        Lifecycle::Removed
+    );
+}
+
+#[test]
+fn containment_and_store_fences_must_both_clear_before_resume() {
+    for restore_store_first in [true, false] {
+        let fixture = Fixture::new();
+        let mut registry = fixture.open();
+        registry
+            .register(fixture.registration("watch"), 1000)
+            .unwrap();
+        registry.bind_store("watch", "store-a").unwrap();
+        let (_, attempt) = registry.begin_attempt("watch", "old", 2000).unwrap();
+        registry
+            .containment(&attempt.id, json!({"fixture":"unproven"}))
+            .unwrap();
+        registry.start_runtime("new", 3000, |_| false).unwrap();
+        registry.bind_store("watch", "store-b").unwrap();
+        assert_eq!(
+            registry.get("watch").unwrap().unwrap().blocked_reason,
+            Some(BlockedReason::OrphanContainmentUnproven)
+        );
+        assert_eq!(
+            registry
+                .change("watch", Change::Resume, 4000)
+                .unwrap()
+                .refusal,
+            Some(Refusal::BlockedReasonUncorrected)
+        );
+        if restore_store_first {
+            registry.bind_store("watch", "store-a").unwrap();
+            assert_eq!(
+                registry.get("watch").unwrap().unwrap().blocked_reason,
+                Some(BlockedReason::OrphanContainmentUnproven)
+            );
+        }
+        registry.recheck_containment("watch", |_| true).unwrap();
+        if !restore_store_first {
+            assert_eq!(
+                registry.get("watch").unwrap().unwrap().blocked_reason,
+                Some(BlockedReason::LogicalStoreMismatch)
+            );
+            assert_eq!(
+                registry
+                    .change("watch", Change::Resume, 4000)
+                    .unwrap()
+                    .refusal,
+                Some(Refusal::BlockedReasonUncorrected)
+            );
+            registry.bind_store("watch", "store-a").unwrap();
+        }
+        assert_eq!(
+            registry.get("watch").unwrap().unwrap().lifecycle,
+            Lifecycle::Paused
+        );
+        assert_eq!(
+            registry
+                .change("watch", Change::Resume, 5000)
+                .unwrap()
+                .refusal,
+            None
+        );
+    }
+}
+
+#[test]
+fn store_observations_preserve_pending_recovery_and_rejection_fences() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "watch", false);
+    registry
+        .evidence(
+            &operation.operation_id,
+            SendEvidence::ObservationCancelled,
+            11000,
+        )
+        .unwrap();
+    registry.bind_store("watch", "wrong-store").unwrap();
+    assert_eq!(
+        registry.get("watch").unwrap().unwrap().blocked_reason,
+        Some(BlockedReason::ReceiptOutcomeUnresolved)
+    );
+    registry.bind_store("watch", "store-1").unwrap();
+    let restored = registry.get("watch").unwrap().unwrap();
+    assert_eq!(
+        restored.blocked_reason,
+        Some(BlockedReason::ReceiptOutcomeUnresolved)
+    );
+    assert_eq!(
+        restored.pending_operation_id.as_deref(),
+        Some(operation.operation_id.as_str())
+    );
+    assert_eq!(
+        registry
+            .change("watch", Change::Resume, 12000)
+            .unwrap()
+            .refusal,
+        Some(Refusal::PendingOperation)
+    );
+    assert_eq!(
+        registry
+            .change(
+                "watch",
+                Change::GrantReconciliation {
+                    attempts: 1,
+                    seconds: 10
+                },
+                12000
+            )
+            .unwrap()
+            .refusal,
+        None
+    );
+}
+
+#[test]
+fn restoring_a_pending_store_mismatch_does_not_bypass_receipt_recovery() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "watch", false);
+    registry.bind_store("watch", "wrong-store").unwrap();
+    registry.bind_store("watch", "store-1").unwrap();
+    assert_eq!(
+        registry.get("watch").unwrap().unwrap().blocked_reason,
+        Some(BlockedReason::LogicalStoreMismatch)
+    );
+    registry
+        .evidence(&operation.operation_id, not_recorded(&operation), 3000)
+        .unwrap();
+    assert_eq!(
+        registry.get("watch").unwrap().unwrap().blocked_reason,
+        Some(BlockedReason::SendRetryExhausted)
+    );
+}

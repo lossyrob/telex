@@ -345,6 +345,12 @@ impl Registry {
         if let Some(operation) = pending {
             save_operation(&tx, &operation)?;
         }
+        if watch.lifecycle == Lifecycle::Paused
+            && watch.blocked_reason.is_none()
+            && !watch.store_verified()
+        {
+            watch.block(BlockedReason::LogicalStoreMismatch);
+        }
         save_watch(&tx, &watch)?;
         audit(
             &tx,
@@ -404,16 +410,43 @@ impl Registry {
     pub fn bind_store(&mut self, id: &str, store: &str) -> Result<bool> {
         let tx = self.connection.transaction()?;
         let mut watch = require_watch(&tx, id)?;
+        let previous_observation = watch.observed_logical_store_id.clone();
+        let previous_reason = watch.blocked_reason;
         let same = watch
             .logical_store_id
             .as_deref()
             .is_none_or(|old| old == store);
+        watch.observed_logical_store_id = Some(store.to_owned());
         if same {
             watch.logical_store_id = Some(store.to_string());
-        } else {
+            if watch.pending_operation_id.is_none()
+                && watch.blocked_reason == Some(BlockedReason::LogicalStoreMismatch)
+            {
+                watch.blocked_reason = None;
+                watch.health = Health::Inactive;
+            }
+        } else if watch.blocked_reason.is_none()
+            || watch.blocked_reason == Some(BlockedReason::LogicalStoreMismatch)
+        {
             watch.block(BlockedReason::LogicalStoreMismatch);
         }
         save_watch(&tx, &watch)?;
+        if previous_observation != watch.observed_logical_store_id
+            || previous_reason != watch.blocked_reason
+        {
+            audit(
+                &tx,
+                Some(id),
+                "store-binding-observed",
+                &json!({
+                    "bound":watch.logical_store_id,
+                    "observed":watch.observed_logical_store_id,
+                    "matches":same,
+                    "previousBlockedReason":previous_reason,
+                    "blockedReason":watch.blocked_reason
+                }),
+            )?;
+        }
         tx.commit()?;
         Ok(same)
     }
@@ -442,6 +475,7 @@ impl Registry {
             || watch.eligibility != Eligibility::Eligible
             || watch.running_attempt_id.is_some()
             || watch.pending_operation_id.is_some()
+            || !watch.store_verified()
         {
             bail!("attempt-ineligible");
         }
@@ -868,6 +902,7 @@ impl Registry {
             status: RuntimeStatus::Running,
             production_ready: false,
             registry_revision: self.revision()?,
+            reconciled_registry_revision: None,
             restart_reconciled: true,
             senders: Vec::new(),
             retention: self.retention(None)?,
@@ -945,12 +980,15 @@ impl Registry {
         if watch.blocked_reason == Some(BlockedReason::OrphanContainmentUnproven) {
             let attempt_id = watch
                 .last_attempt_id
-                .as_deref()
+                .clone()
                 .context("containment attempt missing")?;
-            let attempt = require_attempt(&tx, attempt_id)?;
+            let attempt = require_attempt(&tx, &attempt_id)?;
             if attempt.containment.as_ref().is_some_and(ended) {
                 watch.blocked_reason = None;
                 watch.health = Health::Inactive;
+                if !watch.store_verified() {
+                    watch.block(BlockedReason::LogicalStoreMismatch);
+                }
                 audit(
                     &tx,
                     Some(id),
@@ -1041,6 +1079,8 @@ impl Registry {
             diagnostic_category: watch.diagnostic_category,
             recurrence: watch.recurrence,
             sender_ready,
+            logical_store_id: watch.logical_store_id,
+            observed_logical_store_id: watch.observed_logical_store_id,
             retention: self.retention(Some(id))?,
         })
     }
@@ -1064,6 +1104,7 @@ fn new_watch(id: String, registration: Option<Registration>, state: Value, now: 
         running_cancelled: false,
         state,
         logical_store_id: None,
+        observed_logical_store_id: None,
         last_allocated_event_sequence: 0,
         last_committed_event_sequence: 0,
         pending_operation_id: None,
@@ -1092,6 +1133,7 @@ fn check_change(watch: &Watch, pending: Option<&Operation>, change: &Change) -> 
         Change::Pause if watch.lifecycle != Lifecycle::Active => Some(Refusal::InvalidLifecycle),
         Change::Resume if watch.lifecycle != Lifecycle::Paused => Some(Refusal::InvalidLifecycle),
         Change::Resume if watch.blocked_reason.is_some() => Some(Refusal::BlockedReasonUncorrected),
+        Change::Resume if !watch.store_verified() => Some(Refusal::BlockedReasonUncorrected),
         Change::Update { registration, .. } => {
             let old = watch.registration.as_ref()?;
             if old.id != registration.id
@@ -1185,6 +1227,9 @@ fn success(watch: &mut Watch, attempt_now: &str, terminal: bool) {
             Health::Ready
         };
         watch.blocked_reason = None;
+        if !watch.store_verified() {
+            watch.block(BlockedReason::LogicalStoreMismatch);
+        }
     }
 }
 
