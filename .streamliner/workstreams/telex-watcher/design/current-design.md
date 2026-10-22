@@ -163,16 +163,19 @@ without mandatory framework ceremony. That acceptance completes the
 `minimal-contract-accepted` checkpoint. It does not prove a production runtime,
 an operational five-minute workflow, or any later gate.
 
-`minimal-example-pack` remains ready but unlaunched. `watcher-runtime-core` is
-ready, focus, and unlaunched: both Application Client dependencies are
-satisfied, and [issue #162](https://github.com/lossyrob/telex/issues/162) plus
-`.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md` are its
-reviewed and reconciled tracker and task specification. Campaign owns launch
-through the Streamliner workflow v2 adapter only after operator approval. Ready
-status grants no worker launch, release, tag, fleet, CLI, example, packaging, or
-Operator Station authority. The downstream `five-minute-custom-watch-gate`
-still owns operational proof that an agent can create, register, leave running,
-and diagnose a custom watch in five minutes.
+`watcher-runtime-core` and `minimal-example-pack` are in progress. On
+2026-10-22 the operator approved both launches through the Streamliner workflow
+v2 adapter. `watcher-runtime-core` runs under
+[issue #162](https://github.com/lossyrob/telex/issues/162) and
+`.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md`, its
+reviewed and reconciled tracker and task specification. Both Application Client
+dependencies are satisfied. Its merge gate runs in shadow mode, so the operator
+merges. `minimal-example-pack` runs under issue #144 as the first live
+merge-gate pilot: Campaign runs the gate, and the owner merges only at the
+cleared exact SHA. Neither launch grants release, tag, publish, fleet, CLI,
+packaging, I161-1, or Operator Station authority. The downstream
+`five-minute-custom-watch-gate` still owns operational proof that an agent can
+create, register, leave running, and diagnose a custom watch in five minutes.
 
 ## Superseded assumptions
 
@@ -192,4 +195,4 @@ learning, not current product authority.
 - Whether an explicit v1 compatibility adapter is worth maintaining instead of
   documented re-registration.
 - Which bounded examples or hardening techniques from PR #131 should be
-  extracted by the now-ready but unlaunched minimal example work.
+  extracted by the in-progress minimal example work.

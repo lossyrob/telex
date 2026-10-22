@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime core is ready but unlaunched: its Application Client holds were discharged on 2026-10-22, and issue #162 is its reviewed and reconciled tracker. Launch is held until the operator approves it through the Campaign-prepared Streamliner workflow v2 adapter. By operator priority decision on 2026-10-22, Telex Watcher is to replace the waiter session in the operator workflow, and watcher-runtime-core is the intended first owner under the operator workflow v2; this records sequencing only and grants no launch authority.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Runtime core's Application Client holds were discharged on 2026-10-22 under reviewed and reconciled tracker issue #162. On 2026-10-22 the operator approved two Streamliner workflow v2 launches: runtime core launched in owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe with a shadow merge gate (the operator merges), and the issue #144 optional example pack launched in owner session 76a56ac2-dd56-403f-99e7-9eadb3458ffe as the first live merge-gate pilot (Campaign gate; the owner merges at the cleared SHA). By operator priority decision on 2026-10-22, Telex Watcher is to replace the waiter session in the operator workflow, and watcher-runtime-core is the intended first owner under the operator workflow v2; that decision records sequencing only. No release, tag, publish, fleet, or I161-1 authority is granted.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-22T18:01:49.602Z",
+  "updatedAt": "2026-10-22T19:27:00.275Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -150,8 +150,8 @@
       "id": "watcher-runtime-core",
       "type": "task",
       "title": "Minimal Watcher runtime core",
-      "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract.",
-      "status": "ready",
+      "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract. Launched 2026-10-22 under Streamliner workflow v2 in owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe on branch lossyrob-watcher-runtime-core; the merge gate runs in shadow mode, and the operator merges.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -237,8 +237,8 @@
       "id": "minimal-example-pack",
       "type": "task",
       "title": "Minimal optional detector examples",
-      "summary": "Ship small copyable GitHub, Azure DevOps, HTTP/JSON, file, and command examples with short guidance, extracting selected PR #131 foundations without creating a mandatory template framework.",
-      "status": "ready",
+      "summary": "Ship small copyable GitHub, Azure DevOps, HTTP/JSON, file, and command examples with short guidance, extracting selected PR #131 foundations without creating a mandatory template framework. Launched 2026-10-22 under Streamliner workflow v2 in owner session 76a56ac2-dd56-403f-99e7-9eadb3458ffe on branch lossyrob-minimal-watcher-examples as the first live merge-gate pilot: Campaign runs the gate, and the owner merges at the cleared SHA.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
