@@ -13,8 +13,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if (-not (Test-Path -LiteralPath $DumpDirectory -PathType Container)) {
+    throw "crash dump directory is unavailable: $DumpDirectory"
+}
 $dumps = @(Get-ChildItem -LiteralPath $DumpDirectory -Filter "*.dmp" -File `
-    -ErrorAction SilentlyContinue)
+    -ErrorAction Stop)
 if ($dumps.Count -eq 0) {
     exit 0
 }

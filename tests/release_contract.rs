@@ -260,6 +260,11 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
             && capture.contains("$EvidenceName-telex.pdb"),
         "crash collection must preserve a matching executable/PDB pair before failing"
     );
+    assert!(
+        capture.contains("crash dump directory is unavailable")
+            && ci.contains("Settle and check final PageHeap dumps"),
+        "dump enumeration and final PageHeap settlement must fail closed"
+    );
 }
 
 #[test]
