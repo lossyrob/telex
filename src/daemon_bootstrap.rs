@@ -982,6 +982,10 @@ impl ProbeProcessGroup {
             }
         }
     }
+
+    fn seal_without_signal(&mut self) {
+        self.ownership = ProbeGroupOwnership::Sealed;
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1111,12 +1115,35 @@ enum ProbeLeaderState {
     Exited(bool),
 }
 
+enum ProbeObserveError {
+    #[cfg(target_os = "linux")]
+    OwnershipLost,
+    Failure,
+}
+
+#[cfg(target_os = "linux")]
+fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
+    let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
+    if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) } != 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let handler = action.sa_sigaction;
+    if handler == libc::SIG_IGN || action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn observe_probe_leader(
     child: &mut std::process::Child,
-) -> Result<ProbeLeaderState, DaemonBootstrapFailure> {
-    let pid =
-        i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+) -> Result<ProbeLeaderState, ProbeObserveError> {
+    let pid = i32::try_from(child.id()).map_err(|_| ProbeObserveError::Failure)?;
     let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
     let result = unsafe {
         libc::waitid(
@@ -1127,33 +1154,35 @@ fn observe_probe_leader(
         )
     };
     if result != 0 {
-        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EINTR) {
             return Ok(ProbeLeaderState::Running);
         }
-        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        return if error.raw_os_error() == Some(libc::ECHILD) {
+            Err(ProbeObserveError::OwnershipLost)
+        } else {
+            Err(ProbeObserveError::Failure)
+        };
     }
     let observed_pid = unsafe { info.si_pid() };
     if observed_pid == 0 {
         return Ok(ProbeLeaderState::Running);
     }
     if observed_pid != pid {
-        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        return Err(ProbeObserveError::Failure);
     }
     match info.si_code {
         libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(unsafe { info.si_status() } == 0)),
         libc::CLD_KILLED | libc::CLD_DUMPED => Ok(ProbeLeaderState::Exited(false)),
-        _ => Err(DaemonBootstrapFailure::IncompatibleManifest),
+        _ => Err(ProbeObserveError::Failure),
     }
 }
 
 #[cfg(windows)]
 fn observe_probe_leader(
     child: &mut std::process::Child,
-) -> Result<ProbeLeaderState, DaemonBootstrapFailure> {
-    match child
-        .try_wait()
-        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
-    {
+) -> Result<ProbeLeaderState, ProbeObserveError> {
+    match child.try_wait().map_err(|_| ProbeObserveError::Failure)? {
         Some(status) => Ok(ProbeLeaderState::Exited(status.success())),
         None => Ok(ProbeLeaderState::Running),
     }
@@ -1262,6 +1291,7 @@ fn run_bounded_probe_process(
 ) -> Result<ProbeOutput, DaemonBootstrapFailure> {
     const CLEANUP_RESERVE: Duration = Duration::from_millis(500);
     configure_probe_command(&mut command);
+    check_probe_wait_ownership()?;
     let start = Instant::now();
     let deadline = start + timeout;
     let cleanup_at = deadline
@@ -1309,7 +1339,15 @@ fn run_bounded_probe_process(
             leader_success = match observe_probe_leader(&mut child) {
                 Ok(ProbeLeaderState::Running) => None,
                 Ok(ProbeLeaderState::Exited(success)) => Some(success),
-                Err(_) => {
+                #[cfg(target_os = "linux")]
+                Err(ProbeObserveError::OwnershipLost) => {
+                    // Another waiter or automatic SIGCHLD policy destroyed
+                    // the unreaped leader anchor. Seal immediately so neither
+                    // this path nor Drop can signal a recycled numeric PGID.
+                    group.seal_without_signal();
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+                Err(ProbeObserveError::Failure) => {
                     terminate_probe_process(&mut child, &mut group, deadline);
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
@@ -1386,7 +1424,7 @@ fn reap_probe_leader(
 ) -> Result<(), DaemonBootstrapFailure> {
     let pid =
         i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
-    while Instant::now() < deadline {
+    loop {
         let mut status = 0;
         let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
         if result == pid {
@@ -1395,9 +1433,11 @@ fn reap_probe_leader(
         if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
+        if Instant::now() >= deadline {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
-    Err(DaemonBootstrapFailure::IncompatibleManifest)
 }
 
 #[cfg(windows)]
