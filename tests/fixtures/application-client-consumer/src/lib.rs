@@ -506,20 +506,34 @@ pub async fn run_operator_station_recovery_probe(
         "station restart target",
     );
     let mut reconciliation_error = None;
-    for _ in 0..120 {
-        match client
-            .reconcile(&station, RecoveryPolicy::BoundedRepair { retries: 3 })
-            .await
+    let reconciliation_deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let remaining = reconciliation_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(
+            remaining,
+            client.reconcile(&station, RecoveryPolicy::BoundedRepair { retries: 3 }),
+        )
+        .await
         {
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 reconciliation_error = None;
                 break;
             }
-            Err(error @ ApplicationClientError::Collision(_)) => {
+            Ok(Err(error @ ApplicationClientError::Collision(_))) => {
                 reconciliation_error = Some(error);
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let remaining =
+                    reconciliation_deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(remaining.min(std::time::Duration::from_millis(250))).await;
             }
-            Err(error) => return Err(format!("restart fixture reconcile: {error}")),
+            Ok(Err(error)) => return Err(format!("restart fixture reconcile: {error}")),
+            Err(_) => break,
         }
     }
     if let Some(error) = reconciliation_error {

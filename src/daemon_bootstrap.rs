@@ -1409,7 +1409,14 @@ fn run_bounded_probe_process(
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
                 Err(ProbeObserveError::Failure) => {
+                    #[cfg(target_os = "linux")]
+                    {
+                        group.seal_without_signal();
+                        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                    }
+                    #[cfg(windows)]
                     terminate_probe_process(&mut child, &mut group, deadline);
+                    #[cfg(windows)]
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
             };

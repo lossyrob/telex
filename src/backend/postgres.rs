@@ -859,7 +859,32 @@ async fn backfill_terminal_disposition_consumption_once(
         )
         .await?;
     }
+
     tx.commit().await?;
+    Ok(())
+}
+
+async fn acquire_schema_migration_lock(client: &tokio_postgres::Client) -> Result<()> {
+    client
+        .query_one(
+            "SELECT pg_advisory_lock(hashtextextended(current_schema(), 0))",
+            &[],
+        )
+        .await?;
+    Ok(())
+}
+
+async fn release_schema_migration_lock(client: &tokio_postgres::Client) -> Result<()> {
+    let released: bool = client
+        .query_one(
+            "SELECT pg_advisory_unlock(hashtextextended(current_schema(), 0))",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !released {
+        bail!("schema migration advisory lock was not held");
+    }
     Ok(())
 }
 
@@ -1060,12 +1085,18 @@ impl Backend for PgBackend {
                 &[&now],
             )
             .await?;
-        backfill_existing_deliveries_consumed_once(&mut client).await?;
-        backfill_delivery_rows_once(&mut client).await?;
-        backfill_terminal_disposition_consumption_once(&mut client).await?;
-        raise_clock_hwm_to_existing_timestamps(&client).await?;
-        publish_schema_version(&client).await?;
-        Ok(())
+        acquire_schema_migration_lock(&client).await?;
+        let migration = async {
+            backfill_existing_deliveries_consumed_once(&mut client).await?;
+            backfill_delivery_rows_once(&mut client).await?;
+            backfill_terminal_disposition_consumption_once(&mut client).await?;
+            raise_clock_hwm_to_existing_timestamps(&client).await?;
+            publish_schema_version(&client).await
+        }
+        .await;
+        let unlock = release_schema_migration_lock(&client).await;
+        migration?;
+        unlock
     }
 
     async fn logical_store_id(&self) -> Result<String> {
