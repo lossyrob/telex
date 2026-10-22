@@ -1723,6 +1723,51 @@
         "publication": "Tag run 36754203801 attempt 1 succeeded on all 8 jobs, including both Windows native controls; publication packet SHA-256 2f6d35836e9564cad3cc0a356e39c6081bd6825a780912476e93d2a0ad81f562; field report https://github.com/lossyrob/telex/issues/157#issuecomment-5916978763.",
         "cause": "The original hosted Errno 13 cause of run 36734022444 remains unknown and is not claimed retrospectively. The v0.2.0 tag stays unpublished history."
       }
+    },
+    {
+      "id": "local-daemon-windows-pageheap-access-violation",
+      "sourceNode": null,
+      "source": "lossyrob/telex#166, found by watcher-runtime-core owner 42c1104a-7eb2-477e-a574-2bffb1cd06fe on PR #164",
+      "crossReference": "telex-watcher/watcher-runtime-core / issue #162 / PR #164",
+      "evidence": {
+        "head": "40a5c916d839dc81432738f122e03a00fd31628e",
+        "run": "CI run 39854080691, Windows heap diagnostics job 120087601259: failure.",
+        "artifact": "windows-heap-diagnostics-40a5c916d839dc81432738f122e03a00fd31628e, ID 12458867179, 49,342,145 bytes; no .dmp file.",
+        "details": "Under PageHeap, a Telex child exited with 0xc0000005 during root daemon_process_sqlite test real_process_status_hints_when_address_active_on_other_store. The job ran the full target three times: two passed 49/49, and the third passed 48/49. Root cause and fault location are unknown; no causal link to the #154 TOKEN_USER fix is established.",
+        "predecessor": "d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the daemon test or daemon, backend, or Watcher runtime source in the final-head delta."
+      },
+      "description": "Diagnose the intermittent Windows access violation in the hosted daemon process diagnostics target.",
+      "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
+      "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
+      "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
+      "target": "hardening-gate (candidate scope)",
+      "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+      "terminalPath": "Obtain a native fault stack or a bounded reproducible diagnosis on an isolated hosted Windows runner, fix a confirmed defect in a separate PR, and validate with the full diagnostic target at an exact head. A green rerun is not a causal fix, and abnormal exit statuses keep failing."
+    },
+    {
+      "id": "local-daemon-windows-credential-writer-timeout",
+      "sourceNode": null,
+      "source": "lossyrob/telex#167, found by watcher-runtime-core owner 42c1104a-7eb2-477e-a574-2bffb1cd06fe on PR #164",
+      "crossReference": "telex-watcher/watcher-runtime-core / issue #162 / PR #164",
+      "evidence": {
+        "heads": "b6bdaf86d1f8016ee83c718ae62736f68f9ebc5d (run 39847163329, job 120063366590) and 40a5c916d839dc81432738f122e03a00fd31628e (run 39854080691, job 120087601235); both Build and test (windows-latest) failures.",
+        "artifact": "windows-build-test-crash-40a5c916d839dc81432738f122e03a00fd31628e, ID 12459182497.",
+        "details": "Root test credential_command_shell_exit_preserves_delayed_inherited_writer exceeded its outer wait and panicked with Elapsed(()) at tests/credential_command.rs:516; the target reported 10 passed and 1 failed. The cause is not attributed to production lifecycle logic, runner load, or the harness.",
+        "predecessor": "Intervening head d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the credential implementation or test."
+      },
+      "description": "Diagnose the intermittent Windows timeout in the delayed inherited credential-writer test.",
+      "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
+      "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
+      "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
+      "target": "hardening-gate (candidate scope)",
+      "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+      "terminalPath": "Distinguish a delayed inherited-writer lifecycle defect from an outer test budget or hosted-runner delay. Keep the semantic assertion; do not skip the test or accept a timeout. Justify any harness-bound change against production behavior, and fix a confirmed defect in a separate PR with exact-head Windows evidence."
     }
   ]
 }
