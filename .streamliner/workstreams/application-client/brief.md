@@ -368,6 +368,26 @@ The successor has no gate credit yet: before merge it needs Local source
 approval, passing required CI, both consumer attestations, both design
 inspections, a disposition of I161-1, and campaign authorization.
 
+Local's source review approved `f02f0ee9` against baseline `7505568c` with no
+findings. It accepted the source corrections for all four design findings. For
+D161-1, upgrade and rollback now drain only after resolving the target root's
+selected predecessor under the exclusive admission they already hold, and a
+versioned CLI launch uses a selection token. For D161-2a, the cross-run
+PostgreSQL sweep is removed. For D161-2b, fixture teardown stops the daemon
+gracefully through its own executable, checks the exact process generation, and
+keeps roots when exit is uncertain; the review does not cover explicit
+crash-induction helpers that still signal by PID. For D161-3, unsupported
+non-Linux Unix bootstrap and the defensive peer check fail closed, while legacy
+connections without an expected file identity are unchanged. The earlier L161-1
+through L161-5 repairs, the SID authority, PostgreSQL transaction-scoped
+migration locking, and the public API are conserved. Local's review was
+read-only: it ran no compilation, tests, or runtime proof, and it did not
+independently audit the writer's compile-only validation. This is a source
+approval only. It gives no runtime, consumer, design, merge, or closure credit,
+and it does not accept the design findings as resolved. Required CI run
+39755917809 is still in progress; its result is not recorded here. Incident
+I161-1 and the withholding of E161-1 are unchanged.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control

@@ -225,7 +225,7 @@ corrective v0.2.1 was published on 2026-09-30.
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its single delivery PR #161 is open at successor head `f02f0ee9`. The predecessor head `7505568c` had Local and retained source review approval after repairs, including source changes intended to address failed CI at `8bd3c330`, `2b8ade1d`, and `ec8b88f7`. It passed required CI, and on 2026-10-22 the Watcher and Operator Station pre-merge consumer attestations approved it. The Application Client design inspection also approved it, but with an inspector profile that differs from the task's, which needs a campaign disposition. The Local Daemon design inspection required changes for four static design findings (D161-1, D161-2a, D161-2b, D161-3), so that head received no design credit. Successor `f02f0ee9` is intended to address those findings; the retained gpt-6-astra delta review approved it, its required CI and Local source review are under way, and it has no gate credit yet. Proof-isolation incident I161-1 withholds acceptance of the v0.2.1 upgrade proof. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its single delivery PR #161 is open at successor head `f02f0ee9`. The predecessor head `7505568c` had Local and retained source review approval after repairs, including source changes intended to address failed CI at `8bd3c330`, `2b8ade1d`, and `ec8b88f7`. It passed required CI, and on 2026-10-22 the Watcher and Operator Station pre-merge consumer attestations approved it. The Application Client design inspection also approved it, but with an inspector profile that differs from the task's, which needs a campaign disposition. The Local Daemon design inspection required changes for four static design findings (D161-1, D161-2a, D161-2b, D161-3), so that head received no design credit. Successor `f02f0ee9` is intended to address those findings; Local's source review and the retained gpt-6-astra delta review approved it with no findings, its required CI is under way, and it has no CI, consumer, or design credit yet. Proof-isolation incident I161-1 withholds acceptance of the v0.2.1 upgrade proof. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` merged on 2026-10-08 and is complete. Isolated both-backend evidence goes to the separate hardening gate, and issue #153 must complete before Local Daemon closure; its prepared worker is held until Streamliner preparation passes the long-context tier to its initializer. |
 
 ## Shared seam
@@ -400,16 +400,16 @@ collapse into noise, and no session-bound polling task is required.
 
 1. Complete issue #152 `client-conformance` through PR #161. The Local Daemon
    design inspection required changes at `7505568c` (D161-1, D161-2a, D161-2b,
-   D161-3). Successor head `f02f0ee9` is intended to address them, and the
-   retained gpt-6-astra delta review approved it. Its required CI run and Local
-   source review are under way. No `7505568c` evidence carries over, so before
-   merge the successor needs Local source approval, passing required CI, both
-   consumer attestations, and both design inspections. The Application Client
-   inspection of `7505568c` used a `gpt-5.6-sol` inspector, but the task
-   specifies a Claude Opus 4.8, high-reasoning, long-context inspector; that
-   mismatch still needs a campaign disposition. The successor also needs a
-   disposition of proof-isolation incident I161-1 and campaign authorization.
-   Keep the consumer gate and `supported-client` checkpoint planned.
+   D161-3). Successor head `f02f0ee9` is intended to address them, and Local's
+   source review and the retained gpt-6-astra delta review approved it with no
+   findings. Its required CI run is under way. No `7505568c` evidence carries
+   over, so before merge the successor needs passing required CI, both consumer
+   attestations, and both design inspections. The Application Client inspection
+   of `7505568c` used a `gpt-5.6-sol` inspector, but the task specifies a Claude
+   Opus 4.8, high-reasoning, long-context inspector; that mismatch still needs a
+   campaign disposition. The successor also needs a disposition of
+   proof-isolation incident I161-1 and campaign authorization. Keep the consumer
+   gate and `supported-client` checkpoint planned.
 2. Local Daemon PR #138 for issue #106 merged on 2026-10-08 as `6ab6143a`.
    Keep the hardening gate a separate builder decision that needs isolated
    restart, drain, upgrade, and push-recovery evidence.
