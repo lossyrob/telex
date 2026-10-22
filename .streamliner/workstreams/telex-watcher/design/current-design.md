@@ -170,21 +170,26 @@ reviewed and reconciled tracker and task specification. Both Application Client
 dependencies are satisfied. For this node only, the operator scoped process-tree
 containment proof to Windows and Linux. macOS remains a required Watcher product
 platform, but #162 must fail closed there before detector launch and must not
-claim macOS support. The connected `watcher-macos-containment` task may
-investigate immediately; implementation lands only after #162 merges. Any
-approach requiring privilege, entitlements, a helper service, a broker, or a VM
-returns to the operator before implementation. This host-scope decision does not
-clear #162's accepted store-binding lifecycle/recovery blocker or premature
-`productionReady` blocker. Both repairs, required CI, implementation review, and
-fresh exact-head design inspection still apply. Its merge gate runs in shadow
-mode, so the operator merges. `minimal-example-pack` completed under issue #144
-in PR #163. Campaign ran the first live merge-gate pilot and cleared exact head
+claim macOS support. The connected `watcher-macos-containment` task is in
+progress under issue #165 and
+`.streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment.md`. On
+2026-10-22 Campaign launched its Phase 1 investigation and operator decision
+packet through the Streamliner workflow v2 adapter. Its merge gate runs in
+shadow mode, so the operator merges. Implementation still lands only after #162
+merges. Any approach requiring privilege, entitlements, a helper service, a
+broker, or a VM returns to the operator before implementation. This host-scope
+decision and follow-up launch do not clear #162's accepted store-binding
+lifecycle/recovery blocker or premature `productionReady` blocker. Both repairs,
+required CI, implementation review, and fresh exact-head design inspection still
+apply. The `watcher-runtime-core` merge gate also runs in shadow mode, so the
+operator merges. `minimal-example-pack` completed under issue #144 in PR #163.
+Campaign ran the first live merge-gate pilot and cleared exact head
 `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
-`5ad7eb04c1357044315e433bd12f34347b6a4cf6`. Neither launch grants release, tag,
-publish, fleet, CLI, packaging, I161-1, or Operator Station authority. The
-downstream `five-minute-custom-watch-gate` still owns operational proof that an
-agent can create, register, leave running, and diagnose a custom watch in five
-minutes.
+`5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
+release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
+authority. The downstream `five-minute-custom-watch-gate` still owns operational
+proof that an agent can create, register, leave running, and diagnose a custom
+watch in five minutes.
 
 `watcher-macos-containment` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It does remain part of the
