@@ -4,6 +4,9 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{GenericClient, IsolationLevel, Row, Transaction};
@@ -19,9 +22,14 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 pub struct PgBackend {
     connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
-    release_client: AsyncMutex<tokio_postgres::Client>,
-    release_connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
+    release: Arc<PgReleaseClient>,
     notify_channel: String,
+}
+
+struct PgReleaseClient {
+    client: AsyncMutex<tokio_postgres::Client>,
+    connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
+    repairing: AtomicBool,
 }
 
 enum PgConnector {
@@ -926,8 +934,11 @@ impl PgBackend {
                 schema: schema.map(str::to_string),
             },
             client: AsyncMutex::new(client),
-            release_client: AsyncMutex::new(release_client),
-            release_connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
+            release: Arc::new(PgReleaseClient {
+                client: AsyncMutex::new(release_client),
+                connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
+                repairing: AtomicBool::new(false),
+            }),
             notify_channel,
         })
     }
@@ -941,8 +952,11 @@ impl PgBackend {
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
-            release_client: AsyncMutex::new(release_client),
-            release_connection: AsyncMutex::new((release_config, schema)),
+            release: Arc::new(PgReleaseClient {
+                client: AsyncMutex::new(release_client),
+                connection: AsyncMutex::new((release_config, schema)),
+                repairing: AtomicBool::new(false),
+            }),
             notify_channel,
         })
     }
@@ -994,42 +1008,62 @@ impl PgBackend {
     async fn client(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>> {
         let mut client = self.client.lock().await;
         if client.is_closed() {
-            *client = self.reconnect_client().await?;
+            let (replacement, refreshed) = self.reconnect_client().await?;
+            *client = replacement;
+            if let Some((config, schema)) = refreshed {
+                *self.release.connection.lock().await = (Self::release_config(&config), schema);
+            }
         }
-        self.repair_release_client().await;
+        self.schedule_release_repair();
         Ok(client)
     }
 
-    async fn repair_release_client(&self) {
-        {
-            let release = self.release_client.lock().await;
-            if !release.is_closed() {
+    fn schedule_release_repair(&self) {
+        if self.release.repairing.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let release = self.release.clone();
+        tokio::spawn(async move {
+            if !release.client.lock().await.is_closed() {
+                release.repairing.store(false, Ordering::Release);
                 return;
             }
-        }
-        let (config, schema) = {
-            let cached = self.release_connection.lock().await;
-            (cached.0.clone(), cached.1.clone())
-        };
-        let Ok(replacement) = Self::open_client(&config, schema.as_deref()).await else {
-            return;
-        };
-        let mut release = self.release_client.lock().await;
-        if release.is_closed() {
-            *release = replacement;
-        }
+            let (config, schema) = {
+                let cached = release.connection.lock().await;
+                (cached.0.clone(), cached.1.clone())
+            };
+            if let Ok(Ok(replacement)) = tokio::time::timeout(
+                Duration::from_secs(5),
+                PgBackend::open_client(&config, schema.as_deref()),
+            )
+            .await
+            {
+                let mut client = release.client.lock().await;
+                if client.is_closed() {
+                    *client = replacement;
+                }
+            }
+            release.repairing.store(false, Ordering::Release);
+        });
     }
 
-    async fn reconnect_client(&self) -> Result<tokio_postgres::Client> {
+    async fn reconnect_client(
+        &self,
+    ) -> Result<(
+        tokio_postgres::Client,
+        Option<(tokio_postgres::Config, Option<String>)>,
+    )> {
         match &self.connector {
-            PgConnector::Static { config, schema } => {
-                Self::open_client(config, schema.as_deref()).await
-            }
+            PgConnector::Static { config, schema } => Self::open_client(config, schema.as_deref())
+                .await
+                .map(|client| (client, None)),
             PgConnector::Profile(profile) => {
                 let (config, schema) = crate::profiles::pg_connect_config(profile)
                     .await
                     .context("resolving postgres reconnect profile")?;
-                Self::open_client(&config, schema.as_deref()).await
+                Self::open_client(&config, schema.as_deref())
+                    .await
+                    .map(|client| (client, Some((config, schema))))
             }
         }
         .context("reconnecting to postgres")
@@ -1502,7 +1536,7 @@ impl Backend for PgBackend {
         // client is established with the backend and preserves the same schema,
         // owner, and epoch checks. A broken release connection fails promptly;
         // drain never starts an unbounded credential refresh.
-        let client = self.release_client.lock().await;
+        let client = self.release.client.lock().await;
         let n = client
             .execute(
                 "UPDATE leases
