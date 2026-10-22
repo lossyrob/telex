@@ -286,7 +286,9 @@ async fn perform_upgrade(
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
-        let selected_predecessor = install::current_binary(layout)?;
+        let selected_predecessor =
+            crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
+                .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
         drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     for warning in &installed.warnings {
@@ -441,7 +443,9 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
-        let selected_predecessor = install::current_binary(&layout)?;
+        let selected_predecessor =
+            crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
+                .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
         drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     let switched = install::switch_to(&layout, &target)?;
@@ -724,11 +728,11 @@ async fn drain_daemon(
         Err(e) => return Err(e.into()),
     };
     if selected_executable.is_none() {
-        let Some(pid) = cap.server_pid else {
+        let (Some(pid), Some(start_time)) = (cap.server_pid, cap.server_start_time) else {
             validate_drain_caller(None)?;
             unreachable!();
         };
-        if !crate::session_watch::process_alive_with_start_time(pid, cap.server_start_time) {
+        if !crate::session_watch::process_alive_with_start_time(pid, Some(start_time)) {
             return Ok(json!({"drained": false, "status": "not_running"}));
         }
     }

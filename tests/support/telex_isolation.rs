@@ -403,8 +403,8 @@ impl Isolation {
 }
 
 impl Drop for Isolation {
-    /// Tear down on unwind too, so a panicking scenario still stops the daemon
-    /// it spawned and removes its temp root instead of leaking either.
+    /// Attempt graceful teardown on unwind. The isolated root is retained
+    /// because endpoint absence is not independently provable during startup.
     fn drop(&mut self) {
         self.cleanup();
     }

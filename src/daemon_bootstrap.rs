@@ -382,6 +382,29 @@ pub(crate) fn resolve_installed_current(
         .map(|candidate| candidate.token)
 }
 
+/// Resolve the selected predecessor for upgrade/rollback drain while the
+/// caller already holds exclusive selector admission.
+///
+/// Missing admission metadata on the unpublished 0.3 lineage remains eligible
+/// as a predecessor without running the compatibility probe. All authority,
+/// selector, containment, manifest, and executable checks still apply.
+pub(crate) fn resolve_selected_current_for_drain(
+    trusted_root: &Path,
+) -> Result<Option<PathBuf>, DaemonBootstrapFailure> {
+    match resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict) {
+        Ok(candidate) => Ok(Some(candidate.token.target_exe)),
+        Err(DaemonBootstrapFailure::MissingCurrent) => Ok(None),
+        Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+            resolve_installed_current_with_admission(
+                trusted_root,
+                AdmissionValidation::ProbeCandidate,
+            )
+            .map(|candidate| Some(candidate.token.target_exe))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub(crate) async fn resolve_installed_current_admitted(
     trusted_root: &Path,
 ) -> Result<(SelectionToken, SelectorAdmission), DaemonBootstrapFailure> {

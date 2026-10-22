@@ -729,6 +729,7 @@ async fn installed_current_killed_selector_client_releases_shared_admission() {
         status.success(),
         "exclusive admission must complete after selector client death: {status}"
     );
+    iso.stop_daemon_with_timeout(Duration::from_secs(45));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -797,6 +798,7 @@ async fn installed_current_gc_obeys_exclusive_selector_admission() {
         !iso.layout().versions_dir.join(stale_tag).exists(),
         "gc must remove only the stale version after taking its protected selector snapshot"
     );
+    iso.stop_daemon_with_timeout(Duration::from_secs(45));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1022,8 +1024,9 @@ async fn installed_current_stale_prestarted_image_is_refused() {
     // Replace the selected target in place. The running daemon keeps the old
     // image, so its platform file identity no longer matches the selection.
     let target = iso.current_binary();
+    let displaced = target.with_extension("running-image");
     let source = isolation::branch_binary();
-    std::fs::remove_file(&target).expect("unlink the running image");
+    std::fs::rename(&target, &displaced).expect("retain the running image");
     std::fs::copy(&source, &target).expect("install a fresh copy at the same path");
 
     let outcome = client
@@ -1039,6 +1042,9 @@ async fn installed_current_stale_prestarted_image_is_refused() {
         Some(stale_pid),
         "authentication failure must not launch another daemon beside the stale peer"
     );
+    std::fs::remove_file(&target).expect("remove replacement selected image");
+    std::fs::rename(&displaced, &target).expect("restore admitted running image pathname");
+    iso.stop_daemon_with_executable(&target);
 }
 
 #[cfg(windows)]
