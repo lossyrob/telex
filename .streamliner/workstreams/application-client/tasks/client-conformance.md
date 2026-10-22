@@ -5,9 +5,10 @@
 - **Type:** implementation
 - **Status:** in progress; PR #161 is open at head `4cd34938`, which is intended
   to address Operator Station finding OS-PR161-0486BEE-1 at `0486beeb`; Local's
-  source review and the retained delta review approved it, its required CI is
-  under way, fresh consumer attestations are still needed, and proof-isolation
-  incident I161-1 is unresolved
+  source review and the retained delta review approved it, its required CI
+  passed, the Watcher and Operator Station pre-merge consumer attestations
+  approved it, design inspections are pending, and proof-isolation incident
+  I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -951,13 +952,62 @@ future control flow; Local inspected the check but did not run it; and source
 review does not establish runtime daemon termination. Local found all other
 tracked files identical to `0486beeb`, so the earlier D161, L161, SID-authority,
 public-API, and PostgreSQL lifecycle source authority is conserved. Both
-approvals are source-only. Required CI run 39775306925 is in progress at the
-exact head; its result is not recorded here. The head movement invalidates all
-`0486beeb` current-head evidence, including its CI credit and Watcher's
-approval, so `4cd34938` has no CI, consumer, design, merge, or closure credit
-yet; it needs passing required CI and fresh Watcher and Operator Station
-attestations. I161-1 remains unresolved, E161-1 remains withheld, and the formal
-post-merge consumer gate remains planned.
+approvals are source-only. Required CI run 39775306925 then ran at the exact
+head; its result follows. The head movement invalidated all `0486beeb`
+current-head evidence, including its CI credit and Watcher's approval, so
+`4cd34938` started with no CI, consumer, design, merge, or closure credit.
+I161-1 remains unresolved, E161-1 remains withheld, and the formal post-merge
+consumer gate remains planned.
+
+Required CI run 39775306925 at `4cd34938` completed with success at
+2026-10-22T12:22:46Z. All 16 jobs succeeded, including the required Live
+Postgres parity job (119812625200) and the required Windows InstalledCurrent
+Postgres process-proof job (119812625123). At completion, PR #161 was open and
+not a draft at the exact head, its base was `main` at `2c2b9fb5`, and GitHub
+reported the merge state as clean. `4cd34938` therefore receives required-CI
+credit for this exact head only; any head movement invalidates it. In the Live
+Postgres job, the consumer fixture's PostgreSQL test reported ok at 12:09:21Z,
+and the PostgreSQL service log contains no `relation "leases" does not exist`
+errors. Its only errors are 30 `isolated wait recovery fault` entries, the last
+at 12:06:03 UTC, before that test finished. This is consistent with the intended
+fix, but whether it satisfies OS-PR161-0486BEE-1 is for Operator Station's fresh
+attestation to decide. Passing CI is not isolation certification: incident
+I161-1 remains unresolved, and E161-1 remains withheld. App reported that fresh
+Watcher and Operator Station pre-merge consumer attestations at `4cd34938` had
+started; their results follow.
+
+Both fresh attestations at `4cd34938` returned APPROVED on 2026-10-22. Watcher
+(session e00d296e-ffca-4477-b1c8-c4d340bd30be; gpt-5.6-sol, high reasoning,
+context tier unavailable; artifact
+`watcher-pr161-4cd3493-premerge-consumability-attestation.md`, 13,555 bytes,
+SHA-256 `db84520d1af042d21967f70d5c8ea0b9a6527e749874e8e89c2259fa77e6b6e5`)
+found that the cleanup-order delta establishes verified daemon termination
+before the run-owned schema is dropped, without changing the public Application
+Client, the public Watcher fixture, the daemon, or the PostgreSQL backend, and
+that no private fallback or unaccepted Watcher compatibility or design
+dependency is required. Operator Station (session
+002c5122-fc0d-403c-8f87-625d87385d44; gpt-5.6-sol, high reasoning, context tier
+unavailable; artifact
+`operator-station-pr161-premerge-consumability-attestation-4cd34938-runtime.json`,
+12,995 bytes, SHA-256
+`75cda963a6ad78b8984e9617c312cd984c7f0bc91efb3663433ae634555d52de`) found that
+it can consume this exact revision through supported public surfaces only, with
+no private fallback, and closed OS-PR161-0486BEE-1 in source and runtime.
+Station's evidence: the fixture stops the exact daemon generation before the
+final `DROP SCHEMA`; both the Linux Live Postgres and Windows InstalledCurrent
+jobs passed the fixture and its new stop-before-drop test; and the PostgreSQL
+service log has no `leases` activity and no database error from fixture
+completion through shutdown. Station attributes the 30 earlier `isolated wait
+recovery fault` entries to deliberate fault-injection tests that ran before the
+fixture. Station also found the earlier D161, L161, and PostgreSQL lifecycle
+source unchanged by blob. `4cd34938` therefore has bounded pre-merge consumer
+credit from both product authorities for this exact head only; any head movement
+invalidates it. This is not the formal post-merge consumer-integration gate,
+which remains planned and must attest the exact merged revision. App reports
+that the Local Daemon design inspection at `4cd34938` has started; its result is
+pending. The Application Client design inspector-profile disposition is also
+pending. `4cd34938` has no design, merge, or closure credit. I161-1 remains
+unresolved, and E161-1 remains withheld.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
