@@ -1118,10 +1118,10 @@ impl PgBackend {
             *client = replacement;
             if let Some((config, schema)) = refreshed {
                 *self.release.connection.lock().await = (Self::release_config(&config), schema);
-                if self.release.proactive_repair {
-                    self.schedule_release_repair();
-                }
             }
+        }
+        if self.release.proactive_repair {
+            self.schedule_release_repair();
         }
         Ok(client)
     }
@@ -1658,24 +1658,46 @@ impl Backend for PgBackend {
         // for the backend's remaining members. The full acquisition + fenced
         // update shares one bound.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        let mut client = tokio::time::timeout_at(deadline, self.release.client.lock())
-            .await
-            .map_err(|_| anyhow!("postgres lease release could not acquire its client in 5s"))?;
+        let mut client = match tokio::time::timeout_at(deadline, self.release.client.lock()).await {
+            Ok(client) => client,
+            Err(_) => {
+                self.schedule_release_repair();
+                return Err(anyhow!(
+                    "postgres lease release could not acquire its client in 5s"
+                ));
+            }
+        };
         if client
             .as_ref()
             .is_none_or(|client| client.client.is_closed())
         {
             let (config, schema) =
-                tokio::time::timeout_at(deadline, self.release.connection.lock())
-                    .await
-                    .map(|cached| (cached.0.clone(), cached.1.clone()))
-                    .map_err(|_| anyhow!("postgres lease release config wait exceeded 5s"))?;
-            let replacement = tokio::time::timeout_at(
+                match tokio::time::timeout_at(deadline, self.release.connection.lock()).await {
+                    Ok(cached) => (cached.0.clone(), cached.1.clone()),
+                    Err(_) => {
+                        drop(client);
+                        self.schedule_release_repair();
+                        return Err(anyhow!("postgres lease release config wait exceeded 5s"));
+                    }
+                };
+            let replacement = match tokio::time::timeout_at(
                 deadline,
                 Self::open_release_client(&config, schema.as_deref()),
             )
             .await
-            .map_err(|_| anyhow!("postgres lease release connection exceeded 5s"))??;
+            {
+                Ok(Ok(replacement)) => replacement,
+                Ok(Err(error)) => {
+                    drop(client);
+                    self.schedule_release_repair();
+                    return Err(error);
+                }
+                Err(_) => {
+                    drop(client);
+                    self.schedule_release_repair();
+                    return Err(anyhow!("postgres lease release connection exceeded 5s"));
+                }
+            };
             *client = Some(replacement);
         }
         let result = tokio::time::timeout_at(

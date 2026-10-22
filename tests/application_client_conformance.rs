@@ -2279,6 +2279,7 @@ async fn schema_migration_and_newer_schema_refusal(ctx: &Ctx<'_>) {
         .await
         .expect("history after migration");
     assert!(history.iter().any(|item| item.message.id == 1));
+    ctx.iso.stop_daemon();
     ctx.leg.discard(&migration_store).await;
 
     // A store written by a newer build is refused, fail-closed, before any
