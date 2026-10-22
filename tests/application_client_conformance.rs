@@ -341,6 +341,9 @@ impl<'a> Ctx<'a> {
     }
 
     async fn finish(self) {
+        if self.iso.cap_path().is_some() {
+            self.iso.stop_daemon();
+        }
         self.leg.discard(&self.store).await;
     }
 }

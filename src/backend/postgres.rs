@@ -30,6 +30,7 @@ struct PgReleaseClient {
     client: AsyncMutex<Option<ManagedPgClient>>,
     connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
     profile: Option<crate::profiles::BackendProfile>,
+    proactive_repair: bool,
     repairing: Arc<AtomicBool>,
 }
 
@@ -984,6 +985,7 @@ impl PgBackend {
                 client: AsyncMutex::new(None),
                 connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
                 profile: None,
+                proactive_repair: false,
                 repairing: Arc::new(AtomicBool::new(false)),
             }),
             notify_channel,
@@ -1021,6 +1023,7 @@ impl PgBackend {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema)),
                 profile: Some(release_profile),
+                proactive_repair: prepare_release,
                 repairing: Arc::new(AtomicBool::new(false)),
             }),
             notify_channel,
@@ -1115,7 +1118,9 @@ impl PgBackend {
             *client = replacement;
             if let Some((config, schema)) = refreshed {
                 *self.release.connection.lock().await = (Self::release_config(&config), schema);
-                self.schedule_release_repair();
+                if self.release.proactive_repair {
+                    self.schedule_release_repair();
+                }
             }
         }
         Ok(client)

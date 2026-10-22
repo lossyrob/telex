@@ -72,15 +72,21 @@ fn config(responsibility: &str, db: &Path) -> ApplicationClientConfig {
             }
             let config_path =
                 PathBuf::from(std::env::var_os("TELEX_CONFIG").expect("isolated TELEX_CONFIG"));
-            std::fs::write(
-                config_path,
-                toml::to_string_pretty(&ConfigFile {
-                    default: None,
-                    backends: BTreeMap::from([(profile_name.to_string(), profile)]),
-                })
-                .expect("serialize process Postgres profile"),
-            )
-            .expect("write process Postgres profile");
+            let configured = std::fs::read_to_string(&config_path)
+                .ok()
+                .and_then(|text| toml::from_str::<ConfigFile>(&text).ok())
+                .is_some_and(|config| config.backends.contains_key(profile_name));
+            if !configured {
+                std::fs::write(
+                    config_path,
+                    toml::to_string_pretty(&ConfigFile {
+                        default: None,
+                        backends: BTreeMap::from([(profile_name.to_string(), profile)]),
+                    })
+                    .expect("serialize process Postgres profile"),
+                )
+                .expect("write process Postgres profile");
+            }
             return ApplicationClientConfig {
                 responsibility: ApplicationResponsibility(responsibility.to_string()),
                 backend: Some(profile_name.to_string()),
