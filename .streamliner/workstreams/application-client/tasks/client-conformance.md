@@ -3,7 +3,7 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `8bd3c330` with source
+- **Status:** in progress; PR #161 is open at head `2b8ade1d` with source
   review approved, required CI not yet recorded, and proof-isolation incident
   I161-1 unresolved
 - **Attention:** focus
@@ -459,8 +459,27 @@ actionable findings (artifact SHA-256
 retained approvals of `5efe5bf9` and `20fe13b4` were superseded by later
 Local findings. These approvals cover source only; Local ran no tests. CI runs
 39723759906 at `d08e764c` and 39726078689 at `5efe5bf9` failed and are
-diagnostic. CI run 39730569101 was started at `8bd3c330`; its result is not
-recorded here.
+diagnostic.
+
+CI run 39730569101 at `8bd3c330` failed in 5 of 16 jobs: Build and test on
+Ubuntu and Windows, Live Postgres parity, Windows `InstalledCurrent` Postgres
+process proofs, and Windows Copilot fallback end-to-end (log SHA-256
+`633fddc8ea0331db27b1de251a965971989f93089dc03090d779e4bc27d0a2b6`). The
+writer then submitted source changes intended to address them in exact head
+`2b8ade1d23214fcaffef68f6d2b0143977b9a7a5` (tree
+`db4a8ce7a8a8988b4ec276366932f113be6ef8fa`), a five-path test and fixture
+change of +93/-66 lines that moves Windows test roots directly below the
+volume root and leaves production authority validation unchanged. Local's
+bounded review approved `2b8ade1d` with no findings (report SHA-256
+`f8c1bd9b01296f76395d51f5c4b4565713f26a5b5892d8fe3139b56e6cafd286`). The
+retained review sequence of five `gpt-6-astra` invocations, run with high
+reasoning and long context, found defects that the writer corrected, then
+concluded with an approval of `8bd3c330..2b8ade1d` (artifact SHA-256
+`d8c96183e0c2429065b3f7a61fed81d9051127e55a65a291f3a82317bb0da917`). These
+approvals cover source only; Local ran no tests. The writer reports that
+full-workspace all-target Clippy is blocked by warnings in unchanged targets;
+it is not green. CI run 39734925308 was started at `2b8ade1d`; its result is
+not recorded here.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

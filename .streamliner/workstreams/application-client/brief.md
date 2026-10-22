@@ -216,8 +216,22 @@ later findings. At exact head `8bd3c330393409a79e88338d24e1174b1c7407b6` (tree
 with no findings, and the retained `gpt-6-astra` review of
 `5efe5bf9..8bd3c330` approved with no actionable findings. These are source
 approvals only. CI runs at `d08e764c` and `5efe5bf9` failed and are
-diagnostic. CI run 39730569101 was started at `8bd3c330`; its result is not
-recorded here.
+diagnostic. CI run 39730569101 at `8bd3c330` also failed, in 5 of 16 jobs,
+including both Build and test jobs, Live Postgres parity, and the Windows
+`InstalledCurrent` Postgres process proofs.
+
+The writer then submitted source changes intended to address those failures
+in exact head `2b8ade1d23214fcaffef68f6d2b0143977b9a7a5` (tree
+`db4a8ce7a8a8988b4ec276366932f113be6ef8fa`), a five-path test and fixture
+change of +93/-66 lines. Windows test roots now sit directly below the volume
+root, and production authority validation is unchanged. Local's bounded
+review approved that head with no findings. The retained review sequence of
+five `gpt-6-astra` invocations, run with high reasoning and long context,
+found defects that the writer corrected, then concluded with an approval of
+`8bd3c330..2b8ade1d`. These are also source approvals only. The writer
+reports that full-workspace all-target Clippy is blocked by warnings in
+unchanged targets, so it is not green. CI run 39734925308 was started at
+`2b8ade1d`; its result is not recorded here.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
