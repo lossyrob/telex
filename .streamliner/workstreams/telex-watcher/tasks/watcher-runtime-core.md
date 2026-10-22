@@ -3,7 +3,8 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
-- **Status:** in progress; launched 2026-10-22 under Streamliner workflow v2
+- **Status:** In progress; PR #164 is ready for operator merge at exact head
+  40a5c916d839dc81432738f122e03a00fd31628e; not merged.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;

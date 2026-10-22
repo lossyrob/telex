@@ -193,14 +193,26 @@ runtime authority only when it is unprivileged, ephemeral, shipped with the
 runtime, controlled through inherited private handles, exposes no reusable
 service endpoint, and exits after identity-matched cleanup evidence. Any
 privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
-or VM-backed architecture returns to the operator. The watcher-macos-containment
-merge gate runs in shadow mode, so the operator merges. This host-scope decision
-and follow-up launch do not clear #162's accepted store-binding
-lifecycle/recovery blocker or premature `productionReady` blocker. Both repairs,
-required CI, implementation review, and fresh exact-head design inspection still
-apply. The `watcher-runtime-core` merge gate also runs in shadow mode, so the
-operator merges. `minimal-example-pack` completed under issue #144 in PR #163.
-Campaign ran the first live merge-gate pilot and cleared exact head
+or VM-backed architecture returns to the operator. The
+`watcher-macos-containment` merge gate runs in shadow mode, so the operator
+merges. This host-scope decision and follow-up launch do not clear #162's
+accepted store-binding lifecycle/recovery blocker or premature `productionReady`
+blocker. At exact head `40a5c916d839dc81432738f122e03a00fd31628e`, independent
+source review `5620648207` and design inspection accepted the B2 store-binding
+lifecycle/recovery repair and B3 `productionReady` reconciliation fence at
+predecessor `d17100bfce6b17ccd03dff01fc66e3d8455cd812`. Independent final-delta
+review `5620856808` then verified that the successor changed only two
+documentation files and that all product source, tests, schemas, dependencies,
+and workflow remained byte-identical; exact-head design inspection accepted
+those documentation corrections at `40a5c916`. All 18 required CI jobs passed at
+that exact head in run `39854080691`, attempt 2, after one retry of two shared
+Windows failures tracked separately in #166 and #167. PR #164 is open,
+non-draft, mergeable-clean, and awaits the operator's merge. Main-branch CI,
+post-merge validation, and the issue field report remain outstanding. Any
+product-head movement invalidates this readiness. The `watcher-runtime-core`
+merge gate also runs in shadow mode, so the operator merges.
+`minimal-example-pack` completed under issue #144 in PR #163. Campaign ran the
+first live merge-gate pilot and cleared exact head
 `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
 `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
 release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
