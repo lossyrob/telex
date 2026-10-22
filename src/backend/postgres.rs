@@ -19,6 +19,7 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 pub struct PgBackend {
     connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
+    release_client: AsyncMutex<tokio_postgres::Client>,
     notify_channel: String,
 }
 
@@ -915,6 +916,7 @@ impl PgBackend {
         schema: Option<&str>,
     ) -> Result<Self> {
         let client = Self::open_client(&config, schema).await?;
+        let release_client = Self::open_client(&config, schema).await?;
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
             connector: PgConnector::Static {
@@ -922,6 +924,7 @@ impl PgBackend {
                 schema: schema.map(str::to_string),
             },
             client: AsyncMutex::new(client),
+            release_client: AsyncMutex::new(release_client),
             notify_channel,
         })
     }
@@ -929,10 +932,12 @@ impl PgBackend {
     pub async fn connect_profile(profile: crate::profiles::BackendProfile) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
+        let release_client = Self::open_client(&config, schema.as_deref()).await?;
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
+            release_client: AsyncMutex::new(release_client),
             notify_channel,
         })
     }
@@ -1461,10 +1466,11 @@ impl Backend for PgBackend {
         lease_epoch: i64,
     ) -> Result<bool> {
         // Drain must not queue behind unrelated work holding the backend's
-        // shared client mutex. Use a short-lived connection for the same
-        // fenced release so shutdown remains independent of ordinary request
-        // serialization without weakening owner/epoch checks.
-        let client = self.reconnect_client().await?;
+        // ordinary client mutex or rerun credential discovery. The dedicated
+        // client is established with the backend and preserves the same schema,
+        // owner, and epoch checks. A broken release connection fails promptly;
+        // drain never starts an unbounded credential refresh.
+        let client = self.release_client.lock().await;
         let n = client
             .execute(
                 "UPDATE leases
