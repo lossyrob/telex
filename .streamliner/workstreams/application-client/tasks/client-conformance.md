@@ -3,11 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at successor head `f02f0ee9`, which
-  is intended to address the Local Daemon design findings at `7505568c`; Local's
-  source review and the retained delta review approved it, its required CI
-  failed, a further successor is assigned, and proof-isolation incident I161-1
-  is unresolved
+- **Status:** in progress; PR #161 is open at residual successor head
+  `689883e2`, which is intended to address the CI failures at `f02f0ee9`; the
+  retained delta review approved it, its required CI and Local source review are
+  under way, and proof-isolation incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -687,6 +686,31 @@ approvals only, and Local's acceptance of the D161 source corrections is
 unchanged; neither is design acceptance. A further successor head is assigned to
 address these failures. Any head movement invalidates all `f02f0ee9` evidence.
 Incident I161-1 and the withholding of E161-1 are unchanged.
+
+Residual successor head `689883e272fbb17d82546d7883bf6df36ca93a6d` (tree
+`32f1b60d964813c5ae2c2ab4bf8259c6db3bc8bc`) is now the PR #161 head. Its review
+baseline is `f02f0ee9`, an ancestor five commits back; its immediate parent is
+`53a669ae`. The product merge base remains `e4f585a7`. The delta from `f02f0ee9`
+changes two paths, +114/-8: `src/backend/postgres.rs` and
+`tests/daemon_process_sqlite.rs`. It is intended to address both CI failures at
+`f02f0ee9`. The test helper `set_daemon_executable` now has the same platform
+gate as its only caller, which is intended to fix the macOS compile failure. For
+the Live Postgres restart timeout, drain now releases its lease through a
+distinct PostgreSQL client instead of the shared client, with bounded background
+repair of that client and driver abort ownership held through initialization.
+This is intended to keep drain from queuing behind ordinary work on the shared
+client. The retained delta review approved the change
+(`REVIEW-PR161-689883E-DELTA.md`, 4,380 bytes, SHA-256
+`4f61a7ce5b80c5fd9a28204788264cf5c37ec72989dc170b52a13b33098864e7`). Its
+reviewers, agents `99ae208c` and `2488698f`, are recorded as gpt-6-astra with
+high reasoning and long context. Its validation was compile-only under the
+I161-1 freeze: formatting, all-features no-run compilation, and targeted Clippy
+on Rust 1.99 and 1.98. The review identifies the timeout cause from source only
+and states that CI must confirm it. Required CI run 39762898070 started at the
+exact head, and Local's source review is assigned; neither has a result. The
+head has no gate credit yet. Evidence from `f02f0ee9`, including its source
+approvals and failed CI, is historical and does not carry forward. Incident
+I161-1 and the withholding of E161-1 are unchanged.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

@@ -405,6 +405,29 @@ further successor head is assigned to address these failures. Any head movement
 invalidates all `f02f0ee9` evidence. Incident I161-1 and the withholding of
 E161-1 are unchanged.
 
+Residual successor head `689883e272fbb17d82546d7883bf6df36ca93a6d` (tree
+`32f1b60d964813c5ae2c2ab4bf8259c6db3bc8bc`) is now the PR #161 head. Its review
+baseline is `f02f0ee9`, an ancestor five commits back; its immediate parent is
+`53a669ae`. The product merge base remains `e4f585a7`. The delta from `f02f0ee9`
+changes two paths, +114/-8: `src/backend/postgres.rs` and
+`tests/daemon_process_sqlite.rs`. It is intended to address both CI failures at
+`f02f0ee9`. The test helper `set_daemon_executable` now has the same platform
+gate as its only caller, which is intended to fix the macOS compile failure. For
+the Live Postgres restart timeout, drain now releases its lease through a
+distinct PostgreSQL client instead of the shared client, with bounded background
+repair of that client and driver abort ownership held through initialization.
+This is intended to keep drain from queuing behind ordinary work on the shared
+client. The retained delta review approved the change. Its reviewers, agents
+`99ae208c` and `2488698f`, are recorded as gpt-6-astra with high reasoning and
+long context. Its validation was compile-only under the I161-1 freeze:
+formatting, all-features no-run compilation, and targeted Clippy on Rust 1.99
+and 1.98. The review identifies the timeout cause from source only and states
+that CI must confirm it. Required CI run 39762898070 started at the exact head,
+and Local's source review is assigned; neither has a result. The head has no
+gate credit yet. Evidence from `f02f0ee9`, including its source approvals and
+failed CI, is historical and does not carry forward. Incident I161-1 and the
+withholding of E161-1 are unchanged.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
