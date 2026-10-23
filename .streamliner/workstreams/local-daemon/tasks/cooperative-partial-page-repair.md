@@ -3,14 +3,13 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** in progress; Campaign launch authorized, supported preparation
-  and exact owner identity pending
+- **Status:** in progress; v2 preparation complete and real kickoff delivered
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
-  one authorized implementation owner, not yet launched
+  implementation owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:**
   [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
@@ -143,12 +142,35 @@ hosted disposable runner. Do not touch installed user/campaign Telex state.
 
 ## Launch
 
-After canonical node/task/tracker landing, Local uses supported Streamliner
-external-session preparation in a separate non-main checkout, verifies the
-exact returned path/branch, then creates one App owner with model
-gpt-6.1-sol, reasoning_effort high and context_tier default. Require
-session-online and one write-authorized identity exchange. No duplicate
-writer, prepared-worktree copying or hand-written preparation bypass.
+Canonical promotion landed at
+`3d517e17fba88559fbd5e69557ceb6264300aeff`. On 2026-10-23 Local completed
+Streamliner v2 preparation and delivered the real kickoff to App owner
+`9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` in checkout directory
+`lossyrob-expert-doodle`.
+The launch-time branch was `lossyrob-expert-doodle`, initially at that main
+commit. A later reconciler App inspection reports branch
+`lossyrob-cooperative-partial-page-repair` and the same owner/checkout.
+
+The requested runtime profile is `gpt-6.1-sol`, high reasoning, default
+context tier and interactive mode; this records the request, not independent
+verification of effective runtime settings. The canonical v2 binding is
+`prompts\v2\launches\cooperative-partial-page-repair-20261023.json`
+in the Telex prompt pack.
+The reconciler read its `launched`/`kickoffDelivered` receipt and matched the
+12,819-byte kickoff at SHA-256
+`dfec5f6b8ff3e147096bb7e98dbb5ea52113fab3973363953663235ab5aba4b8`.
+The binding snapshot is 3,560 bytes at SHA-256
+`5af3fa466a2104fdf534f1ba09cad1e3e641e44047f7d60c4b17c867bd1bc0d8`.
+Local's receipt records completed preparation checks and accepted immediate
+kickoff delivery. The reconciler independently observed the same App owner
+and checkout with busy activity; delivery acceptance/activity do not prove
+implementation or CI completion.
+
+This v2 launch corrects and supersedes the earlier preparation-pending and
+session-online/write-authorized identity-exchange requirements in this task.
+Local reports no API/SDK/v1 handshake; none is required for this v2 launch.
+No duplicate writer, prepared-worktree copying or hand-written preparation
+bypass is authorized. The workstation freeze remains in force.
 
 ## Workflow
 
@@ -161,8 +183,8 @@ runtime, merge and hardening remain separate.
 
 ## Ownership and handoff
 
-Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates one authorized
-owner. Concrete owner identity is recorded after verified launch. Existing
+Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates launched owner
+9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c under the v2 receipt above. Existing
 Watcher c90bafbb preserves its branch/evidence; current Watcher coordinator
 fe2e883c-debc-4573-a855-2cf1e0f89407 has been told PR 180 waits.
 

@@ -2157,7 +2157,7 @@
       "requiredness": "Campaign-authorized bounded Local root repair, required before watcher-cli-ux / issue 179 / PR 180 can clear its dependent delivery gate.",
       "sequencing": "One separate Local repair node/issue/PR. Diagnose completion/permit/worker behavior, correct minimally, validate at an exact hosted head and return to Campaign gate. No third unchanged-head retry or Watcher-side absorption.",
       "target": "local-daemon/cooperative-partial-page-repair / issue https://github.com/lossyrob/telex/issues/181",
-      "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 owns one authorized implementation-owner preparation/launch; concrete worker identity pending. Existing PR 180 owner retains original evidence and owns no root fix.",
+      "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates implementation owner 9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c. V2 preparation and real kickoff are complete from main 3d517e17 in checkout lossyrob-expert-doodle with that initial branch; gpt-6.1-sol/high/default/interactive requested. No API/SDK/v1 handshake is required. Existing PR 180 owner retains original evidence and owns no root fix.",
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly authorized the bounded node, one gpt-6.1-sol/high/default owner, tracker closed by its repair PR, and upstream blocker of watcher-cli-ux on 2026-10-23.",
