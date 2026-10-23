@@ -2483,6 +2483,116 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority.",
       "terminalPath": "Resolve the observed attempt-to-handler-file gap with actual child exit/stdout/stderr and delivery timing evidence. Preserve historical no-replay, exact descriptor identity/role and lower-bound guarantees. Any separate authorized correction requires exact-head hosted Windows coverage; green retry alone does not close the candidate."
+    },
+    {
+      "id": "local-daemon-optional-clippy-198-unchanged-test-warnings",
+      "sourceNode": null,
+      "source": "PR #185 head 57fdc9752d3217f9ab9f2038bf90345ec48bae96; owner-reported optional compile-only lint output discovered during issue #181 work, outside its repair scope.",
+      "crossReference": "Campaign-wide test sentinel / issue #182 triage only. Separate from issue #181 and the existing runtime-flake and recording-marker candidates.",
+      "evidence": {
+        "intakePacket": {
+          "file": "pr185-optional-test-clippy-intake-20261023.json",
+          "bytes": 3100,
+          "sha256": "a1f4539085648d04d6bdff92b154f173f01116abec740aa6d18284e2e3c086eb"
+        },
+        "reportedSource": {
+          "reporterSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+          "sourceMessageCallId": "call_EU1XawHRiEvmBt90IObgT5cc",
+          "pullRequest": "https://github.com/lossyrob/telex/pull/185",
+          "issue": "https://github.com/lossyrob/telex/issues/181",
+          "head": "57fdc9752d3217f9ab9f2038bf90345ec48bae96",
+          "command": "cargo clippy --no-default-features --features sqlite --lib --tests -- -D warnings",
+          "reportedToolchain": "Rust Clippy 1.98",
+          "evidenceKind": "owner-reported compile-only lint output",
+          "retainedOutputReference": null
+        },
+        "observations": [
+          {
+            "path": "tests/copilot_plugin.rs",
+            "lines": "304-307",
+            "lint": "double_ended_iterator_last"
+          },
+          {
+            "path": "tests/conformance.rs",
+            "lines": "322",
+            "lint": "useless_vec"
+          },
+          {
+            "path": "src/daemon_bootstrap.rs",
+            "lines": "3480",
+            "lint": "zombie_processes"
+          },
+          {
+            "path": "src/daemon_bootstrap.rs",
+            "lines": "3481",
+            "lint": "print_literal"
+          }
+        ],
+        "reportedScope": {
+          "allAffectedCodeUnchangedByRepair": true,
+          "broaderCommandIsExistingRequiredCiInvocation": false,
+          "scopedUnitTestCompilationPassed": true,
+          "formattingPassed": true,
+          "hostedRequiredCiStillPendingUnderRegisteredWait": true
+        },
+        "historicalIntakeQualification": "reportedSource and reportedScope preserve the owner-attributed 57fdc975 intake snapshot, not independently verified execution, unchanged-source, required-CI or wait-registration facts. The original null retained-output reference, approximate toolchain description and pending sentinel triage are historical; laterOwnerSummary supplies an attributed summary and exact reported toolchain, and sentinelTriageReceipt supplies deferred triage. Neither retroactively verifies the initial assertions. The old-head CI/wait statement grants no current-head coverage.",
+        "laterOwnerSummary": {
+          "supplementFile": "pr185-optional-test-clippy-evidence-20261023.json",
+          "supplementBytes": 2277,
+          "supplementSha256": "8fc6c8833a391372186e4de0074532e32ffa3d5cb0c9ee02131c16b4b8455388",
+          "url": "https://github.com/lossyrob/telex/pull/185#issuecomment-6375017751",
+          "providerAuthor": "lossyrob",
+          "providerCreatedAt": "2026-10-23T21:23:47Z",
+          "providerUpdatedAt": "2026-10-23T21:23:47Z",
+          "head": "57fdc9752d3217f9ab9f2038bf90345ec48bae96",
+          "kind": "owner-authored summary of original compiler output",
+          "rawCompilerOutputArchive": null,
+          "reportedToolchain": {
+            "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+            "clippy": "0.1.98 (88d9e12ae1 2026-08-18)"
+          },
+          "reportedCommands": [
+            {
+              "command": "cargo test --lib --no-run --no-default-features --features sqlite",
+              "result": "passed"
+            },
+            {
+              "command": "cargo fmt --all --check",
+              "result": "passed"
+            },
+            {
+              "command": "cargo clippy --no-default-features --features sqlite --lib -- -D warnings",
+              "result": "passed"
+            },
+            {
+              "command": "cargo clippy --no-default-features --features sqlite --lib --tests -- -D warnings",
+              "result": "failed on the four previously reported test-code lints"
+            }
+          ],
+          "verificationBoundary": "Local and the reconciler read the provider comment in full and matched author, head, four locations, command results and toolchain identities to the supplied summary packet. Reading the summary does not independently verify command execution or source/CI assertions. No lint rerun, raw compiler archive or runtime proof is supplied; the owner reports only a toolchain-identity read for this intake."
+        },
+        "sentinelTriageReceipt": {
+          "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6375033191",
+          "providerAuthor": "lossyrob",
+          "providerCreatedAt": "2026-10-23T21:24:46Z",
+          "providerUpdatedAt": "2026-10-23T21:26:50Z",
+          "disposition": "Deferred behind measured test-performance work as lower-priority test hygiene, not implementation acceptance.",
+          "reconsideration": "Reconsider after the performance PR and active repair land, and only if evidence supports useful test-only cleanup for a local lint check. File a separate improvement issue before implementation; add no CI job or test battery and do not expand or block issue #181.",
+          "sourceBoundary": "Local and the reconciler read the provider comment in full. Local's earlier account of pending-output wording is a historical intake snapshot; the later updated comment links the owner-authored evidence summary. That summary remains neither a raw output archive nor independent execution proof. Sentinel triage is not a new implementation owner, node or dependency."
+        },
+        "limits": "All execution, unchanged-code, optional/non-required-CI and compile/format success statements remain attributed to the owner. The broader --tests command failed; it is not reported as passing and required CI is not waived. zombie_processes names a lint, not an observed process leak, runtime defect or security vulnerability. Evidence belongs to old PR head 57fdc975 and does not validate a later head or diagnose the separate runtime/marker failures. No command, test, runtime, CI query or rerun was performed for this reconciliation."
+      },
+      "description": "Retain one attributed optional test-lint hygiene candidate for the four owner-reported Clippy warnings, outside the issue #181 repair.",
+      "affectedOutcome": "Potentially useful local test-lint ergonomics after higher-priority measured test-performance work; not evidence that the issue #181 runtime outcome failed.",
+      "requiredness": "Optional and non-gating; deferred triage only. Not required for issue #181, PR #185, Watcher delivery, Local hardening/closure or any current gate.",
+      "sequencing": "Keep separate from the active repair and runtime-flake/marker candidates. Reconsider only after the performance PR and active repair land, if evidence supports value; a separate improvement issue and implementation authorization must precede any cleanup. No new CI job or test battery.",
+      "selectedDisposition": "Deferred lower-priority test hygiene under the existing campaign-wide test sentinel charter; no accepted implementation scope.",
+      "target": "Existing campaign-wide test sentinel / issue #182 triage record only; no new issue or workstream node.",
+      "owner": "Existing test sentinel fc772c8f-2a38-40de-a868-69a5397dbbc5 retains deferred triage under its charter. Implementation is unassigned; no new owner or launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 requested one separate discovery-only record; sentinel comment 6375033191 records deferred triage. Neither is implementation acceptance, issue #181 scope, readiness, merge or gate authority.",
+      "terminalPath": "Retain the attributed summary and its limits. After the performance PR and active repair land, the sentinel may consider a separate improvement issue only if the evidence supports useful local test-lint cleanup without adding CI jobs or a test battery. Obtain separate implementation authority before changes. Preserve required CI, workstation freeze, issue #181 and Watcher gates, and all existing runtime/marker evidence."
     }
   ]
 }
