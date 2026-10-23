@@ -221,9 +221,9 @@ Watcher runtime authority only when it is unprivileged, ephemeral, shipped with
 the runtime, controlled through inherited private handles, exposes no reusable
 service endpoint, and exits after identity-matched cleanup evidence. Any
 privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
-or VM-backed architecture returns to the operator. The merge gates for both
-macOS items run in shadow mode, so the operator merges. This host-scope decision
-and follow-up launch do not clear #162's accepted store-binding
+or VM-backed architecture returns to the operator. Campaign runs the merge gates
+for both macOS items and merges at the exact cleared SHA. This host-scope
+decision and follow-up launch do not clear #162's accepted store-binding
 lifecycle/recovery blocker or premature `productionReady` blocker. At exact head
 `40a5c916d839dc81432738f122e03a00fd31628e`, independent source review
 `5620648207` and design inspection accepted the B2 store-binding
@@ -254,14 +254,14 @@ schema-version branch; and audit that state hashes are not applicable. Strict v2
 canonicalization remains unchanged. PR #170 remains independently valid. The
 repair, exact-head review and CI, post-merge validation, #162 field report, and
 final reconciliation remain outstanding. The `watcher-runtime-core` merge gate
-also runs in shadow mode, so the operator merges. `minimal-example-pack`
-completed under issue #144 in PR #163. Campaign ran the first live merge-gate
-pilot and cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which
-the owner merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these
-launches grants release, tag, publish, fleet, CLI, packaging, I161-1, or
-Operator Station authority. The downstream `five-minute-custom-watch-gate` still
-owns operational proof that an agent can create, register, leave running, and
-diagnose a custom watch in five minutes.
+runs in shadow mode, so the operator merges. `minimal-example-pack` completed
+under issue #144 in PR #163. Campaign ran the first live merge-gate pilot and
+cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner
+merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches
+grants release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
+authority. The downstream `five-minute-custom-watch-gate` still owns operational
+proof that an agent can create, register, leave running, and diagnose a custom
+watch in five minutes.
 
 `watcher-macos-containment-runtime` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It replaces

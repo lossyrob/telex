@@ -42,8 +42,8 @@ anchor and nonzero-signal authority until a separately justified completion
 transition, then seal, exactly reap, and observe under the existing proof rules;
 if no ordinary-user completion condition can be proved, return decision-needed.
 
-The owner session is `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`. The merge gate is
-shadow; the operator merges.
+The owner session is `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`. Campaign runs the
+merge gate and merges at the exact cleared SHA.
 
 ## Outcome
 
@@ -214,8 +214,8 @@ establishes fork closure and PID/PGID reuse safety.
 - When the capability ships, the same product PR updates the macOS tracker
   reference in `docs/watcher-runtime.md` from #165 to #172.
 - One product PR says `Closes #172`. Required CI, independent implementation
-  review, exact-head design review, and shadow merge-gate evidence pass at the
-  final head.
+  review, and exact-head design review pass at the final head; Campaign runs the
+  merge gate and merges at the exact cleared SHA.
 
 ## Invalidation conditions
 

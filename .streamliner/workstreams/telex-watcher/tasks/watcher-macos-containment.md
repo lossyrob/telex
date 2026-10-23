@@ -27,7 +27,7 @@ Phase 1 investigation is complete. On 2026-10-22 the operator selected
 `Revise macOS to the non-detaching detector contract` in issue #165.
 
 Owner session `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b` holds this node through the
-PR #168 merge. The merge gate is shadow; the operator merges.
+PR #168 merge. Campaign runs the merge gate and merges at the exact cleared SHA.
 
 ## Delivery
 
@@ -94,8 +94,9 @@ process group ended.
 - The merged change enables no macOS execution. #162 remains fail-closed on
   macOS until #172 lands.
 - PR #168 changes exactly the two named documents and says `Closes #165`.
-- Required CI, independent review, design-steward approval, and shadow
-  merge-gate evidence all pass at the final exact head.
+- Required CI, independent review, and design-steward approval all pass at the
+  final exact head; Campaign runs the merge gate and merges at the exact cleared
+  SHA.
 
 ## Invalidation conditions
 
