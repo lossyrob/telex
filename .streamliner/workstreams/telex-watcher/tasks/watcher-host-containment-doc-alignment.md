@@ -5,7 +5,7 @@
 - **Type:** task
 - **Status:** planned; owner not yet launched
 - **Attention:** watch
-- **Depends on:** `watcher-macos-containment`
+- **Depends on:** completed `watcher-macos-containment`
 - **Tracker:** [lossyrob/telex#177](https://github.com/lossyrob/telex/issues/177)
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
@@ -26,6 +26,10 @@ shipping PR rewrites the interim macOS sentence that this item adds. #177 is a
 prerequisite for #172 product-PR readiness and closure only; it does not stop
 the active source and native proof work and grants no implementation
 authorization. The Windows-path five-minute gate does not depend on this item.
+
+`watcher-macos-containment` completed on 2026-10-23, so every dependency of this
+item is satisfied. It stays planned with no owner until the Watcher coordinator
+launches one.
 
 ## Outcome
 

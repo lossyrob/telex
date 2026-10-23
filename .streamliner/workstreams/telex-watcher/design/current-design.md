@@ -176,7 +176,7 @@ dependencies are satisfied. For this node only, the operator scoped process-tree
 containment proof to Windows and Linux. macOS remains a required Watcher product
 platform, but #162 must fail closed there before detector launch and must not
 claim macOS support. The connected `watcher-macos-containment` contract item is
-in progress under issue #165 and
+completed under issue #165 and
 `.streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment.md`. The
 connected `watcher-macos-containment-runtime` implementation item is in progress
 under issue #172 and `tasks/watcher-macos-containment-runtime.md` in this
@@ -186,9 +186,10 @@ normative macOS contract delivered by PR #168 in `docs/design/watcher.md` and
 ADR 0054, and #172 owns macOS runtime implementation and proof. Campaign merged
 PR #168 on 2026-10-23 as main `bc1e02edf43490c41dbc3628b692c4cbf822c5ef` at
 exact head `151ade144795ff275eb416eed3dc5d071f85fa81`, and issue #165 closed on
-merge; post-merge validation and the #165 field report remain outstanding. The
-inherited native ARM64 and x64 Phase 1 investigation rejected recursive kqueue
-tracking and ordinary process groups as solutions to the former arbitrary
+merge. Exact-merge main CI passed, the owner posted the #165 field report, and
+the Watcher coordinator completed the contract item on 2026-10-23. The inherited
+native ARM64 and x64 Phase 1 investigation rejected recursive kqueue tracking
+and ordinary process groups as solutions to the former arbitrary
 detached-descendant contract. On 2026-10-22 the operator selected a revised
 macOS contract for trusted non-detaching detectors. On macOS the detector root
 and every local descendant must remain in the Watcher-assigned attempt process

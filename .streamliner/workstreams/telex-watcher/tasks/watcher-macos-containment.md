@@ -13,8 +13,8 @@ continues to fail closed on macOS until #172 lands.
 
 ## Status and sequencing
 
-Status: in progress, with focus attention, until post-merge validation and
-the #165 field report are posted; then completed, with watch attention.
+Status: completed, with watch attention. The Watcher coordinator sent completion
+on 2026-10-23 after post-merge validation and the #165 field report were posted.
 
 On 2026-10-23 the design steward approved splitting the former #165 scope under
 the operator's one-item, one-PR rule. This node now covers only the macOS
@@ -26,9 +26,9 @@ receipt and restart integration, and the implementation authorization gate.
 Phase 1 investigation is complete. On 2026-10-22 the operator selected
 `Revise macOS to the non-detaching detector contract` in issue #165.
 
-Owner session `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b` holds this node through
-post-merge validation and the #165 field report. Campaign runs the merge gate
-and merges at the exact cleared SHA.
+Owner session `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b` held this node through
+post-merge validation and the #165 field report. Campaign ran the merge gate and
+merged at the exact cleared SHA.
 
 ## Delivery
 
@@ -42,8 +42,15 @@ non-draft. At that head, the design steward and an independent review approved
 it with no material findings, and all 18 CI checks passed after one bounded
 failed-job retry. Campaign's merge gate cleared that head, and Campaign merged
 it on 2026-10-23 as main `bc1e02edf43490c41dbc3628b692c4cbf822c5ef`; issue #165
-closed on merge. Post-merge main CI and the #165 field report remain
-outstanding.
+closed on merge. Exact-merge main CI run 39918260819 passed all 18 checks on
+attempt 1, with no retry.
+
+The owner then posted the #165 field report with design impact `updated-docs`.
+It confirms that the merged `docs/design/watcher.md` and
+`docs/design/DECISIONS.md` blobs are byte-identical to the reviewed head,
+carries both #177 debt dispositions, and keeps the #172 proof and implementation
+hold separate:
+https://github.com/lossyrob/telex/issues/165#issuecomment-6360262925
 
 ## Outcome
 
