@@ -3953,10 +3953,9 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel::<()>();
         let committed = Arc::new(AtomicBool::new(false));
         let worker_committed = committed.clone();
-        let deadline = spent_deadline();
-        let completion_deadline = tokio::time::Instant::from_std(
-            deadline.instant().expect("bounded") + RECONCILE_BLOCKING_GRACE,
-        );
+        let clock_origin = tokio::time::Instant::now();
+        let deadline = PassDeadline::at(clock_origin.into_std());
+        let completion_deadline = clock_origin + RECONCILE_BLOCKING_GRACE;
         let phase = run_blocking_cancellable_in_slot(
             slot.clone(),
             deadline,
