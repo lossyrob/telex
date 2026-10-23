@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T06:50:05.891Z",
+  "updatedAt": "2026-10-23T07:05:32.739Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -311,6 +311,43 @@
           "url": "https://github.com/lossyrob/telex/pull/173#issuecomment-6359133171",
           "createdAt": "2026-10-23T06:42:38Z",
           "details": "Owner disposition: no additional test-only change is requested for this repair. The suggested coverage expansion is declined rather than left as untracked follow-up work."
+        }
+      ]
+    },
+    {
+      "id": "macos-runtime-release-source-provenance",
+      "sourceNodeId": "watcher-macos-containment-runtime",
+      "requiredness": "required-for-item-outcome",
+      "description": "Release-provenance gap. The bounded census native matrix, run 39909079250 at ff02b8bf, completed on two tested releases: ARM64 xnu-12377.161.14 with libsystem_c 1752.160.4, and x64 xnu-11417.140.69.711.44 with libsystem_c 1698.140.3. The inspected Apple source mirror lacks exact patched-kernel tags for these releases, so the source-to-release comparison and its adjudication remain open. This is not an impossibility finding.",
+      "disposition": "absorb",
+      "target": {
+        "id": "watcher-macos-containment-runtime",
+        "tracker": "https://github.com/lossyrob/telex/issues/172",
+        "owners": [
+          "watcher-macos-containment-runtime owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b"
+        ]
+      },
+      "status": "in-progress",
+      "decisionState": "accepted",
+      "rationale": "The #172 implementation authorization gate already requires that pinned XNU reasoning is mapped to both target releases. This is absorbed proof work inside #172, with no scope or outcome change. Product integration stays held.",
+      "terminalPath": "Completes inside #172 when the source-to-release comparison for both tested releases is done and adjudicated as part of its implementation authorization gate. This entry adds no Watcher dependency and changes no graph or status.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into watcher-macos-containment-runtime and #172 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6).",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6359445909",
+          "createdAt": "2026-10-23T07:04:03Z",
+          "details": "Owner census report for run 39909079250 attempt 1 at ff02b8bf52dde4a1f40e7954a98fef661660dff0: no observed successor counterexample within the experiment bounds. It records kernels xnu-12377.161.14~5 (ARM64) and xnu-11417.140.69.711.44~1 (x64), and mapped libsystem_c 1752.160.4 and 1698.140.3. Release-to-source mapping is still open: the inspected Apple GitHub mirror had no exact tag for either patched kernel, and the published family pins are comparison inputs, not identities of the tested binaries. The comment calls this a provenance gap, not proof that corresponding source exists nowhere.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39909079250"
+        },
+        {
+          "source": "task",
+          "path": ".streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment-runtime.md",
+          "details": "Implementation authorization gate item 3: the pinned XNU reasoning is mapped to both target releases."
+        },
+        {
+          "source": "coordinator-report",
+          "details": "The owner found the matching x64 Libc-1698.140.3 tag and is incorporating it."
         }
       ]
     }
