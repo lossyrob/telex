@@ -34,7 +34,8 @@ item is satisfied. The Watcher coordinator launched owner session
 attention. The launch binding record is
 `watcher-host-containment-doc-alignment-20261023.json` under
 `streamliner/telex/prompts/v2/launches/` in the planning repository, with
-kickoff SHA-256 `3d3ce235`.
+kickoff SHA-256 `3d3ce235`. The owner opened PR #178, which says
+`Closes #177`.
 
 ## Outcome
 
@@ -83,9 +84,22 @@ Replace lines 683-686 at `bc1e02ed` with exactly:
 >   accepted, Watcher fails closed before detector launch on macOS and does not
 >   claim macOS support.
 
+### Replacement 3: Linux handshake and receipt
+
+After the Linux bullet's existing text "including descendants that change groups
+or sessions." (lines 680-681 at `bc1e02ed`), append exactly:
+
+> The guardian's startup handshake and its terminal-receipt path/nonce identity
+> are host-required before detector release.
+
+The steward added this replacement on 2026-10-23 after exact-head inspection of
+PR #178 at `25dec0cd`: Replacement 1 made the launch paragraph host-neutral and
+left Linux's existing obligation implicit. Evidence:
+https://github.com/lossyrob/telex/issues/177#issuecomment-6368460103
+
 ## Success criteria
 
-- `docs/design/watcher.md` contains the two replacements above and no other
+- `docs/design/watcher.md` contains the three replacements above and no other
   product-contract change.
 - Windows remains correctly described by atomic Job containment, durable
   pre-resume identity recording, and fail-closed recovery without a separate

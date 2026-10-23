@@ -6,7 +6,7 @@
 - **Status:** shaped; planned and unlaunched
 - **Attention:** watch
 - **Depends on:** completed `watcher-runtime-core`
-- **Tracker:** not yet created
+- **Tracker:** [lossyrob/telex#179](https://github.com/lossyrob/telex/issues/179)
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -62,16 +62,18 @@ Do not create the CLI implementation worker until:
 2. Its concrete local management API and v2 health/evidence schemas are
    available on `main`.
 3. The CLI tracker and this task specification are reviewed and reconciled.
-4. Launch uses a genuine new `gpt-6-astra` context with high reasoning and long
-   context. Do not reuse the runtime implementation/reviewer, an initializer,
-   or a Station product context.
+4. Launch uses a genuine new context with the current v2 launch adapter
+   profile (`gpt-6.1-sol`, high reasoning, default context tier, per the
+   2026-10-23 operator directive). Do not reuse the runtime
+   implementation/reviewer, an initializer, or a Station product context.
 
 Issue #144, broad packaging, runtime hardening, and Operator Station issue #153
 are not prerequisites.
 
 Prerequisite 1 is met: `watcher-runtime-core` completed on 2026-10-23, so this
-node's only graph dependency is satisfied. The node stays planned with no
-tracker until the Watcher coordinator opens one.
+node's only graph dependency is satisfied. The Watcher coordinator opened
+tracker issue #179 on 2026-10-23; the node stays planned with no owner until
+the coordinator launches one.
 
 ## Deliverables
 
@@ -94,6 +96,50 @@ Exact spelling may follow repository conventions, but the CLI must provide:
 
 The runtime process entry point may remain separate from management commands.
 Service installation and supervision are later work.
+
+### Local management transport
+
+The runtime's management handle is in-process, and the runtime holds exclusive
+registry ownership, so a separate CLI process cannot open the registry while
+the runtime runs. This node adds a local management transport between the CLI
+and the owning runtime process:
+
+- The owning runtime exposes one local endpoint per registry, created only
+  after it acquires registry ownership and removed or invalidated when
+  ownership ends. The CLI is a thin client; it never opens or locks the
+  registry while a runtime owns it.
+- The endpoint carries the existing typed management `Command` and `Response`
+  semantics as versioned JSON. It adds no operation, mutation, or bypass that
+  `LocalManagement` lacks, and every mutation still runs through the registry
+  owner's transactions.
+- Access is limited to the same local OS user as the runtime: a Unix domain
+  socket in a user-private directory with owner-only permissions, or a Windows
+  named pipe with an owner-only DACL that rejects remote clients. The endpoint
+  is never reachable over the network or through Telex messages, and it never
+  accepts remote executable registration.
+- The endpoint location derives from the canonical registry identity, so path
+  aliases reach the same runtime. A stale endpoint whose owner has gone yields
+  a typed `runtime-not-running` result, never a hang or a silent fallback.
+- With no owning runtime, mutation commands fail with typed
+  `runtime-not-running` unless the implementation provides an explicit offline
+  mode that acquires registry ownership itself and runs the same in-process
+  handle; any such mode must refuse while another owner exists and must not
+  connect a sender.
+- Bounded request size, per-request timeout, and concurrent-client limits
+  apply. A dropped client does not roll back an admitted mutation, matching
+  `LocalManagement`.
+
+Document the endpoint, its authorization boundary, and the not-running
+behavior in `docs/watcher-runtime.md` and `docs/design/watcher.md`, and record
+the decision as a new ADR in `docs/design/DECISIONS.md`. This is local
+same-user administration, not a remote administration protocol, a service, or
+an installer.
+
+The steward added this subsection on 2026-10-23 when approving the tracker
+body; evidence: on main, `telex-watcher/src/management.rs` exposes only an
+in-process handle, `ownership.rs` and `registry_v2.rs` hold the registry
+under an exclusive OS lock, and `docs/watcher-runtime.md` says the handle is
+not a remote administration protocol.
 
 ### Output and audit behavior
 
@@ -218,7 +264,11 @@ wait loop:
    stable sender, and fixed target.
 3. Use an explicit credential allowlist. Do not print or persist the token.
 4. Establish a baseline without emitting a false actionable event.
-5. Leave the runtime operating after the originating agent session ends.
+5. Start the runtime as an ordinary detached user process on a host with
+   claimed containment (Windows or Linux; macOS fails closed until
+   `watcher-macos-containment-runtime` lands), and leave it operating after
+   the originating agent session ends. No installer, service registration,
+   or autostart is used; document the exact start and stop commands.
 6. Observe one authorized PR transition, receive the fixed-route Telex event,
    and verify committed receipt/state evidence.
 7. Inspect status and attempts, exercise pause/resume or a safe update, and
@@ -285,6 +335,11 @@ builder-owned gate.
   close, and mismatched exact-operation retry.
 - Run CLI integration against isolated SQLite and credentialed Postgres through
   the public Application Client-backed runtime.
+- Test the local management transport: same-user success, refusal of
+  another local user where the platform allows it in CI or a documented
+  local check, stale-endpoint `runtime-not-running`, alias paths reaching the
+  same owner, oversize and slow-client bounds, and that no command opens the
+  registry while a runtime owns it.
 - Use committed fixtures before any live GitHub proof. Live observation uses an
   owned or explicitly authorized PR and never mutates it.
 - Establish one full implementation-review baseline on the first stable
@@ -308,6 +363,9 @@ Stop and report `decision-needed` if implementation requires:
   receipt, or tombstone semantics;
 - a provider-specific command or provider action in the Watcher CLI;
 - remote executable mutation or administration;
+- a management transport reachable beyond the same local OS user, carried
+  over Telex messages, or exposing operations beyond the typed management
+  `Command` set;
 - a private Telex client, raw daemon IPC, CLI-output parsing, or fallback;
 - automatic v1 migration;
 - packaging or service authority to make the management operations function;
