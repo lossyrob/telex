@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T07:41:06.365Z",
+  "updatedAt": "2026-10-23T07:50:02.899Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -419,6 +419,12 @@
           "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6359785305",
           "createdAt": "2026-10-23T07:26:37Z",
           "details": "Owner source/provenance packet: the published XNU family comparison found no change to the relevant transitions, as a source-only result. Provenance for the two tested patched kernels and the ARM64 libraries remains open. Steward adjudication is pending; product integration stays held."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6359975390",
+          "createdAt": "2026-10-23T07:38:31Z",
+          "details": "Owner exact-build KDK provenance packet for 25G83 and 24G830. The archived KDK XAR TOC signatures verify offline through Apple's Software Update certificate chain to the Apple root certificate, with a rejected corrupted-signature negative control; revocation and Gatekeeper assessment were not performed. Selected Payload and PackageInfo bytes match their signed TOC lengths and digests: Payload SHA-256 09da4c267d832e378d459ccdfa244aaa4abd368d03a4edc74678248cdeea9346 (25G83) and ba7d555cbf3d77bc350741b5542b919ce6e52056f493785ba04129162e1e70a6 (24G830). A resolved extraction-tool hazard: 7-Zip produced a hard-linked ARM PackageInfo alias containing Payload bytes; reading the members directly at their signed XAR offsets produced the correct signed bytes. No checksum requirement was waived. Kernel extraction, exact-build kernel-transition correspondence, and userspace library UUID evidence remain open. Steward adjudication of this component is pending, and product integration stays held."
         }
       ]
     },
