@@ -168,6 +168,16 @@ pub fn parse_request(bytes: &[u8]) -> Result<DetectorRequest, ProtocolError> {
     Ok(request)
 }
 
+/// Transport uses ordinary JSON: JCS can rewrite admitted floats as unsafe integer tokens.
+pub fn encode_request(request: &DetectorRequest) -> Result<Vec<u8>, ProtocolError> {
+    validate_request(request)?;
+    let bytes = serde_json::to_vec(request).map_err(json_error)?;
+    if parse_request(&bytes)? != *request {
+        return malformed("request transport round-trip changed the request");
+    }
+    Ok(bytes)
+}
+
 pub fn parse_result(bytes: &[u8]) -> Result<DetectorResult, ProtocolError> {
     byte_cap("detector stdout", bytes.len(), MAX_STDOUT_BYTES)?;
     let result = from_value(parse_json(bytes)?)?;

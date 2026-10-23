@@ -347,9 +347,12 @@ async fn actor_lifecycle(iso: &isolation::Isolation) {
         "build Telex, Watcher fixture, and guardian binaries before the library-only matrix: cargo build -p telex -p telex-watcher --all-features --bins"
     );
     let input = iso.root.join("actor-detector.json");
+    let captured_request = iso.root.join("actor-request.json");
     std::fs::write(
         &input,
-        serde_json::to_vec(&json!({"stdout":serde_json::to_string(&json!({
+        serde_json::to_vec(&json!({
+            "captureV2Request": captured_request,
+            "stdout":serde_json::to_string(&json!({
         "schemaVersion":2,"outcome":"terminal","nextState":null,
         "event":{"kind":"fixture.terminal","subject":"Finished","body":"Done"}
     })).unwrap()}))
@@ -359,7 +362,8 @@ async fn actor_lifecycle(iso: &isolation::Isolation) {
     let registration = json!({
         "schemaVersion":2,"id":"actor-terminal","command":[detector,input],
         "backendProfile":"watcher-test","sender":"service:actor-suite","target":"agent:watcher-recipient",
-        "intervalSeconds":1,"timeoutSeconds":5,"initialState":{"cursor":1},
+        "intervalSeconds":1,"timeoutSeconds":5,
+        "parameters":{"measurement":1e20},"initialState":{"measurement":1e20},
         "environmentAllowlist":["TELEX_HOME","TELEX_DB","TELEX_INSTALL_ROOT"]
     });
     let response = management
@@ -391,6 +395,14 @@ async fn actor_lifecycle(iso: &isolation::Isolation) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
+    let wire = std::fs::read(captured_request).unwrap();
+    let request = protocol_v2::parse_request(&wire).unwrap();
+    assert_eq!(request.state, registration["initialState"]);
+    assert_eq!(request.watch.parameters, registration["parameters"]);
+    assert_eq!(request.watch.id, "actor-terminal");
+    let canonical = protocol_v2::canonical_bytes(&request).unwrap();
+    assert_ne!(wire, canonical);
+    assert!(protocol_v2::parse_request(&canonical).is_err());
     let slow = iso.root.join("slow-detector.json");
     std::fs::write(
         &slow,

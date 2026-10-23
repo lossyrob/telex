@@ -682,6 +682,288 @@ fn v1_rows_are_preserved_but_never_eligible_or_reusable() {
 }
 
 #[test]
+fn legacy_removal_retains_opaque_state_tombstones_and_explicit_audit() {
+    for raw in [
+        r#"{"cursor":5}"#,
+        r#"{"checksum":18446744073709551615}"#,
+        r#"{"nested":[-9223372036854775808]}"#,
+        r#"{"opaque":"\uffff"}"#,
+    ] {
+        let fixture = Fixture::new();
+        let connection = Connection::open(fixture.path()).unwrap();
+        connection
+            .execute_batch("CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")
+            .unwrap();
+        connection
+            .execute("INSERT INTO watches VALUES('old-watch',?1)", [raw])
+            .unwrap();
+        drop(connection);
+
+        let mut registry = fixture.open();
+        let mut expected = registry.get("old-watch").unwrap().unwrap();
+        assert_eq!(expected.state, serde_json::from_str::<Value>(raw).unwrap());
+        for change in [
+            Change::Pause,
+            Change::Resume,
+            Change::Update {
+                registration: Box::new(fixture.registration("old-watch")),
+                state: None,
+            },
+            Change::GrantReconciliation {
+                attempts: 1,
+                seconds: 1,
+            },
+            Change::GrantSendRetry {
+                attempts: 1,
+                seconds: 1,
+            },
+            Change::CloseNotAccepted,
+        ] {
+            assert_eq!(
+                registry.change("old-watch", change, 1000).unwrap().refusal,
+                Some(Refusal::UnsupportedRegistrationVersion)
+            );
+        }
+        let before_revision = registry.revision().unwrap();
+        let removed = registry.change("old-watch", Change::Remove, 2000).unwrap();
+        assert!(removed.refusal.is_none());
+        expected.lifecycle = Lifecycle::Removed;
+        expected.eligibility = Eligibility::Inactive;
+        expected.health = Health::Inactive;
+        expected.blocked_reason = None;
+        assert_eq!(
+            serde_json::to_value(removed.watch.unwrap()).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(registry.revision().unwrap(), before_revision + 1);
+        drop(registry);
+
+        let mut registry = fixture.open();
+        assert_eq!(
+            serde_json::to_value(registry.get("old-watch").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(
+            registry
+                .register(fixture.registration("old-watch"), 3000)
+                .unwrap()
+                .refusal,
+            Some(Refusal::IdAlreadyAllocated)
+        );
+        assert!(registry
+            .begin_attempt("old-watch", "runtime", 3000)
+            .is_err());
+        assert_eq!(
+            registry
+                .change("old-watch", Change::Remove, 3000)
+                .unwrap()
+                .refusal,
+            Some(Refusal::InvalidLifecycle)
+        );
+        let retained: String = registry
+            .connection
+            .query_row(
+                "SELECT state_json FROM watches WHERE id='old-watch'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, raw);
+        let audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits WHERE watch_id='old-watch' AND action='remove' ORDER BY id",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            audits,
+            vec![
+                json!({
+                    "revision": 1,
+                    "stateChanged": false,
+                    "stateHashStatus": "not-applicable",
+                    "stateHashReason": "unsupported-registration-version"
+                }),
+                json!({"refusal": "invalid-lifecycle"})
+            ]
+        );
+        let isolation: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits WHERE watch_id='old-watch' AND action='isolate-v1'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(isolation, vec![json!({"version": 1})]);
+    }
+}
+
+#[test]
+fn legacy_removal_rolls_back_when_audit_or_registry_revision_fails() {
+    for failure in [
+        "CREATE TRIGGER fail_removal BEFORE INSERT ON watcher_v2_audits
+         WHEN NEW.action='remove' BEGIN SELECT RAISE(ABORT,'audit-failed'); END;",
+        "CREATE TRIGGER fail_removal BEFORE UPDATE OF revision ON watcher_v2_meta
+         BEGIN SELECT RAISE(ABORT,'revision-failed'); END;",
+    ] {
+        let fixture = Fixture::new();
+        let raw = r#"{"checksum":18446744073709551615}"#;
+        let connection = Connection::open(fixture.path()).unwrap();
+        connection
+            .execute_batch("CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")
+            .unwrap();
+        connection
+            .execute("INSERT INTO watches VALUES('old-watch',?1)", [raw])
+            .unwrap();
+        drop(connection);
+        let mut registry = fixture.open();
+        let mut original = registry.get("old-watch").unwrap().unwrap();
+        original.registration_revision = 7;
+        save_watch(&registry.connection, &original).unwrap();
+        let before_revision = registry.revision().unwrap();
+        let before_audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits ORDER BY id",
+            [],
+        )
+        .unwrap();
+        registry.connection.execute_batch(failure).unwrap();
+        let error = registry
+            .change("old-watch", Change::Remove, 2000)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(if failure.contains("audit-failed") {
+            "audit-failed"
+        } else {
+            "revision-failed"
+        }));
+        drop(registry);
+
+        let mut registry = fixture.open();
+        assert_eq!(
+            serde_json::to_value(registry.get("old-watch").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+        assert_eq!(registry.revision().unwrap(), before_revision);
+        let audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits ORDER BY id",
+            [],
+        )
+        .unwrap();
+        assert_eq!(audits, before_audits);
+        let retained: String = registry
+            .connection
+            .query_row(
+                "SELECT state_json FROM watches WHERE id='old-watch'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, raw);
+        registry
+            .connection
+            .execute_batch("DROP TRIGGER fail_removal")
+            .unwrap();
+        let removed = registry.change("old-watch", Change::Remove, 3000).unwrap();
+        assert!(removed.refusal.is_none());
+        assert_eq!(removed.watch.unwrap().lifecycle, Lifecycle::Removed);
+        assert_eq!(registry.revision().unwrap(), before_revision + 1);
+        let audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits WHERE action='remove'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            audits,
+            vec![json!({
+                "revision": 7,
+                "stateChanged": false,
+                "stateHashStatus": "not-applicable",
+                "stateHashReason": "unsupported-registration-version"
+            })]
+        );
+    }
+}
+
+#[test]
+fn v2_mutations_require_valid_hashes_and_keep_existing_audit_shape() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    let original = registry.get("watch").unwrap().unwrap();
+    for state in [
+        json!(u64::MAX),
+        json!({"nested": [i64::MIN]}),
+        json!("\u{ffff}"),
+    ] {
+        assert!(registry
+            .change(
+                "watch",
+                Change::Update {
+                    registration: Box::new(fixture.registration("watch")),
+                    state: Some(state.clone()),
+                },
+                2000
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("canonicalization-failed"));
+        assert_eq!(
+            serde_json::to_value(registry.get("watch").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+        let mut invalid = original.clone();
+        invalid.state = state;
+        save_watch(&registry.connection, &invalid).unwrap();
+        assert!(registry
+            .change("watch", Change::Remove, 2000)
+            .unwrap_err()
+            .to_string()
+            .contains("canonicalization-failed"));
+        assert_eq!(
+            serde_json::to_value(registry.get("watch").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&invalid).unwrap()
+        );
+        save_watch(&registry.connection, &original).unwrap();
+        assert_eq!(registry.revision().unwrap(), 1);
+    }
+    registry
+        .change(
+            "watch",
+            Change::Update {
+                registration: Box::new(fixture.registration("watch")),
+                state: Some(Value::Null),
+            },
+            3000,
+        )
+        .unwrap();
+    registry.change("watch", Change::Remove, 4000).unwrap();
+    let audits: Vec<Value> = read_many(
+        &registry.connection,
+        "SELECT data FROM watcher_v2_audits WHERE watch_id='watch' AND action IN ('update','remove') ORDER BY id",
+        [],
+    ).unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            json!({
+                "revision": 2,
+                "oldStateHash": hash_value(&original.state).unwrap(),
+                "newStateHash": hash_value(&Value::Null).unwrap()
+            }),
+            json!({
+                "revision": 2,
+                "oldStateHash": hash_value(&Value::Null).unwrap(),
+                "newStateHash": hash_value(&Value::Null).unwrap()
+            }),
+        ]
+    );
+}
+
+#[test]
 fn cadence_coalesces_missed_ticks_and_retention_has_positive_warning_thresholds() {
     let fixture = Fixture::new();
     let mut registry = fixture.open();

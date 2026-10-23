@@ -14,8 +14,8 @@ impl Fixture {
         }
     }
 
-    fn owner(&self) -> (Runtime, LocalManagement) {
-        let (runtime, management) = Runtime::open(RuntimeConfig {
+    fn open(&self) -> (Runtime, LocalManagement) {
+        Runtime::open(RuntimeConfig {
             registry: self.root.join("registry.sqlite"),
             daemon: ApplicationDaemonBootstrap::ExactExecutable {
                 executable: std::env::current_exe().unwrap(),
@@ -24,7 +24,11 @@ impl Fixture {
             retention_warning_rows: 10000,
             retention_warning_bytes: 10_000_000,
         })
-        .unwrap();
+        .unwrap()
+    }
+
+    fn owner(&self) -> (Runtime, LocalManagement) {
+        let (runtime, management) = self.open();
         lock(&runtime.registry)
             .unwrap()
             .start_runtime(&runtime.id, now_ms(), |_| true)
@@ -151,4 +155,84 @@ async fn management_resume_recovers_only_after_original_store_verification() {
         .unwrap();
     assert!(matches!(resumed, Response::Mutation(result)
         if result.refusal.is_none() && result.watch.as_ref().is_some_and(|watch| watch.lifecycle == Lifecycle::Active)));
+}
+
+#[tokio::test]
+async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
+    for state in [
+        json!({"checksum": u64::MAX}),
+        json!({"nested": [i64::MIN]}),
+        json!({"opaque": "\u{ffff}"}),
+    ] {
+        let fixture = Fixture::new();
+        let connection = rusqlite::Connection::open(fixture.root.join("registry.sqlite")).unwrap();
+        connection
+            .execute_batch("CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO watches VALUES('old-watch',?1)",
+                [serde_json::to_string(&state).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+        let (runtime, management) = fixture.open();
+        let owner = tokio::spawn(runtime.run());
+        let (rejected, removed, shown, reused, attempts) =
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let registration = |id, initial_state| Command::Register {
+                    json: serde_json::to_vec(&json!({
+                        "schemaVersion": 2, "id": id, "command": ["not-executed"],
+                        "backendProfile": "fixture", "sender": "service:watcher",
+                        "target": "agent:recipient", "intervalSeconds": 1, "timeoutSeconds": 1,
+                        "initialState": initial_state
+                    }))
+                    .unwrap(),
+                    working_directory: fixture.root.clone(),
+                };
+                let rejected = management
+                    .execute(registration("new-watch", state.clone()))
+                    .await;
+                let removed = management
+                    .execute(Command::Remove {
+                        id: "old-watch".into(),
+                    })
+                    .await;
+                let shown = management
+                    .execute(Command::Show {
+                        id: "old-watch".into(),
+                    })
+                    .await;
+                let reused = management
+                    .execute(registration("old-watch", serde_json::Value::Null))
+                    .await;
+                let attempts = management
+                    .execute(Command::Attempts {
+                        id: "old-watch".into(),
+                        limit: 10,
+                    })
+                    .await;
+                management.execute(Command::Shutdown).await.unwrap();
+                (rejected, removed, shown, reused, attempts)
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(rejected.unwrap(), Response::Mutation(result)
+            if result.refusal == Some(Refusal::InvalidRegistration)
+                && result.diagnostic.as_deref().is_some_and(|d| d.contains("canonicalization-failed"))));
+        assert!(matches!(removed.unwrap(), Response::Mutation(result)
+            if result.refusal.is_none()
+                && result.watch.as_ref().is_some_and(|w| w.lifecycle == Lifecycle::Removed && w.state == state)));
+        assert!(matches!(shown.unwrap(), Response::Watch(Some(watch))
+            if watch.schema_version == 1 && watch.lifecycle == Lifecycle::Removed && watch.state == state));
+        assert!(matches!(reused.unwrap(), Response::Mutation(result)
+            if result.refusal == Some(Refusal::IdAlreadyAllocated)));
+        assert!(matches!(attempts.unwrap(), Response::Attempts(attempts) if attempts.is_empty()));
+    }
 }

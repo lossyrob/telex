@@ -51,6 +51,143 @@ fn req(value: &Value) -> Result<DetectorRequest, ProtocolError> {
     parse_request(&serde_json::to_vec(value).unwrap())
 }
 
+#[test]
+fn request_transport_preserves_admitted_numbers_without_changing_canonical_hashes() {
+    for number in [
+        "1e20",
+        "-1e20",
+        "1e16",
+        "1e30",
+        "5e-324",
+        "333333333.3333333",
+        "-0.0",
+        "0",
+        "9007199254740991",
+        "-9007199254740991",
+    ] {
+        let raw = serde_json::to_string(&request()).unwrap().replace(
+            r#""state":null"#,
+            &format!(r#""state":{{"measurement":{number}}}"#),
+        );
+        let mut request = parse_request(raw.as_bytes()).unwrap();
+        request.watch.parameters = json!({"nested": [request.state.clone()]});
+        let wire = encode_request(&request).unwrap();
+        assert_eq!(wire, serde_json::to_vec(&request).unwrap());
+        let reparsed = parse_request(&wire).unwrap();
+        assert_eq!(reparsed, request, "{number}");
+        assert_eq!(
+            canonical_bytes(&reparsed).unwrap(),
+            canonical_bytes(&request).unwrap()
+        );
+        assert_eq!(
+            hash_value(&reparsed).unwrap(),
+            hash_value(&request).unwrap()
+        );
+        if number == "1e20" {
+            assert_eq!(
+                canonical_bytes(&request.state).unwrap(),
+                br#"{"measurement":100000000000000000000}"#
+            );
+            assert_eq!(
+                hash_value(&request.state).unwrap(),
+                "sha256:89429d8e5feb7d43a5d571a80b824808424da0ad99da14382fe60197493abcf9"
+            );
+            let canonical = canonical_bytes(&request).unwrap();
+            assert_ne!(wire, canonical);
+            assert!(matches!(
+                parse_request(&canonical),
+                Err(ProtocolError::Canonicalization(_))
+            ));
+        }
+    }
+}
+
+#[test]
+fn request_transport_keeps_strict_numeric_and_schema_validation() {
+    for number in [
+        "100000000000000000000",
+        "9007199254740992",
+        "-9007199254740992",
+        "1e400",
+        "1e-400",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ] {
+        let raw = serde_json::to_string(&request())
+            .unwrap()
+            .replace(r#""state":null"#, &format!(r#""state":{number}"#));
+        assert!(parse_request(raw.as_bytes()).is_err(), "{number}");
+    }
+    for value in [json!(u64::MAX), json!(i64::MIN), json!("\u{ffff}")] {
+        let mut request = req(&request()).unwrap();
+        request.state = value.clone();
+        assert!(matches!(
+            encode_request(&request),
+            Err(ProtocolError::Canonicalization(_))
+        ));
+        request.state = Value::Null;
+        request.watch.parameters = value;
+        assert!(matches!(
+            encode_request(&request),
+            Err(ProtocolError::Canonicalization(_))
+        ));
+    }
+    for pointer in [
+        "/schemaVersion",
+        "/attempt/id",
+        "/attempt/now",
+        "/watch/id",
+        "/watch/activatedAt",
+        "/watch/lastSuccessAt",
+    ] {
+        let mut input = request();
+        *input.pointer_mut(pointer).unwrap() = if pointer == "/schemaVersion" {
+            json!(1)
+        } else {
+            json!("")
+        };
+        let typed: DetectorRequest = serde_json::from_value(input.clone()).unwrap();
+        assert!(req(&input).is_err(), "{pointer}");
+        assert!(
+            matches!(encode_request(&typed), Err(ProtocolError::Malformed(_))),
+            "{pointer}"
+        );
+    }
+}
+
+#[test]
+fn request_transport_preserves_state_and_parameter_byte_caps() {
+    for parameters in [false, true] {
+        let cap = if parameters {
+            MAX_PARAMETERS_BYTES
+        } else {
+            MAX_STATE_BYTES
+        };
+        let mut request = req(&request()).unwrap();
+        let exact = json!("\u{e9}".repeat((cap - 2) / 2));
+        if parameters {
+            request.watch.parameters = exact;
+        } else {
+            request.state = exact;
+        }
+        assert_eq!(
+            parse_request(&encode_request(&request).unwrap()).unwrap(),
+            request
+        );
+        let oversized = json!(format!("{}x", "\u{e9}".repeat((cap - 2) / 2)));
+        if parameters {
+            request.watch.parameters = oversized;
+        } else {
+            request.state = oversized;
+        }
+        assert!(matches!(
+            encode_request(&request),
+            Err(ProtocolError::OutputLimit(_))
+        ));
+    }
+}
+
 fn res(value: &Value) -> Result<DetectorResult, ProtocolError> {
     parse_result(&serde_json::to_vec(value).unwrap())
 }
