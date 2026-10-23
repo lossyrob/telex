@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T15:20:10.675Z",
+  "updatedAt": "2026-10-23T15:48:00.549Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -455,6 +455,18 @@
           "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6360440956",
           "createdAt": "2026-10-23T08:07:32Z",
           "details": "Owner packet: both Apple-signed Payloads were completely decoded, with every chunk length and the complete source hash verified, and nothing installed or executed. It records the exact KDK release kernel and DWARF identities: 25G83 kernel.release.vmapple UUID B2455C4B-781C-3F38-8CA0-DD11CF317C15 (ARM64) and 24G830 kernel UUID F6A1B3D4-1EBB-3628-A1C5-89506C51DDEC (x86_64), with matching kernel and symbol UUIDs and version strings that match the native report. This is not an exact running-image correspondence claim: the native artifacts lack a running-kernel image identifier and system-wrapper instruction bytes. Running-kernel identity bridging, proof-relevant disassembly and symbol analysis, and exact-UUID userspace wrapper evidence remain unproved. Final implementation authorization remains HOLD, and no native race matrix was repeated."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6368504633",
+          "createdAt": "2026-10-23T15:30:56Z",
+          "details": "Design steward approval of the complete PBZX decode and exact release-kernel/DWARF identities after independent reproduction. The steward accepts the running-kernel bridge for targeting machine-code analysis: each earlier native version string uniquely matches one authenticated exact-build KDK image among 42 kernels in 25G83 and 33 in 24G830. The bridge is reversible if a later live kernel UUID differs. No new native capture is needed for the kernel side. Exact-UUID userspace wrapper bytes and bounded proof-relevant kernel and wrapper machine-code analysis remain open in this verdict; final implementation authorization remains HOLD."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6368804596",
+          "createdAt": "2026-10-23T15:45:54Z",
+          "details": "Design steward verdict on live capture run 39979771410. Direct evidence on the new hosts records live kernel UUIDs matching the authenticated KDK images and retained root-wrapper bytes from the exact-UUID libraries. The bridge to earlier native runs 39904383638 and 39909079250 is accepted by unique version-string correspondence corroborated by live UUIDs on matching hosts; those earlier hosts did not record kern.uuid. Earlier userspace library UUIDs directly match the retained images. No further capture is needed for this accepted bridge. One ARM fork/vfork stub-slot target remains unresolved and must be resolved offline from a catalog-bound Apple-origin 25G83 dyld cache with the required library UUIDs; the target must not be inferred. Atfork and runtime callbacks are not required closure items under the conforming-detector contract; a system callback found to change group membership returns decision-needed. Bounded Watcher-side root-wrapper checks and the kernel machine-code analysis remain required. Final implementation authorization remains HOLD, and no race matrix is repeated."
         }
       ]
     },
