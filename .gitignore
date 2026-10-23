@@ -3,6 +3,10 @@
 # Rust build artifacts
 /target
 
+# Python detector/test bytecode
+__pycache__/
+*.py[cod]
+
 # Local telex stores / test artifacts
 *.db
 *.db-wal

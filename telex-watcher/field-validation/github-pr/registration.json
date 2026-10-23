@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "id": "github-pr-example",
+  "command": ["python", "telex-watcher\\field-validation\\github-pr\\github_pr_detector.py"],
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "backendProfile": "example-backend",
+  "sender": "service:watcher/github",
+  "target": "project:example/reviews",
+  "parameters": {
+    "repo": "example/project",
+    "pullRequest": 162,
+    "fixture": "fixtures/pr-open.json"
+  }
+}

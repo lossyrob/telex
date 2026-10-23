@@ -15,6 +15,10 @@ The minimal v2 authoring, registration, identity, and compatibility direction is
 recorded in
 [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
 
+The v2 Rust runtime and typed local administration boundary are documented in
+[Watcher runtime core](../watcher-runtime.md). Runtime implementation is not a
+claim of completed management CLI, service packaging, or operational hardening.
+
 Mechanism-level Telex membership, liveness, lease, delivery, receipt, and
 disposition semantics remain governed by [daemon.md](daemon.md). Telex core
 treats Watcher event metadata as opaque. The namespacing guidance in
@@ -937,10 +941,11 @@ detector results. Mixed registries remain usable: unsupported v1 registrations
 are visibly paused/blocked with `unsupported-registration-version`, while valid
 v2 watches continue.
 
-The in-repository spike-era `telex-watcher` crate and detectors under
-`telex-watcher/examples/detectors` remain historical v1 implementation evidence.
-The separate `telex-watcher/examples/v2` pack exercises the v2 schemas without
-depending on that runtime. The spike's presence does not claim v2 conformance.
+The former spike implementation in the `telex-watcher` crate and the retained
+detectors under `telex-watcher/examples/detectors` remain historical v1
+implementation evidence. The crate's current runtime implements the v2 contract;
+`telex-watcher/examples/v2` and `telex-watcher/field-validation/github-pr`
+consume that contract. Retained v1 artifacts do not claim v2 conformance.
 
 Baseline migration is explicit:
 
@@ -991,10 +996,10 @@ Watcher uses query-only reconciliation and remains blocked. It never falls back
 to CLI subprocess parsing, raw daemon IPC, spike-private helpers, or a
 Watcher-private client.
 
-The Application Client owner must later reconcile normative
-`application-client.md` AC-C14 with the authoritative `not-recorded` result
-required here, then update the non-normative requirements crosswalk. ADR 0050
-records that follow-up; this node does not change shared client semantics.
+The supported public Rust Application Client now supplies authoritative
+exact-operation `NotRecorded`, identity-checkable retry, and
+`RetentionBoundaryCrossed`. Watcher consumes that conformance without changing
+shared client semantics.
 
 ## Schema and documentation conformance
 

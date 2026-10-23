@@ -1,0 +1,80 @@
+{
+  "templates": {
+    "registration": {
+      "schemaVersion": 2,
+      "id": "schema-conformance",
+      "command": ["python", "detector.py"],
+      "intervalSeconds": 300,
+      "timeoutSeconds": 30,
+      "backendProfile": "example",
+      "sender": "service:watcher/github",
+      "target": "project:example/reviews"
+    },
+    "request": {
+      "schemaVersion": 2,
+      "attempt": {"id": "attempt-conformance", "now": "2024-02-29T12:34:56Z"},
+      "watch": {
+        "id": "schema-conformance",
+        "activatedAt": "2024-02-29T12:00:00.123Z",
+        "lastSuccessAt": null,
+        "parameters": {"repo": "example/project", "pullRequest": 162}
+      },
+      "state": null
+    },
+    "result": {
+      "schemaVersion": 2,
+      "outcome": "idle"
+    }
+  },
+  "cases": [
+    {"name": "registration-minimal", "model": "registration", "schemaValid": true, "protocolValid": true},
+    {"name": "registration-default-overrides", "model": "registration", "set": {"/attention": "fyi", "/requiresDisposition": false, "/environmentAllowlist": ["GH_CONFIG_DIR"], "/parameters": ["opaque", null], "/initialState": {"cursor": 1}}, "schemaValid": true, "protocolValid": true},
+    {"name": "registration-empty-argument-is-argv", "model": "registration", "set": {"/command": ["python", ""]}, "schemaValid": true, "protocolValid": true},
+    {"name": "registration-v1", "model": "registration", "set": {"/schemaVersion": 1}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-missing-target", "model": "registration", "remove": ["/target"], "schemaValid": false, "protocolValid": false},
+    {"name": "registration-no-shell-command-string", "model": "registration", "set": {"/command": "python detector.py"}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-empty-executable", "model": "registration", "set": {"/command": [""]}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-nul-argument", "model": "registration", "set": {"/command": ["python", "bad\u0000argument"]}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-forbidden-action", "model": "registration", "set": {"/action": "merge"}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-duplicate-environment-name", "model": "registration", "set": {"/environmentAllowlist": ["TOKEN", "TOKEN"]}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-null-directory", "model": "registration", "set": {"/workingDirectory": null}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-relative-directory-runtime-check", "model": "registration", "set": {"/workingDirectory": "."}, "schemaValid": true, "protocolValid": false},
+    {"name": "registration-zero-interval", "model": "registration", "set": {"/intervalSeconds": 0}, "schemaValid": false, "protocolValid": false},
+    {"name": "registration-interval-product-maximum", "model": "registration", "set": {"/intervalSeconds": 86401}, "schemaValid": true, "protocolValid": false},
+    {"name": "registration-timeout-product-maximum", "model": "registration", "set": {"/timeoutSeconds": 3601}, "schemaValid": true, "protocolValid": false},
+    {"name": "registration-route-whitespace-runtime-check", "model": "registration", "set": {"/sender": "contains space"}, "schemaValid": true, "protocolValid": false},
+    {"name": "registration-unsafe-integer-runtime-check", "model": "registration", "set": {"/parameters": {"id": 9007199254740992}}, "schemaValid": true, "protocolValid": false},
+    {"name": "request-leap-day", "model": "request", "schemaValid": true, "protocolValid": true},
+    {"name": "request-one-fraction-digit", "model": "request", "set": {"/attempt/now": "2026-10-22T12:34:56.1Z"}, "schemaValid": true, "protocolValid": true},
+    {"name": "request-two-fraction-digits", "model": "request", "set": {"/attempt/now": "2026-10-22T12:34:56.12Z"}, "schemaValid": true, "protocolValid": true},
+    {"name": "request-nonnull-last-success", "model": "request", "set": {"/watch/lastSuccessAt": "2024-02-29T12:30:00.123Z"}, "schemaValid": true, "protocolValid": true},
+    {"name": "request-nonleap-february-29", "model": "request", "set": {"/attempt/now": "2025-02-29T12:34:56Z"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-april-31", "model": "request", "set": {"/watch/activatedAt": "2026-04-31T12:34:56Z"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-invalid-last-success-calendar", "model": "request", "set": {"/watch/lastSuccessAt": "2026-02-30T12:34:56Z"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-rejects-offset", "model": "request", "set": {"/attempt/now": "2026-10-22T12:34:56+00:00"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-rejects-four-fraction-digits", "model": "request", "set": {"/attempt/now": "2026-10-22T12:34:56.1234Z"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-rejects-leap-second", "model": "request", "set": {"/attempt/now": "2026-10-22T12:34:60Z"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-required-nullable-last-success", "model": "request", "remove": ["/watch/lastSuccessAt"], "schemaValid": false, "protocolValid": false},
+    {"name": "request-required-state", "model": "request", "remove": ["/state"], "schemaValid": false, "protocolValid": false},
+    {"name": "request-no-unknown-attempt-fields", "model": "request", "set": {"/attempt/action": "mutate"}, "schemaValid": false, "protocolValid": false},
+    {"name": "request-no-legacy-script", "model": "request", "set": {"/script": {"sha256": "old"}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-idle-omits-state", "model": "result", "schemaValid": true, "protocolValid": true},
+    {"name": "result-idle-explicit-null-state", "model": "result", "set": {"/nextState": null}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-idle-forbids-event", "model": "result", "set": {"/event": {"kind": "anything", "subject": "Example", "body": ""}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-event-without-next-state", "model": "result", "set": {"/outcome": "event", "/event": {"kind": "Provider Vocabulary", "subject": "Example", "body": "line\nbody"}}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-event-with-opaque-metadata", "model": "result", "set": {"/outcome": "event", "/event": {"kind": "anything", "subject": "Example", "body": "", "metadata": {"target": "opaque data", "nested": [null, true]}}}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-event-requires-event", "model": "result", "set": {"/outcome": "event"}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-event-forbids-authored-identity", "model": "result", "set": {"/outcome": "event", "/event": {"id": "not-detector-owned", "kind": "anything", "subject": "Example", "body": ""}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-event-forbids-authored-routing", "model": "result", "set": {"/outcome": "event", "/event": {"target": "not-detector-owned", "kind": "anything", "subject": "Example", "body": ""}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-metadata-must-be-object", "model": "result", "set": {"/outcome": "event", "/event": {"kind": "anything", "subject": "Example", "body": "", "metadata": []}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-terminal-bare", "model": "result", "set": {"/outcome": "terminal"}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-terminal-null-state", "model": "result", "set": {"/outcome": "terminal", "/nextState": null}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-terminal-event", "model": "result", "set": {"/outcome": "terminal", "/event": {"kind": "done", "subject": "Finished", "body": ""}}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-terminal-null-event-invalid", "model": "result", "set": {"/outcome": "terminal", "/event": null}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-degraded-bare", "model": "result", "set": {"/outcome": "degraded"}, "schemaValid": true, "protocolValid": true},
+    {"name": "result-degraded-null-state-invalid", "model": "result", "set": {"/outcome": "degraded", "/nextState": null}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-degraded-event-invalid", "model": "result", "set": {"/outcome": "degraded", "/event": {"kind": "anything", "subject": "Example", "body": ""}}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-forbids-outer-action", "model": "result", "set": {"/action": "merge"}, "schemaValid": false, "protocolValid": false},
+    {"name": "result-unsupported-outcome", "model": "result", "set": {"/outcome": "ready"}, "schemaValid": false, "protocolValid": false}
+  ]
+}

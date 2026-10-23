@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-event-metadata-v2.schema.json",
+  "title": "Telex Watcher event metadata v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "watcher", "detector"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "watcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["watchId", "eventSequence", "eventId", "operationId", "attemptId", "runtimeId", "logicalStoreId", "registrationRevision", "detectorSchemaVersion"],
+      "properties": {
+        "watchId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "eventSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "eventId": { "type": "string", "minLength": 1 },
+        "operationId": { "type": "string", "minLength": 1 },
+        "attemptId": { "type": "string", "minLength": 1 },
+        "runtimeId": { "type": "string", "minLength": 1 },
+        "logicalStoreId": { "type": "string", "minLength": 1 },
+        "registrationRevision": { "type": "integer", "minimum": 1 },
+        "detectorSchemaVersion": { "const": 2 }
+      }
+    },
+    "detector": { "type": "object" }
+  }
+}

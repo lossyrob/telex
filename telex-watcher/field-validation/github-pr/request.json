@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "attempt": {"id": "fixture-attempt", "now": "2026-10-22T12:00:00Z"},
+  "watch": {
+    "id": "github-pr-example",
+    "activatedAt": "2026-10-22T12:00:00Z",
+    "lastSuccessAt": null,
+    "parameters": {
+      "repo": "example/project",
+      "pullRequest": 162,
+      "fixture": "fixtures/pr-open.json"
+    }
+  },
+  "state": null
+}

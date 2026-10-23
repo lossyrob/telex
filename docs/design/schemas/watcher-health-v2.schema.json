@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-health-v2.schema.json",
+  "title": "Telex Watcher runtime or watch health v2",
+  "oneOf": [{ "$ref": "#/$defs/runtime" }, { "$ref": "#/$defs/watch" }],
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,3})?Z$"
+    },
+    "optionalTimestamp": { "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] },
+    "optionalString": { "type": ["string", "null"] },
+    "count": { "type": "integer", "minimum": 0 },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rows", "bytes", "warningRows", "warningBytes", "warning"],
+      "properties": {
+        "rows": { "$ref": "#/$defs/count" },
+        "bytes": { "$ref": "#/$defs/count" },
+        "warningRows": { "type": "integer", "minimum": 1 },
+        "warningBytes": { "type": "integer", "minimum": 1 },
+        "warning": { "type": "boolean" }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remaining", "used", "deadlineMs"],
+      "properties": {
+        "remaining": { "$ref": "#/$defs/count" },
+        "used": { "$ref": "#/$defs/count" },
+        "deadlineMs": { "type": "integer" }
+      }
+    },
+    "pending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventSequence", "eventId", "operationId", "logicalStoreId", "status", "reconciliationBudget", "sendBudget", "lastEvidenceAt"],
+      "properties": {
+        "eventSequence": { "type": "integer", "minimum": 1 },
+        "eventId": { "type": "string", "minLength": 1 },
+        "operationId": { "type": "string", "minLength": 1 },
+        "logicalStoreId": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["staged", "query-required", "retry-permitted", "accepted", "closed-not-accepted", "removed-not-recorded", "removed-rejected"] },
+        "reconciliationBudget": { "$ref": "#/$defs/budget" },
+        "sendBudget": { "$ref": "#/$defs/budget" },
+        "lastEvidenceAt": { "$ref": "#/$defs/optionalTimestamp" }
+      }
+    },
+    "recurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastRecurrenceHash", "consecutiveIdenticalRecurrences", "firstIdenticalAt", "lastIdenticalAt", "lastIdenticalEventSequence"],
+      "properties": {
+        "lastRecurrenceHash": { "oneOf": [{ "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, { "type": "null" }] },
+        "consecutiveIdenticalRecurrences": { "$ref": "#/$defs/count" },
+        "firstIdenticalAt": { "$ref": "#/$defs/optionalTimestamp" },
+        "lastIdenticalAt": { "$ref": "#/$defs/optionalTimestamp" },
+        "lastIdenticalEventSequence": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backendProfile", "requiredSenders", "logicalStoreId", "ready", "membership", "lifecycle", "compensation", "error"],
+      "properties": {
+        "backendProfile": { "type": "string", "minLength": 1 },
+        "requiredSenders": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "logicalStoreId": { "$ref": "#/$defs/optionalString" },
+        "ready": { "type": "boolean" },
+        "membership": {
+          "type": "array",
+          "items": {
+            "$comment": "Public Rust ApplicationHealth evidence is embedded without interpreting backend rows or daemon frames.",
+            "type": "object",
+            "required": ["logical_store_id", "responsibility", "runtime_id", "address", "capability", "registered", "sender_ready", "inbound_actionable", "pending_unconsumed", "liveness", "lifecycle"]
+          }
+        },
+        "lifecycle": { "type": ["object", "null"] },
+        "compensation": { "type": "array", "items": { "type": "object" } },
+        "error": { "type": ["object", "null"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [{
+        "if": { "properties": { "productionReady": { "const": true } }, "required": ["productionReady"] },
+        "then": { "properties": {
+          "status": { "const": "running" },
+          "restartReconciled": { "const": true },
+          "reconciledRegistryRevision": { "type": "integer", "minimum": 0 },
+          "diagnostics": { "maxItems": 0 },
+          "senders": { "items": { "properties": { "ready": { "const": true } } } }
+        } }
+      }],
+      "required": ["schemaVersion", "runtimeId", "pid", "startedAt", "heartbeatAt", "status", "productionReady", "registryRevision", "reconciledRegistryRevision", "restartReconciled", "senders", "retention", "diagnostics", "detach"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runtimeId": { "type": "string", "minLength": 1 },
+        "pid": { "type": "integer", "minimum": 1 },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "heartbeatAt": { "$ref": "#/$defs/timestamp" },
+        "status": { "enum": ["running", "stopped", "interrupted"] },
+        "productionReady": { "type": "boolean" },
+        "registryRevision": { "$ref": "#/$defs/count" },
+        "reconciledRegistryRevision": { "type": ["integer", "null"], "minimum": 0 },
+        "restartReconciled": { "type": "boolean" },
+        "senders": { "type": "array", "items": { "$ref": "#/$defs/sender" } },
+        "retention": { "$ref": "#/$defs/retention" },
+        "diagnostics": {
+          "type": "array",
+          "items": { "enum": ["membership-reconciliation-pending", "sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "containment-unproven", "registry-failure"] }
+        },
+        "detach": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "registrationRevision", "detectorSchemaVersion", "activatedAt", "lifecycle", "eligibility", "health", "blockedReason", "lastAllocatedEventSequence", "lastCommittedEventSequence", "pending", "lastAttemptId", "lastSuccessAt", "lastEventAt", "nextAttemptMs", "latestAttemptDurationMs", "suppressedDueCount", "consecutiveFailures", "diagnosticCategory", "recurrence", "senderReady", "logicalStoreId", "observedLogicalStoreId", "retention"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "id": { "type": "string", "minLength": 1 },
+        "registrationRevision": { "type": "integer", "minimum": 1 },
+        "detectorSchemaVersion": { "enum": [1, 2] },
+        "activatedAt": { "$ref": "#/$defs/timestamp" },
+        "lifecycle": { "enum": ["active", "paused", "terminal", "removed"] },
+        "eligibility": { "enum": ["eligible", "reconciliation-pending", "inactive"] },
+        "health": { "enum": ["ready", "degraded", "blocked", "inactive"] },
+        "blockedReason": {
+          "enum": [null, "receipt-outcome-unresolved", "send-retry-exhausted", "send-permanently-rejected", "operation-identity-conflict", "logical-store-mismatch", "unsupported-registration-version", "orphan-containment-unproven"]
+        },
+        "lastAllocatedEventSequence": { "$ref": "#/$defs/count" },
+        "lastCommittedEventSequence": { "$ref": "#/$defs/count" },
+        "pending": { "oneOf": [{ "$ref": "#/$defs/pending" }, { "type": "null" }] },
+        "lastAttemptId": { "$ref": "#/$defs/optionalString" },
+        "lastSuccessAt": { "$ref": "#/$defs/optionalTimestamp" },
+        "lastEventAt": { "$ref": "#/$defs/optionalTimestamp" },
+        "nextAttemptMs": { "type": "integer" },
+        "latestAttemptDurationMs": { "type": ["integer", "null"], "minimum": 0 },
+        "suppressedDueCount": { "$ref": "#/$defs/count" },
+        "consecutiveFailures": { "$ref": "#/$defs/count" },
+        "diagnosticCategory": {
+          "enum": [null, "detector-degraded", "process-failure", "malformed-output", "canonicalization-failed", "output-limit", "timeout", "send-failure", "unknown-receipt", "receipt-reconciliation-pending", "runtime-interrupted"]
+        },
+        "recurrence": { "$ref": "#/$defs/recurrence" },
+        "senderReady": { "type": "boolean" },
+        "logicalStoreId": { "$ref": "#/$defs/optionalString" },
+        "observedLogicalStoreId": { "$ref": "#/$defs/optionalString" },
+        "retention": { "$ref": "#/$defs/retention" }
+      }
+    }
+  }
+}

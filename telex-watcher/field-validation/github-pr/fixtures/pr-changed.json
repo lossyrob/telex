@@ -1,0 +1,20 @@
+{
+  "number": 162,
+  "url": "https://github.com/example/project/pull/162",
+  "title": "Example change",
+  "state": "OPEN",
+  "headRefOid": "1111111111111111111111111111111111111111",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "CLEAN",
+  "mergeable": "MERGEABLE",
+  "reviews": [
+    {"id": "review-1", "author": {"login": "reviewer"}, "state": "APPROVED", "body": "Looks good.", "submittedAt": "2026-10-22T12:05:00Z"}
+  ],
+  "comments": [
+    {"id": "comment-1", "author": {"login": "author"}, "body": "Ready for review.", "createdAt": "2026-10-22T12:04:00Z", "updatedAt": "2026-10-22T12:04:00Z"}
+  ],
+  "statusCheckRollup": [
+    {"__typename": "CheckRun", "databaseId": 10, "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}
+  ]
+}
