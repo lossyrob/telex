@@ -123,9 +123,15 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 On 2026-10-23 Campaign promoted the repeated Windows partial-page candidate
 into active `cooperative-partial-page-repair`, tracked by
-[#181](https://github.com/lossyrob/telex/issues/181). One separate Local owner
-is authorized with `gpt-6.1-sol` / high reasoning / default context tier;
-supported preparation and launch are pending canonical node/task landing.
+[#181](https://github.com/lossyrob/telex/issues/181). After canonical
+promotion landed as `3d517e17`, Local completed v2 preparation and delivered
+the real kickoff to owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` in
+checkout `lossyrob-expert-doodle`, initially on that branch and main commit.
+The requested profile is `gpt-6.1-sol` / high reasoning / default context
+tier / interactive. The launched v2 binding supersedes the earlier pending
+preparation and v1 identity-exchange wording; no API/SDK/v1 handshake is
+required. Launch does not establish implementation or hosted-validation
+completion.
 The repair blocks delivery of Watcher CLI #179 / PR #180, whose existing
 owner and Watcher-only scope remain intact. Diagnosis precedes correction;
 the repair PR must close #181 and earn exact-head hosted validation and
