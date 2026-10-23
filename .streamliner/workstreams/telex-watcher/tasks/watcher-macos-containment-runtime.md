@@ -29,10 +29,11 @@ runtime-core merge prerequisite was satisfied by PR #164 merge
 `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; PR #170 merged #162's independent
 documentation correction as main 2513ccda. PR #173 merged #162's bounded repairs
 on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`, and issue #162
-closed on merge; its post-merge validation and field report remain outstanding.
-This node does not depend on that validation or report. On 2026-10-23 the design
-steward approved the candidate Phase 2 proof shape, subject to corrections, and
-kept product implementation on hold.
+closed on merge. After post-merge validation and the #162 field report, the
+Watcher coordinator completed `watcher-runtime-core` on 2026-10-23, so this
+node's runtime-core dependency is satisfied. On 2026-10-23 the design steward
+approved the candidate Phase 2 proof shape, subject to corrections, and kept
+product implementation on hold.
 
 At exact proof head 810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and
 x86_64 run 39904383638 rejected the one-shot SIGKILL completion candidate: a

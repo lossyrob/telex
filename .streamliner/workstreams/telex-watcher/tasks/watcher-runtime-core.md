@@ -3,22 +3,22 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
-- **Status:** In progress; PR #164 merged on 2026-10-23 as main
+- **Status:** Completed; PR #164 merged on 2026-10-23 as main
   d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c, and PR #170 merged the #162
   documentation correction on 2026-10-23 as main
   2513ccdac136a148c5603fd4a0e08962fb9e0929; closing repair PR #173 merged on
   2026-10-23 as main 55cb6b116607bceccf3ce0b72550e2d849ca5426 at exact head
-  f1c25007ae63738b039c8eb8a9ac141238ac4472, and issue #162 closed on merge;
-  post-merge validation, #162 field report, and final reconciliation remain
-  outstanding.
-- **Attention:** focus
+  f1c25007ae63738b039c8eb8a9ac141238ac4472, and issue #162 closed on merge; the
+  owner posted the #162 field report, and the Watcher coordinator sent
+  completion on 2026-10-23.
+- **Attention:** watch
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
   passed and reconciled Application Client `consumer-integration-gate`; both
   satisfied on 2026-10-22
 - **Tracker:** [lossyrob/telex#162](https://github.com/lossyrob/telex/issues/162)
 - **Owner session:** 42c1104a-7eb2-477e-a574-2bffb1cd06fe
-- **Merge gate:** Campaign runs the merge gate and merges at the exact cleared
+- **Merge gate:** Campaign ran the merge gate and merged at the exact cleared
   SHA
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
@@ -41,8 +41,19 @@ evidence remain unchanged. Closing PR #173 carries both repairs and says
 steward approved its design, independent source review found no blocking product
 findings, and all 18 CI checks passed after one failed-job retry. PR #173 merged
 at that head on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`,
-and issue #162 closed on merge. Post-merge validation, the #162 field report,
-and final reconciliation remain outstanding.
+and issue #162 closed on merge. Exact-merge main CI run 39916429612 passed all
+18 checks on attempt 2, after one unchanged-merge retry of two failed Windows
+jobs that are tracked as external Local Daemon work.
+
+The owner then posted the #162 field report with design impact `updated-docs`.
+It records passing local post-merge runtime, protocol, containment, schema, and
+detector-fixture checks at the exact merge. It claims Windows and Linux
+containment only; macOS and other unclaimed hosts still fail closed, and macOS
+runtime support belongs to #172. Its GitHub detector evidence is fixture-backed,
+not live GitHub polling or live agent-wakeup proof. The shared CI investigations
+remain external and are not claimed fixed. The Watcher coordinator sent
+completion on 2026-10-23:
+https://github.com/lossyrob/telex/issues/162#issuecomment-6360421716
 
 ## Outcome
 

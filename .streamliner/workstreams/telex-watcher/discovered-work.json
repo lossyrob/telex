@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T07:52:02.392Z",
+  "updatedAt": "2026-10-23T15:20:10.675Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -77,7 +77,7 @@
           "Telex Watcher design steward session 4745cca8-006f-4422-9d35-cf056f28c31f"
         ]
       },
-      "status": "in-progress",
+      "status": "completed",
       "decisionState": "accepted",
       "rationale": "Issue #162 cannot close while public removal of an isolated unsupported row fails. The design steward approved a bounded repair that preserves unsupported state losslessly, keeps the permanent ID and tombstone, explicitly audits when v2 state hashes do not apply, and leaves strict v2 canonicalization unchanged. PR #170 remains independently valid.",
       "terminalPath": "PR #173, which said Closes #162, passed required CI and review at exact head f1c25007, and Campaign merged it at that cleared SHA as main 55cb6b11. Completes when post-merge validation and the #162 field report are posted and the Watcher coordinator sends completion for watcher-runtime-core.",
@@ -103,7 +103,14 @@
           "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
           "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426."
         }
-      ]
+      ],
+      "completionEvidence": {
+        "fieldReport": "https://github.com/lossyrob/telex/issues/162#issuecomment-6360421716",
+        "fieldReportCreatedAt": "2026-10-23T08:06:23Z",
+        "mergeCommit": "55cb6b116607bceccf3ce0b72550e2d849ca5426",
+        "mainCi": "https://github.com/lossyrob/telex/actions/runs/39916429612 attempt 2: success, 18 of 18 checks, after one unchanged-merge retry of two failed Windows jobs routed as external Local Daemon work.",
+        "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-runtime-core on 2026-10-23 and stated that this entry's terminal path is met."
+      }
     },
     {
       "id": "runtime-core-request-transport-exponent-reencoding",
@@ -120,7 +127,7 @@
           "Telex Watcher design steward session 4745cca8-006f-4422-9d35-cf056f28c31f"
         ]
       },
-      "status": "in-progress",
+      "status": "completed",
       "decisionState": "accepted",
       "rationale": "The repair is needed for #162's outcome. It separates transport serialization from JCS validation, hash, and evidence encoding, with no admission-policy change. Design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved it at 02:13 on 2026-10-23.",
       "terminalPath": "Commit f1c25007 in PR #173 implements the repair. PR #173 passed required CI and review at that exact head, and Campaign merged it at that cleared SHA as main 55cb6b11. Completes when post-merge validation and the #162 field report are posted and the Watcher coordinator sends completion for watcher-runtime-core.",
@@ -150,7 +157,14 @@
           "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
           "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426."
         }
-      ]
+      ],
+      "completionEvidence": {
+        "fieldReport": "https://github.com/lossyrob/telex/issues/162#issuecomment-6360421716",
+        "fieldReportCreatedAt": "2026-10-23T08:06:23Z",
+        "mergeCommit": "55cb6b116607bceccf3ce0b72550e2d849ca5426",
+        "mainCi": "https://github.com/lossyrob/telex/actions/runs/39916429612 attempt 2: success, 18 of 18 checks, after one unchanged-merge retry of two failed Windows jobs routed as external Local Daemon work.",
+        "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-runtime-core on 2026-10-23 and stated that this entry's terminal path is met."
+      }
     },
     {
       "id": "watcher-ci-local-daemon-signatures",
@@ -429,6 +443,18 @@
         {
           "source": "coordinator-report",
           "details": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 reports that design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved the bounded offline KDK vendor-origin and integrity component recorded in issue #172 comment 6359975390. The approval covers only the exact-build-labeled Apple packages and the selected members. The outer DMGs have mirror integrity only, and revocation and Gatekeeper were not checked. Still open: kernel extraction and identity, correspondence to the exact running image, proof-relevant kernel machine-code comparison, and the userspace UUID and wrapper evidence. Final implementation authorization stays HOLD, and no native rerun is required. The owner will post the verdict on #172."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6360205460",
+          "createdAt": "2026-10-23T07:52:58Z",
+          "details": "Posted steward verdict approving the bounded offline KDK vendor-origin and integrity component. Both inner KernelDebugKit.pkg TOC signatures verify through Apple's Software Update chain, and the steward independently reran both verifications. The approval authenticates only the exact-build-labeled inner packages and selected members; the outer DMGs have mirror integrity only, and revocation and Gatekeeper were not checked. Final implementation authorization remains HOLD. The verdict lists the remaining sequence: complete signed-Payload extraction, exact kernel and symbol identities, correspondence to the native environments, proof-relevant machine-code inspection, and userspace evidence matched to the recorded libsystem UUIDs. No new native matrix is requested."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6360440956",
+          "createdAt": "2026-10-23T08:07:32Z",
+          "details": "Owner packet: both Apple-signed Payloads were completely decoded, with every chunk length and the complete source hash verified, and nothing installed or executed. It records the exact KDK release kernel and DWARF identities: 25G83 kernel.release.vmapple UUID B2455C4B-781C-3F38-8CA0-DD11CF317C15 (ARM64) and 24G830 kernel UUID F6A1B3D4-1EBB-3628-A1C5-89506C51DDEC (x86_64), with matching kernel and symbol UUIDs and version strings that match the native report. This is not an exact running-image correspondence claim: the native artifacts lack a running-kernel image identifier and system-wrapper instruction bytes. Running-kernel identity bridging, proof-relevant disassembly and symbol analysis, and exact-UUID userspace wrapper evidence remain unproved. Final implementation authorization remains HOLD, and no native race matrix was repeated."
         }
       ]
     },

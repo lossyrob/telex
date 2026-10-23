@@ -69,6 +69,10 @@ Do not create the CLI implementation worker until:
 Issue #144, broad packaging, runtime hardening, and Operator Station issue #153
 are not prerequisites.
 
+Prerequisite 1 is met: `watcher-runtime-core` completed on 2026-10-23, so this
+node's only graph dependency is satisfied. The node stays planned with no
+tracker until the Watcher coordinator opens one.
+
 ## Deliverables
 
 ### Command surface

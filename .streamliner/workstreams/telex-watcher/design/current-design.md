@@ -168,8 +168,8 @@ without mandatory framework ceremony. That acceptance completes the
 `minimal-contract-accepted` checkpoint. It does not prove a production runtime,
 an operational five-minute workflow, or any later gate.
 
-`watcher-runtime-core` is in progress. On 2026-10-22 the operator approved its
-launch through the Streamliner workflow v2 adapter. It runs under issue #162 and
+`watcher-runtime-core` is completed. On 2026-10-22 the operator approved its
+launch through the Streamliner workflow v2 adapter. It ran under issue #162 and
 `.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md`, its
 reviewed and reconciled tracker and task specification. Both Application Client
 dependencies are satisfied. For this node only, the operator scoped process-tree
@@ -201,13 +201,13 @@ for Phase 2 was satisfied when PR #164 merged as
 `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162 does not need to close
 before #172 implementation. On 2026-10-23 the design steward approved the
 candidate Phase 2 proof shape, subject to corrections, and kept product
-implementation on hold. Product implementation remains held until PR #168 merges
-the clarified ADR 0054 and normative Watcher text, the Phase 2 plan incorporates
-that disposition, pinned XNU source reasoning and native ARM64/x64 evidence
-establish the fork/group-empty proof, and the owner returns the selected
-algorithm and evidence for implementation authorization. At exact proof head
-810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and x86_64 run
-39904383638 rejected the one-shot SIGKILL completion candidate: a
+implementation on hold. PR #168 merged the clarified ADR 0054 and normative
+Watcher text on 2026-10-23. Product implementation remains held until the
+Phase 2 plan incorporates that disposition, pinned XNU source reasoning and
+native ARM64/x64 evidence establish the fork/group-empty proof, and the owner
+returns the selected algorithm and evidence for implementation authorization.
+At exact proof head 810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and
+x86_64 run 39904383638 rejected the one-shot SIGKILL completion candidate: a
 barrier-controlled in-group descendant survived the accepted group SIGKILL and
 answered two post-seal challenges one second apart. Both post-reap observations
 reported presence, and ESRCH appeared only after private teardown. The result
@@ -217,8 +217,8 @@ Product implementation remains held. Any successor must retain the destructive
 anchor and nonzero-signal authority until a separately justified completion
 transition, then seal, exactly reap, and observe under the existing proof rules;
 if no ordinary-user completion condition can be proved, return decision-needed.
-After those gates are accepted, implementation may proceed under #172 without
-waiting for #162's runtime repair, field report, or closure. The fail-closed
+After those gates are accepted, implementation proceeds under #172;
+`watcher-runtime-core` is complete and imposes no further wait. The fail-closed
 macOS behavior from #162 remains authoritative until the complete #172
 implementation lands. An ordinary per-attempt private guard remains within
 Watcher runtime authority only when it is unprivileged, ephemeral, shipped with
@@ -266,12 +266,12 @@ evidence remain unchanged. Closing PR #173 carries both repairs and says
 steward approved its design, independent source review found no blocking product
 findings, and all 18 CI checks passed after one failed-job retry. PR #173 merged
 at that head on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`,
-and issue #162 closed on merge. Post-merge validation, the #162 field report,
-and final reconciliation remain outstanding. For `watcher-runtime-core`,
-Campaign runs the merge gate and merges at the exact cleared SHA.
-`minimal-example-pack` completed under issue #144 in PR #163. Campaign ran the
-first live merge-gate pilot and cleared exact head
-`fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
+and issue #162 closed on merge. Exact-merge main CI passed on attempt 2, the
+owner posted the #162 field report, and the Watcher coordinator completed the
+node on 2026-10-23. For `watcher-runtime-core`, Campaign ran the merge gate and
+merged at the exact cleared SHA. `minimal-example-pack` completed under
+issue #144 in PR #163. Campaign ran the first live merge-gate pilot and cleared
+exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
 `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
 release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
 authority. The downstream `five-minute-custom-watch-gate` still owns operational
@@ -301,12 +301,13 @@ The operator's 2026-10-22 decision in issue #165 directs the workstream to
 supersede the prior cross-platform assumption that every supported Watcher host
 must contain arbitrary detached descendants. The selected direction preserves
 that guarantee on Windows and Linux and uses the narrower assigned-process-group
-contract for trusted non-detaching detectors on macOS. The owner's pending
-product-design change, PR #168, will record the decision as ADR 0054 in
-`docs/design/DECISIONS.md` and update `docs/design/watcher.md`. Until that
-change merges, the normative Watcher design still states the prior
-requirement, #162 remains fail-closed on macOS, and no macOS support claim is
-accepted.
+contract for trusted non-detaching detectors on macOS. PR #168 recorded the
+decision as ADR 0054 in `docs/design/DECISIONS.md` and updated
+`docs/design/watcher.md`; it merged on 2026-10-23 as main `bc1e02ed`. Issue #177
+corrects two overstatements in that merged text: the launch requirement becomes
+host-specific, and the macOS bullet states that Watcher fails closed with no
+macOS support claim until #172 is accepted. The shipped runtime remains
+fail-closed on macOS until #172's complete implementation lands.
 
 Issue #127 and unmerged PR #131 remain optional-example and implementation
 learning, not current product authority.

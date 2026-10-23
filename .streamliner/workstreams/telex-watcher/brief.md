@@ -175,7 +175,8 @@ node is complete. On 2026-10-22 the operator approved its launch as the first
 live merge-gate pilot, and Campaign launched owner session
 76a56ac2-dd56-403f-99e7-9eadb3458ffe. Campaign cleared PR #163 at exact head
 `fdb4f52f`, and the owner merged it as `5ad7eb04`; issue #144 closed.
-`watcher-runtime-core` is in progress. Its Application Client holds are
+`watcher-runtime-core` completed on 2026-10-23 after its closing repair merged
+and the owner posted the #162 field report. Its Application Client holds were
 discharged: `client-conformance` merged through PR #161 as `4d25fdff` on
 2026-10-22, and Watcher's post-merge consumer integration gate receipt passed on
 that merged main. Issue [#162](https://github.com/lossyrob/telex/issues/162) and
