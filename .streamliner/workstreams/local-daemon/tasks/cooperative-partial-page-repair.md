@@ -8,6 +8,7 @@
 - **Depends on:** none
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
+- **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
@@ -171,6 +172,87 @@ session-online/write-authorized identity-exchange requirements in this task.
 Local reports no API/SDK/v1 handshake; none is required for this v2 launch.
 No duplicate writer, prepared-worktree copying or hand-written preparation
 bypass is authorized. The workstation freeze remains in force.
+
+## Draft repair association
+
+On 2026-10-23 Local requested association of OPEN/draft
+[PR #185](https://github.com/lossyrob/telex/pull/185) at head
+`7b11b92630d0b2cf63423a77fc19232aff368825`, base `main`, branch
+`lossyrob-cooperative-partial-page-repair`. Its body says `Closes #181`;
+canonical owner remains `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c`.
+The reconciler independently verified this PR identity and closing text.
+
+The owner reports absorbing DI-185-01 as a same-origin fixture correction
+in [comment 6375067883](
+https://github.com/lossyrob/telex/pull/185#issuecomment-6375067883).
+Local and the reconciler read the owner-authored comment; that receipt is
+not source review or independent verification of the reported correction.
+At head-refresh intake, fresh review, design inspection and hosted
+validation were unresolved. The later design-only receipt below qualifies
+that design snapshot only; the draft is not Campaign-ready.
+
+The steward's later report
+`pr185-local-design-inspection-7b11b926-20261023.md` approves the bounded
+DI-185-01 source resolution at exact head
+`7b11b92630d0b2cf63423a77fc19232aff368825`, tree
+`5582a2ca68d9c67a1dbfe99edd35842abb239d5f`, with zero open design findings
+within the inspected scope. Local and the reconciler read and hash-matched
+the 7,852-byte report at SHA-256
+`5c9eb56e372fefdc36e3d9a359d7df5b56d809031ce30d9201ddc71162b60c1d`.
+It supplements the immutable `57fdc975` changes-required inspection rather
+than rewriting that history. This is design-only source resolution, not
+independent App source-review completion, hosted runtime proof, historical
+cause, accepted repair delivery or Campaign gate/merge acceptance. The
+reconciler read the report, not product source or runtime evidence.
+
+At the original draft head
+`57fdc9752d3217f9ab9f2038bf90345ec48bae96`, Local reported queued/running
+CI and one requested wait
+through the existing coordinator; registration confirmation was still
+pending. This is a historical snapshot, superseded for registration only
+by the later receipt below.
+
+Local subsequently reported receiving the existing coordinator's
+wait-registered receipt for `wait-pr185-ci40025809314-57fdc97`, exact head
+`57fdc9752d3217f9ab9f2038bf90345ec48bae96`, run `40025809314`.
+The coordinator reported an explicit 21-job inventory including
+cooperative-boundary, LivePG and Windows InstalledCurrent guards, with the
+sole five-minute native schedule armed and verified, read-only. Local
+relayed the wait ID to the owner. The reconciler did not independently
+inspect scheduler state or CI results.
+
+That registration is historical coverage of `57fdc975`, not registration
+or validation of the current head. No old-head evidence, review, design
+or CI acceptance carries over.
+
+At head-refresh intake, Local reported independently reading metadata for
+run `40026777909`:
+`pull_request`, attempt 1, `head_sha`
+`7b11b92630d0b2cf63423a77fc19232aff368825`. Local was requesting the
+existing observer's rebind to this head/run; no registration receipt had
+then arrived. That pending statement is the historical head-refresh
+snapshot, qualified only for registration by the later receipt below.
+
+Local later received coordinator `2a4bc4c8`'s successor registration for
+`wait-pr185-ci40026777909-7b11b92` at exact head
+`7b11b92630d0b2cf63423a77fc19232aff368825`, run `40026777909`.
+The coordinator reports the full 21-job inventory including
+cooperative-boundary, LivePG and Windows InstalledCurrent guards, with the
+existing verified five-minute native schedule as sole observer. Local
+relayed the successor ID to the owner. The old `57fdc975` /
+`40025809314` wait was superseded without further query or log retrieval.
+These are attributed coordinator/Local receipts, not the reconciler's
+independent scheduler, inventory or CI-result inspection.
+
+The reconciler did not query the new run or its results. Existing-observer
+registration is not a new poller, CI success, runtime acceptance or
+Campaign readiness. Independent App review, new-head hosted CI, accepted
+delivery and the Campaign gate remain separate and are not credited here.
+
+Draft association does not accept the proposed repair, establish runtime
+success, conclude a historical root cause, or clear the Watcher dependency,
+marker candidates, issue #153 or any existing gate. The original outcome,
+evidence histories, workstation freeze and Campaign merge gate remain.
 
 ## Workflow
 

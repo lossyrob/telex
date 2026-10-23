@@ -132,6 +132,18 @@ tier / interactive. The launched v2 binding supersedes the earlier pending
 preparation and v1 identity-exchange wording; no API/SDK/v1 handshake is
 required. Launch does not establish implementation or hosted-validation
 completion.
+Draft [PR #185](https://github.com/lossyrob/telex/pull/185) now carries the
+proposed repair at head
+`7b11b92630d0b2cf63423a77fc19232aff368825`, base `main`, branch
+`lossyrob-cooperative-partial-page-repair`; its body says `Closes #181`.
+The PR is OPEN/draft. The owner reports the DI-185-01 same-origin fixture
+correction. A later exact-head steward inspection approves its bounded
+design-only source resolution, with zero open design findings in that
+scope. Independent App review and new-head hosted validation remain
+unresolved, not Campaign-ready. Earlier head `57fdc975` and its registered
+CI wait are historical, not current coverage. This association establishes
+no runtime acceptance or historical root-cause conclusion; no old-head
+acceptance carries over.
 The repair blocks delivery of Watcher CLI #179 / PR #180, whose existing
 owner and Watcher-only scope remain intact. Diagnosis precedes correction;
 the repair PR must close #181 and earn exact-head hosted validation and
