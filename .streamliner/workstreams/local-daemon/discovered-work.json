@@ -2023,6 +2023,62 @@
             "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
             "test": "station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page",
             "reportedOutcome": "failed",
+            "retainedVerificationAuthority": "The original attribution, qualification and retentionRecordBoundary preserve historical coordinator-only intake from packet 3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741. Local had not then verified the attempt-2 log hash or checkout, and the original owner retention record reported no attempt-2 log retrieval. Those unknown-hash/checkout and custody limitations are superseded only by the later retainedVerification from supplement 908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344. The owner's subsequent single archival retrieval and Local's retained-file verification do not retroactively verify initial intake, diagnose a cause, close a candidate or clear a required check.",
+            "retainedVerification": {
+              "supplementSha256": "908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344",
+              "result": {
+                "id": "local-daemon-windows-cooperative-partial-page-overrun",
+                "test": "station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page",
+                "outcome": "failed",
+                "location": "src/station_intent.rs:3865:14",
+                "message": "a cooperative stop must be returned to the caller, not abandoned",
+                "thread": 3488,
+                "testStatusTimestamp": "2026-10-23T19:26:42.4095111Z",
+                "failureBlockTimestamp": "2026-10-23T19:26:59.4114573Z",
+                "failureLogLines": "2102-2103",
+                "qualification": "Same test and assertion recur in both retained attempts. No semaphore/worker completion timing or causal diagnosis is supplied by this assertion stack."
+              },
+              "custody": {
+                "owner": "c90bafbb-6e49-4ced-a684-e15cfadfc69e",
+                "ownerReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-receipt.txt",
+                "retrieval": "Owner reports exactly one bounded archival full-job retrieval after Local's explicit evidence-custody request. The original coordinator read had not been saved. No third CI retry or new observer was used.",
+                "fullLog": {
+                  "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-full.txt",
+                  "bytes": 433581,
+                  "sha256": "4e6ec7a29337c0a27c2ddd8796fe212b8de2c6103177f1c78f16e9f4e38fdf62",
+                  "localVerification": "Local computed byte count and SHA-256, matched the owner's receipt, and read checkout, failure, marker result, summary and artifact-upload records from this retained file."
+                }
+              },
+              "executionIdentity": {
+                "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+                "associatedHead": "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "associatedBase": "3eebe1276850708c70837804d6084eeee6fad31a",
+                "logLines": "111-114",
+                "observation": "The attempt-2 checkout message and git log --format=%H record the provider test merge. This is now independently read from the attempt-2 log, not copied from attempt 1.",
+                "comparison": "Both retained attempt logs record the same provider test-merge SHA. This is not a claim that the provider merge is byte-identical to the PR head or that binaries were independently rebuilt/verified by Local."
+              },
+              "targetSummary": {
+                "target": "root telex library",
+                "passed": 564,
+                "failed": 1,
+                "ignored": 4,
+                "measured": 0,
+                "filteredOut": 0,
+                "durationSeconds": 54.46,
+                "summaryLogLine": 2173,
+                "stepExitCode": 1,
+                "stepExitTimestamp": "2026-10-23T19:26:59.5883728Z",
+                "qualification": "This precise Test-step exit is read from the full log; earlier job-level completion timestamps remain separately attributed, not substituted for this step record."
+              },
+              "artifactUpload": {
+                "id": "12526062998",
+                "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+                "compressedBytes": 72974494,
+                "archiveSha256": "67feb38bd518fccb3ca0d00501036b3c7c049351a973a18813a0837833034d73",
+                "logLines": "2275-2279",
+                "attribution": "Digest, size and ID are upload-log observations. No attempt-2 artifact was downloaded, archive-hashed, extracted or inventoried by Local; its dump and file contents remain unknown."
+              }
+            },
             "reportedLocation": "src/station_intent.rs:3865:14",
             "reportedSummary": "564 passed, 1 failed, 4 ignored",
             "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
@@ -2132,6 +2188,58 @@
             "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
             "test": "daemon::p3_tests::drain_deferred_repushes_unacked_after_turn_stop",
             "reportedOutcome": "passed",
+            "retainedVerificationAuthority": "The original attribution, qualification and retentionRecordBoundary preserve historical coordinator-only intake from packet 3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741. Local had not then verified the attempt-2 log hash or checkout, and the original owner retention record reported no attempt-2 log retrieval. Those unknown-hash/checkout and custody limitations are superseded only by the later retainedVerification from supplement 908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344. The owner's subsequent single archival retrieval and Local's retained-file verification do not retroactively verify initial intake, diagnose a cause, close a candidate or clear a required check.",
+            "retainedVerification": {
+              "supplementSha256": "908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344",
+              "result": {
+                "id": "local-daemon-windows-idle-drain-repush-marker",
+                "test": "daemon::p3_tests::drain_deferred_repushes_unacked_after_turn_stop",
+                "outcome": "passed",
+                "timestamp": "2026-10-23T19:26:42.4695773Z",
+                "logLine": 2052,
+                "qualification": "Pass is specific to attempt 2. It does not explain or close the first-attempt failure."
+              },
+              "custody": {
+                "owner": "c90bafbb-6e49-4ced-a684-e15cfadfc69e",
+                "ownerReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-receipt.txt",
+                "retrieval": "Owner reports exactly one bounded archival full-job retrieval after Local's explicit evidence-custody request. The original coordinator read had not been saved. No third CI retry or new observer was used.",
+                "fullLog": {
+                  "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-full.txt",
+                  "bytes": 433581,
+                  "sha256": "4e6ec7a29337c0a27c2ddd8796fe212b8de2c6103177f1c78f16e9f4e38fdf62",
+                  "localVerification": "Local computed byte count and SHA-256, matched the owner's receipt, and read checkout, failure, marker result, summary and artifact-upload records from this retained file."
+                }
+              },
+              "executionIdentity": {
+                "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+                "associatedHead": "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "associatedBase": "3eebe1276850708c70837804d6084eeee6fad31a",
+                "logLines": "111-114",
+                "observation": "The attempt-2 checkout message and git log --format=%H record the provider test merge. This is now independently read from the attempt-2 log, not copied from attempt 1.",
+                "comparison": "Both retained attempt logs record the same provider test-merge SHA. This is not a claim that the provider merge is byte-identical to the PR head or that binaries were independently rebuilt/verified by Local."
+              },
+              "targetSummary": {
+                "target": "root telex library",
+                "passed": 564,
+                "failed": 1,
+                "ignored": 4,
+                "measured": 0,
+                "filteredOut": 0,
+                "durationSeconds": 54.46,
+                "summaryLogLine": 2173,
+                "stepExitCode": 1,
+                "stepExitTimestamp": "2026-10-23T19:26:59.5883728Z",
+                "qualification": "This precise Test-step exit is read from the full log; earlier job-level completion timestamps remain separately attributed, not substituted for this step record."
+              },
+              "artifactUpload": {
+                "id": "12526062998",
+                "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+                "compressedBytes": 72974494,
+                "archiveSha256": "67feb38bd518fccb3ca0d00501036b3c7c049351a973a18813a0837833034d73",
+                "logLines": "2275-2279",
+                "attribution": "Digest, size and ID are upload-log observations. No attempt-2 artifact was downloaded, archive-hashed, extracted or inventoried by Local; its dump and file contents remain unknown."
+              }
+            },
             "reportedSummary": "564 passed, 1 failed, 4 ignored",
             "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
             "qualification": "Reported runtime evidence, not independently queried or log-hashed by Local. The exact attempt-2 checkout identity and retained log hash have not been supplied. Same PR head is reported; do not automatically relabel attempt 1's test-merge identity as independently verified for attempt 2.",
@@ -2241,6 +2349,58 @@
             "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
             "test": "daemon::p3_tests::on_deliver_wake_on_cc_pushes_live_cc_without_replay",
             "reportedOutcome": "passed",
+            "retainedVerificationAuthority": "The original attribution, qualification and retentionRecordBoundary preserve historical coordinator-only intake from packet 3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741. Local had not then verified the attempt-2 log hash or checkout, and the original owner retention record reported no attempt-2 log retrieval. Those unknown-hash/checkout and custody limitations are superseded only by the later retainedVerification from supplement 908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344. The owner's subsequent single archival retrieval and Local's retained-file verification do not retroactively verify initial intake, diagnose a cause, close a candidate or clear a required check.",
+            "retainedVerification": {
+              "supplementSha256": "908ca8e0f8cfa5ab1a3304ff85c9627cc1744e47cf033dcfd263825cef4ee344",
+              "result": {
+                "id": "local-daemon-windows-live-cc-push-marker",
+                "test": "daemon::p3_tests::on_deliver_wake_on_cc_pushes_live_cc_without_replay",
+                "outcome": "passed",
+                "timestamp": "2026-10-23T19:26:43.1517973Z",
+                "logLine": 2059,
+                "qualification": "Pass is specific to attempt 2. It does not establish a common cause with the other candidates or close this one."
+              },
+              "custody": {
+                "owner": "c90bafbb-6e49-4ced-a684-e15cfadfc69e",
+                "ownerReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-receipt.txt",
+                "retrieval": "Owner reports exactly one bounded archival full-job retrieval after Local's explicit evidence-custody request. The original coordinator read had not been saved. No third CI retry or new observer was used.",
+                "fullLog": {
+                  "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt2-120608948530-full.txt",
+                  "bytes": 433581,
+                  "sha256": "4e6ec7a29337c0a27c2ddd8796fe212b8de2c6103177f1c78f16e9f4e38fdf62",
+                  "localVerification": "Local computed byte count and SHA-256, matched the owner's receipt, and read checkout, failure, marker result, summary and artifact-upload records from this retained file."
+                }
+              },
+              "executionIdentity": {
+                "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+                "associatedHead": "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "associatedBase": "3eebe1276850708c70837804d6084eeee6fad31a",
+                "logLines": "111-114",
+                "observation": "The attempt-2 checkout message and git log --format=%H record the provider test merge. This is now independently read from the attempt-2 log, not copied from attempt 1.",
+                "comparison": "Both retained attempt logs record the same provider test-merge SHA. This is not a claim that the provider merge is byte-identical to the PR head or that binaries were independently rebuilt/verified by Local."
+              },
+              "targetSummary": {
+                "target": "root telex library",
+                "passed": 564,
+                "failed": 1,
+                "ignored": 4,
+                "measured": 0,
+                "filteredOut": 0,
+                "durationSeconds": 54.46,
+                "summaryLogLine": 2173,
+                "stepExitCode": 1,
+                "stepExitTimestamp": "2026-10-23T19:26:59.5883728Z",
+                "qualification": "This precise Test-step exit is read from the full log; earlier job-level completion timestamps remain separately attributed, not substituted for this step record."
+              },
+              "artifactUpload": {
+                "id": "12526062998",
+                "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+                "compressedBytes": 72974494,
+                "archiveSha256": "67feb38bd518fccb3ca0d00501036b3c7c049351a973a18813a0837833034d73",
+                "logLines": "2275-2279",
+                "attribution": "Digest, size and ID are upload-log observations. No attempt-2 artifact was downloaded, archive-hashed, extracted or inventoried by Local; its dump and file contents remain unknown."
+              }
+            },
             "reportedSummary": "564 passed, 1 failed, 4 ignored",
             "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
             "qualification": "Reported runtime evidence, not independently queried or log-hashed by Local. The exact attempt-2 checkout identity and retained log hash have not been supplied. Same PR head is reported; do not automatically relabel attempt 1's test-merge identity as independently verified for attempt 2.",
