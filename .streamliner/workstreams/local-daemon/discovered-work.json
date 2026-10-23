@@ -1996,6 +1996,275 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority. Co-tracking is administrative, not causal equivalence or gate acceptance.",
       "terminalPath": "Independently classify each timeout using retained command/daemon timing and identity evidence. Preserve prompt store-lock refusal, successful attach/readiness and ordinary-send/turn-guard semantics. Any confirmed fix or justified harness change requires separately authorized scope and exact-head full hosted validation; no skipped checks, accepted timeout or unsupported budget increase. A green rerun alone is not a causal fix. Explicit hardening disposition is still required."
+    },
+    {
+      "id": "local-daemon-windows-cooperative-partial-page-overrun",
+      "sourceNode": null,
+      "source": "PR #180 head 8826fad763f12ed6cde30a3f976a87e8807de775, run 40008577194 attempt 1, Windows build/test job 120602732487",
+      "crossReference": "telex-watcher / watcher-cli-ux / issue #179 / PR #180; historical PR #161 station-grace source delta 52abb30",
+      "evidence": {
+        "test": "station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page",
+        "reportedLocation": "src/station_intent.rs:3865",
+        "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120602732487",
+        "providerOwnerReceipt": "https://github.com/lossyrob/telex/pull/180#issuecomment-6372846861",
+        "sourceMeaning": "The exact source scans six seeded intents with an already-spent cooperative deadline, then expects BoundedPhase::completed() to return a value before checking partial-page truncation and one mandatory item. The reported line maps to the missing Completed result, not the later item-count assertion.",
+        "history": "The entire station_intent.rs blob matches earlier 52abb30, whose single deadline-plus-grace source correction was reviewed. This is a reported recurrence of that test symptom, not proof the same semaphore/deadline cause has recurred.",
+        "attribution": "Test name and failure line supplied by Watcher; source semantics and blob identity inspected by Local. Raw failure excerpt, exact error/worker outcome and artifact identity remain pending the existing owner's retained evidence.",
+        "retainedEvidenceAuthority": "The attribution field preserves historical intake from routing packet 091a368b3c5691b97d5da149c719d5c5ebb3aaf655772215f7e4f62b678787f1, before retained-log review. Its pending raw-failure and artifact-identity statements are superseded by retainedEvidence from Local supplement be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5: Local subsequently hashed and read the retained job log, confirmed the complete assertion block, and read the upload-log artifact identity. The exact blocking-worker outcome and cause remain unestablished. Archive digest and compressed size remain upload-log observations, not an independently rehashed archive.",
+        "cause": "Unknown. Permit contention, cooperative scheduling, worker error/panic or filesystem timing must not be selected from the test name alone.",
+        "retainedEvidence": {
+          "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
+          "candidateEvidence": {
+            "id": "local-daemon-windows-cooperative-partial-page-overrun",
+            "test": "station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page",
+            "location": "src/station_intent.rs:3865:14",
+            "message": "a cooperative stop must be returned to the caller, not abandoned",
+            "logLines": "2101-2168",
+            "observed": "The Option::expect stack confirms no Completed value was observed. The subsequent scan-result, truncation and item-count assertions were not reached.",
+            "notEstablished": "No recorded semaphore timing, blocking-worker result/panic detail, filesystem latency or exact completion deadline establishes why the wrapper returned no completed value."
+          },
+          "retainedLog": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-8826fad7-120602732487.txt",
+            "bytes": 454448,
+            "sha256": "21aa0585d47364173ded4bd4b0742f480e7c3ddb3388e0802bb07a476a1dc8db",
+            "localObservation": "Local computed the hash and read all three complete failure blocks, target summary, checkout identity and artifact-upload receipt. No previously supplied log hash existed to compare against.",
+            "command": "cargo test --workspace --verbose",
+            "summary": "Root telex library target: 562 passed, 3 failed, 4 ignored, 0 measured, 0 filtered out; 99.10 seconds.",
+            "checkout": {
+              "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+              "reportedMergeOf": [
+                "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "3eebe1276850708c70837804d6084eeee6fad31a"
+              ],
+              "logLines": "111-114",
+              "qualification": "The job ran the provider test merge, not a direct head checkout. The artifact name and requested PR head do not override that identity. The merge object is not available in Local's Git object store; no fetch was performed and byte equality of merge-vs-head source is not asserted. Earlier immutable source reads were at the PR head and agree with the log's test names and source lines."
+            },
+            "limits": "Failure blocks contain Rust assertion stacks, not a native corruption stack or handler process diagnostics. Timestamp clustering reflects failure output emission; it does not establish concurrent causal timing or test ordering."
+          },
+          "retainedArtifact": {
+            "id": "12525068916",
+            "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+            "directory": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt1-artifact12525068916",
+            "uploadLogTime": "2026-10-23T19:14:02.6412066Z",
+            "compressedBytesFromUploadLog": 72936062,
+            "archiveSha256FromUploadLog": "4378f66b04e86ba2307f739f1ae363f798192acd5b1a23db18f66465fac46ac5",
+            "archiveHashQualification": "Digest and compressed size read from the hashed job log. No archive was downloaded or independently rehashed by Local.",
+            "localDirectoryInventory": {
+              "files": 4,
+              "expandedBytes": 371496960,
+              "dumpFiles": 0,
+              "contents": [
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.pdb",
+                  "bytes": 163393536
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.pdb",
+                  "bytes": 163393536
+                }
+              ]
+            },
+            "limits": "The supplied extracted tree contains no dump, handler stdout/stderr, recording marker, or test fixture state files. This inventory is not proof that no crash or handler failure happened. No executable was run, no binary was loaded for debugging, and no PDB identity match was claimed."
+          }
+        }
+      },
+      "description": "Classify failure to observe the mandatory cooperative partial page on Windows without discarding the shared deadline or fairness contract.",
+      "affectedOutcome": "Local Daemon bounded discovery/progress evidence and root-library CI reliability; no Watcher-source attribution.",
+      "requiredness": "Provisional candidate evidence for the existing Local Daemon hardening gate, not accepted implementation scope, a new dependency or gate decision.",
+      "sequencing": "Preserve the first-attempt failure and existing unchanged-head retry separately. Inspect retained exact failure details before choosing a dedicated tracker or implementation scope. Do not reopen closed feature trackers or treat an earlier source review as runtime closure.",
+      "target": "hardening-gate (candidate scope); dedicated tracker pending exact retained-evidence classification",
+      "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 owns triage. Existing PR 180 owner retains logs/retry. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority.",
+      "terminalPath": "Identify the precise non-completion boundary using retained evidence, then separately authorize any product or synchronization correction. Preserve the single-slot admission, one absolute deadline-plus-grace, truthful truncation and mandatory progress semantics. Validate at an exact hosted Windows head; neither green retry nor a budget increase alone establishes a causal fix."
+    },
+    {
+      "id": "local-daemon-windows-idle-drain-repush-marker",
+      "sourceNode": null,
+      "source": "PR #180 head 8826fad763f12ed6cde30a3f976a87e8807de775, run 40008577194 attempt 1, Windows build/test job 120602732487",
+      "crossReference": "telex-watcher / watcher-cli-ux / issue #179 / PR #180; related observation-helper context only: local-daemon-windows-live-cc-push-marker",
+      "evidence": {
+        "test": "daemon::p3_tests::drain_deferred_repushes_unacked_after_turn_stop",
+        "reportedLocation": "src/daemon.rs:10769",
+        "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120602732487",
+        "providerOwnerReceipt": "https://github.com/lossyrob/telex/pull/180#issuecomment-6372846861",
+        "sourceMeaning": "The assertion waits for the recording handler's pushed.json marker after DrainDeferred returns Ack. The helper polls file existence using HANDLER_OBSERVATION_BUDGET, currently 60 seconds. The assertion requires an unacked deferred message to be repushed after turn-stop.",
+        "history": "An existing comment at daemon.rs:9368-9383 explicitly names this and the live-CC test as historical Windows handler-observation failures. That comment is prior context, not an independently verified diagnosis of this occurrence.",
+        "attribution": "Test/location reported by Watcher; source branch and current budget inspected. No raw child status/stderr, timing or marker evidence has been read by Local.",
+        "cause": "Unknown. Missing observed marker does not by itself identify process startup, handler failure, delivery scheduling, file observation or production repush semantics.",
+        "retainedEvidence": {
+          "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
+          "candidateEvidence": {
+            "id": "local-daemon-windows-idle-drain-repush-marker",
+            "test": "daemon::p3_tests::drain_deferred_repushes_unacked_after_turn_stop",
+            "location": "src/daemon.rs:10769:9",
+            "message": "idle drain must re-push a still-unacked deferred message after the turn stops",
+            "logLines": "2170-2231",
+            "observed": "The retained panic identifies the marker-observation assertion after the earlier DrainDeferred response assertion in the source.",
+            "notEstablished": "The block supplies no handler PID/exit code/stdout/stderr or marker contents. No production-delivery or runner-scheduling cause is established."
+          },
+          "retainedLog": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-8826fad7-120602732487.txt",
+            "bytes": 454448,
+            "sha256": "21aa0585d47364173ded4bd4b0742f480e7c3ddb3388e0802bb07a476a1dc8db",
+            "localObservation": "Local computed the hash and read all three complete failure blocks, target summary, checkout identity and artifact-upload receipt. No previously supplied log hash existed to compare against.",
+            "command": "cargo test --workspace --verbose",
+            "summary": "Root telex library target: 562 passed, 3 failed, 4 ignored, 0 measured, 0 filtered out; 99.10 seconds.",
+            "checkout": {
+              "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+              "reportedMergeOf": [
+                "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "3eebe1276850708c70837804d6084eeee6fad31a"
+              ],
+              "logLines": "111-114",
+              "qualification": "The job ran the provider test merge, not a direct head checkout. The artifact name and requested PR head do not override that identity. The merge object is not available in Local's Git object store; no fetch was performed and byte equality of merge-vs-head source is not asserted. Earlier immutable source reads were at the PR head and agree with the log's test names and source lines."
+            },
+            "limits": "Failure blocks contain Rust assertion stacks, not a native corruption stack or handler process diagnostics. Timestamp clustering reflects failure output emission; it does not establish concurrent causal timing or test ordering."
+          },
+          "retainedArtifact": {
+            "id": "12525068916",
+            "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+            "directory": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt1-artifact12525068916",
+            "uploadLogTime": "2026-10-23T19:14:02.6412066Z",
+            "compressedBytesFromUploadLog": 72936062,
+            "archiveSha256FromUploadLog": "4378f66b04e86ba2307f739f1ae363f798192acd5b1a23db18f66465fac46ac5",
+            "archiveHashQualification": "Digest and compressed size read from the hashed job log. No archive was downloaded or independently rehashed by Local.",
+            "localDirectoryInventory": {
+              "files": 4,
+              "expandedBytes": 371496960,
+              "dumpFiles": 0,
+              "contents": [
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.pdb",
+                  "bytes": 163393536
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.pdb",
+                  "bytes": 163393536
+                }
+              ]
+            },
+            "limits": "The supplied extracted tree contains no dump, handler stdout/stderr, recording marker, or test fixture state files. This inventory is not proof that no crash or handler failure happened. No executable was run, no binary was loaded for debugging, and no PDB identity match was claimed."
+          }
+        }
+      },
+      "description": "Classify the Windows idle-drain repush marker failure while preserving delivery after turn-stop for unacked deferred work.",
+      "affectedOutcome": "Local Daemon on-deliver/idle-drain correctness evidence and root-library CI, not a Watcher-owned repair.",
+      "requiredness": "Provisional candidate evidence for the existing Local Daemon hardening gate; no new dependency or accepted hardening scope.",
+      "sequencing": "Keep this signature separate from the live-CC marker case even though both use a recording-handler helper. Use the existing owner's first-run evidence and retry, with no extra observer. Diagnose before tracker/implementation assignment.",
+      "target": "hardening-gate (candidate scope); dedicated tracker pending exact retained-evidence classification",
+      "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 owns triage. Existing PR 180 owner retains logs/retry. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority.",
+      "terminalPath": "Establish the actual handler attempt/exit/recording outcome and the drain-to-delivery sequence; then separately authorize any confirmed root defect or harness correction. Preserve authenticated DrainDeferred, acknowledgment and unacked-message repush semantics. No skipped assertion, accepted missing marker or unsupported timeout inflation; exact-head hosted proof remains necessary."
+    },
+    {
+      "id": "local-daemon-windows-live-cc-push-marker",
+      "sourceNode": null,
+      "source": "PR #180 head 8826fad763f12ed6cde30a3f976a87e8807de775, run 40008577194 attempt 1, Windows build/test job 120602732487",
+      "crossReference": "telex-watcher / watcher-cli-ux / issue #179 / PR #180; related observation-helper context only: local-daemon-windows-idle-drain-repush-marker",
+      "evidence": {
+        "test": "daemon::p3_tests::on_deliver_wake_on_cc_pushes_live_cc_without_replay",
+        "reportedLocation": "src/daemon.rs:9573",
+        "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120602732487",
+        "providerOwnerReceipt": "https://github.com/lossyrob/telex/pull/180#issuecomment-6372846861",
+        "sourceMeaning": "The reported line waits for cc.json after the prior on-deliver-attempt observation. It precedes descriptor identity/role validation and lower-bound advancement assertions. The file-observation helper uses a 60-second budget. A recorded attempt is not automatically evidence of accepted delivery.",
+        "history": "The same existing handler-observation comment names this test; no exact active tracker matches it. A shared helper with idle-drain is a correlation lead, not a proven common cause.",
+        "attribution": "Test/location reported by Watcher; source sequence inspected. Exact failure text, handler outcome and artifact identities are not yet independently read.",
+        "retainedEvidenceAuthority": "The attribution field preserves historical intake from routing packet 091a368b3c5691b97d5da149c719d5c5ebb3aaf655772215f7e4f62b678787f1, before retained-log review. Its unread exact-failure-text and artifact-identity statements are superseded by retainedEvidence from Local supplement be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5: Local subsequently hashed and read the retained job log, confirmed the exact panic text, and read the upload-log artifact identity. Handler outcome and fixture/marker evidence remain unavailable. Archive digest and compressed size remain upload-log observations, not an independently rehashed archive.",
+        "cause": "Unknown; do not infer historical-CC replay, a bad lower bound, lost delivery or a common timeout cause solely from the reported marker assertion.",
+        "retainedEvidence": {
+          "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
+          "candidateEvidence": {
+            "id": "local-daemon-windows-live-cc-push-marker",
+            "test": "daemon::p3_tests::on_deliver_wake_on_cc_pushes_live_cc_without_replay",
+            "location": "src/daemon.rs:9573:9",
+            "message": "live CC should push to opted-in on-deliver handler",
+            "logLines": "2233-2293",
+            "observed": "The retained panic identifies the file-observation assertion following the source's prior attempt assertion. Later descriptor/role/lower-bound validation is not reached.",
+            "notEstablished": "An earlier recorded attempt is not a successful handler delivery receipt. No child outcome, file timing or common cause with idle-drain is established by the stack."
+          },
+          "retainedLog": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-8826fad7-120602732487.txt",
+            "bytes": 454448,
+            "sha256": "21aa0585d47364173ded4bd4b0742f480e7c3ddb3388e0802bb07a476a1dc8db",
+            "localObservation": "Local computed the hash and read all three complete failure blocks, target summary, checkout identity and artifact-upload receipt. No previously supplied log hash existed to compare against.",
+            "command": "cargo test --workspace --verbose",
+            "summary": "Root telex library target: 562 passed, 3 failed, 4 ignored, 0 measured, 0 filtered out; 99.10 seconds.",
+            "checkout": {
+              "providerTestMerge": "da52c4d687b517ec10aa3d673bc50e9863225156",
+              "reportedMergeOf": [
+                "8826fad763f12ed6cde30a3f976a87e8807de775",
+                "3eebe1276850708c70837804d6084eeee6fad31a"
+              ],
+              "logLines": "111-114",
+              "qualification": "The job ran the provider test merge, not a direct head checkout. The artifact name and requested PR head do not override that identity. The merge object is not available in Local's Git object store; no fetch was performed and byte equality of merge-vs-head source is not asserted. Earlier immutable source reads were at the PR head and agree with the log's test names and source lines."
+            },
+            "limits": "Failure blocks contain Rust assertion stacks, not a native corruption stack or handler process diagnostics. Timestamp clustering reflects failure output emission; it does not establish concurrent causal timing or test ordering."
+          },
+          "retainedArtifact": {
+            "id": "12525068916",
+            "name": "windows-build-test-crash-8826fad763f12ed6cde30a3f976a87e8807de775",
+            "directory": "C:\\Users\\robemanuele\\.copilot\\session-state\\c90bafbb-6e49-4ced-a684-e15cfadfc69e\\files\\pr180-ci-attempt1-artifact12525068916",
+            "uploadLogTime": "2026-10-23T19:14:02.6412066Z",
+            "compressedBytesFromUploadLog": 72936062,
+            "archiveSha256FromUploadLog": "4378f66b04e86ba2307f739f1ae363f798192acd5b1a23db18f66465fac46ac5",
+            "archiveHashQualification": "Digest and compressed size read from the hashed job log. No archive was downloaded or independently rehashed by Local.",
+            "localDirectoryInventory": {
+              "files": 4,
+              "expandedBytes": 371496960,
+              "dumpFiles": 0,
+              "contents": [
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "telex\\telex\\target\\debug\\telex.pdb",
+                  "bytes": 163393536
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.exe",
+                  "bytes": 22354944
+                },
+                {
+                  "path": "_temp\\telex-crash-symbols\\workspace-telex.pdb",
+                  "bytes": 163393536
+                }
+              ]
+            },
+            "limits": "The supplied extracted tree contains no dump, handler stdout/stderr, recording marker, or test fixture state files. This inventory is not proof that no crash or handler failure happened. No executable was run, no binary was loaded for debugging, and no PDB identity match was claimed."
+          }
+        }
+      },
+      "description": "Classify the Windows live-CC recording-handler marker failure without weakening no-replay or opted-in wake semantics.",
+      "affectedOutcome": "Local Daemon live-CC wake/delivery evidence and root-library CI reliability.",
+      "requiredness": "Provisional candidate evidence for the existing Local Daemon hardening gate; no accepted implementation scope or new gate.",
+      "sequencing": "Preserve exact independent failure evidence and relate it to the idle-drain case only if retained diagnostics establish the connection. Keep the current PR owner's retry/evidence role; do not absorb root fixes into Watcher PR 180.",
+      "target": "hardening-gate (candidate scope); dedicated tracker pending exact retained-evidence classification",
+      "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 owns triage. Existing PR 180 owner retains logs/retry. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority.",
+      "terminalPath": "Resolve the observed attempt-to-handler-file gap with actual child exit/stdout/stderr and delivery timing evidence. Preserve historical no-replay, exact descriptor identity/role and lower-bound guarantees. Any separate authorized correction requires exact-head hosted Windows coverage; green retry alone does not close the candidate."
     }
   ]
 }
