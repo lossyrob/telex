@@ -824,9 +824,10 @@ not the shared client API.
 ## Health and diagnostics
 
 The management surface must expose JSON projections for runtime and watch status.
-The existing
-[watcher-health-v1.schema.json](schemas/watcher-health-v1.schema.json) is frozen
-for experimental v1 and is not the v2 health contract.
+The canonical v2 projection is
+[watcher-health-v2.schema.json](schemas/watcher-health-v2.schema.json). The
+existing [watcher-health-v1.schema.json](schemas/watcher-health-v1.schema.json)
+is frozen for experimental v1 and is not the v2 health contract.
 
 V2 runtime status includes:
 
@@ -874,10 +875,12 @@ supervisor or operator CLI is the first consumer. Automatic remote health
 notification is deferred and must later be thresholded, coalesced, and
 explicitly routed; the event target is never implicitly spammed.
 
-Runtime implementation must add machine-readable v2 metadata/health conformance
-before promotion. This node freezes only the three issue-named v2 schemas;
-metadata and health projection schemas belong to runtime implementation once
-its concrete model exists.
+The canonical
+[watcher-event-metadata-v2.schema.json](schemas/watcher-event-metadata-v2.schema.json)
+and [watcher-health-v2.schema.json](schemas/watcher-health-v2.schema.json)
+define the machine-readable projections for the concrete runtime models.
+`watcher-runtime-core` owns executable conformance across those projections and
+the registration, request, and result schemas.
 
 ## Management operations
 
@@ -1007,13 +1010,15 @@ The canonical v2 schema set produced by this contract is:
 
 - [watcher-registration-v2.schema.json](schemas/watcher-registration-v2.schema.json);
 - [watcher-detector-request-v2.schema.json](schemas/watcher-detector-request-v2.schema.json);
-- [watcher-detector-result-v2.schema.json](schemas/watcher-detector-result-v2.schema.json).
+- [watcher-detector-result-v2.schema.json](schemas/watcher-detector-result-v2.schema.json);
+- [watcher-event-metadata-v2.schema.json](schemas/watcher-event-metadata-v2.schema.json); and
+- [watcher-health-v2.schema.json](schemas/watcher-health-v2.schema.json).
 
 Contract validation must:
 
-- validate all three against JSON Schema draft 2020-12;
+- validate all five against JSON Schema draft 2020-12;
 - accept the normative registration, request, and result examples in this
-  document;
+  document and the canonical event-metadata and health fixture corpus;
 - reject detector-authored event identity, route, attention, disposition,
   cadence, timeout, and action fields;
 - reject invalid outcome/event/state combinations;
@@ -1029,8 +1034,8 @@ Contract validation must:
 - verify design links and ADR anchors resolve.
 
 `watcher-runtime-core` owns executable repository checks for the items above and
-must add conformance between its concrete v2 registration, request, result,
-normalized metadata, and health models and the corresponding normative contract.
+conformance between its concrete v2 registration, request, result, normalized
+metadata, and health models and these five schemas.
 Provider-specific fixtures and conformance suites remain project-owned, not
 prerequisites for Watcher registration.
 
@@ -1052,8 +1057,6 @@ prerequisites for Watcher registration.
   unresolved tombstones represented?
 - How are backend/profile selection and opaque logical-store identity threaded
   through registration, membership, receipts, evidence, and health?
-- How are v2 metadata and health projections made machine-readable and checked
-  alongside the three canonical schemas?
 - Which platform mechanisms prove detector-tree death after abrupt runtime exit?
 - How does service supervision consume health and detect staleness?
 - How are register, show/list, pause, resume, update/state replacement,
@@ -1085,6 +1088,7 @@ may ignore them and author a detector directly.
 | Templates/manifests/preflight/tests | Optional project/tooling choices, absent from v2 registration/runtime semantics. |
 | V1 migration | Explicit new watch ID, detector update/wrapper, and reviewed state decision. Optional adapter deferred. |
 | Shared Application Client | Required; no private fallback. |
+| Machine-readable v2 metadata and health | Closed by `watcher-event-metadata-v2.schema.json` and `watcher-health-v2.schema.json`, with executable schema and concrete-model conformance owned by `watcher-runtime-core`. |
 
 ## Test isolation
 

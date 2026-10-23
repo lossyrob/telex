@@ -28,12 +28,17 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   [history/](history/application-client-issue-12-original.md). Load-bearing
   boundary: [ADR 0049](DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks).
 - **[watcher.md](watcher.md)** — the **normative Telex Watcher application
-  contract**: trusted local detector execution, versioned request/result schemas,
-  minimal command-plus-policy registration, runtime-owned event sequence identity,
-  receipt-gated state and externally inspectable duplicates, watch lifecycle and
-  health, credential policy, normalized events, v1 migration posture, and the
-  requirements exported to the shared Application Client. Load-bearing
-  boundaries: retained provider-neutral architecture in
+  contract**: trusted local detector execution; versioned
+  [registration](schemas/watcher-registration-v2.schema.json),
+  [request](schemas/watcher-detector-request-v2.schema.json),
+  [result](schemas/watcher-detector-result-v2.schema.json),
+  [event metadata](schemas/watcher-event-metadata-v2.schema.json), and
+  [health](schemas/watcher-health-v2.schema.json) schemas; minimal
+  command-plus-policy registration; runtime-owned event sequence identity;
+  receipt-gated state and externally inspectable duplicates; watch lifecycle,
+  credential policy, normalized events, v1 migration posture, and requirements
+  exported to the shared Application Client. Load-bearing boundaries: retained
+  provider-neutral architecture in
   [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state)
   and minimal v2 authoring/identity in
   [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
