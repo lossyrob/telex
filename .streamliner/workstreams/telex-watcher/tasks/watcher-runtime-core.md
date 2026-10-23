@@ -4,9 +4,11 @@
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
 - **Status:** In progress; PR #164 merged on 2026-10-23 as main
-  d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c; documentation correction,
-  post-merge validation, #162 field report, and final reconciliation remain
-  outstanding.
+  d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c, and PR #170 merged the #162
+  documentation correction on 2026-10-23 as main
+  2513ccdac136a148c5603fd4a0e08962fb9e0929; the bounded unsupported-v1 removal
+  repair, its exact-head review and CI, post-merge validation, #162 field
+  report, and final reconciliation remain outstanding.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
@@ -17,6 +19,17 @@
 - **Merge gate:** shadow mode; Campaign runs the gate, and the operator merges
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
+
+Additional post-merge public-management validation found that removal of an
+isolated unsupported v1 row can fail when its unchanged opaque state is not
+v2-canonicalizable, because the audit path applies v2 state hashing to every
+admitted mutation. The steward approved a bounded runtime repair under #162:
+unsupported-row removal must preserve the opaque state, permanent identity,
+tombstone, and evidence; skip v2 hashing through an explicit schema-version
+branch; and audit that state hashes are not applicable. Strict v2
+canonicalization remains unchanged. PR #170 remains independently valid. The
+repair, exact-head review and CI, post-merge validation, #162 field report, and
+final reconciliation remain outstanding.
 
 ## Outcome
 
@@ -39,8 +52,9 @@ hardening. Those remain separate accepted nodes or gates.
 For this node only, process-tree containment proof is required on Windows and
 Linux. macOS remains a required Watcher product platform, but this node must
 fail closed there before detector launch and must not claim macOS support. The
-connected `watcher-macos-containment` node owns macOS investigation and later
-implementation after this node merges.
+connected `watcher-macos-containment` node owns the macOS contract, and
+`watcher-macos-containment-runtime` owns macOS implementation after this node
+merges.
 
 Any macOS design requiring privilege, entitlements, a helper service, a broker,
 or a VM returns to the operator before implementation. This narrowing does not
@@ -422,7 +436,7 @@ Stop and report `decision-needed` if implementation requires:
 - destructive testing against shared user or campaign coordination state; or
 - implementing or claiming macOS containment in this node instead of
   fail-closing and handing the platform requirement to
-  `watcher-macos-containment`;
+  `watcher-macos-containment-runtime`;
 - weakening or bypassing the accepted store-binding lifecycle/recovery or
   readiness-membership repairs because of this host-scope decision;
 - launch before conformance merge, both exact-head attestations, and the
