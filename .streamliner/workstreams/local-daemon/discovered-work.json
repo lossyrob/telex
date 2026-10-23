@@ -2012,6 +2012,26 @@
         "attribution": "Test name and failure line supplied by Watcher; source semantics and blob identity inspected by Local. Raw failure excerpt, exact error/worker outcome and artifact identity remain pending the existing owner's retained evidence.",
         "retainedEvidenceAuthority": "The attribution field preserves historical intake from routing packet 091a368b3c5691b97d5da149c719d5c5ebb3aaf655772215f7e4f62b678787f1, before retained-log review. Its pending raw-failure and artifact-identity statements are superseded by retainedEvidence from Local supplement be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5: Local subsequently hashed and read the retained job log, confirmed the complete assertion block, and read the upload-log artifact identity. The exact blocking-worker outcome and cause remain unestablished. Archive digest and compressed size remain upload-log observations, not an independently rehashed archive.",
         "cause": "Unknown. Permit contention, cooperative scheduling, worker error/panic or filesystem timing must not be selected from the test name alone.",
+        "retryObservations": [
+          {
+            "source": "coordinator-report",
+            "authorityPacketSha256": "3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741",
+            "head": "8826fad763f12ed6cde30a3f976a87e8807de775",
+            "run": "40008577194",
+            "attempt": 2,
+            "job": "120608948530",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
+            "test": "station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page",
+            "reportedOutcome": "failed",
+            "reportedLocation": "src/station_intent.rs:3865:14",
+            "reportedSummary": "564 passed, 1 failed, 4 ignored",
+            "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
+            "qualification": "Reported runtime evidence, not independently queried or log-hashed by Local. The exact attempt-2 checkout identity and retained log hash have not been supplied. Same PR head is reported; do not automatically relabel attempt 1's test-merge identity as independently verified for attempt 2.",
+            "classification": "The partial-page assertion is reported on both attempts at the unchanged PR head. This strengthens recurrence evidence but does not establish why the phase failed to return a Completed result. The two marker candidates are not causally resolved by passing on retry.",
+            "attempt1RetentionRecord": "https://github.com/lossyrob/telex/pull/180#issuecomment-6373068163",
+            "retentionRecordBoundary": "The attempt-1 owner retention record separately reports the failed retry but says the owner retrieved no attempt-2 logs. The per-test attempt-2 observations here are attributed to the coordinator's separately reported failed-step read, not to that retention record. No candidate is closed, no implementation owner is assigned, and no new retry or check waiver is authorized."
+          }
+        ],
         "retainedEvidence": {
           "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
           "candidateEvidence": {
@@ -2101,6 +2121,25 @@
         "history": "An existing comment at daemon.rs:9368-9383 explicitly names this and the live-CC test as historical Windows handler-observation failures. That comment is prior context, not an independently verified diagnosis of this occurrence.",
         "attribution": "Test/location reported by Watcher; source branch and current budget inspected. No raw child status/stderr, timing or marker evidence has been read by Local.",
         "cause": "Unknown. Missing observed marker does not by itself identify process startup, handler failure, delivery scheduling, file observation or production repush semantics.",
+        "retryObservations": [
+          {
+            "source": "coordinator-report",
+            "authorityPacketSha256": "3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741",
+            "head": "8826fad763f12ed6cde30a3f976a87e8807de775",
+            "run": "40008577194",
+            "attempt": 2,
+            "job": "120608948530",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
+            "test": "daemon::p3_tests::drain_deferred_repushes_unacked_after_turn_stop",
+            "reportedOutcome": "passed",
+            "reportedSummary": "564 passed, 1 failed, 4 ignored",
+            "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
+            "qualification": "Reported runtime evidence, not independently queried or log-hashed by Local. The exact attempt-2 checkout identity and retained log hash have not been supplied. Same PR head is reported; do not automatically relabel attempt 1's test-merge identity as independently verified for attempt 2.",
+            "classification": "The partial-page assertion is reported on both attempts at the unchanged PR head. This strengthens recurrence evidence but does not establish why the phase failed to return a Completed result. The two marker candidates are not causally resolved by passing on retry.",
+            "attempt1RetentionRecord": "https://github.com/lossyrob/telex/pull/180#issuecomment-6373068163",
+            "retentionRecordBoundary": "The attempt-1 owner retention record separately reports the failed retry but says the owner retrieved no attempt-2 logs. The per-test attempt-2 observations here are attributed to the coordinator's separately reported failed-step read, not to that retention record. No candidate is closed, no implementation owner is assigned, and no new retry or check waiver is authorized."
+          }
+        ],
         "retainedEvidence": {
           "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
           "candidateEvidence": {
@@ -2191,6 +2230,25 @@
         "attribution": "Test/location reported by Watcher; source sequence inspected. Exact failure text, handler outcome and artifact identities are not yet independently read.",
         "retainedEvidenceAuthority": "The attribution field preserves historical intake from routing packet 091a368b3c5691b97d5da149c719d5c5ebb3aaf655772215f7e4f62b678787f1, before retained-log review. Its unread exact-failure-text and artifact-identity statements are superseded by retainedEvidence from Local supplement be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5: Local subsequently hashed and read the retained job log, confirmed the exact panic text, and read the upload-log artifact identity. Handler outcome and fixture/marker evidence remain unavailable. Archive digest and compressed size remain upload-log observations, not an independently rehashed archive.",
         "cause": "Unknown; do not infer historical-CC replay, a bad lower bound, lost delivery or a common timeout cause solely from the reported marker assertion.",
+        "retryObservations": [
+          {
+            "source": "coordinator-report",
+            "authorityPacketSha256": "3098d75dd9668b68032c257fc714171e0916cc2e94522d659db07cc949368741",
+            "head": "8826fad763f12ed6cde30a3f976a87e8807de775",
+            "run": "40008577194",
+            "attempt": 2,
+            "job": "120608948530",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40008577194/job/120608948530",
+            "test": "daemon::p3_tests::on_deliver_wake_on_cc_pushes_live_cc_without_replay",
+            "reportedOutcome": "passed",
+            "reportedSummary": "564 passed, 1 failed, 4 ignored",
+            "attribution": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports one failed-step log read.",
+            "qualification": "Reported runtime evidence, not independently queried or log-hashed by Local. The exact attempt-2 checkout identity and retained log hash have not been supplied. Same PR head is reported; do not automatically relabel attempt 1's test-merge identity as independently verified for attempt 2.",
+            "classification": "The partial-page assertion is reported on both attempts at the unchanged PR head. This strengthens recurrence evidence but does not establish why the phase failed to return a Completed result. The two marker candidates are not causally resolved by passing on retry.",
+            "attempt1RetentionRecord": "https://github.com/lossyrob/telex/pull/180#issuecomment-6373068163",
+            "retentionRecordBoundary": "The attempt-1 owner retention record separately reports the failed retry but says the owner retrieved no attempt-2 logs. The per-test attempt-2 observations here are attributed to the coordinator's separately reported failed-step read, not to that retention record. No candidate is closed, no implementation owner is assigned, and no new retry or check waiver is authorized."
+          }
+        ],
         "retainedEvidence": {
           "supplementSha256": "be8f9651e6cf2de6daa11869723cac3c4b8a980a415a5258754e405646327fc5",
           "candidateEvidence": {
