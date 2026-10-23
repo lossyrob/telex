@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T06:41:24.826Z",
+  "updatedAt": "2026-10-23T06:45:10.579Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -265,6 +265,38 @@
           "source": "task",
           "path": ".streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment-runtime.md",
           "details": "Success criterion: the same product PR updates the macOS tracker reference in docs/watcher-runtime.md from #165 to #172."
+        }
+      ]
+    },
+    {
+      "id": "runtime-core-public-list-reopen-regression-test",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "not-required-for-item-outcome",
+      "description": "The independent exact-head source review of PR #173 at f1c25007 made a non-blocking suggestion: add a committed public-management regression test that exercises List and runtime reopen. The committed public-management regression does not itself exercise those paths.",
+      "disposition": "reject",
+      "target": {
+        "id": "watcher-runtime-core",
+        "tracker": "https://github.com/lossyrob/telex/issues/162",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/173"
+      },
+      "status": "rejected",
+      "decisionState": "accepted",
+      "rationale": "Committed registry tests cover durable retention and reopen. The independent public Runtime/LocalManagement probe at f1c25007 passed all List filter combinations, Show, removal and reopen, permanent ID refusal, and both transaction-failure paths. Public List routing is unchanged, and no product failure was found.",
+      "terminalPath": "Terminal when recorded. The suggestion is not pursued, no follow-up item is created, and no graph or status change follows.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 accepted the reject disposition under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6). The runtime-core owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe declined the suggestion on PR #173.",
+      "evidence": [
+        {
+          "source": "pull-request-review",
+          "url": "https://github.com/lossyrob/telex/pull/173#pullrequestreview-5624817107",
+          "commit": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
+          "createdAt": "2026-10-23T06:41:19Z",
+          "details": "Independent exact-head COMMENT review: no blocking product findings. It records the List and reopen coverage gap as a non-blocking observation and reports that an out-of-tree public Runtime/LocalManagement probe passed those public paths. The review does not attest green CI or merge readiness."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/pull/173#issuecomment-6359133171",
+          "createdAt": "2026-10-23T06:42:38Z",
+          "details": "Owner disposition: no additional test-only change is requested for this repair. The suggested coverage expansion is declined rather than left as untracked follow-up work."
         }
       ]
     }
