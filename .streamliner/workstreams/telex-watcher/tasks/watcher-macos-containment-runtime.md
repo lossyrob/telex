@@ -25,7 +25,13 @@ The node depends on `watcher-macos-containment`, `watcher-runtime-core`, and
 `watcher-host-containment-doc-alignment` under #177. #177 is a prerequisite
 for #172 product-PR readiness and closure only; it does not stop the active
 source and native proof work and grants no implementation authorization. The
-runtime-core merge prerequisite was satisfied by PR #164 merge
+documentation prerequisite is now satisfied: PR #178 merged on 2026-10-23
+as main `b6eac6801eb9e6185868e0059640ceef5fe49eb7`, and the Watcher
+coordinator completed #177 after exact-merge main CI and its field report.
+This does not clear this node's product-PR readiness or implementation
+authorization HOLD; the existing successor rewrite duties remain.
+
+The runtime-core merge prerequisite was satisfied by PR #164 merge
 `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; PR #170 merged #162's independent
 documentation correction as main 2513ccda. PR #173 merged #162's bounded repairs
 on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`, and issue #162
@@ -226,6 +232,21 @@ establishes fork closure and PID/PGID reuse safety.
 - One product PR says `Closes #172`. Required CI, independent implementation
   review, and exact-head design review pass at the final head; Campaign runs the
   merge gate and merges at the exact cleared SHA.
+
+### Successor documentation duty
+
+The shipping PR also reconciles the present-tense macOS passages in
+`docs/design/watcher.md` (lines 209-215 and 612-616 at `b6eac680`) with the
+shipped capability: it keeps the normative non-detaching contract they state,
+and it leaves no sentence that implies macOS detectors run or produce
+containment receipts before the accepted capability ships. If #172 closes
+without shipping a macOS capability, the closing change instead qualifies
+these passages as the accepted contract for an unshipped capability and keeps
+macOS fail-closed.
+
+The steward added this duty on 2026-10-23 from the #177 field report
+(https://github.com/lossyrob/telex/issues/177#issuecomment-6369949388);
+evidence: `docs/design/watcher.md` lines 209-215 and 612-616 at `b6eac680`.
 
 ## Invalidation conditions
 

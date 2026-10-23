@@ -303,11 +303,16 @@ must contain arbitrary detached descendants. The selected direction preserves
 that guarantee on Windows and Linux and uses the narrower assigned-process-group
 contract for trusted non-detaching detectors on macOS. PR #168 recorded the
 decision as ADR 0054 in `docs/design/DECISIONS.md` and updated
-`docs/design/watcher.md`; it merged on 2026-10-23 as main `bc1e02ed`. Issue #177
-corrects two overstatements in that merged text: the launch requirement becomes
-host-specific, and the macOS bullet states that Watcher fails closed with no
-macOS support claim until #172 is accepted. The shipped runtime remains
-fail-closed on macOS until #172's complete implementation lands.
+`docs/design/watcher.md`; it merged on 2026-10-23 as main `bc1e02ed`.
+PR #178 delivered issue #177's three approved corrections on 2026-10-23 as
+main `b6eac680`: the launch requirement is host-specific, Linux explicitly
+retains its guardian handshake and terminal-receipt requirement, and the
+macOS bullet states that Watcher fails closed with no macOS support claim
+until #172 is accepted. After exact-merge main CI and the field report, the
+Watcher coordinator completed #177. Its documentation prerequisite for #172
+is satisfied; #172's implementation and final authorization HOLD are unchanged.
+The shipped runtime remains fail-closed on macOS until #172's complete
+implementation lands.
 
 Issue #127 and unmerged PR #131 remain optional-example and implementation
 learning, not current product authority.

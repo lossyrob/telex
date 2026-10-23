@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T15:54:21.975Z",
+  "updatedAt": "2026-10-23T18:54:37.500Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -493,6 +493,25 @@
           "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6368804596",
           "createdAt": "2026-10-23T15:45:54Z",
           "details": "Design steward verdict on live capture run 39979771410. Direct evidence on the new hosts records live kernel UUIDs matching the authenticated KDK images and retained root-wrapper bytes from the exact-UUID libraries. The bridge to earlier native runs 39904383638 and 39909079250 is accepted by unique version-string correspondence corroborated by live UUIDs on matching hosts; those earlier hosts did not record kern.uuid. Earlier userspace library UUIDs directly match the retained images. No further capture is needed for this accepted bridge. One ARM fork/vfork stub-slot target remains unresolved and must be resolved offline from a catalog-bound Apple-origin 25G83 dyld cache with the required library UUIDs; the target must not be inferred. Atfork and runtime callbacks are not required closure items under the conforming-detector contract; a system callback found to change group membership returns decision-needed. Bounded Watcher-side root-wrapper checks and the kernel machine-code analysis remain required. Final implementation authorization remains HOLD, and no race matrix is repeated."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6369762802",
+          "createdAt": "2026-10-23T16:33:37Z",
+          "details": "Design steward approval of the 25G83 InstallAssistant.pkg provenance basis for data-only extraction, subject to binding conditions. The original failed receipt remains unchanged and must not be relabeled as passing; a separate receipt must record the corrected comparison: catalog Digest equals the Apple-signed XAR TOC checksum and SHA-1 of the compressed TOC, not the whole-file SHA-1. The reported legacy SHA-1 mismatch is therefore not a real conflict for this catalog entry; no general claim about Apple's Digest field is made. The signed provenance chain covers the selected SharedSupport.dmg member; the unsigned HTTPS-origin integrity list is corroborating only. Execute, mount-and-run, and install nothing. Before semantic use, require the inner asset's own 25G83 build metadata, record the extraction path and each nested container's hash, and require the selected arm64e dyld cache to match the exact full native ARM libsystem_kernel and libsystem_c LC_UUIDs recorded in runs 39909079250 and 39979771410. If a check fails or a nested container lacks Apple-signed or catalog-bound integrity, stop and return decision-needed; do not substitute another cache. No revocation, Gatekeeper/notarization, platform-trust, or unconditional inner-OS identity claim is made. The offline fork/vfork stub-slot resolution, bounded Watcher-root wrapper check, and kernel analysis remain required. Final implementation authorization remains HOLD. No new download or native run is needed or authorized by this verdict."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6372221591",
+          "createdAt": "2026-10-23T18:43:13Z",
+          "details": "Design steward approval of the bounded offline ARM import-target component in owner report 6370671025. Run 39992225321 at head e946b9f5779d3a291211de5e7f47017cda3a3b5c completed on attempt 1 with one successful 455-second job and no retry. Artifact 12518966337 is 122,340 bytes, SHA-256 587fcfd82d774bf4e70228b64f5590f394e44e3f129aee244071cda2b60c2712. In the authenticated cache's exact-UUID libsystem_kernel c6a4a4cb92e63bafaae0e8306259209a, the retained fork/vfork stub slot resolves offline to ___fork; its bounded 76-byte body contains mov x16, #2 followed by svc #0x80. This closes only the offline slot-target collection gap. No live pointer or PAC-authenticated slot was observed: the v5 authenticated bit is format metadata only, and 0x18bb9b8ec is only an old-slide projection. No reachable call graph is established; the error-path helper and fork/vfork wrappers and their effects remain open. Owner work remains: bounded Watcher-root wrapper analysis, kernel machine-code synthesis, corrected implementation plan, release-admission policy, and final algorithm/evidence decision. Existing callback scope is unchanged, with no exhaustive atfork/runtime-callback requirement; a relevant system callback that changes group membership returns decision-needed. The earlier native runs' missing kern.uuid distinction is unchanged. No new host-image observation, running-kernel memory hash, native race matrix, or product capability is established. The original failed receipt is not relabeled. No further capture or rerun is required for this component. Final implementation authorization remains HOLD.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39992225321"
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6372381064",
+          "createdAt": "2026-10-23T18:52:10Z",
+          "details": "Design steward clarification of the pending release-admission policy: a strict kernel/library UUID allowlist is not required. A bounded supported-release/architecture policy is admissible only if proof-relevant equivalence covers its entire finite, inspectable domain of releases/builds, architectures, and production kernel variants. Neither exact-image nor class admission is accepted for shipping yet. After algorithm proof, exact-image admission would require an explicit reliable runtime identity rule and refusal of unknown or mismatched identities before detector launch; the accepted reversible unique-version-string bridge may establish correspondence where applicable, but a UUID is not a running-memory hash. The two currently investigated images would restrict ARM support to VMAPPLE 25G83 and x64 support to the mapped 24G830 image. That product restriction requires the operator's decision and is not an implementation default. Current evidence does not establish physical Apple Silicon coverage; physical production-variant equivalence has not been adjudicated. For class admission, delta checks mean an evidence-backed equivalence argument, not a generic source tag, startup probe, or broad macOS version label. Map authenticated production KDK variants and retained image/source identities to the runtime admission key; exclude development/KASAN or other variants unless separately mapped. Check relevant compiled paths and configuration/architecture conditionals against census/list-transfer and EMPTY semantics, fork publication and membership insertion/removal, exec shadows and representative transfer, terminal wait/reap, killpg error/absence behavior, and inactive-thread completion. Relevant userspace wrappers must preserve expected syscall arguments, group setup, and errno behavior. Byte-for-byte equality is not required, but each difference must be shown not to change the completion predicate, group-membership reasoning, reuse-safe authority, or seal-before-reap guarantee; analyze proof-relevant differences. Existing native ARM64/x64 evidence may support a class only where that argument establishes representative tested paths; distinguish exercised hosts from statically covered variants, and return decision-needed if a difference defeats transfer. No native matrix per UUID or physical device is automatically required, and no new native run is scheduled. Unrecognized builds, architectures, flavors, or failed identity/capability preconditions must fail closed with a typed unsupported/unproved-platform diagnostic before detector launch; admission failure proves neither a terminal receipt nor group absence. Arbitrary future patches/builds are not admitted: proof-relevant updates need review and deliberate class extension under a maintenance rule, with unknown cases fail-closed. Runtime probes do not replace concurrency/lifetime reasoning. The owner finishes the synthesis and takes the product support/fallback scope decision to the operator, distinguishing desired scope from completed proof and not presenting two fully proved shipping alternatives. The steward recommends pursuing bounded release/architecture admission with physical-kernel equivalence checks rather than silently adopting VM-only support; the operator decides restrictions or deferral. No new item or privilege/helper/VM deployment authority is granted. The non-detaching detector contract, callback scope, and final algorithm/evidence gate are unchanged. Final implementation authorization remains HOLD."
         }
       ]
     },
@@ -557,7 +576,7 @@
         "tracker": "https://github.com/lossyrob/telex/issues/177",
         "task": ".streamliner/workstreams/telex-watcher/tasks/watcher-host-containment-doc-alignment.md"
       },
-      "status": "planned",
+      "status": "completed",
       "decisionState": "accepted",
       "rationale": "The design steward ruled this a documentation overstatement, not a Windows runtime gap. Windows uses atomic kill-on-close Job assignment plus durable pre-resume identity, with no guard or receipt by design, and no Windows duty is added. #177 Replacement 1 makes the launch paragraph host-specific. The steward rejected watcher-cli-ux, which excludes containment, and runtime-hardening, which is too late because the normative text is inaccurate now.",
       "terminalPath": "Completes when the docs-only #177 PR applies Replacement 1 to docs/design/watcher.md and Campaign merges it at the exact cleared SHA.",
@@ -575,7 +594,17 @@
           "createdAt": "2026-10-23T07:37:41Z",
           "details": "Tracker for watcher-host-containment-doc-alignment. Its body records the outcome, docs/design/watcher.md-only scope, both exact replacements, and success criteria."
         }
-      ]
+      ],
+      "completionEvidence": {
+        "fieldReport": "https://github.com/lossyrob/telex/issues/177#issuecomment-6369949388",
+        "fieldReportCreatedAt": "2026-10-23T16:43:22Z",
+        "mergeCommit": "b6eac6801eb9e6185868e0059640ceef5fe49eb7",
+        "reviewedHead": "439eeb6c329591fcab6ace1ea1ee9c81f381d1fc",
+        "documentBlob": "5f4f6cd4eb89ab8fe720e637174441cbd836ebda",
+        "mergeGate": "https://github.com/lossyrob/telex/pull/178#issuecomment-6369444587",
+        "mainCi": "https://github.com/lossyrob/telex/actions/runs/39985513856 attempt 1: success, 18 of 18 jobs at the exact merge, with no retry.",
+        "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-host-containment-doc-alignment on 2026-10-23 and explicitly completed this debt terminal path. Windows gains no guard or receipt duty; the Linux handshake and receipt obligation is explicit. The #172 implementation and final authorization HOLD remain unchanged."
+      }
     },
     {
       "id": "macos-contract-interim-fail-closed-status",
@@ -588,7 +617,7 @@
         "tracker": "https://github.com/lossyrob/telex/issues/177",
         "task": ".streamliner/workstreams/telex-watcher/tasks/watcher-host-containment-doc-alignment.md"
       },
-      "status": "planned",
+      "status": "completed",
       "decisionState": "accepted",
       "rationale": "#177 Replacement 2 adds the interim fail-closed statement now. The final rewrite is absorbed into #172: The shipping PR must remove the temporary fail-closed sentence in `docs/design/watcher.md` and rewrite the macOS containment bullet into unqualified present tense only if the complete runtime implementation, source/native proof, guard-loss/restart behavior, and final design authorization land together at that exact head. The steward rejected watcher-cli-ux, which excludes containment, and runtime-hardening, which is too late because the normative text is inaccurate now.",
       "terminalPath": "Completes when the docs-only #177 PR applies Replacement 2 to docs/design/watcher.md and Campaign merges it at the exact cleared SHA. The later #172 rewrite is a watcher-macos-containment-runtime success criterion and does not hold this entry.",
@@ -605,8 +634,24 @@
           "url": "https://github.com/lossyrob/telex/issues/177",
           "createdAt": "2026-10-23T07:37:41Z",
           "details": "Tracker for watcher-host-containment-doc-alignment. Its body records the outcome, docs/design/watcher.md-only scope, both exact replacements, and success criteria."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6369978581",
+          "createdAt": "2026-10-23T16:44:55Z",
+          "details": "The design steward absorbs the #177 field report's remaining present-tense macOS passages in docs/design/watcher.md, lines 209-215 and 612-616 at b6eac680, into #172's documentation duty. The shipping PR reconciles them with the accepted shipped capability while retaining their normative non-detaching contract; if #172 closes without shipping the capability, the closing change qualifies them as the accepted contract for an unshipped capability and keeps macOS fail-closed. The exact duty and record line are in tasks/watcher-macos-containment-runtime.md. This creates no new item and changes no outcome, dependency, proof work, or HOLD; the completed interim-status debt remains complete."
         }
-      ]
+      ],
+      "completionEvidence": {
+        "fieldReport": "https://github.com/lossyrob/telex/issues/177#issuecomment-6369949388",
+        "fieldReportCreatedAt": "2026-10-23T16:43:22Z",
+        "mergeCommit": "b6eac6801eb9e6185868e0059640ceef5fe49eb7",
+        "reviewedHead": "439eeb6c329591fcab6ace1ea1ee9c81f381d1fc",
+        "documentBlob": "5f4f6cd4eb89ab8fe720e637174441cbd836ebda",
+        "mergeGate": "https://github.com/lossyrob/telex/pull/178#issuecomment-6369444587",
+        "mainCi": "https://github.com/lossyrob/telex/actions/runs/39985513856 attempt 1: success, 18 of 18 jobs at the exact merge, with no retry.",
+        "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-host-containment-doc-alignment on 2026-10-23 and explicitly completed this debt terminal path. The interim macOS fail-closed statement is delivered. The existing later #172 rewrite duty, implementation HOLD, and final authorization gate remain unchanged."
+      }
     }
   ]
 }

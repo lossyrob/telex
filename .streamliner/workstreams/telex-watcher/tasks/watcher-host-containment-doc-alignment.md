@@ -3,7 +3,7 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-host-containment-doc-alignment`
 - **Type:** task
-- **Status:** in progress; owner session `99ea868c-1d3c-4ad7-8e1b-69bfb4d41705`
+- **Status:** completed; owner session `99ea868c-1d3c-4ad7-8e1b-69bfb4d41705`
 - **Attention:** watch
 - **Depends on:** completed `watcher-macos-containment`
 - **Tracker:** [lossyrob/telex#177](https://github.com/lossyrob/telex/issues/177)
@@ -30,8 +30,9 @@ authorization. The Windows-path five-minute gate does not depend on this item.
 `watcher-macos-containment` completed on 2026-10-23, so every dependency of this
 item is satisfied. The Watcher coordinator launched owner session
 `99ea868c-1d3c-4ad7-8e1b-69bfb4d41705` on 2026-10-23 from main
-`91ff646679638d230a5f52116d5d3dcaae0d8379`. The node is in progress with watch
-attention. The launch binding record is
+`91ff646679638d230a5f52116d5d3dcaae0d8379`. The node completed on 2026-10-23
+with watch attention after exact-merge validation and the field report.
+The launch binding record is
 `watcher-host-containment-doc-alignment-20261023.json` under
 `streamliner/telex/prompts/v2/launches/` in the planning repository, with
 kickoff SHA-256 `3d3ce235`. The owner opened PR #178, which says
@@ -114,6 +115,30 @@ https://github.com/lossyrob/telex/issues/177#issuecomment-6368460103
 
 One item, one PR. The PR body says `Closes #177`. Campaign runs the merge gate
 and merges at the exact cleared SHA.
+
+Campaign cleared reviewed head
+`439eeb6c329591fcab6ace1ea1ee9c81f381d1fc` with high confidence and no debt,
+then merged PR #178 on 2026-10-23 as main
+`b6eac6801eb9e6185868e0059640ceef5fe49eb7`; issue #177 closed on merge.
+The delivered `docs/design/watcher.md` is byte-identical to the reviewed
+document, Git blob `5f4f6cd4eb89ab8fe720e637174441cbd836ebda`. Exact-merge
+main CI run 39985513856 passed all 18 jobs on attempt 1, with no retry.
+The owner posted the field report with design impact `updated-docs`, and the
+Watcher coordinator sent completion on 2026-10-23. The owner held this node
+through post-merge validation and the report.
+
+The delivery includes all three approved replacements, including the
+steward's Linux handshake/receipt amendment. Windows gains no guard or receipt
+duty. The shared first-attempt PR CI failures remain external #167 and #175
+investigations; green PR and main CI are not causal fixes. The #172
+documentation prerequisite is satisfied, but its implementation and final
+authorization HOLD remain unchanged.
+
+Field report:
+https://github.com/lossyrob/telex/issues/177#issuecomment-6369949388
+
+Campaign merge gate:
+https://github.com/lossyrob/telex/pull/178#issuecomment-6369444587
 
 ## Related
 
