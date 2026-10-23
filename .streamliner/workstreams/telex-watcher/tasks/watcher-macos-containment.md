@@ -30,6 +30,18 @@ fork/group-empty proof, and the owner returns the selected algorithm and
 evidence for implementation authorization. The node remains in progress with
 focus attention; it is not blocked on #162 closure.
 
+At exact proof head 810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and
+x86_64 run 39904383638 rejected the one-shot SIGKILL completion candidate: a
+barrier-controlled in-group descendant survived the accepted group SIGKILL and
+answered two post-seal challenges one second apart. Both post-reap observations
+reported presence, and ESRCH appeared only after private teardown. The result
+preserves the pinned-source old-group closure argument and fail-closed receipt
+rule but proves that one accepted group SIGKILL is not a completion condition.
+Product implementation remains held. Any successor must retain the destructive
+anchor and nonzero-signal authority until a separately justified completion
+transition, then seal, exactly reap, and observe under the existing proof rules;
+if no ordinary-user completion condition can be proved, return decision-needed.
+
 The owner session is `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`, worktree
 `lossyrob-jubilant-bassoon`, branch `lossyrob-macos-watcher-containment`, base
 `ec98b3ee`. The merge gate is shadow; the operator merges.

@@ -195,21 +195,32 @@ implementation on hold. Product implementation remains held until PR #168 merges
 the clarified ADR 0054 and normative Watcher text, the Phase 2 plan incorporates
 that disposition, pinned XNU source reasoning and native ARM64/x64 evidence
 establish the fork/group-empty proof, and the owner returns the selected
-algorithm and evidence for implementation authorization. After those gates are
-accepted, implementation may proceed under #165 without waiting for #162's
-separate documentation correction or field-report closure. The fail-closed macOS
-behavior from #162 remains authoritative until the complete #165 implementation
-lands. An ordinary per-attempt private guard remains within Watcher runtime
-authority only when it is unprivileged, ephemeral, shipped with the runtime,
-controlled through inherited private handles, exposes no reusable service
-endpoint, and exits after identity-matched cleanup evidence. Any privileged,
-entitled, installed, persistent, shared, launchd-managed, brokered, or VM-backed
-architecture returns to the operator. The `watcher-macos-containment` merge gate
-runs in shadow mode, so the operator merges. This host-scope decision and
-follow-up launch do not clear #162's accepted store-binding lifecycle/recovery
-blocker or premature `productionReady` blocker. At exact head
-`40a5c916d839dc81432738f122e03a00fd31628e`, independent source review
-`5620648207` and design inspection accepted the B2 store-binding
+algorithm and evidence for implementation authorization. At exact proof head
+810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and x86_64 run
+39904383638 rejected the one-shot SIGKILL completion candidate: a
+barrier-controlled in-group descendant survived the accepted group SIGKILL and
+answered two post-seal challenges one second apart. Both post-reap observations
+reported presence, and ESRCH appeared only after private teardown. The result
+preserves the pinned-source old-group closure argument and fail-closed receipt
+rule but proves that one accepted group SIGKILL is not a completion condition.
+Product implementation remains held. Any successor must retain the destructive
+anchor and nonzero-signal authority until a separately justified completion
+transition, then seal, exactly reap, and observe under the existing proof rules;
+if no ordinary-user completion condition can be proved, return decision-needed.
+After those gates are accepted, implementation may proceed under #165 without
+waiting for #162's separate documentation correction or field-report closure.
+The fail-closed macOS behavior from #162 remains authoritative until the
+complete #165 implementation lands. An ordinary per-attempt private guard
+remains within Watcher runtime authority only when it is unprivileged,
+ephemeral, shipped with the runtime, controlled through inherited private
+handles, exposes no reusable service endpoint, and exits after identity-matched
+cleanup evidence. Any privileged, entitled, installed, persistent, shared,
+launchd-managed, brokered, or VM-backed architecture returns to the operator.
+The `watcher-macos-containment` merge gate runs in shadow mode, so the operator
+merges. This host-scope decision and follow-up launch do not clear #162's
+accepted store-binding lifecycle/recovery blocker or premature `productionReady`
+blocker. At exact head `40a5c916d839dc81432738f122e03a00fd31628e`, independent
+source review `5620648207` and design inspection accepted the B2 store-binding
 lifecycle/recovery repair and B3 `productionReady` reconciliation fence at
 predecessor `d17100bfce6b17ccd03dff01fc66e3d8455cd812`. Independent final-delta
 review `5620856808` then verified that the successor changed only two
