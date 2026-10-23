@@ -52,8 +52,9 @@ hardening. Those remain separate accepted nodes or gates.
 For this node only, process-tree containment proof is required on Windows and
 Linux. macOS remains a required Watcher product platform, but this node must
 fail closed there before detector launch and must not claim macOS support. The
-connected `watcher-macos-containment` node owns macOS investigation and later
-implementation after this node merges.
+connected `watcher-macos-containment` node owns the macOS contract, and
+`watcher-macos-containment-runtime` owns macOS implementation after this node
+merges.
 
 Any macOS design requiring privilege, entitlements, a helper service, a broker,
 or a VM returns to the operator before implementation. This narrowing does not
@@ -435,7 +436,7 @@ Stop and report `decision-needed` if implementation requires:
 - destructive testing against shared user or campaign coordination state; or
 - implementing or claiming macOS containment in this node instead of
   fail-closing and handing the platform requirement to
-  `watcher-macos-containment`;
+  `watcher-macos-containment-runtime`;
 - weakening or bypassing the accepted store-binding lifecycle/recovery or
   readiness-membership repairs because of this host-scope decision;
 - launch before conformance merge, both exact-head attestations, and the
