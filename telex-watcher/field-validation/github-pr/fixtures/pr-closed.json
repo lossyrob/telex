@@ -1,0 +1,14 @@
+{
+  "number": 162,
+  "url": "https://github.com/example/project/pull/162",
+  "title": "Example change",
+  "state": "CLOSED",
+  "headRefOid": "1111111111111111111111111111111111111111",
+  "isDraft": false,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "mergeStateStatus": "UNKNOWN",
+  "mergeable": "UNKNOWN",
+  "reviews": [],
+  "comments": [],
+  "statusCheckRollup": []
+}

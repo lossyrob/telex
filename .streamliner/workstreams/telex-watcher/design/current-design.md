@@ -64,8 +64,13 @@ Watcher owns:
 
 The detector owns provider and repository semantics, event kind and content,
 cursor and replay behavior, recurrence intent, and provider-specific gap or
-downtime policy. Telex owns durable transport, receipt axes, address semantics,
-and disposition. The recipient owns all consequential action after wakeup.
+downtime policy. On macOS the detector also owns conformance to the
+non-detaching execution contract: its root and every local descendant must
+remain in the Watcher-assigned attempt process group. Watcher owns assignment
+and cleanup of that group. Windows and Linux retain their stronger
+detached-descendant containment guarantees. Telex owns durable transport,
+receipt axes, address semantics, and disposition. The recipient owns all
+consequential action after wakeup.
 
 Watcher does not become a workflow engine, mutate providers, launch agents,
 host human UX, accept remote executable registration, claim to sandbox
@@ -172,18 +177,56 @@ containment proof to Windows and Linux. macOS remains a required Watcher product
 platform, but #162 must fail closed there before detector launch and must not
 claim macOS support. The connected `watcher-macos-containment` task is in
 progress under issue #165 and
-`.streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment.md`. On
-2026-10-22 Campaign launched its Phase 1 investigation and operator decision
-packet through the Streamliner workflow v2 adapter. Its merge gate runs in
-shadow mode, so the operator merges. Implementation still lands only after #162
-merges. Any approach requiring privilege, entitlements, a helper service, a
-broker, or a VM returns to the operator before implementation. This host-scope
-decision and follow-up launch do not clear #162's accepted store-binding
-lifecycle/recovery blocker or premature `productionReady` blocker. Both repairs,
-required CI, implementation review, and fresh exact-head design inspection still
-apply. The `watcher-runtime-core` merge gate also runs in shadow mode, so the
-operator merges. `minimal-example-pack` completed under issue #144 in PR #163.
-Campaign ran the first live merge-gate pilot and cleared exact head
+`.streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment.md`. Its
+native ARM64 and x64 Phase 1 investigation rejected recursive kqueue tracking
+and ordinary process groups as solutions to the former arbitrary
+detached-descendant contract. On 2026-10-22 the operator selected a revised
+macOS contract for trusted non-detaching detectors. On macOS the detector root
+and every local descendant must remain in the Watcher-assigned attempt process
+group; work that escapes that group is outside the cleanup guarantee. This is a
+trusted behavioral precondition, not a sandbox claim, and it does not weaken the
+existing Windows or Linux guarantees. #162 remains fail-closed on macOS and must
+not claim macOS support. The `watcher-runtime-core` merge sequencing condition
+for Phase 2 was satisfied when PR #164 merged as
+`d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162 does not need to close
+before #165 implementation. Phase 2 remains held until PR #168 merges ADR 0054
+and the normative non-detaching detector contract and the owner presents an
+implementation plan that identifies a PID/PGID-reuse-safe anchor, race-safe
+group-empty proof, guard-loss behavior, restart evidence, and receipt scope
+within the accepted ordinary-user runtime boundary. After those gates are
+accepted, implementation may proceed under #165 without waiting for #162's
+separate documentation correction or field-report closure. The fail-closed macOS
+behavior from #162 remains authoritative until the complete #165 implementation
+lands. An ordinary per-attempt private guard remains within Watcher runtime
+authority only when it is unprivileged, ephemeral, shipped with the runtime,
+controlled through inherited private handles, exposes no reusable service
+endpoint, and exits after identity-matched cleanup evidence. Any privileged,
+entitled, installed, persistent, shared, launchd-managed, brokered, or VM-backed
+architecture returns to the operator. The `watcher-macos-containment` merge gate
+runs in shadow mode, so the operator merges. This host-scope decision and
+follow-up launch do not clear #162's accepted store-binding lifecycle/recovery
+blocker or premature `productionReady` blocker. At exact head
+`40a5c916d839dc81432738f122e03a00fd31628e`, independent source review
+`5620648207` and design inspection accepted the B2 store-binding
+lifecycle/recovery repair and B3 `productionReady` reconciliation fence at
+predecessor `d17100bfce6b17ccd03dff01fc66e3d8455cd812`. Independent final-delta
+review `5620856808` then verified that the successor changed only two
+documentation files and that all product source, tests, schemas, dependencies,
+and workflow remained byte-identical; exact-head design inspection accepted
+those documentation corrections at `40a5c916`. All 18 required CI jobs passed at
+that exact head in run `39854080691`, attempt 2, after one retry of two shared
+Windows failures tracked separately in #166 and #167. The operator merged
+PR #164 at exact product head `40a5c916d839dc81432738f122e03a00fd31628e` on
+2026-10-23 as main `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162
+remains open. Under the steward's post-merge disposition, #162 owns a bounded
+factual documentation correction linking the shipped v2 health and
+event-metadata schemas, with no new tracker or ADR. Main-branch post-merge
+validation, the #162 field report, and final canonical reconciliation also
+remain outstanding. The field report must be posted as a new comment on
+issue #162, and that comment's permalink becomes the durable disposition link.
+The `watcher-runtime-core` merge gate also runs in shadow mode, so the operator
+merges. `minimal-example-pack` completed under issue #144 in PR #163. Campaign
+ran the first live merge-gate pilot and cleared exact head
 `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
 `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
 release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
@@ -192,10 +235,11 @@ proof that an agent can create, register, leave running, and diagnose a custom
 watch in five minutes.
 
 `watcher-macos-containment` does not enter the dependency list of the
-Windows-path `five-minute-custom-watch-gate`. It does remain part of the
-product-level `usable-watcher` checkpoint and a dependency of `closure-gate`,
-because fail-closed macOS behavior is safe but does not satisfy the required
-macOS product outcome.
+Windows-path `five-minute-custom-watch-gate`. It remains part of the
+product-level `usable-watcher` checkpoint and a dependency of `closure-gate`.
+The operator-selected contract makes macOS support achievable without claiming
+arbitrary detached-descendant containment, but fail-closed behavior remains the
+only accepted macOS runtime state until #165 supplies proven implementation.
 
 ## Superseded assumptions
 
@@ -206,6 +250,17 @@ template framework or conformance, and detector-authored event identity. ADR
 registration, fixed routing, structured results, generic bounds and
 diagnostics, no workflow actions, durable acceptance before state commit,
 visible at-least-once duplicates, and the shared Application Client boundary.
+
+The operator's 2026-10-22 decision in issue #165 directs the workstream to
+supersede the prior cross-platform assumption that every supported Watcher host
+must contain arbitrary detached descendants. The selected direction preserves
+that guarantee on Windows and Linux and uses the narrower assigned-process-group
+contract for trusted non-detaching detectors on macOS. The owner's pending
+product-design change will record the decision as ADR 0054 in
+`docs/design/DECISIONS.md` and update `docs/design/watcher.md`. Until that
+change merges, the normative Watcher design still states the prior
+requirement, #162 remains fail-closed on macOS, and no macOS support claim is
+accepted.
 
 Issue #127 and unmerged PR #131 remain optional-example and implementation
 learning, not current product authority.
@@ -223,7 +278,3 @@ not unresolved Watcher core scope.
 
 - Whether an explicit v1 compatibility adapter is worth maintaining instead of
   documented re-registration.
-- Which macOS mechanism can prove abrupt Watcher-runtime-exit containment for
-  detector processes and detached descendants on supported Darwin architectures
-  without new privileged authority; if none can, which operator-reserved
-  privileged architecture, if any, should be selected?

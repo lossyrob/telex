@@ -7,10 +7,11 @@ and [v2 result](../../../docs/design/schemas/watcher-detector-result-v2.schema.j
 contracts. There is no shared module, manifest, pinning step, or required test
 framework to adopt.
 
-This pack can be exercised without a Watcher runtime. The existing spike runtime
-and [older examples](../detectors/README.md) speak v1 and cannot run these v2
-registrations. Schema and offline checks establish example behavior, not durable
-delivery or production operational acceptance.
+This pack can be exercised without a Watcher runtime. The current
+[Watcher runtime](../../../docs/watcher-runtime.md) uses the v2 protocol;
+the [older examples](../detectors/README.md) remain historical v1 inputs and
+require explicit adaptation for v2. Schema and offline checks establish example
+behavior, not durable delivery or production operational acceptance.
 
 ## Choose an observation
 

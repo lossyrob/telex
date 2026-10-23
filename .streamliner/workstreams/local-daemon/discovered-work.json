@@ -1768,6 +1768,50 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
       "terminalPath": "Distinguish a delayed inherited-writer lifecycle defect from an outer test budget or hosted-runner delay. Keep the semantic assertion; do not skip the test or accept a timeout. Justify any harness-bound change against production behavior, and fix a confirmed defect in a separate PR with exact-head Windows evidence."
+    },
+    {
+      "id": "local-daemon-windows-station-intent-restoration-counter",
+      "sourceNode": null,
+      "source": "lossyrob/telex#169, reported by Telex Watcher orchestration v2 from documentation-only PR #168",
+      "crossReference": "telex-watcher / watcher-macos-containment / PR #168",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/169",
+        "head": "c3a3cc217004772bf7f1a4336331a6d0725571bf",
+        "run": "https://github.com/lossyrob/telex/actions/runs/39858955547",
+        "job": "https://github.com/lossyrob/telex/actions/runs/39858955547/job/120104359002",
+        "test": "station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one",
+        "sourceLocation": "tests/daemon_process_sqlite.rs:5790",
+        "observedCounters": {
+          "restored": 0,
+          "refreshed_no_op": 1,
+          "failed": 1,
+          "observed_count": 2,
+          "scanned": 2,
+          "pass_seq": 3,
+          "deadline_reached": false
+        },
+        "attempts": "Issue body reports first full-target attempt 49/49, second 48/49 with this assertion, and no retained third result. This is the first CI run attempt, not the later bounded rerun.",
+        "artifact": {
+          "name": "windows-heap-diagnostics-c3a3cc217004772bf7f1a4336331a6d0725571bf",
+          "id": "12461047648",
+          "compressedBytes": 49288291,
+          "archiveSha256": "abcdb9209a098e4d0df96f9acaa00efd652fda76440287815eb2b8d2b35804be",
+          "contentsReported": "attempt-1/attempt-2 logs, telex.exe/telex.pdb and PageHeap EXE/PDB snapshot; full failed-job log retained separately by PR owner; no .dmp reported.",
+          "attribution": "Provider issue body and Watcher handoff, not independently downloaded or hash-verified by Local."
+        },
+        "classification": "Rust assertion/counter mismatch, not issue 166's native 0xc0000005 signature. No common cause or Watcher runtime-source regression established.",
+        "hypothesisOnly": "Automatic reconciliation may have restored the healthy member before the explicit pass, yielding refreshed_no_op instead of restored. Actual membership/intent state and timing must decide; the counters alone do not establish that diagnosis."
+      },
+      "description": "Investigate the intermittent Windows PageHeap station-intent multi-store reconciliation assertion while preserving the healthy-versus-unprovable producer distinction.",
+      "affectedOutcome": "Confidence in Local Daemon reconciliation semantics and required hosted process-test results. PR 168 is an observing docs-only consumer, not an attributed cause.",
+      "requiredness": "Candidate evidence for the existing Local Daemon hardening gate. Candidate intake is not accepted implementation scope, a new dependency, or gate acceptance.",
+      "sequencing": "Preserve first-run evidence. Keep the existing owner/observer's single bounded failed-job rerun after full first-run termination; record its outcome separately. Diagnose and fix any confirmed shared defect or synchronization error in a separately authorized PR, not in docs-only PR 168.",
+      "target": "hardening-gate (candidate scope); existing issue https://github.com/lossyrob/telex/issues/169",
+      "owner": "Local Daemon orchestrator owns discovery triage/routing. Existing PR 168 owner retains evidence and the reported bounded rerun plan. Implementation is unassigned; no owner launched.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication on 2026-10-22, submitted to Campaign for evidence-only reconciliation using the existing candidate convention. No gate or node transition authorized.",
+      "terminalPath": "At the existing hardening gate, explicitly adjudicate issue 169 as delivered work or an explicit scope disposition. Investigation must distinguish already-restored membership from failed restoration using actual membership/intent evidence. If a defect or synchronization issue is confirmed, an authorized separate PR must preserve or restore the intended assertion semantics and pass the full isolated hosted Windows target at an exact head. A green rerun alone is not a causal fix or grounds to silently mark the discovery complete."
     }
   ]
 }

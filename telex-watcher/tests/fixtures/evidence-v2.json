@@ -1,0 +1,75 @@
+{
+  "metadata": {
+    "schemaVersion": 2,
+    "watcher": {
+      "watchId": "fixture-watch",
+      "eventSequence": 1,
+      "eventId": "watcher-event-fixture",
+      "operationId": "watcher-operation-fixture",
+      "attemptId": "attempt-fixture",
+      "runtimeId": "runtime-fixture",
+      "logicalStoreId": "store-fixture",
+      "registrationRevision": 1,
+      "detectorSchemaVersion": 2
+    },
+    "detector": { "provider": "fixture" }
+  },
+  "runtime": {
+    "schemaVersion": 2,
+    "runtimeId": "runtime-fixture",
+    "pid": 123,
+    "startedAt": "2026-10-22T12:00:00.000Z",
+    "heartbeatAt": "2026-10-22T12:00:01.000Z",
+    "status": "running",
+    "productionReady": true,
+    "registryRevision": 1,
+    "reconciledRegistryRevision": 1,
+    "restartReconciled": true,
+    "senders": [],
+    "retention": { "rows": 1, "bytes": 1024, "warningRows": 100000, "warningBytes": 268435456, "warning": false },
+    "diagnostics": [],
+    "detach": []
+  },
+  "watch": {
+    "schemaVersion": 2,
+    "id": "fixture-watch",
+    "registrationRevision": 1,
+    "detectorSchemaVersion": 2,
+    "activatedAt": "2026-10-22T12:00:00.000Z",
+    "lifecycle": "active",
+    "eligibility": "reconciliation-pending",
+    "health": "degraded",
+    "blockedReason": null,
+    "lastAllocatedEventSequence": 1,
+    "lastCommittedEventSequence": 0,
+    "pending": {
+      "eventSequence": 1,
+      "eventId": "watcher-event-fixture",
+      "operationId": "watcher-operation-fixture",
+      "logicalStoreId": "store-fixture",
+      "status": "query-required",
+      "reconciliationBudget": { "remaining": 8, "used": 0, "deadlineMs": 123000 },
+      "sendBudget": { "remaining": 2, "used": 1, "deadlineMs": 123000 },
+      "lastEvidenceAt": "2026-10-22T12:00:01.000Z"
+    },
+    "lastAttemptId": "attempt-fixture",
+    "lastSuccessAt": null,
+    "lastEventAt": null,
+    "nextAttemptMs": 120000,
+    "latestAttemptDurationMs": 42,
+    "suppressedDueCount": 0,
+    "consecutiveFailures": 0,
+    "diagnosticCategory": "receipt-reconciliation-pending",
+    "recurrence": {
+      "lastRecurrenceHash": null,
+      "consecutiveIdenticalRecurrences": 0,
+      "firstIdenticalAt": null,
+      "lastIdenticalAt": null,
+      "lastIdenticalEventSequence": null
+    },
+    "senderReady": true,
+    "logicalStoreId": "store-fixture",
+    "observedLogicalStoreId": "store-fixture",
+    "retention": { "rows": 1, "bytes": 1024, "warningRows": 100000, "warningBytes": 268435456, "warning": false }
+  }
+}

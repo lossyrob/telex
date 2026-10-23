@@ -3,7 +3,10 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
-- **Status:** in progress; launched 2026-10-22 under Streamliner workflow v2
+- **Status:** In progress; PR #164 merged on 2026-10-23 as main
+  d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c; documentation correction,
+  post-merge validation, #162 field report, and final reconciliation remain
+  outstanding.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;

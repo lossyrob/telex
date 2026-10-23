@@ -66,12 +66,14 @@ The richer rationale and detector protocol sketch are preserved in
 
 - **In scope:** a per-user headless Watcher process; trusted local detector
   commands; minimal persistent registration and opaque detector state; bounded
-  scheduling, timeout, concurrency, retry, backoff, process cleanup, output, and
-  logs; fixed-target Telex event emission; receipt-gated state commit;
-  runtime-generated event sequence identity; pause/resume/update/delete and
-  attempt/state inspection surfaces; small optional examples; restart recovery;
-  local SQLite and networked Postgres operation; production packaging and
-  troubleshooting.
+  scheduling, timeout, concurrency, retry, backoff, host-specific process
+  cleanup: detached-descendant containment on Windows and Linux, and
+  assigned-group containment for conforming non-detaching detectors on macOS,
+  output, and logs; fixed-target Telex event emission; receipt-gated state
+  commit; runtime-generated event sequence identity; pause/resume/update/delete
+  and attempt/state inspection surfaces; small optional examples; restart
+  recovery; local SQLite and networked Postgres operation; production packaging
+  and troubleshooting.
 - **Out of scope:** general cron or workflow automation; arbitrary post-trigger
   actions; interpreting provider semantics in the Watcher runtime; running
   scripts inside the Telex local exchange or Operator Station; remote
@@ -204,6 +206,10 @@ private-client or mandatory-template fallback, and
   `telex-console`, or Operator Station process.
 - **Scripts are trusted same-user code:** registration is local-only in the first
   product; the Watcher does not claim to sandbox an agent-authored executable.
+- **macOS detector support is non-detaching:** Windows and Linux retain
+  detached-descendant containment. On macOS, every attempt-scoped local process
+  must remain in the Watcher-assigned group; escaped work is outside the cleanup
+  guarantee until a separately authorized architecture says otherwise.
 - **Detector output is structured, not exit-code folklore:** process exit status
   reports execution success/failure; a versioned JSON result reports
   `idle`, `event`, `terminal`, or `degraded`, plus opaque next state and optional
