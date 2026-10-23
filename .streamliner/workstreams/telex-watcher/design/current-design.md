@@ -237,7 +237,7 @@ that exact head in run `39854080691`, attempt 2, after one retry of two shared
 Windows failures tracked separately in #166 and #167. The operator merged
 PR #164 at exact product head `40a5c916d839dc81432738f122e03a00fd31628e` on
 2026-10-23 as main `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162
-remains open. Under the steward's post-merge disposition, #162 owned a bounded
+remained open. Under the steward's post-merge disposition, #162 owned a bounded
 factual documentation correction linking the shipped v2 health and
 event-metadata schemas, with no new tracker or ADR. PR #170 merged that
 documentation correction at exact head
@@ -258,18 +258,21 @@ strict request parser rejects. The steward approved a bounded transport repair
 under #162: detector stdin uses validated ordinary JSON with an equal strict
 reparse, while canonical hashing, admission, limits, schemas, and durable
 evidence remain unchanged. Closing PR #173 carries both repairs and says
-`Closes #162`. The steward approved its design at exact head
-`f1c25007ae63738b039c8eb8a9ac141238ac4472`. Independent source review,
-exact-head CI, Campaign merge, post-merge validation, the #162 field report, and
-final reconciliation remain outstanding. For `watcher-runtime-core`, Campaign
-runs the merge gate and merges at the exact cleared SHA. `minimal-example-pack`
-completed under issue #144 in PR #163. Campaign ran the first live merge-gate
-pilot and cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which
-the owner merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these
-launches grants release, tag, publish, fleet, CLI, packaging, I161-1, or
-Operator Station authority. The downstream `five-minute-custom-watch-gate` still
-owns operational proof that an agent can create, register, leave running, and
-diagnose a custom watch in five minutes.
+`Closes #162`. At exact head `f1c25007ae63738b039c8eb8a9ac141238ac4472`, the
+steward approved its design, independent source review found no blocking product
+findings, and all 18 CI checks passed after one failed-job retry. PR #173 merged
+at that head on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`,
+and issue #162 closed on merge. Post-merge validation, the #162 field report,
+and final reconciliation remain outstanding. For `watcher-runtime-core`,
+Campaign runs the merge gate and merges at the exact cleared SHA.
+`minimal-example-pack` completed under issue #144 in PR #163. Campaign ran the
+first live merge-gate pilot and cleared exact head
+`fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
+`5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
+release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
+authority. The downstream `five-minute-custom-watch-gate` still owns operational
+proof that an agent can create, register, leave running, and diagnose a custom
+watch in five minutes.
 
 `watcher-macos-containment-runtime` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It replaces

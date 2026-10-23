@@ -6,10 +6,11 @@
 - **Status:** In progress; PR #164 merged on 2026-10-23 as main
   d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c, and PR #170 merged the #162
   documentation correction on 2026-10-23 as main
-  2513ccdac136a148c5603fd4a0e08962fb9e0929; closing repair PR #173 is open, with
-  design approved at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472;
-  independent source review, exact-head CI, Campaign merge, post-merge
-  validation, #162 field report, and final reconciliation remain outstanding.
+  2513ccdac136a148c5603fd4a0e08962fb9e0929; closing repair PR #173 merged on
+  2026-10-23 as main 55cb6b116607bceccf3ce0b72550e2d849ca5426 at exact head
+  f1c25007ae63738b039c8eb8a9ac141238ac4472, and issue #162 closed on merge;
+  post-merge validation, #162 field report, and final reconciliation remain
+  outstanding.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
@@ -36,10 +37,12 @@ strict request parser rejects. The steward approved a bounded transport repair
 under #162: detector stdin uses validated ordinary JSON with an equal strict
 reparse, while canonical hashing, admission, limits, schemas, and durable
 evidence remain unchanged. Closing PR #173 carries both repairs and says
-`Closes #162`. The steward approved its design at exact head
-`f1c25007ae63738b039c8eb8a9ac141238ac4472`. Independent source review,
-exact-head CI, Campaign merge, post-merge validation, the #162 field report, and
-final reconciliation remain outstanding.
+`Closes #162`. At exact head `f1c25007ae63738b039c8eb8a9ac141238ac4472`, the
+steward approved its design, independent source review found no blocking product
+findings, and all 18 CI checks passed after one failed-job retry. PR #173 merged
+at that head on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`,
+and issue #162 closed on merge. Post-merge validation, the #162 field report,
+and final reconciliation remain outstanding.
 
 ## Outcome
 
