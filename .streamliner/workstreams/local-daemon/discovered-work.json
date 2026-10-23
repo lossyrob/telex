@@ -1756,7 +1756,17 @@
         "heads": "b6bdaf86d1f8016ee83c718ae62736f68f9ebc5d (run 39847163329, job 120063366590) and 40a5c916d839dc81432738f122e03a00fd31628e (run 39854080691, job 120087601235); both Build and test (windows-latest) failures.",
         "artifact": "windows-build-test-crash-40a5c916d839dc81432738f122e03a00fd31628e, ID 12459182497.",
         "details": "Root test credential_command_shell_exit_preserves_delayed_inherited_writer exceeded its outer wait and panicked with Elapsed(()) at tests/credential_command.rs:516; the target reported 10 passed and 1 failed. The cause is not attributed to production lifecycle logic, runner load, or the harness.",
-        "predecessor": "Intervening head d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the credential implementation or test."
+        "predecessor": "Intervening head d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the credential implementation or test.",
+        "successorOccurrences": [
+          {
+            "head": "d4dad4e73bf65cd3957a3a9560877865cb57058e",
+            "run": "39902791837",
+            "job": "120247905082",
+            "reportedSignature": "Windows delayed credential-writer Elapsed timeout; coordinator maps to issue 167",
+            "evidenceStatus": "Watcher coordinator report; new raw excerpt/artifact identity not independently inspected by Local",
+            "retryDisposition": "Existing PR owner owns exactly one bounded failed-job rerun at unchanged head; result separate and not a causal fix."
+          }
+        ]
       },
       "description": "Diagnose the intermittent Windows timeout in the delayed inherited credential-writer test.",
       "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
@@ -1812,6 +1822,112 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication on 2026-10-22, submitted to Campaign for evidence-only reconciliation using the existing candidate convention. No gate or node transition authorized.",
       "terminalPath": "At the existing hardening gate, explicitly adjudicate issue 169 as delivered work or an explicit scope disposition. Investigation must distinguish already-restored membership from failed restoration using actual membership/intent evidence. If a defect or synchronization issue is confirmed, an authorized separate PR must preserve or restore the intended assertion semantics and pass the full isolated hosted Windows target at an exact head. A green rerun alone is not a causal fix or grounds to silently mark the discovery complete."
+    },
+    {
+      "id": "local-daemon-ubuntu-installed-current-crash-reattach-timeout",
+      "sourceNode": null,
+      "source": "PR 168 head d4dad4e73bf65cd3957a3a9560877865cb57058e, CI run 39902791837 job 120247904851; Watcher coordinator report",
+      "crossReference": "telex-watcher / watcher-macos-containment / PR #168",
+      "evidence": {
+        "head": "d4dad4e73bf65cd3957a3a9560877865cb57058e",
+        "run": "39902791837",
+        "job": "120247904851",
+        "signature": "Ubuntu InstalledCurrent crash/reattach timeout",
+        "attribution": "Reported by existing coordinator; retained logs/artifacts remain with PR owner. Exact test/source line and artifact identity requested; no Local CI query or runtime diagnosis.",
+        "retainedEvidence": {
+          "id": "local-daemon-ubuntu-installed-current-crash-reattach-timeout",
+          "job": "120247904851",
+          "test": "installed_current_crash_restart_and_reattach_recovers_membership",
+          "source": "tests/installed_current_process.rs:519-527",
+          "reportedPanicLocation": "tests/installed_current_process.rs:525:5",
+          "observedResult": {
+            "ready": false,
+            "address": "ic:crash:station",
+            "failure": "Failed(Unavailable(\"timeout operation failed (diagnostic d1ecd88136a8cad0)\"))",
+            "compensation": [],
+            "validation_error": null,
+            "cancellation": null
+          },
+          "log": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b\\files\\ci-39902791837-ubuntu-job.log",
+            "bytes": 313240,
+            "sha256": "98bf5553d4f71ba996e6dfa85225850ab36ab3f1d79bfe461dd9f416719d8b7a",
+            "hashVerifiedByLocal": true,
+            "failureLinesRead": "2052-2058",
+            "targetSummary": "26 passed; 1 failed; 1 ignored"
+          },
+          "sourceContext": "Exact-head source first attaches, terminates the recorded daemon for crash induction, waits for disappearance, installs a 1500ms capability-publication delay, then calls reconcile_many with BoundedRepair retries=4. outcome.ready is asserted before the later new-PID/publication-marker/single-spawn checks.",
+          "qualification": "The retained failure proves a timeout-shaped public unavailability at the post-crash reconciliation assertion. It does not identify which internal wait expired, establish an ownership violation, or prove recurrence of historical repaired capability-publication findings. Later marker/spawn-count assertions were not reached; do not claim they passed."
+        },
+        "retainedEvidenceAuthority": "Local Daemon retained-evidence supplement 2026-10-23 (SHA-256 8c17bf7cfbc297a8272acf84221c3cb3115da6b7975dacb36d665c1bc9764133), approved by Campaign for evidence-only reconciliation; supplements and does not replace the original attributed intake evidence."
+      },
+      "description": "Classify the Ubuntu InstalledCurrent crash/reattach timeout before assigning a precise tracker or cause.",
+      "affectedOutcome": "Reliability of shared daemon restart/reattach proof and required Ubuntu CI; no Watcher source implication.",
+      "requiredness": "Provisional candidate evidence for the existing Local Daemon hardening gate, not accepted scope or a new dependency.",
+      "sequencing": "Keep original and bounded rerun evidence separate; use existing owner/observer only. Complete exact-signature mapping before tracker creation or implementation assignment.",
+      "target": "hardening-gate (candidate scope); exact GitHub tracker pending retained-evidence mapping",
+      "owner": "Local Daemon orchestrator owns intake/triage. Existing PR 168 owner retains evidence/rerun ownership. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23; Campaign evidence-only reconciliation, with no graph/node/gate transition.",
+      "terminalPath": "Exact test/phase evidence and explicit tracker disposition, then causal classification and separately authorized repair or explicit hardening disposition. A successful unchanged-head rerun is not a causal fix."
+    },
+    {
+      "id": "local-daemon-windows-station-restart-lockfileex-33",
+      "sourceNode": null,
+      "source": "PR 168 head d4dad4e73bf65cd3957a3a9560877865cb57058e, CI run 39902791837 job 120247904932; Watcher coordinator report",
+      "crossReference": "telex-watcher / watcher-macos-containment / PR #168",
+      "evidence": {
+        "head": "d4dad4e73bf65cd3957a3a9560877865cb57058e",
+        "run": "39902791837",
+        "job": "120247904932",
+        "signature": "Windows station-restart LockFileEx error 33 in heap diagnostics",
+        "attribution": "Reported by existing coordinator; raw test/operation/source-line and artifact identity requested. Not issue 166's AV or issue 169's restoration-counter assertion; no common cause inferred.",
+        "retainedEvidence": {
+          "id": "local-daemon-windows-station-restart-lockfileex-33",
+          "job": "120247904932",
+          "test": "station_intent_daemon_restart_restores_push_without_manual_resume",
+          "source": [
+            "tests/daemon_process_sqlite.rs:4652-4679",
+            "tests/daemon_process_sqlite.rs:4531-4542",
+            "tests/daemon_process_sqlite.rs:24:9"
+          ],
+          "observedOperation": "Side-station attach used to spawn the successor after graceful daemon drain.",
+          "observedStatus": {
+            "exitCode": 1,
+            "timedOut": false,
+            "stdout": "",
+            "stderrCategory": "Unsupported: opening SQLite store: cannot acquire store lock ... LockFileEx ... (os error 33)"
+          },
+          "observedStorePath": "C:\\telex-process-tx5548-18e10fcda1b83594-44-0\\db.sqlite",
+          "log": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b\\files\\ci-39902791837-heap-job.log",
+            "bytes": 57023,
+            "sha256": "ddf86c17b0826deacc0a464bb8182391809eb8dfa6d63a37594f0c7215fc848f",
+            "hashVerifiedByLocal": true,
+            "failureLinesRead": "559-580"
+          },
+          "artifact": {
+            "id": "12478779666",
+            "archiveSha256": "43089cc790050d10e92301bad8f3de2d1f4fb6924c8ed87a69ead0cde29dbb92",
+            "retainedDirectory": "C:\\Users\\robemanuele\\.copilot\\session-state\\d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b\\files\\ci-39902791837-attempt1-artifacts\\windows-heap-diagnostics-d4dad4e73bf65cd3957a3a9560877865cb57058e",
+            "attribution": "ID/archive digest supplied by existing owner through Watcher. Local confirmed the retained directory exists but did not download, extract or independently hash an archive."
+          },
+          "classificationRefinement": "This is an explicit SQLite store-lock refusal, not evidence that station-intent lock ownership failed. The captured child returned ordinary exit 1, not a native exception. The test reaches the post-drain successor-spawn helper and fails before the subsequent push-restored observation.",
+          "qualification": "The source's preceding wait_until_not_running assertion is not independently certified kernel-process or store-lock release proof. The log does not identify which process held the SQLite lock, establish that the lock should have been free, or justify retrying/stealing/removing it. No common cause with issue 166 or 169 is established."
+        },
+        "retainedEvidenceAuthority": "Local Daemon retained-evidence supplement 2026-10-23 (SHA-256 8c17bf7cfbc297a8272acf84221c3cb3115da6b7975dacb36d665c1bc9764133), approved by Campaign for evidence-only reconciliation; supplements and does not replace the original attributed intake evidence."
+      },
+      "description": "Classify the distinct hosted Windows station-restart locking error without weakening owner-lock semantics.",
+      "affectedOutcome": "Reliability of shared station restart/locking proof and Windows diagnostics; no Watcher source implication.",
+      "requiredness": "Provisional candidate evidence for the existing Local Daemon hardening gate, not accepted scope or a new dependency.",
+      "sequencing": "Preserve first-run evidence and the existing owner's single bounded rerun; complete exact-signature mapping before tracker creation or implementation assignment.",
+      "target": "hardening-gate (candidate scope); exact GitHub tracker pending retained-evidence mapping",
+      "owner": "Local Daemon orchestrator owns intake/triage. Existing PR 168 owner retains evidence/rerun ownership. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23; Campaign evidence-only reconciliation, with no graph/node/gate transition.",
+      "terminalPath": "Exact failing test/operation evidence and explicit tracker disposition; causal classification and any separately authorized fix must preserve owner-private persistent-lock/fail-closed semantics and full hosted diagnostic coverage. Green rerun alone is not resolution."
     }
   ]
 }
