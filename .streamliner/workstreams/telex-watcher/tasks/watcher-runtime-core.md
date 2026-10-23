@@ -6,9 +6,10 @@
 - **Status:** In progress; PR #164 merged on 2026-10-23 as main
   d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c, and PR #170 merged the #162
   documentation correction on 2026-10-23 as main
-  2513ccdac136a148c5603fd4a0e08962fb9e0929; the bounded unsupported-v1 removal
-  repair, its exact-head review and CI, post-merge validation, #162 field
-  report, and final reconciliation remain outstanding.
+  2513ccdac136a148c5603fd4a0e08962fb9e0929; closing repair PR #173 is open, with
+  design approved at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472;
+  independent source review, exact-head CI, Campaign merge, post-merge
+  validation, #162 field report, and final reconciliation remain outstanding.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
@@ -28,8 +29,16 @@ admitted mutation. The steward approved a bounded runtime repair under #162:
 unsupported-row removal must preserve the opaque state, permanent identity,
 tombstone, and evidence; skip v2 hashing through an explicit schema-version
 branch; and audit that state hashes are not applicable. Strict v2
-canonicalization remains unchanged. PR #170 remains independently valid. The
-repair, exact-head review and CI, post-merge validation, #162 field report, and
+canonicalization remains unchanged. PR #170 remains independently valid.
+Post-merge validation also found that detector stdin encoding rewrites an
+admitted exponent-form number such as `1e20` into an integral token that the
+strict request parser rejects. The steward approved a bounded transport repair
+under #162: detector stdin uses validated ordinary JSON with an equal strict
+reparse, while canonical hashing, admission, limits, schemas, and durable
+evidence remain unchanged. Closing PR #173 carries both repairs and says
+`Closes #162`. The steward approved its design at exact head
+`f1c25007ae63738b039c8eb8a9ac141238ac4472`. Independent source review,
+exact-head CI, Campaign merge, post-merge validation, the #162 field report, and
 final reconciliation remain outstanding.
 
 ## Outcome
