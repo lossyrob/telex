@@ -1,4 +1,4 @@
-name: Isolated macOS group proof
+name: Isolated macOS census proof
 
 on:
   push:
@@ -7,14 +7,44 @@ on:
     paths:
       - tests/macos_group_proof.c
       - tests/macos_group_proof.py
+      - tests/macos_census_proof.py
       - .github/workflows/macos-group-proof.yml
 
 permissions:
   contents: read
 
 jobs:
+  compile-only:
+    name: Compile gate, no fixtures (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and parse without running probe binaries
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tests/macos_census_proof.py --compile-only "$RUNNER_TEMP/macos-census-compile"
+      - name: Preserve compile-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-census-compile-${{ matrix.arch }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-census-compile
+          if-no-files-found: error
+          retention-days: 30
   native-proof:
-    name: Bounded native evidence (${{ matrix.os }})
+    name: Bounded census evidence (${{ matrix.os }})
+    needs: compile-only
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
     strategy:
@@ -33,12 +63,12 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.arch }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python3 tests/macos_group_proof.py "$RUNNER_TEMP/macos-group-proof-evidence"
+          python3 tests/macos_census_proof.py --execute "$RUNNER_TEMP/macos-census-proof-evidence"
       - name: Preserve exact-source native evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-group-proof-${{ matrix.arch }}-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/macos-group-proof-evidence
+          name: macos-census-proof-${{ matrix.arch }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-census-proof-evidence
           if-no-files-found: error
           retention-days: 30

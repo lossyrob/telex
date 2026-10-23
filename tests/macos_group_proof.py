@@ -78,7 +78,7 @@ def bounded_reap(process):
     process.wait(timeout=30)
 
 
-def run_probe(binary, output, name, arguments, boot, loss=None, timeout=65):
+def run_probe(binary, output, name, arguments, boot, loss=None, timeout=65, successor=False):
     cooperative = os.pipe() if loss else None
     process = None
     result = {"name": name, "argv": [str(binary), *arguments], "events_file": name + ".jsonl"}
@@ -126,11 +126,21 @@ def run_probe(binary, output, name, arguments, boot, loss=None, timeout=65):
             names = [e["event"] for e in stream.events]
             result["counterexample"] = any(name in names for name in (
                 "LIVE_IN_GROUP_AFTER_SEAL", "ABSENCE_PRECEDED_OWNED_LIVE_RESPONSE"))
+            if successor:
+                result["counterexample"] |= any(name in names for name in (
+                    "SUCCESSOR_TOKEN_OLD_ATTEMPT_RESPONSE", "UNSAFE_TOKEN_WITH_ACTIVE_FIXTURE",
+                    "UNSAFE_TOKEN_WITH_RUNNING_SUCCESSOR", "FAULT_INJECTION_PERMITTED_SEAL",
+                    "PRIOR_TOKEN_SURVIVED_REJECTED_RETRY", "PRIOR_TOKEN_SURVIVED_NEW_SIGNAL",
+                    "SEAL_WITHOUT_FRESH_COMPLETION_TOKEN", "NONZERO_AFTER_SEAL",
+                ))
+            result["inconclusive"] = successor and result["rc"] == 43
             result["outcomes"] = [e for e in stream.events if e["event"] in {
                 "candidate_outcome", "LIVE_IN_GROUP_AFTER_SEAL", "reuse_observed",
                 "reuse_INCONCLUSIVE", "ACTUAL_PID_PGID_REUSE", "anchored_no_reuse_sample",
                 "EPERM_not_success_source_gate_unresolved", "private_teardown_event_eof",
                 "ABSENCE_PRECEDED_OWNED_LIVE_RESPONSE",
+                "SUCCESSOR_TOKEN_OLD_ATTEMPT_RESPONSE", "completion_token_timeout_no_success",
+                "completion_token_positive", "decision_seams_rejected_not_native_fault_injection",
             }]
             if loss:
                 required = ("guard_loss_before_release_no_detector" if loss == "before"
@@ -141,9 +151,10 @@ def run_probe(binary, output, name, arguments, boot, loss=None, timeout=65):
                     raise RuntimeError("detector executed without release")
                 result["disposition"] = "no receipt; post-release remains unproven" if loss == "after" \
                     else "gate EOF prevented detector execution; no receipt"
-            elif result["rc"] not in (0, 42):
+            elif result["rc"] not in ((0, 42, 43) if successor else (0, 42)) and not (
+                    successor and result["counterexample"]):
                 raise RuntimeError(f"native helper failed with {result['rc']}")
-            if (result["rc"] == 42) != result["counterexample"]:
+            if not successor and (result["rc"] == 42) != result["counterexample"]:
                 raise RuntimeError("counterexample exit code/evidence mismatch")
             return result
         finally:
