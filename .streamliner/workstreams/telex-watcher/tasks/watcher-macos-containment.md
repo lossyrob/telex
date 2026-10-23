@@ -19,8 +19,9 @@ Status: in progress.
 
 Phase 1 investigation is complete. On 2026-10-22 the operator selected
 `Revise macOS to the non-detaching detector contract` in issue #165. The
-runtime-core merge prerequisite is satisfied; issue #162 may remain open for
-its independent documentation correction, post-merge validation, and field
+runtime-core merge prerequisite is satisfied; PR #170 merged #162's independent
+documentation correction as main 2513ccda, and issue #162 may remain open for
+its bounded unsupported-v1 removal repair, post-merge validation, and field
 report. On 2026-10-23 the design steward approved the candidate Phase 2 proof
 shape, subject to corrections, and kept product implementation on hold. Product
 implementation remains held until PR #168 merges the clarified ADR 0054 and

@@ -208,15 +208,15 @@ anchor and nonzero-signal authority until a separately justified completion
 transition, then seal, exactly reap, and observe under the existing proof rules;
 if no ordinary-user completion condition can be proved, return decision-needed.
 After those gates are accepted, implementation may proceed under #165 without
-waiting for #162's separate documentation correction or field-report closure.
-The fail-closed macOS behavior from #162 remains authoritative until the
-complete #165 implementation lands. An ordinary per-attempt private guard
-remains within Watcher runtime authority only when it is unprivileged,
-ephemeral, shipped with the runtime, controlled through inherited private
-handles, exposes no reusable service endpoint, and exits after identity-matched
-cleanup evidence. Any privileged, entitled, installed, persistent, shared,
-launchd-managed, brokered, or VM-backed architecture returns to the operator.
-The `watcher-macos-containment` merge gate runs in shadow mode, so the operator
+waiting for #162's runtime repair, field report, or closure. The fail-closed
+macOS behavior from #162 remains authoritative until the complete #165
+implementation lands. An ordinary per-attempt private guard remains within
+Watcher runtime authority only when it is unprivileged, ephemeral, shipped with
+the runtime, controlled through inherited private handles, exposes no reusable
+service endpoint, and exits after identity-matched cleanup evidence. Any
+privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
+or VM-backed architecture returns to the operator. The
+`watcher-macos-containment` merge gate runs in shadow mode, so the operator
 merges. This host-scope decision and follow-up launch do not clear #162's
 accepted store-binding lifecycle/recovery blocker or premature `productionReady`
 blocker. At exact head `40a5c916d839dc81432738f122e03a00fd31628e`, independent
@@ -231,21 +231,31 @@ that exact head in run `39854080691`, attempt 2, after one retry of two shared
 Windows failures tracked separately in #166 and #167. The operator merged
 PR #164 at exact product head `40a5c916d839dc81432738f122e03a00fd31628e` on
 2026-10-23 as main `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162
-remains open. Under the steward's post-merge disposition, #162 owns a bounded
+remains open. Under the steward's post-merge disposition, #162 owned a bounded
 factual documentation correction linking the shipped v2 health and
-event-metadata schemas, with no new tracker or ADR. Main-branch post-merge
-validation, the #162 field report, and final canonical reconciliation also
-remain outstanding. The field report must be posted as a new comment on
-issue #162, and that comment's permalink becomes the durable disposition link.
-The `watcher-runtime-core` merge gate also runs in shadow mode, so the operator
-merges. `minimal-example-pack` completed under issue #144 in PR #163. Campaign
-ran the first live merge-gate pilot and cleared exact head
-`fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
-`5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
-release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
-authority. The downstream `five-minute-custom-watch-gate` still owns operational
-proof that an agent can create, register, leave running, and diagnose a custom
-watch in five minutes.
+event-metadata schemas, with no new tracker or ADR. PR #170 merged that
+documentation correction at exact head
+`6760bb2235584e744047ec3953395a4e804dba2b` on 2026-10-23 as main
+`2513ccdac136a148c5603fd4a0e08962fb9e0929`. The field report must be posted as a
+new comment on issue #162, and that comment's permalink becomes the durable
+disposition link. Additional post-merge public-management validation found that
+removal of an isolated unsupported v1 row can fail when its unchanged opaque
+state is not v2-canonicalizable, because the audit path applies v2 state hashing
+to every admitted mutation. The steward approved a bounded runtime repair
+under #162: unsupported-row removal must preserve the opaque state, permanent
+identity, tombstone, and evidence; skip v2 hashing through an explicit
+schema-version branch; and audit that state hashes are not applicable. Strict v2
+canonicalization remains unchanged. PR #170 remains independently valid. The
+repair, exact-head review and CI, post-merge validation, #162 field report, and
+final reconciliation remain outstanding. The `watcher-runtime-core` merge gate
+also runs in shadow mode, so the operator merges. `minimal-example-pack`
+completed under issue #144 in PR #163. Campaign ran the first live merge-gate
+pilot and cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which
+the owner merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these
+launches grants release, tag, publish, fleet, CLI, packaging, I161-1, or
+Operator Station authority. The downstream `five-minute-custom-watch-gate` still
+owns operational proof that an agent can create, register, leave running, and
+diagnose a custom watch in five minutes.
 
 `watcher-macos-containment` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It remains part of the
