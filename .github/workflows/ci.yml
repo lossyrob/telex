@@ -7,6 +7,61 @@ on:
       - main
 
 jobs:
+  cooperative-partial-page:
+    name: Cooperative partial-page boundary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify source and isolate test state
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) {
+            throw "Expected source head $env:EXPECTED_HEAD, got $actual"
+          }
+          Write-Output "Exact source head: $actual"
+          $root = Join-Path $env:RUNNER_TEMP ("telex-partial-page-" + [guid]::NewGuid())
+          New-Item -ItemType Directory -Path $root | Out-Null
+          @(
+            "TELEX_HOME=$(Join-Path $root 'home')"
+            "TELEX_DB=$(Join-Path $root 'messages.db')"
+            "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Test station-intent boundaries
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --lib station_intent::tests::
+
+      - name: Repeat the real partial-page regression
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            Write-Output "Partial-page attempt $attempt"
+            cargo test --no-default-features --features sqlite --lib station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page -- --exact
+            if ($LASTEXITCODE -ne 0) {
+              throw "Partial-page attempt $attempt failed"
+            }
+          }
+
   build-test:
     name: Build and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

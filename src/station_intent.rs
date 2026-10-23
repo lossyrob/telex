@@ -1264,6 +1264,9 @@ where
 
 /// Run blocking work with a cooperative cancellation signal for work that can mutate durable state.
 ///
+/// Admission and completion share `deadline + grace`. A cooperative partial page is returned
+/// only if admission and successful worker completion both fit inside that window.
+///
 /// On timeout the caller stops waiting and signals the worker before returning. The worker must
 /// check the signal immediately before every durable commit. A signal prevents new work where it
 /// is observed, but cannot interrupt a syscall that already entered rename or unlink; a timed-out
@@ -1277,29 +1280,44 @@ where
     F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
     T: Send + 'static,
 {
+    run_blocking_cancellable_in_slot(filesystem_phase_slot(), deadline, grace, work).await
+}
+
+fn filesystem_phase_slot() -> Arc<tokio::sync::Semaphore> {
     // Discovery and GC can block on a filesystem indefinitely. Permit at most one such phase for
     // the process, so a wedged scope cannot consume Tokio's shared blocking capacity on every
     // heartbeat and starve unrelated backend work.
     static FILESYSTEM_PHASE_SLOT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-    let slot = FILESYSTEM_PHASE_SLOT
+    FILESYSTEM_PHASE_SLOT
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
-        .clone();
+        .clone()
+}
+
+async fn run_blocking_cancellable_in_slot<T, F>(
+    slot: Arc<tokio::sync::Semaphore>,
+    deadline: PassDeadline,
+    grace: Duration,
+    work: F,
+) -> BoundedPhase<T>
+where
+    F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
+    T: Send + 'static,
+{
     // Permit acquisition and cooperative completion share one absolute
     // `deadline + grace` boundary. A spent cooperative deadline must still be
     // able to acquire an immediately available slot and return its mandatory
     // partial page, but contention must not receive one grace window for the
     // slot and a second grace window for the work.
-    let completion_deadline = deadline.0.map(|deadline| deadline + grace);
+    let completion_deadline = deadline
+        .0
+        .map(|deadline| tokio::time::Instant::from_std(deadline + grace));
     let permit = match completion_deadline {
-        Some(completion_deadline) => match tokio::time::timeout(
-            completion_deadline.saturating_duration_since(Instant::now()),
-            slot.acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
-        },
+        Some(completion_deadline) => {
+            match tokio::time::timeout_at(completion_deadline, slot.acquire_owned()).await {
+                Ok(Ok(permit)) => permit,
+                Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
+            }
+        }
         None => match slot.acquire_owned().await {
             Ok(permit) => permit,
             Err(_) => return BoundedPhase::Overran,
@@ -1312,19 +1330,16 @@ where
         work(worker_cancelled)
     });
     match completion_deadline {
-        Some(completion_deadline) => match tokio::time::timeout(
-            completion_deadline.saturating_duration_since(Instant::now()),
-            handle,
-        )
-        .await
-        {
-            Ok(Ok(value)) => BoundedPhase::Completed(value),
-            Ok(Err(_)) => BoundedPhase::Overran,
-            Err(_) => {
-                cancelled.store(true, Ordering::Release);
-                BoundedPhase::Overran
+        Some(completion_deadline) => {
+            match tokio::time::timeout_at(completion_deadline, handle).await {
+                Ok(Ok(value)) => BoundedPhase::Completed(value),
+                Ok(Err(_)) => BoundedPhase::Overran,
+                Err(_) => {
+                    cancelled.store(true, Ordering::Release);
+                    BoundedPhase::Overran
+                }
             }
-        },
+        }
         None => match handle.await {
             Ok(value) => BoundedPhase::Completed(value),
             Err(_) => BoundedPhase::Overran,
@@ -2460,10 +2475,26 @@ impl IntentStore {
         scope: Option<String>,
         deadline: PassDeadline,
     ) -> BoundedPhase<Result<ScanPage>> {
+        self.scan_bounded_in_slot(budget, scope, deadline, filesystem_phase_slot())
+            .await
+    }
+
+    async fn scan_bounded_in_slot(
+        &self,
+        budget: usize,
+        scope: Option<String>,
+        deadline: PassDeadline,
+        slot: Arc<tokio::sync::Semaphore>,
+    ) -> BoundedPhase<Result<ScanPage>> {
         let store = self.clone();
-        run_blocking_cancellable_within(deadline, RECONCILE_BLOCKING_GRACE, move |cancelled| {
-            store.scan_bounded_cancellable(budget, scope.as_deref(), deadline, Some(&cancelled))
-        })
+        run_blocking_cancellable_in_slot(
+            slot,
+            deadline,
+            RECONCILE_BLOCKING_GRACE,
+            move |cancelled| {
+                store.scan_bounded_cancellable(budget, scope.as_deref(), deadline, Some(&cancelled))
+            },
+        )
         .await
     }
 
@@ -3825,10 +3856,11 @@ mod tests {
             .expect("seed");
 
         let page = store
-            .scan_bounded_within(
+            .scan_bounded_in_slot(
                 64,
                 None,
                 PassDeadline::at(Instant::now() + RECONCILE_SCAN_BOUND),
+                Arc::new(tokio::sync::Semaphore::new(1)),
             )
             .await
             .completed()
@@ -3856,14 +3888,23 @@ mod tests {
                 .expect("seed");
         }
 
-        // Already spent, so discovery stops after its mandatory first read — the worst case for
-        // the outer wait, which has only the grace period to work with.
+        // Establish uncontended admission and timely completion independently of other tests and
+        // OS scheduling. Tokio does not auto-advance its paused clock while spawn_blocking runs;
+        // the scan's std::time deadline still expires and enforces the mandatory partial page.
+        tokio::time::pause();
+        let completion_clock = tokio::time::Instant::now();
         let page = store
-            .scan_bounded_within(64, None, spent_deadline())
+            .scan_bounded_in_slot(
+                64,
+                None,
+                PassDeadline::at(completion_clock.into_std()),
+                Arc::new(tokio::sync::Semaphore::new(1)),
+            )
             .await
             .completed()
             .expect("a cooperative stop must be returned to the caller, not abandoned")
             .expect("scan");
+        assert_eq!(tokio::time::Instant::now(), completion_clock);
         assert!(
             page.discovery_truncated,
             "this asserts nothing unless discovery actually stopped short"
@@ -3874,6 +3915,161 @@ mod tests {
             "the mandatory first read is the progress a spent pass still owes the scope"
         );
         let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellable_phase_admission_timeout_never_starts_a_worker() {
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slot.clone().acquire_owned().await.expect("hold slot");
+        let started = Arc::new(AtomicBool::new(false));
+        let worker_started = started.clone();
+        let phase = run_blocking_cancellable_in_slot(
+            slot.clone(),
+            spent_deadline(),
+            RECONCILE_BLOCKING_GRACE,
+            move |_| worker_started.store(true, Ordering::Release),
+        )
+        .await;
+
+        assert!(phase.overran(), "an unavailable slot cannot yield a page");
+        assert!(!started.load(Ordering::Acquire), "no worker was admitted");
+        assert_eq!(
+            slot.available_permits(),
+            0,
+            "the holder still owns the slot"
+        );
+        drop(permit);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellable_phase_admission_and_worker_share_one_completion_deadline() {
+        use std::future::{poll_fn, Future};
+        use std::sync::mpsc;
+        use std::task::Poll;
+
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slot.clone().acquire_owned().await.expect("hold slot");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let committed = Arc::new(AtomicBool::new(false));
+        let worker_committed = committed.clone();
+        let clock_origin = tokio::time::Instant::now();
+        let deadline = PassDeadline::at(clock_origin.into_std());
+        let completion_deadline = clock_origin + RECONCILE_BLOCKING_GRACE;
+        let phase = run_blocking_cancellable_in_slot(
+            slot.clone(),
+            deadline,
+            RECONCILE_BLOCKING_GRACE,
+            move |cancelled| {
+                started_tx
+                    .send(cancelled.clone())
+                    .expect("report worker entry");
+                let _ = release_rx.recv();
+                if !cancelled.load(Ordering::Acquire) {
+                    worker_committed.store(true, Ordering::Release);
+                }
+            },
+        );
+        tokio::pin!(phase);
+
+        poll_fn(|cx| {
+            assert!(phase.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert!(matches!(
+            started_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        tokio::time::advance(RECONCILE_BLOCKING_GRACE / 2).await;
+        drop(permit);
+        poll_fn(|cx| {
+            assert!(phase.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        // Synchronize with the blocking thread without allowing the paused clock to auto-advance.
+        let cancelled = started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("admitted worker started");
+        tokio::time::advance(RECONCILE_BLOCKING_GRACE / 2 + Duration::from_millis(1)).await;
+        poll_fn(|cx| {
+            assert!(
+                matches!(phase.as_mut().poll(cx), Poll::Ready(BoundedPhase::Overran)),
+                "the original completion deadline must end the wait for the admitted worker"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        assert!(
+            tokio::time::Instant::now() <= completion_deadline + Duration::from_millis(1),
+            "admission must not renew the worker's grace"
+        );
+        assert!(
+            cancelled.load(Ordering::Acquire),
+            "timeout signals cancellation"
+        );
+        assert_eq!(slot.available_permits(), 0, "the worker retains its permit");
+
+        let next_started = Arc::new(AtomicBool::new(false));
+        let next_worker_started = next_started.clone();
+        assert!(
+            run_blocking_cancellable_in_slot(
+                slot.clone(),
+                deadline,
+                RECONCILE_BLOCKING_GRACE,
+                move |_| next_worker_started.store(true, Ordering::Release),
+            )
+            .await
+            .overran(),
+            "timing out must not admit another worker while the first is still alive"
+        );
+        assert!(!next_started.load(Ordering::Acquire));
+        drop(release_tx);
+        let _permit = slot
+            .acquire_owned()
+            .await
+            .expect("worker released slot on exit");
+        assert!(
+            !committed.load(Ordering::Acquire),
+            "the worker observes cancellation before a new commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellable_phase_unbounded_completion_returns_the_worker_result() {
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        assert_eq!(
+            run_blocking_cancellable_in_slot(
+                slot.clone(),
+                PassDeadline::unbounded(),
+                Duration::ZERO,
+                |cancelled| {
+                    assert!(!cancelled.load(Ordering::Acquire));
+                    42
+                },
+            )
+            .await
+            .completed(),
+            Some(42)
+        );
+        assert_eq!(slot.available_permits(), 1);
+        assert!(Arc::ptr_eq(
+            &filesystem_phase_slot(),
+            &filesystem_phase_slot()
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellable_phase_worker_panic_is_not_a_partial_page() {
+        assert!(run_blocking_cancellable_in_slot(
+            Arc::new(tokio::sync::Semaphore::new(1)),
+            PassDeadline::unbounded(),
+            Duration::ZERO,
+            |_| panic!("injected worker failure"),
+        )
+        .await
+        .overran());
     }
 
     #[test]
