@@ -1,0 +1,44 @@
+name: Isolated macOS group proof
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-containment-proof
+    paths:
+      - tests/macos_group_proof.c
+      - tests/macos_group_proof.py
+      - .github/workflows/macos-group-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  native-proof:
+    name: Bounded native evidence (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated proof, not product acceptance
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tests/macos_group_proof.py "$RUNNER_TEMP/macos-group-proof-evidence"
+      - name: Preserve exact-source native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-group-proof-${{ matrix.arch }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-group-proof-evidence
+          if-no-files-found: error
+          retention-days: 30
