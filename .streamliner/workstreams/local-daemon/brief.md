@@ -121,6 +121,19 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 ## Current State
 
+On 2026-10-23 Campaign promoted the repeated Windows partial-page candidate
+into active `cooperative-partial-page-repair`, tracked by
+[#181](https://github.com/lossyrob/telex/issues/181). One separate Local owner
+is authorized with `gpt-6.1-sol` / high reasoning / default context tier;
+supported preparation and launch are pending canonical node/task landing.
+The repair blocks delivery of Watcher CLI #179 / PR #180, whose existing
+owner and Watcher-only scope remain intact. Diagnosis precedes correction;
+the repair PR must close #181 and earn exact-head hosted validation and
+Campaign merge authorization. The workstation freeze remains in force.
+The two marker candidates, issue #153, and hardening/closure decisions are
+unchanged. This is bounded repair authority, not product-design acceptance
+or a merge authorization.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
