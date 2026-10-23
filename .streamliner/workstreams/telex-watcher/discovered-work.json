@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T16:45:29.082Z",
+  "updatedAt": "2026-10-23T18:44:04.269Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -499,6 +499,13 @@
           "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6369762802",
           "createdAt": "2026-10-23T16:33:37Z",
           "details": "Design steward approval of the 25G83 InstallAssistant.pkg provenance basis for data-only extraction, subject to binding conditions. The original failed receipt remains unchanged and must not be relabeled as passing; a separate receipt must record the corrected comparison: catalog Digest equals the Apple-signed XAR TOC checksum and SHA-1 of the compressed TOC, not the whole-file SHA-1. The reported legacy SHA-1 mismatch is therefore not a real conflict for this catalog entry; no general claim about Apple's Digest field is made. The signed provenance chain covers the selected SharedSupport.dmg member; the unsigned HTTPS-origin integrity list is corroborating only. Execute, mount-and-run, and install nothing. Before semantic use, require the inner asset's own 25G83 build metadata, record the extraction path and each nested container's hash, and require the selected arm64e dyld cache to match the exact full native ARM libsystem_kernel and libsystem_c LC_UUIDs recorded in runs 39909079250 and 39979771410. If a check fails or a nested container lacks Apple-signed or catalog-bound integrity, stop and return decision-needed; do not substitute another cache. No revocation, Gatekeeper/notarization, platform-trust, or unconditional inner-OS identity claim is made. The offline fork/vfork stub-slot resolution, bounded Watcher-root wrapper check, and kernel analysis remain required. Final implementation authorization remains HOLD. No new download or native run is needed or authorized by this verdict."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6372221591",
+          "createdAt": "2026-10-23T18:43:13Z",
+          "details": "Design steward approval of the bounded offline ARM import-target component in owner report 6370671025. Run 39992225321 at head e946b9f5779d3a291211de5e7f47017cda3a3b5c completed on attempt 1 with one successful 455-second job and no retry. Artifact 12518966337 is 122,340 bytes, SHA-256 587fcfd82d774bf4e70228b64f5590f394e44e3f129aee244071cda2b60c2712. In the authenticated cache's exact-UUID libsystem_kernel c6a4a4cb92e63bafaae0e8306259209a, the retained fork/vfork stub slot resolves offline to ___fork; its bounded 76-byte body contains mov x16, #2 followed by svc #0x80. This closes only the offline slot-target collection gap. No live pointer or PAC-authenticated slot was observed: the v5 authenticated bit is format metadata only, and 0x18bb9b8ec is only an old-slide projection. No reachable call graph is established; the error-path helper and fork/vfork wrappers and their effects remain open. Owner work remains: bounded Watcher-root wrapper analysis, kernel machine-code synthesis, corrected implementation plan, release-admission policy, and final algorithm/evidence decision. Existing callback scope is unchanged, with no exhaustive atfork/runtime-callback requirement; a relevant system callback that changes group membership returns decision-needed. The earlier native runs' missing kern.uuid distinction is unchanged. No new host-image observation, running-kernel memory hash, native race matrix, or product capability is established. The original failed receipt is not relabeled. No further capture or rerun is required for this component. Final implementation authorization remains HOLD.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39992225321"
         }
       ]
     },
