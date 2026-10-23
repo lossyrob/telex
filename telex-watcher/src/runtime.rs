@@ -709,7 +709,7 @@ impl Runtime {
                         "watch not found",
                     );
                 };
-                let Some(operation) = watch.pending_operation_id else {
+                let Some(operation) = watch.pending_operation_id.as_deref() else {
                     return self.refuse(
                         Some(&id),
                         "reconcile-now",
@@ -730,9 +730,9 @@ impl Runtime {
                         "selected backend client is unavailable",
                     );
                 }
-                self.recover(&operation, true).await?;
+                self.recover(operation, true).await?;
                 Ok(Response::Mutation(
-                    lock(&self.registry)?.recovery_result(&id)?,
+                    lock(&self.registry)?.recovery_result(&watch)?,
                 ))
             }
             Command::Health => {
