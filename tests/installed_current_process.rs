@@ -32,12 +32,14 @@ mod isolation;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
 
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
+#[cfg(windows)]
+use std::process::Command;
 #[cfg(windows)]
 use std::time::Instant;
 use telex::application_client::{
