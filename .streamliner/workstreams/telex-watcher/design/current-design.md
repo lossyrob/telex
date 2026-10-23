@@ -186,19 +186,28 @@ and every local descendant must remain in the Watcher-assigned attempt process
 group; work that escapes that group is outside the cleanup guarantee. This is a
 trusted behavioral precondition, not a sandbox claim, and it does not weaken the
 existing Windows or Linux guarantees. #162 remains fail-closed on macOS and must
-not claim macOS support. Phase 2 implementation still lands only after #162
-merges and only after native proof of durable group ownership, cleanup, and
-restart recovery. An ordinary per-attempt private guard remains within Watcher
-runtime authority only when it is unprivileged, ephemeral, shipped with the
-runtime, controlled through inherited private handles, exposes no reusable
-service endpoint, and exits after identity-matched cleanup evidence. Any
-privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
-or VM-backed architecture returns to the operator. The
-`watcher-macos-containment` merge gate runs in shadow mode, so the operator
-merges. This host-scope decision and follow-up launch do not clear #162's
-accepted store-binding lifecycle/recovery blocker or premature `productionReady`
-blocker. At exact head `40a5c916d839dc81432738f122e03a00fd31628e`, independent
-source review `5620648207` and design inspection accepted the B2 store-binding
+not claim macOS support. The `watcher-runtime-core` merge sequencing condition
+for Phase 2 was satisfied when PR #164 merged as
+`d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162 does not need to close
+before #165 implementation. Phase 2 remains held until PR #168 merges ADR 0054
+and the normative non-detaching detector contract and the owner presents an
+implementation plan that identifies a PID/PGID-reuse-safe anchor, race-safe
+group-empty proof, guard-loss behavior, restart evidence, and receipt scope
+within the accepted ordinary-user runtime boundary. After those gates are
+accepted, implementation may proceed under #165 without waiting for #162's
+separate documentation correction or field-report closure. The fail-closed macOS
+behavior from #162 remains authoritative until the complete #165 implementation
+lands. An ordinary per-attempt private guard remains within Watcher runtime
+authority only when it is unprivileged, ephemeral, shipped with the runtime,
+controlled through inherited private handles, exposes no reusable service
+endpoint, and exits after identity-matched cleanup evidence. Any privileged,
+entitled, installed, persistent, shared, launchd-managed, brokered, or VM-backed
+architecture returns to the operator. The `watcher-macos-containment` merge gate
+runs in shadow mode, so the operator merges. This host-scope decision and
+follow-up launch do not clear #162's accepted store-binding lifecycle/recovery
+blocker or premature `productionReady` blocker. At exact head
+`40a5c916d839dc81432738f122e03a00fd31628e`, independent source review
+`5620648207` and design inspection accepted the B2 store-binding
 lifecycle/recovery repair and B3 `productionReady` reconciliation fence at
 predecessor `d17100bfce6b17ccd03dff01fc66e3d8455cd812`. Independent final-delta
 review `5620856808` then verified that the successor changed only two
@@ -206,13 +215,18 @@ documentation files and that all product source, tests, schemas, dependencies,
 and workflow remained byte-identical; exact-head design inspection accepted
 those documentation corrections at `40a5c916`. All 18 required CI jobs passed at
 that exact head in run `39854080691`, attempt 2, after one retry of two shared
-Windows failures tracked separately in #166 and #167. PR #164 is open,
-non-draft, mergeable-clean, and awaits the operator's merge. Main-branch CI,
-post-merge validation, and the issue field report remain outstanding. Any
-product-head movement invalidates this readiness. The `watcher-runtime-core`
-merge gate also runs in shadow mode, so the operator merges.
-`minimal-example-pack` completed under issue #144 in PR #163. Campaign ran the
-first live merge-gate pilot and cleared exact head
+Windows failures tracked separately in #166 and #167. The operator merged
+PR #164 at exact product head `40a5c916d839dc81432738f122e03a00fd31628e` on
+2026-10-23 as main `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162
+remains open. Under the steward's post-merge disposition, #162 owns a bounded
+factual documentation correction linking the shipped v2 health and
+event-metadata schemas, with no new tracker or ADR. Main-branch post-merge
+validation, the #162 field report, and final canonical reconciliation also
+remain outstanding. The field report must be posted as a new comment on
+issue #162, and that comment's permalink becomes the durable disposition link.
+The `watcher-runtime-core` merge gate also runs in shadow mode, so the operator
+merges. `minimal-example-pack` completed under issue #144 in PR #163. Campaign
+ran the first live merge-gate pilot and cleared exact head
 `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
 `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches grants
 release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station

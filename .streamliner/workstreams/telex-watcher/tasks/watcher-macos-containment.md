@@ -4,9 +4,10 @@
 
 Complete the operator-selected macOS Watcher contract for trusted
 non-detaching detectors. Preserve the native ARM64 and x64 Phase 1 evidence,
-reconcile the canonical product design, then, only after
-`watcher-runtime-core` merges, implement and prove ordinary-user containment of
-the Watcher-assigned attempt process group.
+reconcile and merge the canonical product design, then implement and prove
+ordinary-user containment of the Watcher-assigned attempt process group. The
+runtime-core sequencing prerequisite was satisfied by PR #164 merge
+`d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`.
 
 Windows and Linux retain their existing detached-descendant guarantees. The
 Windows-path five-minute gate remains independent. #162 continues to fail
@@ -17,10 +18,14 @@ closed on macOS until this task lands.
 Status: in progress.
 
 Phase 1 investigation is complete. On 2026-10-22 the operator selected
-`Revise macOS to the non-detaching detector contract` in issue #165. Canonical
-design reconciliation may proceed now. Phase 2 implementation remains blocked
-until `watcher-runtime-core` merges. If design reconciliation completes first,
-record the node as blocked with focus attention until that merge.
+`Revise macOS to the non-detaching detector contract` in issue #165. The
+runtime-core merge prerequisite is satisfied; issue #162 may remain open for
+its independent documentation correction, post-merge validation, and field
+report. Phase 2 implementation remains held until PR #168 merges ADR 0054 and
+the normative Watcher contract and an implementation plan satisfying the
+identity, anchor, cleanup-proof, guard-failure, restart, and validation
+obligations below is accepted. The node remains in progress with focus
+attention; it is not blocked on #162 closure.
 
 The owner session is `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`, worktree
 `lossyrob-jubilant-bassoon`, branch `lossyrob-macos-watcher-containment`, base

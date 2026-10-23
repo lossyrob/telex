@@ -3,8 +3,10 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-runtime-core`
 - **Type:** implementation
-- **Status:** In progress; PR #164 is ready for operator merge at exact head
-  40a5c916d839dc81432738f122e03a00fd31628e; not merged.
+- **Status:** In progress; PR #164 merged on 2026-10-23 as main
+  d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c; documentation correction,
+  post-merge validation, #162 field report, and final reconciliation remain
+  outstanding.
 - **Attention:** focus
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **External dependencies:** completed Application Client `client-conformance`;
