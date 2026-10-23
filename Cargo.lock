@@ -2502,6 +2502,7 @@ dependencies = [
  "clap",
  "dirs",
  "fs2",
+ "futures-util",
  "libc",
  "rusqlite",
  "serde",

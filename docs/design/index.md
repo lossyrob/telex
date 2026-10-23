@@ -42,6 +42,10 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state)
   and minimal v2 authoring/identity in
   [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
+  The local management boundary is
+  [ADR 0055](DECISIONS.md#0055---watcher-cli-administers-the-registry-owner-through-a-same-user-local-endpoint);
+  command and diagnostics usage is in
+  [Watcher runtime and administration](../watcher-runtime.md).
 - **[operator-station.md](operator-station.md)** — the **normative Operator Station
   application contract**: direct human attendance of explicitly configured
   addresses, durable ingest before acknowledgment, feed/history/thread behavior,

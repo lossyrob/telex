@@ -109,6 +109,12 @@ impl Runtime {
         &self.id
     }
 
+    /// Keep the existing registry lock alive until a host has removed its
+    /// management endpoint. The guard exposes no registry access or mutation.
+    pub fn retain_registry_ownership(&self) -> impl Send + 'static {
+        self.registry.clone()
+    }
+
     /// Owns scheduling and administration until Shutdown or a registry failure.
     pub async fn run(mut self) -> Result<()> {
         let previous = lock(&self.registry)?.unfinished_containment()?;

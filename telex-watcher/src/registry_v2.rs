@@ -51,7 +51,7 @@ pub struct Mutation {
     pub diagnostic: Option<String>,
     pub recovery: Option<SendEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audit: Option<ManagementAudit>,
+    pub audit: Option<Box<ManagementAudit>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +258,7 @@ impl Registry {
             refusal: None,
             diagnostic: None,
             recovery: None,
-            audit: Some(management_audit),
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -416,7 +416,7 @@ impl Registry {
             refusal: None,
             diagnostic: None,
             recovery: None,
-            audit: Some(management_audit),
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -445,7 +445,7 @@ impl Registry {
             refusal: Some(reason),
             diagnostic: Some(diagnostic),
             recovery: None,
-            audit: Some(management_audit),
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -475,7 +475,7 @@ impl Registry {
             refusal: None,
             diagnostic: None,
             recovery: latest.and_then(|operation| operation.last_evidence),
-            audit: Some(management_audit),
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -1469,7 +1469,7 @@ fn mutation_refused(
         refusal: Some(refusal),
         diagnostic: None,
         recovery: None,
-        audit: Some(management_audit),
+        audit: Some(Box::new(management_audit)),
     })
 }
 fn read_one<T: DeserializeOwned>(

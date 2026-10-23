@@ -2652,3 +2652,34 @@ sequenced after #162 merges.
 - If ordinary-user process-group machinery cannot provide race-safe terminal
   proof, issue #172 returns `decision-needed`; the contract revision does not
   permit an unproven success claim.
+
+## 0055 - Watcher CLI administers the registry owner through a same-user local endpoint
+
+- **Date:** 2026-10-23
+- **Status:** Accepted through issue #179, additions C1-C4
+
+**Context.** The production runtime holds exclusive physical-registry ownership.
+Its typed `LocalManagement` handle is in-process, so a separate management CLI
+cannot safely open that registry while the runtime runs. Ordinary registration,
+diagnostics, and explicit receipt recovery must remain usable after the
+originating agent session ends.
+
+**Decision.** The registry owner exposes one endpoint for its canonical physical
+registry identity after acquiring ownership. Versioned JSON carries the existing
+typed management `Command` and `Response`; mutations still run through the
+owner's transactions. Unix uses an owner-only socket in a user-private directory;
+Windows uses a named pipe with an owner-only current-user DACL and rejects
+remote clients. The client never acquires registry ownership, opens SQLite, or
+connects a sender. Missing or stale ownership returns typed
+`runtime-not-running`; there is no implicit offline fallback. Request sizes,
+request duration, and concurrent clients are bounded. A disconnected caller
+does not undo an admitted operation and must inspect evidence before retrying.
+
+**Consequences.** Local administration requires an owning runtime process but
+does not require service registration, an installer, autostart, or Telex-message
+administration. Path aliases resolve to the same physical registry endpoint.
+The transport grants no additional operation or authority and adds no remote
+executable registration. CLI JSON and human output share safe typed projections;
+opaque state, detector payloads, and credential-bearing diagnostics are not
+default output. Runtime and detector lifecycle, receipt identity/recovery,
+canonical hashing, v1 isolation, and permanent tombstones remain unchanged.

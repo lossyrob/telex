@@ -5,7 +5,14 @@ use crate::registry_v2::Mutation;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    content = "value",
+    deny_unknown_fields
+)]
 pub enum Command {
     Register {
         json: Vec<u8>,
@@ -29,6 +36,11 @@ pub enum Command {
         json: Vec<u8>,
         working_directory: PathBuf,
         /// None preserves state; Some(Value::Null) replaces it with JSON null.
+        #[serde(
+            default,
+            deserialize_with = "present_state",
+            skip_serializing_if = "Option::is_none"
+        )]
         state: Option<serde_json::Value>,
     },
     ReconcileNow {
@@ -76,8 +88,13 @@ pub enum Command {
     Shutdown,
 }
 
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase", tag = "type", content = "value")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    tag = "type",
+    content = "value",
+    deny_unknown_fields
+)]
 pub enum Response {
     Mutation(Mutation),
     Watch(Option<Watch>),
@@ -89,6 +106,13 @@ pub enum Response {
     Pending(Option<Box<Operation>>),
     ReceiptEvidence(Vec<ReceiptEvidence>),
     Stopping,
+}
+
+fn present_state<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 pub(crate) struct Request {

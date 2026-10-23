@@ -1054,6 +1054,24 @@ fn management_mutations_return_durable_revision_and_state_evidence() {
 }
 
 #[test]
+fn host_ownership_guard_outlives_the_runtime_until_endpoint_teardown() {
+    let fixture = Fixture::new();
+    let config =
+        crate::RuntimeConfig::installed(fixture.path(), fixture.root.join("unused-install"));
+    let (runtime, management) = crate::Runtime::open(config).unwrap();
+    let ownership = runtime.retain_registry_ownership();
+    drop(runtime);
+    drop(management);
+    assert!(Registry::open(&fixture.path(), 10_000, 10_000_000)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("registry-already-owned"));
+    drop(ownership);
+    fixture.open();
+}
+
+#[test]
 fn cadence_coalesces_missed_ticks_and_retention_has_positive_warning_thresholds() {
     let fixture = Fixture::new();
     let mut registry = fixture.open();
