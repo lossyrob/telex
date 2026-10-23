@@ -21,11 +21,14 @@ Phase 1 investigation is complete. On 2026-10-22 the operator selected
 `Revise macOS to the non-detaching detector contract` in issue #165. The
 runtime-core merge prerequisite is satisfied; issue #162 may remain open for
 its independent documentation correction, post-merge validation, and field
-report. Phase 2 implementation remains held until PR #168 merges ADR 0054 and
-the normative Watcher contract and an implementation plan satisfying the
-identity, anchor, cleanup-proof, guard-failure, restart, and validation
-obligations below is accepted. The node remains in progress with focus
-attention; it is not blocked on #162 closure.
+report. On 2026-10-23 the design steward approved the candidate Phase 2 proof
+shape, subject to corrections, and kept product implementation on hold. Product
+implementation remains held until PR #168 merges the clarified ADR 0054 and
+normative Watcher text, the Phase 2 plan incorporates that disposition, pinned
+XNU source reasoning and native ARM64/x64 evidence establish the
+fork/group-empty proof, and the owner returns the selected algorithm and
+evidence for implementation authorization. The node remains in progress with
+focus attention; it is not blocked on #162 closure.
 
 The owner session is `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`, worktree
 `lossyrob-jubilant-bassoon`, branch `lossyrob-macos-watcher-containment`, base
@@ -75,15 +78,20 @@ The implementation must:
    group anchor, receipt path, nonce, and `assigned-process-group` scope;
 3. keep the containment owner outside the detector group and hold the detector
    launch gate until handshake and durable identity recording complete;
-4. establish the detector root as the assigned group leader and retain a
-   reuse-safe ownership anchor until cleanup proof completes;
+4. establish the gated trampoline that becomes the detector root as the assigned
+   process-group leader before durable launch release; retain
+   PID/PGID-reuse-safe destructive authority through every nonzero group signal;
+   irreversibly seal all signaling and numeric-authority reconstruction before
+   exact leader reap; and permit only read-only former-group observation
+   afterward;
 5. observe Watcher death through a private liveness channel and clean the whole
    assigned group on runtime death, root exit, timeout, cancellation, output
    bound, or explicit cleanup;
-6. never infer cleanup from leader exit and never signal a numeric PID or PGID
-   without current reuse-safe identity verification;
-7. write and sync a terminal receipt only after race-safe proof that the
-   assigned group is empty;
+6. never infer cleanup from leader exit, never issue a nonzero signal after the
+   anchor is released, and never accept numeric-group absence without the
+   pinned-source and native fork/reuse proof required by this task;
+7. write and sync a terminal receipt only after exact leader reap and race-safe
+   ESRCH proof that the assigned group is absent;
 8. treat guard failure before launch as no launch and guard failure after launch
    as unproved unless an identity-matched terminal receipt exists;
 9. retain `orphan-containment-unproven`, pause the watch, and start no
@@ -118,6 +126,13 @@ Run native ARM64 and x64 macOS validation covering:
 - guard loss before and after detector release;
 - runtime/guard death races and restart while cleanup is in progress;
 - PID and PGID reuse pressure, anchor release ordering, and stale identity;
+- mechanically prove that no timeout, retry, cancellation, error, Drop, restart,
+  or finalization path can reconstruct nonzero signal authority after the seal;
+- pin the XNU group lookup, membership removal/destruction, group creation, fork
+  inheritance, and kill iteration paths used by the proof, and verify the same
+  semantics on both tested native OS releases;
+- use barriers, not sleeps, to cover fork insertion versus final group signal,
+  leader reap, ESRCH observation, and receipt publication;
 - durable receipt creation, fsync, nonce/identity mismatch, malformed receipt,
   and boot-session change;
 - unrelated-process survival and no process-table scan followed by arbitrary
@@ -127,9 +142,12 @@ Run native ARM64 and x64 macOS validation covering:
 - SQLite and credentialed PostgreSQL lifecycle/health parity without weakening
   sender, receipt, store-binding, or readiness fences.
 
-The selected anchor and group-empty algorithm require focused native stress or
-race evidence. An unreaped direct group leader is a candidate, not an accepted
-fact, until those tests establish the required PID/PGID reuse properties.
+The selected destructive anchor, signal-seal, and group-empty algorithm require
+pinned XNU source reasoning plus barrier-controlled native race evidence; stress
+alone is insufficient. An unreaped direct group leader held through every
+nonzero signal, followed by irreversible seal, exact reap, and read-only ESRCH
+observation, is an admissible candidate, not accepted proof, until that evidence
+establishes fork closure and PID/PGID reuse safety.
 
 ## Success criteria
 
@@ -151,8 +169,10 @@ fact, until those tests establish the required PID/PGID reuse properties.
 Return `decision-needed` and do not call the node ready if:
 
 - the implementation assumes that group-leader exit proves group cleanup;
-- the group anchor can be released before terminal proof or a reused PID/PGID
-  can be signaled as the old attempt;
+- the destructive-ownership anchor can be released before every nonzero signal
+  is complete and every signal-authority reconstruction path is irreversibly
+  sealed, any nonzero signal can occur after the seal, or a reused PID/PGID can
+  be signaled as the old attempt;
 - fork/exit/kill races can leave a conforming in-group descendant after a
   successful receipt;
 - runtime death can close the liveness path without causing group cleanup;

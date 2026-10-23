@@ -189,11 +189,13 @@ existing Windows or Linux guarantees. #162 remains fail-closed on macOS and must
 not claim macOS support. The `watcher-runtime-core` merge sequencing condition
 for Phase 2 was satisfied when PR #164 merged as
 `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; issue #162 does not need to close
-before #165 implementation. Phase 2 remains held until PR #168 merges ADR 0054
-and the normative non-detaching detector contract and the owner presents an
-implementation plan that identifies a PID/PGID-reuse-safe anchor, race-safe
-group-empty proof, guard-loss behavior, restart evidence, and receipt scope
-within the accepted ordinary-user runtime boundary. After those gates are
+before #165 implementation. On 2026-10-23 the design steward approved the
+candidate Phase 2 proof shape, subject to corrections, and kept product
+implementation on hold. Product implementation remains held until PR #168 merges
+the clarified ADR 0054 and normative Watcher text, the Phase 2 plan incorporates
+that disposition, pinned XNU source reasoning and native ARM64/x64 evidence
+establish the fork/group-empty proof, and the owner returns the selected
+algorithm and evidence for implementation authorization. After those gates are
 accepted, implementation may proceed under #165 without waiting for #162's
 separate documentation correction or field-report closure. The fail-closed macOS
 behavior from #162 remains authoritative until the complete #165 implementation
