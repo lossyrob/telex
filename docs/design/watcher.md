@@ -680,18 +680,22 @@ Watcher applies an explicit host-specific containment guarantee:
   including descendants that create another process group or session.
 - Linux contains the detector process tree with the private pipe-owned
   subreaper guardian, including descendants that change groups or sessions.
-- macOS supports conforming non-detaching detectors. Watcher assigns one
-  process group to the attempt, and the detector root plus every process it
-  creates must remain in that group until the attempt ends. Work moved outside
-  the group is outside the cleanup guarantee.
+- The accepted macOS contract is for conforming non-detaching detectors. When
+  the capability is enabled, Watcher assigns one process group to the attempt,
+  and the detector root plus every process it creates must remain in that group
+  until the attempt ends. Work moved outside the group is outside the cleanup
+  guarantee. Until issue #172's implementation and proof are accepted, Watcher
+  fails closed before detector launch on macOS and does not claim macOS support.
 - Every other host fails closed before detector launch until a documented and
   tested containment contract is accepted for that host.
 
-Before detector release, Watcher MUST persist a versioned containment identity
-sufficient to distinguish the current boot, containment owner, assigned scope,
-and terminal receipt. The launch gate opens only after the containment owner
-handshake and durable identity recording succeed. Setup, handshake, or identity
-recording failure starts no detector.
+Before detector release, Watcher MUST durably persist a versioned, host-specific
+containment identity sufficient to distinguish the containment instance, its
+owner, and its assigned scope during recovery. The launch gate opens only after
+the host's accepted containment setup and durable identity recording succeed.
+Any host-required containment-owner handshake and terminal-receipt path/nonce
+identity MUST also be established before release. Failure of setup, any required
+handshake, or identity recording starts no detector.
 
 On macOS the containment identity MUST name the boot session, guard process and
 start identity, assigned process-group ID, PID- and PGID-reuse-safe group
