@@ -1,0 +1,44 @@
+name: Read-only macOS provenance
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-containment-proof
+    paths:
+      - tests/macos_provenance_capture.c
+      - tests/macos_provenance_capture.py
+      - .github/workflows/macos-provenance-capture.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Read-only provenance (${{ matrix.arch }})
+    if: github.run_attempt == 1
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Match host and image identities before bounded mapping capture
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tests/macos_provenance_capture.py "$RUNNER_TEMP/macos-provenance"
+      - name: Preserve matching, nonmatching, or incomplete evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-provenance-${{ matrix.arch }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-provenance
+          if-no-files-found: error
+          retention-days: 30
