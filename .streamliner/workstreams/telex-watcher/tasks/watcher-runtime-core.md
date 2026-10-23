@@ -16,7 +16,8 @@
   satisfied on 2026-10-22
 - **Tracker:** [lossyrob/telex#162](https://github.com/lossyrob/telex/issues/162)
 - **Owner session:** 42c1104a-7eb2-477e-a574-2bffb1cd06fe
-- **Merge gate:** shadow mode; Campaign runs the gate, and the operator merges
+- **Merge gate:** Campaign runs the merge gate and merges at the exact cleared
+  SHA
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -139,16 +140,18 @@ that launch. This record launches no worker.
 On 2026-10-22, the operator approved launch through the Streamliner workflow v2
 adapter, and Campaign launched owner session
 42c1104a-7eb2-477e-a574-2bffb1cd06fe in worktree `lossyrob-symmetrical-bassoon`
-on branch `lossyrob-watcher-runtime-core`. The merge gate runs in shadow mode
-with balanced care and craft posture: Campaign runs the gate at the exact head
-SHA and records a verdict, and the operator merges. The authority is Campaign
-operator directive `telex-v2-launch-and-merge-gate-directive-20261022.json`
-(1,188 bytes, SHA-256
+on branch `lossyrob-watcher-runtime-core`. The merge gate launched in shadow
+mode with balanced care and craft posture: Campaign ran the gate at the exact
+head SHA and recorded a verdict, and the operator merged. The authority is
+Campaign operator directive
+`telex-v2-launch-and-merge-gate-directive-20261022.json` (1,188 bytes, SHA-256
 `94fe1a334cd4dded0d609627eef253c120615cbe20a4142788d094dc4966f1dd`) under
 merge-gate policy `streamliner/telex/prompts/v2/telex-v2-merge-gate.md` in the
 planning repository (commit `c213a5e3`, blob `b10277f8`). The directive grants
 no release, tag, publish, or fleet authority, no I161-1 change, and no live
-merge for any item other than issue #144.
+merge for any item other than issue #144. On 2026-10-23, Campaign moved closing
+PR #173 to Campaign merge: Campaign runs the merge gate and merges at the exact
+cleared SHA.
 
 ## Deliverables
 

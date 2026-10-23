@@ -253,15 +253,15 @@ identity, tombstone, and evidence; skip v2 hashing through an explicit
 schema-version branch; and audit that state hashes are not applicable. Strict v2
 canonicalization remains unchanged. PR #170 remains independently valid. The
 repair, exact-head review and CI, post-merge validation, #162 field report, and
-final reconciliation remain outstanding. The `watcher-runtime-core` merge gate
-runs in shadow mode, so the operator merges. `minimal-example-pack` completed
-under issue #144 in PR #163. Campaign ran the first live merge-gate pilot and
-cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner
-merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these launches
-grants release, tag, publish, fleet, CLI, packaging, I161-1, or Operator Station
-authority. The downstream `five-minute-custom-watch-gate` still owns operational
-proof that an agent can create, register, leave running, and diagnose a custom
-watch in five minutes.
+final reconciliation remain outstanding. For `watcher-runtime-core`, Campaign
+runs the merge gate and merges at the exact cleared SHA. `minimal-example-pack`
+completed under issue #144 in PR #163. Campaign ran the first live merge-gate
+pilot and cleared exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f`, which
+the owner merged as `5ad7eb04c1357044315e433bd12f34347b6a4cf6`. None of these
+launches grants release, tag, publish, fleet, CLI, packaging, I161-1, or
+Operator Station authority. The downstream `five-minute-custom-watch-gate` still
+owns operational proof that an agent can create, register, leave running, and
+diagnose a custom watch in five minutes.
 
 `watcher-macos-containment-runtime` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It replaces

@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-23T06:11:00.265Z",
+  "updatedAt": "2026-10-23T06:16:51.095Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -150,7 +150,7 @@
       "id": "watcher-runtime-core",
       "type": "task",
       "title": "Minimal Watcher runtime core",
-      "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract. Launched 2026-10-22 under Streamliner workflow v2 in owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe on branch lossyrob-watcher-runtime-core; the merge gate runs in shadow mode, and the operator merges. For this node only, containment proof is Windows and Linux; macOS and other unclaimed hosts fail closed before detector launch, and macOS implementation belongs to `watcher-macos-containment-runtime`. The host decision does not clear the accepted store-binding lifecycle/recovery or premature readiness blockers. On 2026-10-22 PR #164 became ready for operator merge at exact head 40a5c916: independent source review and design inspection accepted the B2 store-binding lifecycle/recovery repair and B3 productionReady fence, and all 18 required CI jobs passed at that head. The operator merged it on 2026-10-23 as main d0237dbb. Issue #162 remains open. PR #170 merged its documentation correction linking the shipped v2 health and event-metadata schemas on 2026-10-23 as main 2513ccda. Post-merge validation found a bounded unsupported-v1 removal/audit defect; #162 remains open for a strict-v2-preserving runtime repair, validation, field report, and final reconciliation.",
+      "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract. Launched 2026-10-22 under Streamliner workflow v2 in owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe on branch lossyrob-watcher-runtime-core; Campaign runs the merge gate and merges at the exact cleared SHA. For this node only, containment proof is Windows and Linux; macOS and other unclaimed hosts fail closed before detector launch, and macOS implementation belongs to `watcher-macos-containment-runtime`. The host decision does not clear the accepted store-binding lifecycle/recovery or premature readiness blockers. On 2026-10-22 PR #164 became ready for operator merge at exact head 40a5c916: independent source review and design inspection accepted the B2 store-binding lifecycle/recovery repair and B3 productionReady fence, and all 18 required CI jobs passed at that head. The operator merged it on 2026-10-23 as main d0237dbb. Issue #162 remains open. PR #170 merged its documentation correction linking the shipped v2 health and event-metadata schemas on 2026-10-23 as main 2513ccda. Post-merge validation found a bounded unsupported-v1 removal/audit defect; #162 remains open for a strict-v2-preserving runtime repair, validation, field report, and final reconciliation.",
       "status": "in-progress",
       "attention": "focus",
       "repoIds": [

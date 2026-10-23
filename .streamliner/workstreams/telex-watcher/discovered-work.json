@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-09-02T14:27:00Z",
+  "updatedAt": "2026-10-23T06:21:42.555Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -61,6 +61,189 @@
         "acceptedOrder": "client-conformance -> consumer-integration-gate -> watcher-runtime-core",
         "gateBoundary": "Public conformance evidence plus exact-revision consumer attestations; no Watcher runtime implementation."
       }
+    },
+    {
+      "id": "runtime-core-unsupported-v1-remove-canonicalization",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "required-for-item-outcome",
+      "description": "Post-merge public-management validation at main d0237dbb found that Runtime::run plus LocalManagement::Remove fails with canonicalization-failed for an isolated unsupported v1 row whose opaque state is outside the v2 interoperable range, such as {\"checksum\":18446744073709551615}. The watch stays paused instead of being removed, because the management transaction computes v2 canonical state hashes for every admitted mutation.",
+      "disposition": "absorb",
+      "target": {
+        "id": "watcher-runtime-core",
+        "tracker": "https://github.com/lossyrob/telex/issues/162",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/173",
+        "owners": [
+          "watcher-runtime-core owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe",
+          "Telex Watcher design steward session 4745cca8-006f-4422-9d35-cf056f28c31f"
+        ]
+      },
+      "status": "in-progress",
+      "decisionState": "accepted",
+      "rationale": "Issue #162 cannot close while public removal of an isolated unsupported row fails. The design steward approved a bounded repair that preserves unsupported state losslessly, keeps the permanent ID and tombstone, explicitly audits when v2 state hashes do not apply, and leaves strict v2 canonicalization unchanged. PR #170 remains independently valid.",
+      "terminalPath": "Completes when PR #173, which says Closes #162, passes required CI and review at its final head and Campaign merges it at the exact cleared SHA. Post-merge validation, the #162 field report, and final reconciliation follow under #162.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into #162 and PR #173 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23. The design steward approved the repair.",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/162#issuecomment-6358391843",
+          "createdAt": "2026-10-23T05:49:24Z",
+          "details": "Owner finding: reproduction at merge d0237dbb, cause, and the bounded repair. Reproduction source and output are retained as legacy_remove_probe.rs and post-merge-legacy-remove-probe.log in the owner session artifacts."
+        },
+        {
+          "source": "pull-request",
+          "url": "https://github.com/lossyrob/telex/pull/173",
+          "head": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
+          "details": "PR #173 is open, not draft, and its body says Closes #162. At this head its commits are 137aaf6b (allow removal of opaque legacy state), 5d9b8567 (align opaque removal audit and rollback proofs), and f1c25007 (separate request transport from canonical evidence). All 18 checks at this head were pending when recorded; exact-head CI and review remain outstanding."
+        }
+      ]
+    },
+    {
+      "id": "runtime-core-request-transport-exponent-reencoding",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "required-for-item-outcome",
+      "description": "An exponent-form number such as 1e20 in an admitted detector request is re-encoded by JCS stdin encoding into an unsafe integral token that the parser rejects.",
+      "disposition": "absorb",
+      "target": {
+        "id": "watcher-runtime-core",
+        "tracker": "https://github.com/lossyrob/telex/issues/162",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/173",
+        "owners": [
+          "watcher-runtime-core owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe",
+          "Telex Watcher design steward session 4745cca8-006f-4422-9d35-cf056f28c31f"
+        ]
+      },
+      "status": "in-progress",
+      "decisionState": "accepted",
+      "rationale": "The repair is needed for #162's outcome. It separates transport serialization from JCS validation, hash, and evidence encoding, with no admission-policy change. Design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved it at 02:13 on 2026-10-23.",
+      "terminalPath": "Commit f1c25007 in PR #173 implements the repair. Completes when PR #173 passes required CI and review at its final head and Campaign merges it at the exact cleared SHA.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into #162 and PR #173 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/162#issuecomment-6358767711",
+          "createdAt": "2026-10-23T06:17:06Z",
+          "details": "Owner finding: at runtime merge d0237dbb, parse_request accepts a request whose state holds 1e20, canonical_bytes rewrites it as 100000000000000000000, and parse_request then rejects those bytes with canonicalization-failed. The runtime uses this encoder for detector stdin. The steward approved an explicit ordinary-JSON request transport encoder in PR #173. Probe source and output are retained as request_roundtrip_probe.rs and post-merge-request-roundtrip-probe.log in the owner session artifacts."
+        },
+        {
+          "source": "coordinator-report",
+          "details": "The coordinator reported the steward approval and repair boundary at 02:13 on 2026-10-23."
+        },
+        {
+          "source": "pull-request",
+          "url": "https://github.com/lossyrob/telex/pull/173",
+          "head": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
+          "details": "PR #173 is open, not draft, and its body says Closes #162. At this head its commits are 137aaf6b (allow removal of opaque legacy state), 5d9b8567 (align opaque removal audit and rollback proofs), and f1c25007 (separate request transport from canonical evidence). All 18 checks at this head were pending when recorded; exact-head CI and review remain outstanding."
+        }
+      ]
+    },
+    {
+      "id": "watcher-ci-local-daemon-signatures",
+      "sourceNodeId": "watcher-macos-containment",
+      "additionalSourceNodeIds": [
+        "watcher-runtime-core"
+      ],
+      "requiredness": "not-required-for-source-items",
+      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness: PR #168 run 39902791837 attempt 1, PR #170 run 39902271641 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
+      "disposition": "external",
+      "target": {
+        "workstream": "local-daemon",
+        "owners": [
+          "Local Daemon orchestrator session aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57"
+        ],
+        "issues": [
+          "https://github.com/lossyrob/telex/issues/166",
+          "https://github.com/lossyrob/telex/issues/167",
+          "https://github.com/lossyrob/telex/issues/169",
+          "https://github.com/lossyrob/telex/issues/171"
+        ],
+        "ledgerCommit": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
+        "ledgerItems": [
+          "local-daemon-ubuntu-installed-current-crash-reattach-timeout",
+          "local-daemon-windows-station-restart-lockfileex-33"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
+      "terminalPath": "Local Daemon owns triage and disposition in its own ledger and trackers. This entry closes no Watcher item and adds no Watcher dependency.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as external, owned by Local Daemon, under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
+      "evidence": [
+        {
+          "source": "ci-run",
+          "url": "https://github.com/lossyrob/telex/actions/runs/39902791837",
+          "head": "d4dad4e73bf65cd3957a3a9560877865cb57058e",
+          "details": "PR #168 run. Attempt 1 failed jobs 120247904851 (Build and test, ubuntu-latest), 120247904932 (Windows heap diagnostics), and 120247905082 (Build and test, windows-latest). Attempt 2 succeeded."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/166",
+          "details": "Investigate Windows access violation in hosted daemon process diagnostics; open. Local Daemon ledger item local-daemon-windows-pageheap-access-violation, found on PR #164."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/167",
+          "details": "Investigate intermittent Windows delayed credential-writer test timeouts; open. Local Daemon ledger item local-daemon-windows-credential-writer-timeout, found on PR #164."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/169",
+          "details": "Investigate Windows PageHeap station-intent restoration counter failure; open. Local Daemon ledger item local-daemon-windows-station-intent-restoration-counter, reported from PR #168."
+        },
+        {
+          "source": "ci-run",
+          "url": "https://github.com/lossyrob/telex/actions/runs/39902271641/job/120246286086",
+          "head": "6760bb2235584e744047ec3953395a4e804dba2b",
+          "details": "PR #170 run, a docs-only head that changes only docs/design/watcher.md and docs/design/index.md. Attempt 1 job 120246286086 (Build and test, ubuntu-latest) failed in drain_hook_launcher_is_neutral_blocks_and_honors_off_switch with a BrokenPipe writing the hook payload at tests/copilot_plugin.rs:711. Attempt 2 succeeded."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/171",
+          "details": "Handle early stdin closure in the Copilot drain-hook test harness; open. The issue gives a candidate harness race, not a confirmed repair. The local-daemon ledger at 8b4b393c has no entry for it."
+        },
+        {
+          "source": "local-daemon-ledger",
+          "repositoryMain": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
+          "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+          "details": "Candidates local-daemon-ubuntu-installed-current-crash-reattach-timeout (job 120247904851) and local-daemon-windows-station-restart-lockfileex-33 (job 120247904932), both from PR #168 run 39902791837."
+        }
+      ]
+    },
+    {
+      "id": "macos-runtime-guide-tracker-reference",
+      "sourceNodeId": "watcher-macos-containment",
+      "requiredness": "required-for-item-outcome",
+      "description": "docs/watcher-runtime.md line 23 names #165 as the macOS capability tracker. After the split, #172 owns the macOS capability.",
+      "disposition": "absorb",
+      "target": {
+        "id": "watcher-macos-containment-runtime",
+        "tracker": "https://github.com/lossyrob/telex/issues/172",
+        "owners": [
+          "watcher-macos-containment-runtime owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b"
+        ]
+      },
+      "status": "planned",
+      "decisionState": "accepted",
+      "rationale": "The shipping #172 product PR updates the reference from #165 to #172. This is already a #172 success criterion, and PR #168 stays limited to its two design documents. The design steward approved it.",
+      "terminalPath": "Completes when the #172 product PR that ships the macOS capability updates docs/watcher-runtime.md and Campaign merges it at the exact cleared SHA.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into watcher-macos-containment-runtime and #172 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23. The design steward approved it.",
+      "evidence": [
+        {
+          "source": "repository",
+          "repositoryMain": "cc550b29",
+          "path": "docs/watcher-runtime.md",
+          "details": "Line 23 links #165."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/172",
+          "details": "The issue body directs the shipping PR to update docs/watcher-runtime.md to describe the shipped macOS capability and point to #172."
+        },
+        {
+          "source": "task",
+          "path": ".streamliner/workstreams/telex-watcher/tasks/watcher-macos-containment-runtime.md",
+          "details": "Success criterion: the same product PR updates the macOS tracker reference in docs/watcher-runtime.md from #165 to #172."
+        }
+      ]
     }
   ]
 }

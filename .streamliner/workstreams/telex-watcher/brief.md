@@ -183,17 +183,17 @@ that merged main. Issue [#162](https://github.com/lossyrob/telex/issues/162) and
 reviewed and reconciled tracker and task specification. On 2026-10-22 the
 operator approved launch through the Streamliner workflow v2 adapter, and
 Campaign launched owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe. Its merge
-gate runs in shadow mode, and the operator merges. Neither launch grants
-release, tag, publish, fleet, or I161-1 authority. By operator priority decision
-on 2026-10-22, Telex Watcher is to replace the waiter session in the operator
-workflow, and `watcher-runtime-core` is the intended first owner under the
-operator workflow v2. The merged core now provides authoritative
-exact-store/exact-operation `NotRecorded`, exact-same-operation retry after that
-result, and `RetentionBoundaryCrossed` when absence evidence is no longer
-available. Watcher's post-merge gate receipt found the merged bundle aligned
-with those requirements, including SQLite and credentialed PostgreSQL parity.
-The completed internal gate remains a historical dependency. There is no
-private-client or mandatory-template fallback, and
+gate launched in shadow mode; Campaign now runs the merge gate and merges at the
+exact cleared SHA. Neither launch grants release, tag, publish, fleet, or I161-1
+authority. By operator priority decision on 2026-10-22, Telex Watcher is to
+replace the waiter session in the operator workflow, and `watcher-runtime-core`
+is the intended first owner under the operator workflow v2. The merged core now
+provides authoritative exact-store/exact-operation `NotRecorded`,
+exact-same-operation retry after that result, and `RetentionBoundaryCrossed`
+when absence evidence is no longer available. Watcher's post-merge gate receipt
+found the merged bundle aligned with those requirements, including SQLite and
+credentialed PostgreSQL parity. The completed internal gate remains a historical
+dependency. There is no private-client or mandatory-template fallback, and
 `five-minute-custom-watch-gate` remains planned.
 
 ## Decisions
