@@ -702,11 +702,17 @@ explicit cleanup, or runtime-liveness EOF triggers cleanup of the entire
 assigned group.
 
 The implementation MUST NOT infer cleanup from the detector leader exiting. It
-MUST retain a reuse-safe ownership anchor until cleanup is checked and MUST
-write and durably sync terminal evidence only after proving that no process
-remains in the assigned group without signaling an unrelated reused identity.
-The exact guard, anchor, and empty-group algorithm are implementation choices
-and require native race evidence; an unreaped group leader is only a candidate,
+MUST retain a PID- and PGID-reuse-safe destructive-ownership anchor through
+every nonzero group signal. Before releasing that anchor, it MUST irreversibly
+seal every path that can signal the group or reconstruct signal authority from
+numeric identity. After exact leader reap, final proof MAY use only a read-only
+former-group observation if pinned kernel/API reasoning and native race evidence
+establish that numeric reuse can produce only conservative presence or
+uncertainty, never false absence, and that no in-scope member can appear after
+an absence result. Terminal evidence may be written and durably synchronized
+only after that proof reports the assigned group absent. The exact guard,
+anchor, signal-seal, and empty-group algorithm remain implementation choices;
+an unreaped group leader plus post-seal observation is an admissible candidate,
 not design proof. If cleanup cannot be proved, the containment owner MUST NOT
 write a successful receipt.
 

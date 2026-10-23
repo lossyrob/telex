@@ -2611,13 +2611,18 @@ command contract; no platform-specific registration field or schema version is
 added.
 
 A macOS implementation must durably record containment identity before detector
-release, keep a PID- and PGID-reuse-safe ownership anchor, observe runtime death
-through a private liveness channel, terminate the whole assigned group on every
-cleanup path, and write terminal evidence only after race-safe proof that the
-group is empty. Restart may clear containment automatically only from
-identity-matched durable terminal evidence or a changed boot-session identity.
-Ambiguity remains `orphan-containment-unproven`, blocks replacement execution,
-and requires authoritative cleanup/proof plus explicit resume.
+release, retain PID- and PGID-reuse-safe destructive authority through every
+nonzero group signal, and irreversibly seal all signaling and authority
+reconstruction before releasing that anchor. It may then use a read-only
+former-group observation after exact leader reap only when pinned kernel/API
+reasoning and native race evidence prove that reuse cannot create false absence
+and no in-scope member can appear after absence. The implementation must observe
+runtime death through a private liveness channel, terminate the whole assigned
+group on every cleanup path, and write terminal evidence only after race-safe
+proof that the group is empty. Restart may clear containment automatically only
+from identity-matched durable terminal evidence or a changed boot-session
+identity. Ambiguity remains `orphan-containment-unproven`, blocks replacement
+execution, and requires authoritative cleanup/proof plus explicit resume.
 
 An ordinary per-attempt private guard may implement this contract as Watcher
 runtime machinery when it is unprivileged, ephemeral, shipped with the runtime,
