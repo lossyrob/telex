@@ -3,7 +3,7 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-cli-ux`
 - **Type:** implementation
-- **Status:** shaped; planned and unlaunched
+- **Status:** in progress; owner session `c90bafbb-6e49-4ced-a684-e15cfadfc69e`
 - **Attention:** watch
 - **Depends on:** completed `watcher-runtime-core`
 - **Tracker:** [lossyrob/telex#179](https://github.com/lossyrob/telex/issues/179)
@@ -72,8 +72,14 @@ are not prerequisites.
 
 Prerequisite 1 is met: `watcher-runtime-core` completed on 2026-10-23, so this
 node's only graph dependency is satisfied. The Watcher coordinator opened
-tracker issue #179 on 2026-10-23; the node stays planned with no owner until
-the coordinator launches one.
+tracker issue #179 and launched owner session
+`c90bafbb-6e49-4ced-a684-e15cfadfc69e` on 2026-10-23 from main
+`6dc79e40dfacba8c1e71ac46ef1be376d43a50ad`. The launch used the
+`gpt-6.1-sol` / high reasoning / default context tier profile. The node is in
+progress with watch attention. The launch binding record is
+`watcher-cli-ux-20261023.json` under
+`streamliner/telex/prompts/v2/launches/` in the planning repository, with
+kickoff SHA-256 `71f5b924`.
 
 ## Deliverables
 
