@@ -278,7 +278,7 @@ static void exact_reap(Observation observation) {
              WTERMSIG(status) == info.si_status), "WNOWAIT_reap_evidence_mismatch");
     phase = 2;
     record("leader_exactly_reaped", waited, status, 0, 0);
-    siginfo_t info = {0};
+    memset(&info, 0, sizeof(info));
     errno = 0;
     int rc = waitid(P_PID, (id_t)waited, &info, WEXITED | WNOHANG | WNOWAIT);
     error = errno;
