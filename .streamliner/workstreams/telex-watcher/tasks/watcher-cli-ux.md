@@ -114,10 +114,19 @@ and the owning runtime process:
   after it acquires registry ownership and removed or invalidated when
   ownership ends. The CLI is a thin client; it never opens or locks the
   registry while a runtime owns it.
-- The endpoint carries the existing typed management `Command` and `Response`
-  semantics as versioned JSON. It adds no operation, mutation, or bypass that
-  `LocalManagement` lacks, and every mutation still runs through the registry
-  owner's transactions.
+- The endpoint executes the existing typed management `Command` through
+  `LocalManagement`. Versioned JSON carries a typed, allowlisted safe
+  projection of the owner's unchanged `Response`, rather than requiring the
+  raw in-process response to cross the wire. The owning process applies that
+  projection and the accepted read filters before response serialization and
+  the frame byte cap. A bounded, versioned request envelope may carry
+  presentation-only selectors for those existing read filters; they add no
+  management operation or mutation authority. The projection preserves all
+  required public results, refusal/recovery semantics, revisions, lifecycle,
+  eligibility, health, and audit/evidence fields. Human and machine-readable
+  output derive from the same projected result. It adds no operation,
+  mutation, or bypass that `LocalManagement` lacks, and every mutation still
+  runs through the registry owner's transactions.
 - Access is limited to the same local OS user as the runtime: a Unix domain
   socket in a user-private directory with owner-only permissions, or a Windows
   named pipe with an owner-only DACL that rejects remote clients. The endpoint
@@ -146,6 +155,12 @@ body; evidence: on main, `telex-watcher/src/management.rs` exposes only an
 in-process handle, `ownership.rs` and `registry_v2.rs` hold the registry
 under an exclusive OS lock, and `docs/watcher-runtime.md` says the handle is
 not a remote administration protocol.
+
+The steward clarified the response boundary on 2026-10-23 after PR #180 review
+found that raw response framing could reject accepted nested state and large
+raw records before safe projection or filtering; evidence:
+https://github.com/lossyrob/telex/pull/180#issuecomment-6372224177. This permits
+endpoint-side typed projection without changing runtime management semantics.
 
 ### Output and audit behavior
 
