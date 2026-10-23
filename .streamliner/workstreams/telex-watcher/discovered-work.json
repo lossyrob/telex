@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T15:48:00.549Z",
+  "updatedAt": "2026-10-23T15:54:21.975Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -315,6 +315,32 @@
         {
           "source": "coordinator-report",
           "details": "Owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe requested exactly one failed-job retry of main run 39916429612 at unchanged 55cb6b11. A green retry is CI evidence only, not a fix."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/pull/178#issuecomment-6368917054",
+          "createdAt": "2026-10-23T15:51:04Z",
+          "details": "Recurrence for #167, with no new disposition. PR #178 run 39978847760 attempt 1 at unchanged docs-only head 439eeb6c329591fcab6ace1ea1ee9c81f381d1fc failed Build and test (windows-latest) job 120500496418: credential_command_shell_exit_preserves_delayed_inherited_writer reported Elapsed at tests/credential_command.rs:516:6, with 10 passed, 1 failed, and 2 ignored. Retained artifact 12512534458. The PR changes only docs/design/watcher.md; root daemon code, credential code, tests, and CI configuration are unchanged.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39978847760",
+          "job": "120500496418",
+          "artifact": "12512534458",
+          "issue": "https://github.com/lossyrob/telex/issues/167",
+          "retentionRecord": "https://github.com/lossyrob/telex/issues/167#issuecomment-6368982218"
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/pull/178#issuecomment-6368917054",
+          "createdAt": "2026-10-23T15:51:04Z",
+          "details": "Distinct PageHeap signature in the same attempt: Windows heap diagnostics job 120500496120 passed its first two full process-suite iterations at 49/49, then iteration 3 failed real_process_copilot_turn_guard_nudges_delivered_unacked_message through tests/daemon_process_sqlite.rs:24:9 with outer attach timeout code=Some(1), timed_out=true; that iteration reported 48 passed and 1 failed. Retained artifact 12513211288. This is not the native access violation in #166. Local Daemon classifies it under existing #175 as a separately named third signature, outer-initial-attach-timeout, not a recurrence of the internal HelloAck timeout. Its source inspection places the failure at the first env.attach call with an eight-second outer budget; later turn-guard steps were not reached. The reported exit code follows the harness kill path, not a diagnosed spontaneous exit or native crash. No common cause is established, and no new issue is needed at intake.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39978847760",
+          "job": "120500496120",
+          "artifact": "12513211288",
+          "issue": "https://github.com/lossyrob/telex/issues/175",
+          "retentionRecord": "https://github.com/lossyrob/telex/issues/175#issuecomment-6368981676"
+        },
+        {
+          "source": "coordinator-report",
+          "details": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 reports that the #177 owner took one failed-job retry of run 39978847760 at unchanged head 439eeb6c329591fcab6ace1ea1ee9c81f381d1fc. Attempt 2 was independently observed in progress at that same head. The owner posted the linked retention records for both complete first-attempt artifacts and raw logs, retained before that retry; downloaded executables were not run. A green retry is CI evidence only, not a causal fix. The external Local Daemon disposition and ledger status remain unchanged; no Watcher graph or status change is made."
         }
       ]
     },

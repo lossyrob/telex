@@ -1765,6 +1765,18 @@
             "reportedSignature": "Windows delayed credential-writer Elapsed timeout; coordinator maps to issue 167",
             "evidenceStatus": "Watcher coordinator report; new raw excerpt/artifact identity not independently inspected by Local",
             "retryDisposition": "Existing PR owner owns exactly one bounded failed-job rerun at unchanged head; result separate and not a causal fix."
+          },
+          {
+            "head": "439eeb6c329591fcab6ace1ea1ee9c81f381d1fc",
+            "pullRequest": 178,
+            "run": "39978847760",
+            "attempt": 1,
+            "job": "120500496418",
+            "artifactId": "12512534458",
+            "reportedSignature": "credential_command_shell_exit_preserves_delayed_inherited_writer, tests/credential_command.rs:516:6, Elapsed(()); target 10 passed, 1 failed, 2 ignored",
+            "sourceReceipt": "https://github.com/lossyrob/telex/pull/178#issuecomment-6368917054",
+            "attribution": "Watcher handoff and provider PR comment; Local did not query CI or download/hash this artifact.",
+            "disposition": "Recurrence of issue 167; preserve prior occurrences and existing candidate status. Existing single unchanged-head retry is separate evidence, not a causal fix."
           }
         ]
       },
@@ -1928,6 +1940,62 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23; Campaign evidence-only reconciliation, with no graph/node/gate transition.",
       "terminalPath": "Exact failing test/operation evidence and explicit tracker disposition; causal classification and any separately authorized fix must preserve owner-private persistent-lock/fail-closed semantics and full hosted diagnostic coverage. Green rerun alone is not resolution."
+    },
+    {
+      "id": "local-daemon-windows-pageheap-deadline-failures",
+      "sourceNode": null,
+      "source": "lossyrob/telex#175 and PR #178 head 439eeb6c329591fcab6ace1ea1ee9c81f381d1fc",
+      "crossReference": "telex-watcher/watcher-ci-local-daemon-signatures; PR #178 documentation-only observation",
+      "evidence": {
+        "tracker": "https://github.com/lossyrob/telex/issues/175",
+        "previousSignatures": [
+          {
+            "signatureId": "outer-store-lock-command-timeout",
+            "head": "55cb6b116607bceccf3ce0b72550e2d849ca5426",
+            "run": "39916429612",
+            "job": "120290894587",
+            "test": "real_process_02_second_instance_and_store_lock",
+            "description": "Issue body reports five-second outer command timeout at line 873 for a second configuration root contending for the same SQLite store; not a diagnosed deadlock."
+          },
+          {
+            "signatureId": "internal-helloack-readiness-timeout",
+            "head": "55cb6b116607bceccf3ce0b72550e2d849ca5426",
+            "run": "39916429612",
+            "job": "120290894587",
+            "test": "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token",
+            "description": "Issue body reports code 1, timed_out=false and internal daemon HelloAck/connect-attempt timeout."
+          }
+        ],
+        "newSignature": {
+          "signatureId": "outer-initial-attach-timeout",
+          "head": "439eeb6c329591fcab6ace1ea1ee9c81f381d1fc",
+          "pullRequest": 178,
+          "run": "39978847760",
+          "attempt": 1,
+          "job": "120500496120",
+          "iteration": 3,
+          "test": "real_process_copilot_turn_guard_nudges_delivered_unacked_message",
+          "reportedAssertion": "tests/daemon_process_sqlite.rs:24:9",
+          "sourceEntry": "tests/daemon_process_sqlite.rs:4004 -> ProcessEnv::attach:159-175",
+          "reportedOutput": "attach failed: code=Some(1) timed_out=true stdout= stderr=",
+          "sourceBudgetSeconds": 8,
+          "artifactId": "12513211288",
+          "sourceReceipt": "https://github.com/lossyrob/telex/pull/178#issuecomment-6368917054",
+          "attribution": "Failure/output/iteration from provider comment and Watcher; helper/control-flow bound by Local immutable source read. Raw log/artifact not independently downloaded or hashed."
+        },
+        "classification": "Three separately named deadline observations under one existing investigation tracker. No common cause established, and the new outer attach timeout is not an internal readiness recurrence, a native exception or a turn-guard semantic failure.",
+        "scope": "PR 178 modifies only docs/design/watcher.md; no root daemon/test/workflow source implication."
+      },
+      "description": "Investigate distinct Windows PageHeap process-suite deadline failures without collapsing outer command, store-lock and internal readiness boundaries.",
+      "affectedOutcome": "Shared Local Daemon process-test reliability and required Windows checks. Watcher docs are an observing consumer, not an attributed source cause.",
+      "requiredness": "Candidate evidence for the existing Local Daemon hardening gate; not accepted implementation scope or a new dependency.",
+      "sequencing": "Retain original artifacts and the already-taken bounded unchanged-head retry separately. Preserve per-signature evidence in issue 175; split corrective work only if diagnosis establishes independent remedies. Do not fold shared fixes into docs-only PR 178.",
+      "target": "hardening-gate (candidate scope); existing issue https://github.com/lossyrob/telex/issues/175",
+      "owner": "Local Daemon orchestrator owns intake/routing. Existing PR owners retain evidence/retry ownership. Implementation remains unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority. Co-tracking is administrative, not causal equivalence or gate acceptance.",
+      "terminalPath": "Independently classify each timeout using retained command/daemon timing and identity evidence. Preserve prompt store-lock refusal, successful attach/readiness and ordinary-send/turn-guard semantics. Any confirmed fix or justified harness change requires separately authorized scope and exact-head full hosted validation; no skipped checks, accepted timeout or unsupported budget increase. A green rerun alone is not a causal fix. Explicit hardening disposition is still required."
     }
   ]
 }
