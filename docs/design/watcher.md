@@ -15,9 +15,11 @@ The minimal v2 authoring, registration, identity, and compatibility direction is
 recorded in
 [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
 
-The v2 Rust runtime and typed local administration boundary are documented in
-[Watcher runtime core](../watcher-runtime.md). Runtime implementation is not a
-claim of completed management CLI, service packaging, or operational hardening.
+The v2 Rust runtime and its local management CLI are documented in
+[Watcher runtime and administration](../watcher-runtime.md). The same-user
+management transport is recorded in
+[ADR 0055](DECISIONS.md#0055---watcher-cli-administers-the-registry-owner-through-a-same-user-local-endpoint).
+Service packaging and operational hardening remain separate work.
 
 Mechanism-level Telex membership, liveness, lease, delivery, receipt, and
 disposition semantics remain governed by [daemon.md](daemon.md). Telex core
@@ -120,10 +122,12 @@ Watcher is an application, not part of the local exchange:
 ```text
 local management CLI
         |
+        | same-user local endpoint
         v
-Watcher registry/state <----> Watcher runtime ----> Telex Application Client
-                                  |
-                                  +----> bounded detector child processes
+Watcher runtime <----> Watcher registry/state
+        |
+        +----> Telex Application Client
+        +----> bounded detector child processes
 ```
 
 The registry is local administrative state. Registration and executable
@@ -303,6 +307,12 @@ watch ineligible and, when proof cannot be made, transitions it to
 paused/inactive/blocked with `orphan-containment-unproven`.
 
 ## Detector protocol v2
+
+Detector-request stdin is ordinary valid JSON, not necessarily RFC 8785/JCS
+canonical bytes. Strict request validation, I-JSON and canonicalizability
+requirements, schema and byte limits, and the admitted numeric model remain
+unchanged. RFC 8785 canonical encoding remains authoritative for hashes and
+durable evidence and MUST NOT replace the request transport encoding.
 
 Watcher invokes a detector with a single JSON request on stdin. The normative
 shape is
@@ -975,9 +985,52 @@ the registration, request, and result schemas.
 
 ## Management operations
 
+### Same-user local transport
+
+After acquiring physical-registry ownership, the owning runtime exposes one
+local endpoint derived from that identity. Canonical-path aliases and hard
+links reach the same owner. The CLI sends versioned JSON containing existing
+typed management commands through `LocalManagement`. The owner applies the
+shared safe projection and accepted read filters to its unchanged in-process
+response before serialization and the response byte cap. The versioned request
+envelope may carry validated presentation-only selectors for existing
+list/show filters, without adding an operation or mutation authority. Required
+public refusal/recovery, revision, lifecycle, eligibility, health, and
+audit/evidence fields remain in the projected result consumed by both human
+and JSON output. The CLI never opens the registry or takes its lock, and cannot
+bypass the owner's mutation transactions.
+
+Authorization is the same local OS user only: a Unix domain socket in an
+owner-private directory with owner-only permissions, or a Windows named pipe
+with an owner-only DACL that rejects remote clients. The endpoint is removed or
+invalidated when ownership ends. Missing or stale endpoints produce typed
+`runtime-not-running`, without a hang or implicit offline mutation. No
+management command attaches a Telex sender.
+
+Requests have byte, timeout, and concurrent-client bounds. Once a mutation is
+admitted to `LocalManagement`, client disconnection does not roll it back.
+Timeout or lost response is not proof that mutation failed: inspect the watch
+and retained evidence before retrying. This endpoint cannot be carried over
+Telex messages, exposed over the network, or extended into remote executable
+registration.
+Accepted deep state and excluded raw values must not exhaust a fitting
+projected result's depth or byte budget. Genuinely oversized projected output
+fails explicitly with usable fixed-ID, filter, or history-limit narrowing;
+matching records are never silently truncated.
+
+### Operation results
+
 The contract requires management semantics but does not freeze CLI spelling.
 Every mutation is local-only, audited, and returns the resulting registration
 revision, lifecycle, eligibility, health, and typed refusal reason.
+
+Management audit projections identify the action and prior/resulting
+registration revision. Updates and reconciliation additionally expose and
+persist canonical old/new committed-state hashes and whether state changed;
+unsupported-v1 removal exposes the explicit non-applicable hash status below.
+Safe JSON output and concise human output derive from the same typed result.
+Opaque detector state, parameters, arbitrary argument values, payload bodies,
+and credential-bearing diagnostics are excluded from default output.
 
 | Operation | Required effect and refusal rules |
 |---|---|
@@ -1034,6 +1087,14 @@ A v2 runtime does not silently execute persisted v1 registrations or accept v1
 detector results. Mixed registries remain usable: unsupported v1 registrations
 are visibly paused/blocked with `unsupported-registration-version`, while valid
 v2 watches continue.
+
+An admitted `Remove` of an unsupported-v1 record retains its opaque state and
+permanent identity/evidence without v2 state hashing. Its audit reports
+`stateChanged: false`, `stateHashStatus: "not-applicable"`, and
+`stateHashReason: "unsupported-registration-version"`. Both `oldStateHash`
+and `newStateHash` are omitted entirely, never emitted as null or replaced by
+a legacy/fallback digest. Other unsupported-v1 mutations remain refused; this
+does not relax v2 validation, state hashing, or removal semantics.
 
 The former spike implementation in the `telex-watcher` crate and the retained
 detectors under `telex-watcher/examples/detectors` remain historical v1

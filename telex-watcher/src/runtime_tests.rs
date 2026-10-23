@@ -56,6 +56,14 @@ async fn staged(registry: &mut Registry, clients: &Clients, id: &str) -> Operati
 
 async fn battery(iso: &isolation::Isolation) {
     let registry_path = iso.root.join("watcher.sqlite");
+    let legacy = rusqlite::Connection::open(&registry_path).unwrap();
+    legacy
+        .execute_batch(
+            "CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);
+         INSERT INTO watches VALUES('legacy-cli','{\"opaque\":18446744073709551615}');",
+        )
+        .unwrap();
+    drop(legacy);
     let mut registry = Registry::open(&registry_path, 10000, 10_000_000).unwrap();
     for id in [
         "accepted",
@@ -330,9 +338,294 @@ async fn battery(iso: &isolation::Isolation) {
     assert!(health.compensation.iter().all(|outcome| outcome.ready));
     colliding.shutdown().await;
     sender.detach("service:inbound-test").await.unwrap();
-    assert!(clients.shutdown().await.iter().all(|outcome| outcome.ready));
 
+    registry
+        .block_watch("retained", BlockedReason::ReceiptOutcomeUnresolved)
+        .unwrap();
+    for id in ["send-grant-cli", "permanent-cli", "removed-cli"] {
+        registry
+            .register(registration(iso, id, "service:watcher-suite"), now_ms())
+            .unwrap();
+        let operation = staged(&mut registry, &clients, id).await;
+        match id {
+            "send-grant-cli" => {
+                let absence = client
+                    .reconcile_operation(&operation.recovery)
+                    .await
+                    .unwrap();
+                assert!(matches!(absence, OperationReconciliation::NotRecorded(_)));
+                registry
+                    .evidence(
+                        &operation.operation_id,
+                        SendEvidence::Reconciliation(Ok(absence)),
+                        now_ms(),
+                    )
+                    .unwrap();
+                registry
+                    .block_watch(id, BlockedReason::SendRetryExhausted)
+                    .unwrap();
+            }
+            "permanent-cli" => {
+                registry
+                    .evidence(
+                        &operation.operation_id,
+                        SendEvidence::send(Err(ApplicationClientError::RejectedBeforeAcceptance {
+                            code: "fixture-permanent".into(),
+                            detail: "typed fault injection before acceptance".into(),
+                            retryability: RejectionRetryability::Permanent,
+                        })),
+                        now_ms(),
+                    )
+                    .unwrap();
+            }
+            "removed-cli" => {
+                registry.change(id, Change::Remove, now_ms()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+    }
+    assert!(clients.shutdown().await.iter().all(|outcome| outcome.ready));
+    drop(other_registry);
+    drop(registry);
+
+    cli_recovery_battery(iso, &registry_path).await;
     actor_lifecycle(iso).await;
+}
+
+async fn cli(
+    iso: &isolation::Isolation,
+    registry: &std::path::Path,
+    args: &[&str],
+    success: bool,
+) -> serde_json::Value {
+    let binary = isolation::branch_binary()
+        .with_file_name(format!("telex-watcher{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        binary.is_file(),
+        "build the branch Watcher binary before the runtime matrix"
+    );
+    let mut command = iso.command_for(&binary);
+    command
+        .arg("--registry")
+        .arg(registry)
+        .arg("--json")
+        .args(args);
+    let output = tokio::process::Command::from(command)
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(
+        output.status.success(),
+        success,
+        "CLI {args:?}: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["schemaVersion"], 1);
+    assert_eq!(result["ok"], success);
+    result
+}
+
+async fn cli_recovery_battery(iso: &isolation::Isolation, registry: &std::path::Path) {
+    use crate::management::Command;
+    let (runtime, management) = Runtime::open(RuntimeConfig::installed(
+        registry.to_owned(),
+        iso.trusted_root(),
+    ))
+    .unwrap();
+    let ownership = runtime.retain_registry_ownership();
+    let server = crate::transport::Server::bind(registry, management.clone()).unwrap();
+    let server = tokio::spawn(server.run());
+    let owner = tokio::spawn(runtime.run());
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let health = cli(iso, registry, &["status"], true).await;
+        if health["result"]["value"]["productionReady"] == true {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{health}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let pending = cli(iso, registry, &["pending", "retained"], true).await;
+    let operation = pending["result"]["value"]["operationId"].clone();
+    let registration_file = iso.root.join("retained-registration.json");
+    std::fs::write(
+        &registration_file,
+        serde_json::to_vec(&registration(iso, "retained", "service:watcher-suite")).unwrap(),
+    )
+    .unwrap();
+    let registration_file = registration_file.to_str().unwrap();
+    for args in [
+        vec!["pause", "retained"],
+        vec!["resume", "retained"],
+        vec!["update", "retained", registration_file],
+    ] {
+        let result = cli(iso, registry, &args, false).await;
+        assert_eq!(result["result"]["value"]["refusal"], "pending-operation");
+    }
+    let result = cli(iso, registry, &["close-not-accepted", "retained"], false).await;
+    assert_eq!(result["result"]["value"]["refusal"], "wrong-recovery-proof");
+    let granted = cli(
+        iso,
+        registry,
+        &[
+            "grant-reconciliation",
+            "retained",
+            "--attempts",
+            "2",
+            "--seconds",
+            "30",
+        ],
+        true,
+    )
+    .await;
+    assert_eq!(granted["result"]["value"]["watch"]["lifecycle"], "active");
+    let pending = cli(iso, registry, &["pending", "retained"], true).await;
+    assert_eq!(pending["result"]["value"]["operationId"], operation);
+    assert_eq!(pending["result"]["value"]["queryOnly"], true);
+    cli(
+        iso,
+        registry,
+        &[
+            "grant-send-retry",
+            "retained",
+            "--attempts",
+            "1",
+            "--seconds",
+            "30",
+        ],
+        false,
+    )
+    .await;
+    cli(iso, registry, &["remove", "retained"], true).await;
+    cli(iso, registry, &["reconcile-now", "retained"], true).await;
+    let retained = cli(iso, registry, &["show", "retained"], true).await;
+    assert_eq!(retained["result"]["value"]["lifecycle"], "removed");
+    assert_eq!(retained["result"]["value"]["pendingOperationId"], operation);
+    let removed = cli(iso, registry, &["removed-evidence", "retained"], true).await;
+    assert_eq!(removed["result"]["value"][0]["operationId"], operation);
+    cli(iso, registry, &["list", "--unresolved-tombstones"], true).await;
+    cli(iso, registry, &["attempts", "retained"], true).await;
+    cli(iso, registry, &["health", "retained"], true).await;
+    cli(
+        iso,
+        registry,
+        &["receipt-evidence", operation.as_str().unwrap()],
+        true,
+    )
+    .await;
+
+    let pending = cli(iso, registry, &["pending", "send-grant-cli"], true).await;
+    let operation = pending["result"]["value"]["operationId"].clone();
+    let granted = cli(
+        iso,
+        registry,
+        &[
+            "grant-send-retry",
+            "send-grant-cli",
+            "--attempts",
+            "1",
+            "--seconds",
+            "30",
+        ],
+        true,
+    )
+    .await;
+    assert_eq!(granted["result"]["value"]["watch"]["lifecycle"], "active");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let events = cli(iso, registry, &["events", "send-grant-cli"], true).await;
+        let event = &events["result"]["value"][0];
+        assert_eq!(event["operationId"], operation);
+        if event["status"] == "accepted" {
+            assert_eq!(event["receipt"]["axes"]["durableAcceptance"], "accepted");
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{events}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let closed = cli(
+        iso,
+        registry,
+        &["close-not-accepted", "permanent-cli"],
+        true,
+    )
+    .await;
+    assert_eq!(
+        closed["result"]["value"]["watch"]["lastCommittedEventSequence"],
+        0
+    );
+    assert_eq!(
+        closed["result"]["value"]["watch"]["lastAllocatedEventSequence"],
+        1
+    );
+    cli(iso, registry, &["resume", "permanent-cli"], true).await;
+    cli(iso, registry, &["pause", "permanent-cli"], true).await;
+
+    cli(iso, registry, &["reconcile-now", "removed-cli"], true).await;
+    let removed = cli(iso, registry, &["show", "removed-cli"], true).await;
+    assert_eq!(removed["result"]["value"]["lifecycle"], "removed");
+    assert_eq!(
+        removed["result"]["value"]["pendingOperationId"],
+        serde_json::Value::Null
+    );
+    let events = cli(iso, registry, &["removed-evidence", "removed-cli"], true).await;
+    assert_eq!(
+        events["result"]["value"][0]["status"],
+        "removed-not-recorded"
+    );
+
+    let mut immutable = registration(iso, "accepted", "service:watcher-suite");
+    immutable.target = "agent:replacement-not-allowed".into();
+    let file = iso.root.join("immutable-registration.json");
+    std::fs::write(&file, serde_json::to_vec(&immutable).unwrap()).unwrap();
+    let refused = cli(
+        iso,
+        registry,
+        &["update", "accepted", file.to_str().unwrap()],
+        false,
+    )
+    .await;
+    assert_eq!(
+        refused["result"]["value"]["refusal"],
+        "immutable-registration"
+    );
+    let mut tombstone = immutable;
+    tombstone.id = "mismatch".into();
+    std::fs::write(&file, serde_json::to_vec(&tombstone).unwrap()).unwrap();
+    let refused = cli(iso, registry, &["register", file.to_str().unwrap()], false).await;
+    assert_eq!(
+        refused["result"]["value"]["refusal"],
+        "id-already-allocated"
+    );
+
+    let refused = cli(iso, registry, &["resume", "legacy-cli"], false).await;
+    assert_eq!(
+        refused["result"]["value"]["refusal"],
+        "unsupported-registration-version"
+    );
+    let removed = cli(iso, registry, &["remove", "legacy-cli"], true).await;
+    assert_eq!(
+        removed["result"]["value"]["audit"],
+        json!({
+            "action":"remove","priorRevision":1,"resultingRevision":1,
+            "stateChanged":false,"stateHashStatus":"not-applicable",
+            "stateHashReason":"unsupported-registration-version"
+        })
+    );
+    cli(
+        iso,
+        registry,
+        &["list", "--removed", "--unsupported-v1"],
+        true,
+    )
+    .await;
+    cli(iso, registry, &["shutdown"], true).await;
+    owner.await.unwrap().unwrap();
+    server.await.unwrap().unwrap();
+    drop(ownership);
+    assert!(management.execute(Command::Health).await.is_err());
 }
 
 async fn actor_lifecycle(iso: &isolation::Isolation) {

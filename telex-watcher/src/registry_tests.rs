@@ -727,6 +727,20 @@ fn legacy_removal_retains_opaque_state_tombstones_and_explicit_audit() {
         let before_revision = registry.revision().unwrap();
         let removed = registry.change("old-watch", Change::Remove, 2000).unwrap();
         assert!(removed.refusal.is_none());
+        let projected_audit = serde_json::to_value(removed.audit.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            projected_audit,
+            json!({
+                "action": "remove",
+                "priorRevision": 1,
+                "resultingRevision": 1,
+                "stateChanged": false,
+                "stateHashStatus": "not-applicable",
+                "stateHashReason": "unsupported-registration-version"
+            })
+        );
+        assert!(projected_audit.get("oldStateHash").is_none());
+        assert!(projected_audit.get("newStateHash").is_none());
         expected.lifecycle = Lifecycle::Removed;
         expected.eligibility = Eligibility::Inactive;
         expected.health = Health::Inactive;
@@ -780,11 +794,17 @@ fn legacy_removal_retains_opaque_state_tombstones_and_explicit_audit() {
             vec![
                 json!({
                     "revision": 1,
+                    "priorRevision": 1,
+                    "resultingRevision": 1,
                     "stateChanged": false,
                     "stateHashStatus": "not-applicable",
                     "stateHashReason": "unsupported-registration-version"
                 }),
-                json!({"refusal": "invalid-lifecycle"})
+                json!({
+                    "refusal": "invalid-lifecycle",
+                    "priorRevision": 1,
+                    "resultingRevision": 1
+                })
             ]
         );
         let isolation: Vec<Value> = read_many(
@@ -878,6 +898,8 @@ fn legacy_removal_rolls_back_when_audit_or_registry_revision_fails() {
             audits,
             vec![json!({
                 "revision": 7,
+                "priorRevision": 7,
+                "resultingRevision": 7,
                 "stateChanged": false,
                 "stateHashStatus": "not-applicable",
                 "stateHashReason": "unsupported-registration-version"
@@ -951,16 +973,161 @@ fn v2_mutations_require_valid_hashes_and_keep_existing_audit_shape() {
         vec![
             json!({
                 "revision": 2,
+                "priorRevision": 1,
+                "resultingRevision": 2,
                 "oldStateHash": hash_value(&original.state).unwrap(),
                 "newStateHash": hash_value(&Value::Null).unwrap()
             }),
             json!({
                 "revision": 2,
+                "priorRevision": 2,
+                "resultingRevision": 2,
                 "oldStateHash": hash_value(&Value::Null).unwrap(),
                 "newStateHash": hash_value(&Value::Null).unwrap()
             }),
         ]
     );
+}
+
+#[test]
+fn management_mutations_return_durable_revision_and_state_evidence() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let registered = registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    let registered = registered.audit.unwrap();
+    assert_eq!(registered.action, "register");
+    assert_eq!(registered.prior_revision, None);
+    assert_eq!(registered.resulting_revision, Some(1));
+
+    let updated = registry
+        .change(
+            "watch",
+            Change::Update {
+                registration: Box::new(fixture.registration("watch")),
+                state: Some(Value::Null),
+            },
+            2000,
+        )
+        .unwrap();
+    let audit = updated.audit.unwrap();
+    assert_eq!(audit.action, "update");
+    assert_eq!(audit.prior_revision, Some(1));
+    assert_eq!(audit.resulting_revision, Some(2));
+    assert_eq!(audit.state_changed, Some(true));
+    assert_eq!(
+        audit.old_state_hash,
+        Some(hash_value(&json!({"cursor": 1})).unwrap())
+    );
+    assert_eq!(
+        audit.new_state_hash,
+        Some(hash_value(&Value::Null).unwrap())
+    );
+    let stored: Value = registry
+        .connection
+        .query_row(
+            "SELECT data FROM watcher_v2_audits WHERE action='update'",
+            [],
+            |row| Ok(serde_json::from_str(&row.get::<_, String>(0)?).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(stored["priorRevision"], 1);
+    assert_eq!(stored["resultingRevision"], 2);
+    assert_eq!(stored["oldStateHash"], audit.old_state_hash.unwrap());
+    assert_eq!(stored["newStateHash"], audit.new_state_hash.unwrap());
+
+    let refused = registry.change("missing", Change::Pause, 3000).unwrap();
+    let audit = refused.audit.unwrap();
+    assert_eq!(audit.action, "pause");
+    assert_eq!(audit.refusal, Some(Refusal::NotFound));
+    assert_eq!(audit.prior_revision, None);
+    assert_eq!(audit.resulting_revision, None);
+
+    let before = registry.get("watch").unwrap().unwrap();
+    let result = registry.recovery_result(&before).unwrap();
+    let audit = result.audit.unwrap();
+    assert_eq!(audit.action, "reconcile-now");
+    assert_eq!(audit.state_changed, Some(false));
+    assert_eq!(audit.prior_revision, Some(2));
+    assert_eq!(audit.resulting_revision, Some(2));
+}
+
+#[test]
+fn reconciliation_audit_persists_changed_and_unchanged_state_hashes() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "watch", false);
+    let before = registry.get("watch").unwrap().unwrap();
+    let recorded = RecordedOperation {
+        logical_store_id: operation.recovery.logical_store_id.clone(),
+        responsibility: operation.recovery.responsibility.clone(),
+        operation_id: operation.recovery.operation_id.clone(),
+        sender: operation.envelope.sender.clone(),
+        target: OperationTarget::Send {
+            to: operation.envelope.to.clone(),
+            cc: operation.envelope.cc.clone(),
+        },
+        payload_identity: operation.recovery.payload_identity.clone(),
+        retry_budget: operation.envelope.retry_budget,
+        outcome: RecordedOperationOutcome::Accepted(accepted(&operation)),
+    };
+    registry
+        .evidence(
+            &operation.operation_id,
+            SendEvidence::Reconciliation(Ok(OperationReconciliation::Recorded(Box::new(recorded)))),
+            3000,
+        )
+        .unwrap();
+    let result = registry.recovery_result(&before).unwrap();
+    assert_eq!(result.audit.unwrap().state_changed, Some(true));
+    let after = registry.get("watch").unwrap().unwrap();
+    assert_eq!(after.state, json!({"cursor": 2}));
+    let result = registry.recovery_result(&after).unwrap();
+    assert_eq!(result.audit.unwrap().state_changed, Some(false));
+    let audits: Vec<Value> = read_many(
+        &registry.connection,
+        "SELECT data FROM watcher_v2_audits WHERE action='reconcile-now' ORDER BY id",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            json!({
+                "priorRevision": 1,
+                "resultingRevision": 1,
+                "stateChanged": true,
+                "oldStateHash": hash_value(&before.state).unwrap(),
+                "newStateHash": hash_value(&after.state).unwrap()
+            }),
+            json!({
+                "priorRevision": 1,
+                "resultingRevision": 1,
+                "stateChanged": false,
+                "oldStateHash": hash_value(&after.state).unwrap(),
+                "newStateHash": hash_value(&after.state).unwrap()
+            }),
+        ]
+    );
+}
+
+#[test]
+fn host_ownership_guard_outlives_the_runtime_until_endpoint_teardown() {
+    let fixture = Fixture::new();
+    let config =
+        crate::RuntimeConfig::installed(fixture.path(), fixture.root.join("unused-install"));
+    let (runtime, management) = crate::Runtime::open(config).unwrap();
+    let ownership = runtime.retain_registry_ownership();
+    drop(runtime);
+    drop(management);
+    assert!(Registry::open(&fixture.path(), 10_000, 10_000_000)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("registry-already-owned"));
+    drop(ownership);
+    fixture.open();
 }
 
 #[test]

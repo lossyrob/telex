@@ -109,6 +109,12 @@ impl Runtime {
         &self.id
     }
 
+    /// Keep the existing registry lock alive until a host has removed its
+    /// management endpoint. The guard exposes no registry access or mutation.
+    pub fn retain_registry_ownership(&self) -> impl Send + 'static {
+        self.registry.clone()
+    }
+
     /// Owns scheduling and administration until Shutdown or a registry failure.
     pub async fn run(mut self) -> Result<()> {
         let previous = lock(&self.registry)?.unfinished_containment()?;
@@ -709,7 +715,7 @@ impl Runtime {
                         "watch not found",
                     );
                 };
-                let Some(operation) = watch.pending_operation_id else {
+                let Some(operation) = watch.pending_operation_id.as_deref() else {
                     return self.refuse(
                         Some(&id),
                         "reconcile-now",
@@ -730,9 +736,9 @@ impl Runtime {
                         "selected backend client is unavailable",
                     );
                 }
-                self.recover(&operation, true).await?;
+                self.recover(operation, true).await?;
                 Ok(Response::Mutation(
-                    lock(&self.registry)?.recovery_result(&id)?,
+                    lock(&self.registry)?.recovery_result(&watch)?,
                 ))
             }
             Command::Health => {
