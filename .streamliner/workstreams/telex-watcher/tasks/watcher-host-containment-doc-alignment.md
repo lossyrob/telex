@@ -3,7 +3,7 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-host-containment-doc-alignment`
 - **Type:** task
-- **Status:** planned; owner not yet launched
+- **Status:** in progress; owner session `99ea868c-1d3c-4ad7-8e1b-69bfb4d41705`
 - **Attention:** watch
 - **Depends on:** completed `watcher-macos-containment`
 - **Tracker:** [lossyrob/telex#177](https://github.com/lossyrob/telex/issues/177)
@@ -28,8 +28,13 @@ the active source and native proof work and grants no implementation
 authorization. The Windows-path five-minute gate does not depend on this item.
 
 `watcher-macos-containment` completed on 2026-10-23, so every dependency of this
-item is satisfied. It stays planned with no owner until the Watcher coordinator
-launches one.
+item is satisfied. The Watcher coordinator launched owner session
+`99ea868c-1d3c-4ad7-8e1b-69bfb4d41705` on 2026-10-23 from main
+`91ff646679638d230a5f52116d5d3dcaae0d8379`. The node is in progress with watch
+attention. The launch binding record is
+`watcher-host-containment-doc-alignment-20261023.json` under
+`streamliner/telex/prompts/v2/launches/` in the planning repository, with
+kickoff SHA-256 `3d3ce235`.
 
 ## Outcome
 
