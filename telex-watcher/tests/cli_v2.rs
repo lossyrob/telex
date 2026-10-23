@@ -63,6 +63,39 @@ impl Fixture {
         assert_eq!(value["ok"], output.status.success());
         (output, value)
     }
+
+    fn start_host(&self) -> Host {
+        let mut host = Host(
+            self.process()
+                .args(["run", "--json"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let started = Instant::now();
+        loop {
+            let (_, response) = self.execute(&["status"]);
+            if response["ok"] == true {
+                return host;
+            }
+            assert!(host.0.try_wait().unwrap().is_none(), "runtime exited early");
+            assert!(started.elapsed() < Duration::from_secs(15), "{response}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn stop_host(&self, host: &mut Host) {
+        let (_, shutdown) = self.execute(&["shutdown"]);
+        assert_eq!(shutdown["ok"], true);
+        let stopped = Instant::now();
+        while host.0.try_wait().unwrap().is_none() {
+            assert!(stopped.elapsed() < Duration::from_secs(15));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (_, stopped) = self.execute(&["status"]);
+        assert_eq!(stopped["error"]["code"], "runtime-not-running");
+    }
 }
 
 impl Drop for Fixture {
@@ -893,25 +926,7 @@ fn executable_not_running_and_parser_errors_are_stable_json_and_do_not_open_regi
 #[test]
 fn executable_runtime_supports_complete_ordinary_lifecycle_and_safe_defaults() {
     let fixture = Fixture::new();
-    let mut host = Host(
-        fixture
-            .process()
-            .args(["run", "--json"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
-    let started = Instant::now();
-    loop {
-        let (_, response) = fixture.execute(&["status"]);
-        if response["ok"] == true {
-            break;
-        }
-        assert!(host.0.try_wait().unwrap().is_none(), "runtime exited early");
-        assert!(started.elapsed() < Duration::from_secs(15), "{response}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let mut host = fixture.start_host();
     // Missing isolated profile prevents any daemon connection or detector execution.
     let registration = fixture.file(
         "registration.json",
@@ -1001,13 +1016,93 @@ fn executable_runtime_supports_complete_ordinary_lifecycle_and_safe_defaults() {
     assert_eq!(refused["error"]["code"], "id-already-allocated");
     let (_, evidence) = fixture.execute(&["removed-evidence", "ordinary"]);
     assert_eq!(evidence["ok"], true);
-    let (_, shutdown) = fixture.execute(&["shutdown"]);
-    assert_eq!(shutdown["ok"], true);
-    let stopped = Instant::now();
-    while host.0.try_wait().unwrap().is_none() {
-        assert!(stopped.elapsed() < Duration::from_secs(15));
-        std::thread::sleep(Duration::from_millis(20));
+    fixture.stop_host(&mut host);
+}
+
+#[test]
+fn executable_accepted_nested_state_is_projected_before_response_decoding() {
+    let fixture = Fixture::new();
+    let mut host = fixture.start_host();
+    let mut state = Value::Null;
+    for _ in 0..122 {
+        state = json!([state]);
     }
-    let (_, stopped) = fixture.execute(&["status"]);
-    assert_eq!(stopped["error"]["code"], "runtime-not-running");
+    let bytes = serde_json::to_vec(&json!({
+        "schemaVersion":2,
+        "id":"nested",
+        "command":["not-executed-cli-fixture"],
+        "backendProfile":"nonexistent-isolated-cli-fixture",
+        "sender":"service:cli-fixture",
+        "target":"agent:cli-fixture",
+        "intervalSeconds":86400,
+        "timeoutSeconds":1,
+        "initialState":state
+    }))
+    .unwrap();
+    telex_watcher::protocol_v2::parse_registration(&bytes, &fixture.root).unwrap();
+    let registration = fixture.file("nested.json", bytes);
+    let (_, registered) = fixture.execute(&["register", registration.to_str().unwrap()]);
+    assert_eq!(registered["ok"], true, "{registered}");
+    assert_eq!(
+        registered["result"]["value"]["watch"]["stateHash"],
+        telex_watcher::protocol_v2::hash_value(&state).unwrap()
+    );
+    for args in [vec!["show", "nested"], vec!["list"]] {
+        let (_, response) = fixture.execute(&args);
+        assert_eq!(response["ok"], true, "{response}");
+    }
+    let state_file = fixture.file("nested-state.json", serde_json::to_vec(&state).unwrap());
+    let (_, updated) = fixture.execute(&[
+        "update",
+        "nested",
+        registration.to_str().unwrap(),
+        "--state-file",
+        state_file.to_str().unwrap(),
+    ]);
+    assert_eq!(updated["ok"], true, "{updated}");
+    let (_, removed) = fixture.execute(&["remove", "nested"]);
+    assert_eq!(removed["ok"], true, "{removed}");
+    assert_eq!(removed["result"]["value"]["watch"]["lifecycle"], "removed");
+    let (_, listed) = fixture.execute(&["list", "--removed"]);
+    assert_eq!(listed["result"]["value"].as_array().unwrap().len(), 1);
+    fixture.stop_host(&mut host);
+}
+
+#[test]
+fn executable_large_raw_registrations_do_not_break_safe_or_zero_match_lists() {
+    let fixture = Fixture::new();
+    let mut host = fixture.start_host();
+    let argument = format!("{SECRET}{}", "x".repeat(1024 * 1024 - SECRET.len()));
+    for index in 0..16 {
+        let bytes = serde_json::to_vec(&json!({
+            "schemaVersion":2,
+            "id":format!("large-{index}"),
+            "command":["not-executed-cli-fixture",argument],
+            "backendProfile":"nonexistent-isolated-cli-fixture",
+            "sender":"service:cli-fixture",
+            "target":"agent:cli-fixture",
+            "intervalSeconds":86400,
+            "timeoutSeconds":1
+        }))
+        .unwrap();
+        telex_watcher::protocol_v2::parse_registration(&bytes, &fixture.root).unwrap();
+        let registration = fixture.file("large.json", bytes);
+        let (_, registered) = fixture.execute(&["register", registration.to_str().unwrap()]);
+        assert_eq!(registered["ok"], true, "{registered}");
+        assert!(!registered.to_string().contains(SECRET));
+    }
+    for args in [vec!["list"], vec!["list", "--active"]] {
+        let (_, listed) = fixture.execute(&args);
+        assert_eq!(listed["ok"], true, "{listed}");
+        let watches = listed["result"]["value"].as_array().unwrap();
+        assert_eq!(watches.len(), 16);
+        assert!(watches
+            .iter()
+            .all(|watch| watch["registration"]["argvLength"] == 2));
+        assert!(!listed.to_string().contains(SECRET));
+    }
+    let (_, listed) = fixture.execute(&["list", "--paused"]);
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["result"]["value"], json!([]));
+    fixture.stop_host(&mut host);
 }

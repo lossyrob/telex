@@ -88,6 +88,31 @@ pub enum Command {
     Shutdown,
 }
 
+impl Command {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Register { .. } => "register",
+            Self::List { .. } => "list",
+            Self::Show { .. } => "show",
+            Self::Pause { .. } => "pause",
+            Self::Resume { .. } => "resume",
+            Self::Update { .. } => "update",
+            Self::ReconcileNow { .. } => "reconcile-now",
+            Self::GrantReconciliation { .. } => "grant-reconciliation",
+            Self::GrantSendRetry { .. } => "grant-send-retry",
+            Self::CloseNotAccepted { .. } => "close-not-accepted",
+            Self::Remove { .. } => "remove",
+            Self::Health | Self::WatchHealth { .. } => "health",
+            Self::Attempts { .. } => "attempts",
+            Self::Events { .. } => "events",
+            Self::Pending { .. } => "pending",
+            Self::ReceiptEvidence { .. } => "receipt-evidence",
+            Self::RemovedEvidence { .. } => "removed-evidence",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(
     rename_all = "camelCase",

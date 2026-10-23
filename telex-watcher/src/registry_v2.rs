@@ -468,7 +468,19 @@ impl Registry {
             management_audit.state_changed =
                 Some(management_audit.old_state_hash != management_audit.new_state_hash);
         }
-        audit_management(&tx, &before.id, &management_audit, json!({}))?;
+        let mut data = json!({});
+        if let Some(changed) = management_audit.state_changed {
+            data["stateChanged"] = json!(changed);
+        }
+        for (name, hash) in [
+            ("oldStateHash", &management_audit.old_state_hash),
+            ("newStateHash", &management_audit.new_state_hash),
+        ] {
+            if let Some(hash) = hash {
+                data[name] = json!(hash);
+            }
+        }
+        audit_management(&tx, &before.id, &management_audit, data)?;
         tx.commit()?;
         Ok(Mutation {
             watch,

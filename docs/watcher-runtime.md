@@ -84,17 +84,42 @@ Both peers are checked as the same OS user. Windows also protects the first
 pipe instance against an already-bound endpoint.
 
 Frames are a four-byte big-endian length and one JSON object. The wire version
-is 1; it carries the existing serde-tagged `Command`/`Response`, with one
-request per connection. Registration is an exact byte vector so the owner's
-strict parser, not the transport, decides registration admission. Explicit-null
-state replacement stays distinct from omission. This wire version is separate
-from the CLI output envelope and the v2 detector/registration schemas.
+is 1, with one request per connection. Requests contain `version`, the existing
+serde-tagged management `command`, and optional presentation-only `filters`.
+Filters use the CLI selector names in camelCase with boolean values; omitted
+selectors default to false. They are accepted only for `show` and compatible
+`list` commands: removed/unsupported selectors cannot broaden the typed list
+command's inclusion flags. Unknown fields, nonboolean selectors, duplicate
+members, and selectors on mutations are rejected before admission.
+
+Responses contain `version` and `result`, an externally tagged `Ok`/`Err`.
+`Ok` contains the versioned safe output envelope described below, including any
+typed management refusal; `Err` contains a transport `code` and safe `message`.
+The owner executes the unchanged `Command` through `LocalManagement`, then
+applies the shared allowlist and accepted filters to its unchanged in-process
+`Response` before serialization and the response cap. Raw state, parameter
+values and argument values do not cross the response wire. Human and JSON
+output consume that same projected envelope. For example, a paused-only list
+with no matches exchanges these objects:
+
+```json
+{"version":1,"command":{"type":"list","value":{"includeRemoved":false,"includeUnsupported":false}},"filters":{"paused":true}}
+{"version":1,"result":{"Ok":{"schemaVersion":1,"command":"list","ok":true,"result":{"type":"watches","value":[]}}}}
+```
+
+Registration is an exact byte vector so the owner's strict parser, not the
+transport, decides registration admission. Explicit-null state replacement
+stays distinct from omission. Wire, output-envelope, and v2
+detector/registration schema versions are independent.
 
 Requests and responses are capped at 16 MiB; at most 16 clients are admitted
 concurrently. Connect, read, write, owner-execution, and client-response
 deadlines are respectively 2, 5, 5, 30, and 41 seconds. Oversize and slow
-requests fail before admission. An oversize response reports
-`response-too-large`: reduce the history limit, and inspect before retrying a
+requests fail before admission. Accepted deep state and excluded raw values
+cannot exhaust a response that fits after projection and filtering. A genuinely
+oversize projected result reports `response-too-large`: inspect a fixed ID
+with `show`/`status`, use list filters, or reduce the history `--limit`.
+Matching results are never silently truncated. Inspect before retrying a
 mutation. Once writing a command may have admitted it, missing or invalid
 replies report `outcome-unknown`, never a safe-to-resend assertion.
 
@@ -115,6 +140,9 @@ The registry records successful and refused management operations. An update
 during an attempt invalidates that attempt's captured revision; its result
 cannot commit or stage an event. Removal cancels execution, retains pending
 operations, and permanently reserves the ID.
+Reconciliation audit rows retain the same prior/resulting revisions and
+old/new committed-state hashes returned to the caller, including whether the
+state changed.
 
 ## Commands and output
 

@@ -12,7 +12,9 @@
 //! Registration JSON remains an exact byte vector, including invalid UTF-8 or
 //! duplicate keys, so only the existing registration parser decides admission.
 
+use crate::cli::Filters;
 use crate::management::{Command, LocalManagement, Response};
+use crate::presentation::{Envelope, OUTPUT_SCHEMA_VERSION};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -119,13 +121,15 @@ impl std::error::Error for TransportError {}
 struct RequestFrame {
     version: u16,
     command: Command,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    filters: Option<Filters>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResponseFrame {
     version: u16,
-    result: Result<Response, TransportError>,
+    result: Result<Envelope, TransportError>,
 }
 
 #[derive(Clone, Copy)]
@@ -207,18 +211,24 @@ impl Server {
 
 /// Connects only to the current user's registry owner. Never opens SQLite,
 /// acquires registry ownership, starts a runtime, or falls back to offline work.
-pub async fn execute(registry: &Path, command: Command) -> Result<Response, TransportError> {
-    execute_with_limits(registry, command, Limits::default()).await
+pub async fn execute(
+    registry: &Path,
+    command: Command,
+    filters: Option<Filters>,
+) -> Result<Envelope, TransportError> {
+    execute_with_limits(registry, command, filters, Limits::default()).await
 }
 
 async fn execute_with_limits(
     registry: &Path,
     command: Command,
+    filters: Option<Filters>,
     limits: Limits,
-) -> Result<Response, TransportError> {
+) -> Result<Envelope, TransportError> {
     let frame = RequestFrame {
         version: PROTOCOL_VERSION,
         command,
+        filters,
     };
     let bytes = encode(&frame, MAX_REQUEST_BYTES).map_err(|_| {
         TransportError::new(
@@ -260,7 +270,11 @@ async fn execute_with_limits(
             "The runtime reply version is unsupported; inspect before retrying.",
         ));
     }
-    response.result
+    let result = response.result?;
+    if result.schema_version != OUTPUT_SCHEMA_VERSION {
+        return Err(TransportError::outcome_unknown());
+    }
+    Ok(result)
 }
 
 async fn serve<S>(connection: &mut S, management: LocalManagement, limits: Limits) -> bool
@@ -274,33 +288,47 @@ where
             "The request read deadline expired before admission.",
         )),
     };
-    let shutdown_requested = matches!(&request, Ok(Command::Shutdown));
+    let shutdown_requested =
+        matches!(&request, Ok(frame) if matches!(frame.command, Command::Shutdown));
+    let mut stopping = false;
     let result = match request {
         Err(error) => Err(error),
-        Ok(command) => match timeout(limits.execute, management.execute(command)).await {
-            Err(_) => Err(TransportError::outcome_unknown()),
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(error)) if error.to_string() == "watcher-owner-unavailable" => {
-                Err(TransportError::new(
-                    TransportErrorCode::RuntimeNotRunning,
-                    "The registry owner is no longer running.",
-                ))
+        Ok(frame) => {
+            let name = frame.command.name();
+            match timeout(limits.execute, management.execute(frame.command)).await {
+                Err(_) => Err(TransportError::outcome_unknown()),
+                Ok(Ok(response)) => {
+                    stopping = shutdown_requested && matches!(response, Response::Stopping);
+                    Ok(Envelope::from_response(
+                        name,
+                        &response,
+                        frame.filters.as_ref(),
+                        chrono::Utc::now().timestamp_millis(),
+                    ))
+                }
+                Ok(Err(error)) if error.to_string() == "watcher-owner-unavailable" => {
+                    Err(TransportError::new(
+                        TransportErrorCode::RuntimeNotRunning,
+                        "The registry owner is no longer running.",
+                    ))
+                }
+                Ok(Err(error)) if error.to_string() == "watcher-owner-outcome-unknown" => {
+                    Err(TransportError::outcome_unknown())
+                }
+                Ok(Err(_)) => Err(TransportError::new(
+                    TransportErrorCode::RuntimeError,
+                    "The registry owner could not complete the command.",
+                )),
             }
-            Ok(Err(error)) if error.to_string() == "watcher-owner-outcome-unknown" => {
-                Err(TransportError::outcome_unknown())
-            }
-            Ok(Err(_)) => Err(TransportError::new(
-                TransportErrorCode::RuntimeError,
-                "The registry owner could not complete the command.",
-            )),
-        },
+        }
     };
-    let stopping = shutdown_requested && matches!(&result, Ok(Response::Stopping));
     let _ = timeout(limits.write, send_result(connection, result)).await;
     stopping
 }
 
-async fn read_request<S: AsyncRead + Unpin>(connection: &mut S) -> Result<Command, TransportError> {
+async fn read_request<S: AsyncRead + Unpin>(
+    connection: &mut S,
+) -> Result<RequestFrame, TransportError> {
     let bytes = read_frame(connection, MAX_REQUEST_BYTES)
         .await
         .map_err(|_| {
@@ -329,12 +357,31 @@ async fn read_request<S: AsyncRead + Unpin>(connection: &mut S) -> Result<Comman
             "The management protocol version is unsupported.",
         ));
     }
-    Ok(frame.command)
+    if let Some(filters) = &frame.filters {
+        let allowed = match &frame.command {
+            Command::Show { .. } => true,
+            Command::List {
+                include_removed,
+                include_unsupported,
+            } => {
+                (!filters.include_removed() || *include_removed)
+                    && (!filters.include_unsupported() || *include_unsupported)
+            }
+            _ => false,
+        };
+        if !allowed {
+            return Err(TransportError::new(
+                TransportErrorCode::InvalidRequest,
+                "Presentation selectors require a compatible list/show command.",
+            ));
+        }
+    }
+    Ok(frame)
 }
 
 async fn send_result<S: AsyncWrite + Unpin>(
     connection: &mut S,
-    result: Result<Response, TransportError>,
+    result: Result<Envelope, TransportError>,
 ) -> io::Result<()> {
     let frame = ResponseFrame {
         version: PROTOCOL_VERSION,
@@ -346,7 +393,7 @@ async fn send_result<S: AsyncWrite + Unpin>(
                 version: PROTOCOL_VERSION,
                 result: Err(TransportError::new(
                     TransportErrorCode::ResponseTooLarge,
-                    "The command completed but its response exceeds the byte limit; narrow the query and inspect before retrying mutations.",
+                    crate::presentation::transport_error_message("response-too-large"),
                 )),
             },
             MAX_RESPONSE_BYTES,

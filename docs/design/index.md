@@ -44,7 +44,8 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
   The local management boundary is
   [ADR 0055](DECISIONS.md#0055---watcher-cli-administers-the-registry-owner-through-a-same-user-local-endpoint);
-  command and diagnostics usage is in
+  the owner applies safe projection and read filters before response framing.
+  Command and diagnostics usage is in
   [Watcher runtime and administration](../watcher-runtime.md).
 - **[operator-station.md](operator-station.md)** — the **normative Operator Station
   application contract**: direct human attendance of explicitly configured

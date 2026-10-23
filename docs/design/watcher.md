@@ -990,9 +990,15 @@ the registration, request, and result schemas.
 After acquiring physical-registry ownership, the owning runtime exposes one
 local endpoint derived from that identity. Canonical-path aliases and hard
 links reach the same owner. The CLI sends versioned JSON containing existing
-typed management commands and receives typed responses. It never opens the
-registry or takes its lock, and cannot bypass the owner's mutation
-transactions.
+typed management commands through `LocalManagement`. The owner applies the
+shared safe projection and accepted read filters to its unchanged in-process
+response before serialization and the response byte cap. The versioned request
+envelope may carry validated presentation-only selectors for existing
+list/show filters, without adding an operation or mutation authority. Required
+public refusal/recovery, revision, lifecycle, eligibility, health, and
+audit/evidence fields remain in the projected result consumed by both human
+and JSON output. The CLI never opens the registry or takes its lock, and cannot
+bypass the owner's mutation transactions.
 
 Authorization is the same local OS user only: a Unix domain socket in an
 owner-private directory with owner-only permissions, or a Windows named pipe
@@ -1007,6 +1013,10 @@ Timeout or lost response is not proof that mutation failed: inspect the watch
 and retained evidence before retrying. This endpoint cannot be carried over
 Telex messages, exposed over the network, or extended into remote executable
 registration.
+Accepted deep state and excluded raw values must not exhaust a fitting
+projected result's depth or byte budget. Genuinely oversized projected output
+fails explicitly with usable fixed-ID, filter, or history-limit narrowing;
+matching records are never silently truncated.
 
 ### Operation results
 
@@ -1015,7 +1025,8 @@ Every mutation is local-only, audited, and returns the resulting registration
 revision, lifecycle, eligibility, health, and typed refusal reason.
 
 Management audit projections identify the action and prior/resulting
-registration revision. Updates additionally expose canonical state hashes;
+registration revision. Updates and reconciliation additionally expose and
+persist canonical old/new committed-state hashes and whether state changed;
 unsupported-v1 removal exposes the explicit non-applicable hash status below.
 Safe JSON output and concise human output derive from the same typed result.
 Opaque detector state, parameters, arbitrary argument values, payload bodies,

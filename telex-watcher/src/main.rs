@@ -58,19 +58,19 @@ async fn main() -> ExitCode {
     } else {
         match args.management_command() {
             Err(error) => Envelope::error(command_name, error.code, error.message),
-            Ok(command) => match transport::execute(registry, command).await {
-                Ok(response) => Envelope::from_response(
-                    command_name,
-                    &response,
-                    args.filters(),
-                    chrono::Utc::now().timestamp_millis(),
-                ),
-                Err(error) => Envelope::error(
-                    command_name,
-                    error.code(),
-                    transport_error_message(error.code()),
-                ),
-            },
+            Ok(command) => {
+                match transport::execute(registry, command, args.filters().cloned()).await {
+                    Ok(mut envelope) => {
+                        envelope.command = command_name.into();
+                        envelope
+                    }
+                    Err(error) => Envelope::error(
+                        command_name,
+                        error.code(),
+                        transport_error_message(error.code()),
+                    ),
+                }
+            }
         }
     };
     let exit = if envelope.ok {

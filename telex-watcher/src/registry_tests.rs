@@ -1054,6 +1054,65 @@ fn management_mutations_return_durable_revision_and_state_evidence() {
 }
 
 #[test]
+fn reconciliation_audit_persists_changed_and_unchanged_state_hashes() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "watch", false);
+    let before = registry.get("watch").unwrap().unwrap();
+    let recorded = RecordedOperation {
+        logical_store_id: operation.recovery.logical_store_id.clone(),
+        responsibility: operation.recovery.responsibility.clone(),
+        operation_id: operation.recovery.operation_id.clone(),
+        sender: operation.envelope.sender.clone(),
+        target: OperationTarget::Send {
+            to: operation.envelope.to.clone(),
+            cc: operation.envelope.cc.clone(),
+        },
+        payload_identity: operation.recovery.payload_identity.clone(),
+        retry_budget: operation.envelope.retry_budget,
+        outcome: RecordedOperationOutcome::Accepted(accepted(&operation)),
+    };
+    registry
+        .evidence(
+            &operation.operation_id,
+            SendEvidence::Reconciliation(Ok(OperationReconciliation::Recorded(Box::new(recorded)))),
+            3000,
+        )
+        .unwrap();
+    let result = registry.recovery_result(&before).unwrap();
+    assert_eq!(result.audit.unwrap().state_changed, Some(true));
+    let after = registry.get("watch").unwrap().unwrap();
+    assert_eq!(after.state, json!({"cursor": 2}));
+    let result = registry.recovery_result(&after).unwrap();
+    assert_eq!(result.audit.unwrap().state_changed, Some(false));
+    let audits: Vec<Value> = read_many(
+        &registry.connection,
+        "SELECT data FROM watcher_v2_audits WHERE action='reconcile-now' ORDER BY id",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            json!({
+                "priorRevision": 1,
+                "resultingRevision": 1,
+                "stateChanged": true,
+                "oldStateHash": hash_value(&before.state).unwrap(),
+                "newStateHash": hash_value(&after.state).unwrap()
+            }),
+            json!({
+                "priorRevision": 1,
+                "resultingRevision": 1,
+                "stateChanged": false,
+                "oldStateHash": hash_value(&after.state).unwrap(),
+                "newStateHash": hash_value(&after.state).unwrap()
+            }),
+        ]
+    );
+}
+
+#[test]
 fn host_ownership_guard_outlives_the_runtime_until_endpoint_teardown() {
     let fixture = Fixture::new();
     let config =

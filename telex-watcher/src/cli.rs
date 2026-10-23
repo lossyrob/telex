@@ -129,7 +129,8 @@ pub struct Query {
     pub limit: u32,
 }
 
-#[derive(Debug, Default, Clone, Args)]
+#[derive(Debug, Default, Clone, Args, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Filters {
     #[arg(long)]
     pub active: bool,

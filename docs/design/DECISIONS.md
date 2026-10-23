@@ -2666,14 +2666,30 @@ originating agent session ends.
 
 **Decision.** The registry owner exposes one endpoint for its canonical physical
 registry identity after acquiring ownership. Versioned JSON carries the existing
-typed management `Command` and `Response`; mutations still run through the
-owner's transactions. Unix uses an owner-only socket in a user-private directory;
+typed management `Command` through `LocalManagement` and an allowlisted safe
+projection of the owner's unchanged in-process `Response`. The owner applies
+the shared projection and accepted read filters before serialization and the
+response frame cap. The bounded request envelope may carry validated
+presentation-only selectors for existing list/show filters; selectors add no
+operation or mutation authority. Required public results, refusal/recovery
+semantics, revisions, lifecycle, eligibility, health, and audit/evidence fields
+are preserved. Human and machine-readable output derive from that same
+projected result. Mutations still run through the owner's transactions.
+Unix uses an owner-only socket in a user-private directory;
 Windows uses a named pipe with an owner-only current-user DACL and rejects
 remote clients. The client never acquires registry ownership, opens SQLite, or
 connects a sender. Missing or stale ownership returns typed
 `runtime-not-running`; there is no implicit offline fallback. Request sizes,
 request duration, and concurrent clients are bounded. A disconnected caller
 does not undo an admitted operation and must inspect evidence before retrying.
+
+The steward clarified the response boundary on 2026-10-23 after PR #180 review
+found that raw response framing could reject accepted nested state and large
+raw records before safe projection or filtering; evidence:
+https://github.com/lossyrob/telex/pull/180#issuecomment-6372224177.
+This permits endpoint-side typed projection without changing runtime management
+semantics. The [C1 clarification](https://github.com/lossyrob/telex/issues/179#issuecomment-6372256445)
+supersedes only the earlier raw-response wire requirement.
 
 **Consequences.** Local administration requires an owning runtime process but
 does not require service registration, an installer, autostart, or Telex-message
@@ -2683,3 +2699,7 @@ executable registration. CLI JSON and human output share safe typed projections;
 opaque state, detector payloads, and credential-bearing diagnostics are not
 default output. Runtime and detector lifecycle, receipt identity/recovery,
 canonical hashing, v1 isolation, and permanent tombstones remain unchanged.
+Bounds remain finite; a genuinely oversized projected result fails explicitly
+with existing fixed-ID, filter, or history-limit narrowing guidance. Results
+are not silently truncated, and a response failure never reruns or rolls back
+an admitted mutation.

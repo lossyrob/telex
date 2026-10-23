@@ -156,6 +156,7 @@ fn byte_array_transport_admits_two_mib_and_preserves_duplicate_keys() {
     let bytes = vec![255; 2 * 1024 * 1024];
     let frame = RequestFrame {
         version: PROTOCOL_VERSION,
+        filters: None,
         command: Command::Register {
             json: bytes.clone(),
             working_directory: std::env::current_dir().unwrap(),
@@ -180,16 +181,61 @@ fn typed_response_decoding_does_not_apply_detector_state_numeric_restrictions() 
     let bytes = encode(
         &ResponseFrame {
             version: PROTOCOL_VERSION,
-            result: Ok(Response::Health(health)),
+            result: Ok(Envelope::from_response(
+                "health",
+                &Response::Health(health),
+                None,
+                0,
+            )),
         },
         MAX_RESPONSE_BYTES,
     )
     .unwrap();
     let decoded: ResponseFrame = serde_json::from_slice(&bytes).unwrap();
-    let Response::Health(health) = decoded.result.unwrap() else {
-        panic!("wrong response")
+    let result = decoded.result.unwrap().result.unwrap();
+    assert_eq!(result.r#type, "health");
+    assert_eq!(result.value["registryRevision"], u64::MAX);
+}
+
+#[tokio::test]
+async fn projected_wire_schema_and_read_selectors_are_explicit() {
+    let (mut writer, mut reader) = tokio::io::duplex(1024);
+    write_frame(
+        &mut writer,
+        br#"{"version":1,"command":{"type":"list","value":{"includeRemoved":false,"includeUnsupported":false}},"filters":{"paused":true}}"#,
+    )
+    .await
+    .unwrap();
+    let frame = read_request(&mut reader).await.unwrap();
+    assert!(matches!(
+        frame.command,
+        Command::List {
+            include_removed: false,
+            include_unsupported: false,
+        }
+    ));
+    assert!(frame.filters.unwrap().paused);
+    let response = ResponseFrame {
+        version: PROTOCOL_VERSION,
+        result: Ok(Envelope::from_response(
+            "list",
+            &Response::Watches(vec![]),
+            None,
+            0,
+        )),
     };
-    assert_eq!(health.registry_revision, u64::MAX);
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        json!({
+            "version":1,
+            "result":{"Ok":{
+                "schemaVersion":1,
+                "command":"list",
+                "ok":true,
+                "result":{"type":"watches","value":[]}
+            }}
+        })
+    );
 }
 
 #[tokio::test]
@@ -213,6 +259,7 @@ async fn native_same_user_round_trip_preserves_state_and_registration_bytes() {
                     working_directory: std::env::current_dir().unwrap(),
                     state,
                 },
+                None,
             )
             .await
         });
@@ -233,7 +280,10 @@ async fn native_same_user_round_trip_preserves_state_and_registration_bytes() {
         assert_eq!(json, expected_registration);
         assert!(crate::protocol_v2::parse_registration(&json, &working_directory).is_err());
         request.reply.send(Ok(Response::Stopping)).unwrap();
-        assert!(matches!(client.await.unwrap().unwrap(), Response::Stopping));
+        assert_eq!(
+            client.await.unwrap().unwrap().result.unwrap().r#type,
+            "stopping"
+        );
     }
     // The client looked up metadata, never took the still-held registry lock.
     assert!(Ownership::acquire(&fixture.registry).is_err());
@@ -265,17 +315,16 @@ async fn native_alias_and_hard_link_reach_the_same_owner() {
             endpoint_key(&path).unwrap(),
             endpoint_key(&fixture.registry).unwrap()
         );
-        let client = tokio::spawn(async move { execute(&path, Command::Health).await });
+        let client = tokio::spawn(async move { execute(&path, Command::Health, None).await });
         let request = timeout(Duration::from_secs(3), requests.recv())
             .await
             .unwrap()
             .unwrap();
         assert!(matches!(request.command, Command::Health));
         request.reply.send(Ok(Response::Watch(None))).unwrap();
-        assert!(matches!(
-            client.await.unwrap().unwrap(),
-            Response::Watch(None)
-        ));
+        let envelope = client.await.unwrap().unwrap();
+        assert_eq!(envelope.result.unwrap().value, Value::Null);
+        assert_eq!(envelope.error.unwrap().code, "not-found");
     }
     server.abort();
     let _ = server.await;
@@ -285,10 +334,13 @@ async fn native_alias_and_hard_link_reach_the_same_owner() {
 async fn native_missing_owner_is_typed_bounded_and_never_creates_registry() {
     let fixture = Fixture::new();
     for registry in [&fixture.registry, &fixture.root.join("missing.sqlite")] {
-        let error = timeout(Duration::from_secs(3), execute(registry, Command::Health))
-            .await
-            .unwrap()
-            .unwrap_err();
+        let error = timeout(
+            Duration::from_secs(3),
+            execute(registry, Command::Health, None),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
         assert_eq!(error.code(), "runtime-not-running");
         let value = serde_json::to_value(&error).unwrap();
         assert_eq!(value["code"], "runtime-not-running");
@@ -326,6 +378,13 @@ async fn native_oversized_malformed_versioned_and_slow_clients_are_bounded() {
         br#"{"version":2,"command":{"type":"health"}}"#,
         br#"{"version":1,"command":{"type":"health"},"x":1}"#,
         br#"{"version":1,"command":{"type":"pause","value":{"id":"w","x":1}}}"#,
+        br#"{"version":1,"command":{"type":"health"},"filters":{"active":true}}"#,
+        br#"{"version":1,"command":{"type":"pause","value":{"id":"w"}},"filters":{}}"#,
+        br#"{"version":1,"command":{"type":"show","value":{"id":"w"}},"filters":{"unknown":true}}"#,
+        br#"{"version":1,"command":{"type":"show","value":{"id":"w"}},"filters":{"active":"true"}}"#,
+        br#"{"version":1,"command":{"type":"show","value":{"id":"w"}},"filters":{"active":true,"active":false}}"#,
+        br#"{"version":1,"command":{"type":"list","value":{"includeRemoved":false,"includeUnsupported":false}},"filters":{"all":true}}"#,
+        br#"{"version":1,"command":{"type":"list","value":{"includeRemoved":false,"includeUnsupported":false}},"filters":{"unsupportedV1":true}}"#,
         br#"{"version":1,"command":{"type":"update","value":{"id":"w","json":[],"workingDirectory":"local","state":{"nested":{"n":1,"n":2}}}}}"#,
         br#"{"version":1,"command":{"type":"update","value":{"id":"w","json":[],"workingDirectory":"local","state":{"n":9007199254740993}}}}"#,
         br#"{"version":1,"command":{"type":"update","value":{"id":"w","json":[],"workingDirectory":"local","state":{"n":1e-999}}}}"#,
@@ -365,7 +424,7 @@ async fn native_concurrency_limit_returns_busy_without_admitting_another_command
     for _ in 0..MAX_CLIENTS {
         let registry = fixture.registry.clone();
         clients.push(tokio::spawn(async move {
-            execute(&registry, Command::Health).await
+            execute(&registry, Command::Health, None).await
         }));
         admitted.push(
             timeout(Duration::from_secs(3), requests.recv())
@@ -375,7 +434,7 @@ async fn native_concurrency_limit_returns_busy_without_admitting_another_command
         );
     }
     assert_eq!(
-        execute(&fixture.registry, Command::Health)
+        execute(&fixture.registry, Command::Health, None)
             .await
             .unwrap_err()
             .code(),
@@ -386,7 +445,10 @@ async fn native_concurrency_limit_returns_busy_without_admitting_another_command
         request.reply.send(Ok(Response::Stopping)).unwrap();
     }
     for client in clients {
-        assert!(matches!(client.await.unwrap().unwrap(), Response::Stopping));
+        assert_eq!(
+            client.await.unwrap().unwrap().result.unwrap().r#type,
+            "stopping"
+        );
     }
     server.abort();
     let _ = server.await;
@@ -405,6 +467,7 @@ async fn native_admitted_command_survives_disconnect_and_timeout() {
         &encode(
             &RequestFrame {
                 version: PROTOCOL_VERSION,
+                filters: None,
                 command: Command::Remove {
                     id: "admitted".into(),
                 },
@@ -430,6 +493,7 @@ async fn native_admitted_command_survives_disconnect_and_timeout() {
             Command::Pause {
                 id: "timeout".into(),
             },
+            None,
         )
         .await
     });
@@ -465,7 +529,7 @@ async fn native_cleanup_drops_active_clients_and_allows_rebind() {
         .unwrap();
     assert!(matches!(result, Ok(0) | Err(_)));
     assert_eq!(
-        execute(&fixture.registry, Command::Health)
+        execute(&fixture.registry, Command::Health, None)
             .await
             .unwrap_err()
             .code(),
@@ -491,7 +555,7 @@ async fn native_shutdown_reply_is_written_before_server_finishes() {
     let (management, mut requests) = LocalManagement::channel();
     let server = tokio::spawn(Server::bind(&fixture.registry, management).unwrap().run());
     let registry = fixture.registry.clone();
-    let client = tokio::spawn(async move { execute(&registry, Command::Shutdown).await });
+    let client = tokio::spawn(async move { execute(&registry, Command::Shutdown, None).await });
     let request = timeout(Duration::from_secs(3), requests.recv())
         .await
         .unwrap()
@@ -503,9 +567,12 @@ async fn native_shutdown_reply_is_written_before_server_finishes() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(matches!(client.await.unwrap().unwrap(), Response::Stopping));
     assert_eq!(
-        execute(&fixture.registry, Command::Health)
+        client.await.unwrap().unwrap().result.unwrap().r#type,
+        "stopping"
+    );
+    assert_eq!(
+        execute(&fixture.registry, Command::Health, None)
             .await
             .unwrap_err()
             .code(),
@@ -519,7 +586,7 @@ async fn native_large_response_is_bounded_and_runtime_errors_are_redacted() {
     let (management, mut requests) = LocalManagement::channel();
     let server = tokio::spawn(Server::bind(&fixture.registry, management).unwrap().run());
     let registry = fixture.registry.clone();
-    let client = tokio::spawn(async move { execute(&registry, Command::Health).await });
+    let client = tokio::spawn(async move { execute(&registry, Command::Health, None).await });
     let request = timeout(Duration::from_secs(3), requests.recv())
         .await
         .unwrap()
@@ -536,7 +603,7 @@ async fn native_large_response_is_bounded_and_runtime_errors_are_redacted() {
     );
 
     let registry = fixture.registry.clone();
-    let client = tokio::spawn(async move { execute(&registry, Command::Health).await });
+    let client = tokio::spawn(async move { execute(&registry, Command::Health, None).await });
     let request = timeout(Duration::from_secs(3), requests.recv())
         .await
         .unwrap()
@@ -561,7 +628,7 @@ async fn client_response_deadline_reports_outcome_unknown() {
     let client = tokio::spawn(async move {
         let mut limits = testing_limits();
         limits.response = Duration::from_millis(100);
-        execute_with_limits(&registry, Command::Health, limits).await
+        execute_with_limits(&registry, Command::Health, None, limits).await
     });
     let request = timeout(Duration::from_secs(3), requests.recv())
         .await
@@ -578,7 +645,15 @@ async fn write_deadline_bounds_an_unread_response() {
     let (mut server, _unread_client) = tokio::io::duplex(1);
     let error = timeout(
         Duration::from_millis(20),
-        send_result(&mut server, Ok(Response::Stopping)),
+        send_result(
+            &mut server,
+            Ok(Envelope::from_response(
+                "shutdown",
+                &Response::Stopping,
+                None,
+                0,
+            )),
+        ),
     )
     .await;
     assert!(error.is_err());

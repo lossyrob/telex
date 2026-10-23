@@ -5,7 +5,7 @@ use crate::evidence::*;
 use crate::management::Response;
 use crate::protocol_v2::{hash_value, Registration};
 use crate::Refusal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use telex::application_client::{
     AddressLifecycleResult, ApplicationClientError, ApplicationHealth,
@@ -16,8 +16,8 @@ use telex::application_client::{
 pub const OUTPUT_SCHEMA_VERSION: u32 = 1;
 pub const HEARTBEAT_STALE_AFTER_MS: i64 = 5_000;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Envelope {
     pub schema_version: u32,
     pub command: String,
@@ -28,14 +28,15 @@ pub struct Envelope {
     pub error: Option<PublicError>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectedResult {
-    pub r#type: &'static str,
+    pub r#type: String,
     pub value: Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicError {
     pub code: String,
     pub message: String,
@@ -135,7 +136,7 @@ impl Envelope {
             command: command.into(),
             ok: error.is_none(),
             result: Some(ProjectedResult {
-                r#type: kind,
+                r#type: kind.into(),
                 value,
             }),
             error,
@@ -151,7 +152,7 @@ impl Envelope {
             ));
         }
         if let Some(result) = &self.result {
-            match result.r#type {
+            match result.r#type.as_str() {
                 "mutation" => {
                     if let Some(item) = result.value.get("watch").filter(|item| !item.is_null()) {
                         lines.extend(human_watch(item));
@@ -619,7 +620,9 @@ pub fn transport_error_message(code: &str) -> &'static str {
         "unauthorized" => "local management requires the runtime's OS user",
         "invalid-request" => "the runtime rejected the local management request",
         "busy" => "the local management admission limit is busy; retry later",
-        "response-too-large" => "the response exceeds the transport limit; narrow the query",
+        "response-too-large" => {
+            "the command completed but its safe result exceeds the limit; inspect with show/status ID, list filters, or a smaller history --limit before retrying mutations"
+        }
         "runtime-error" => "the owner could not complete the request; inspect runtime health",
         _ => "local management transport failed",
     }
