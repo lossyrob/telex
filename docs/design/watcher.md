@@ -680,6 +680,8 @@ Watcher applies an explicit host-specific containment guarantee:
   including descendants that create another process group or session.
 - Linux contains the detector process tree with the private pipe-owned
   subreaper guardian, including descendants that change groups or sessions.
+  The guardian's startup handshake and its terminal-receipt path/nonce identity
+  are host-required before detector release.
 - The accepted macOS contract is for conforming non-detaching detectors. When
   the capability is enabled, Watcher assigns one process group to the attempt,
   and the detector root plus every process it creates must remain in that group
