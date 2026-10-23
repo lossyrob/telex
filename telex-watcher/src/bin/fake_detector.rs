@@ -28,6 +28,8 @@ struct Config {
     #[serde(default = "yes")]
     read_stdin: bool,
     #[serde(default)]
+    capture_v2_request: Option<String>,
+    #[serde(default)]
     stdout: Option<String>,
     /// When > 0, emit this many bytes of stdout instead of the literal `stdout`.
     #[serde(default)]
@@ -134,6 +136,11 @@ fn main() {
     if config.read_stdin {
         let mut buffer = Vec::new();
         let _ = std::io::stdin().read_to_end(&mut buffer);
+        if let Some(path) = &config.capture_v2_request {
+            telex_watcher::protocol_v2::parse_request(&buffer)
+                .expect("fake_detector stdin must be a valid v2 request");
+            fs::write(path, &buffer).expect("capture validated v2 request");
+        }
     }
 
     if config.sleep_ms > 0 {

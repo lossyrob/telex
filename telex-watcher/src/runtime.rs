@@ -314,7 +314,7 @@ impl Runtime {
                 },
                 state: watch.state.clone(),
             };
-            let bytes = protocol_v2::canonical_bytes(&request)?;
+            let bytes = protocol_v2::encode_request(&request)?;
             let spec = ProcessSpec {
                 command: registration.command.clone(),
                 working_directory: registration.working_directory.clone(),
