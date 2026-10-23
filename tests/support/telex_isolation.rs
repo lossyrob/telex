@@ -61,6 +61,43 @@ pub fn branch_binary() -> PathBuf {
     std::fs::canonicalize(&candidate).unwrap_or(candidate)
 }
 
+/// Build the public consumer in a per-feature target shared by both harnesses.
+/// Cargo still checks freshness on every call; the separate workspace avoids
+/// contending with the parent test runner's target directory lock.
+pub fn build_consumer_fixture(features: &str) -> PathBuf {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("application-client-consumer");
+    let target_dir = fixture.join(format!(
+        "target-{}",
+        features.replace(',', "-").replace(' ', "")
+    ));
+    let mut command = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()));
+    command
+        .arg("build")
+        .arg("--manifest-path")
+        .arg(fixture.join("Cargo.toml"))
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg(features)
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    run_with_timeout(command, Duration::from_secs(900))
+        .assert_success(&format!("building the consumer fixture with [{features}]"));
+    let binary = target_dir.join("debug").join(format!(
+        "telex-application-client-consumer{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    assert!(
+        binary.is_file(),
+        "fixture binary not produced at {}",
+        binary.display()
+    );
+    binary
+}
+
 #[cfg(windows)]
 fn original_localappdata() -> Option<PathBuf> {
     use std::sync::OnceLock;
