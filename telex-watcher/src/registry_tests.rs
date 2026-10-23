@@ -780,12 +780,9 @@ fn legacy_removal_retains_opaque_state_tombstones_and_explicit_audit() {
             vec![
                 json!({
                     "revision": 1,
-                    "oldStateHash": null,
-                    "newStateHash": null,
-                    "stateHashNotApplicable": {
-                        "reason": "unsupported-registration-version",
-                        "schemaVersion": 1
-                    }
+                    "stateChanged": false,
+                    "stateHashStatus": "not-applicable",
+                    "stateHashReason": "unsupported-registration-version"
                 }),
                 json!({"refusal": "invalid-lifecycle"})
             ]
@@ -797,6 +794,95 @@ fn legacy_removal_retains_opaque_state_tombstones_and_explicit_audit() {
         )
         .unwrap();
         assert_eq!(isolation, vec![json!({"version": 1})]);
+    }
+}
+
+#[test]
+fn legacy_removal_rolls_back_when_audit_or_registry_revision_fails() {
+    for failure in [
+        "CREATE TRIGGER fail_removal BEFORE INSERT ON watcher_v2_audits
+         WHEN NEW.action='remove' BEGIN SELECT RAISE(ABORT,'audit-failed'); END;",
+        "CREATE TRIGGER fail_removal BEFORE UPDATE OF revision ON watcher_v2_meta
+         BEGIN SELECT RAISE(ABORT,'revision-failed'); END;",
+    ] {
+        let fixture = Fixture::new();
+        let raw = r#"{"checksum":18446744073709551615}"#;
+        let connection = Connection::open(fixture.path()).unwrap();
+        connection
+            .execute_batch("CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")
+            .unwrap();
+        connection
+            .execute("INSERT INTO watches VALUES('old-watch',?1)", [raw])
+            .unwrap();
+        drop(connection);
+        let mut registry = fixture.open();
+        let mut original = registry.get("old-watch").unwrap().unwrap();
+        original.registration_revision = 7;
+        save_watch(&registry.connection, &original).unwrap();
+        let before_revision = registry.revision().unwrap();
+        let before_audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits ORDER BY id",
+            [],
+        )
+        .unwrap();
+        registry.connection.execute_batch(failure).unwrap();
+        let error = registry
+            .change("old-watch", Change::Remove, 2000)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(if failure.contains("audit-failed") {
+            "audit-failed"
+        } else {
+            "revision-failed"
+        }));
+        drop(registry);
+
+        let mut registry = fixture.open();
+        assert_eq!(
+            serde_json::to_value(registry.get("old-watch").unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+        assert_eq!(registry.revision().unwrap(), before_revision);
+        let audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits ORDER BY id",
+            [],
+        )
+        .unwrap();
+        assert_eq!(audits, before_audits);
+        let retained: String = registry
+            .connection
+            .query_row(
+                "SELECT state_json FROM watches WHERE id='old-watch'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, raw);
+        registry
+            .connection
+            .execute_batch("DROP TRIGGER fail_removal")
+            .unwrap();
+        let removed = registry.change("old-watch", Change::Remove, 3000).unwrap();
+        assert!(removed.refusal.is_none());
+        assert_eq!(removed.watch.unwrap().lifecycle, Lifecycle::Removed);
+        assert_eq!(registry.revision().unwrap(), before_revision + 1);
+        let audits: Vec<Value> = read_many(
+            &registry.connection,
+            "SELECT data FROM watcher_v2_audits WHERE action='remove'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            audits,
+            vec![json!({
+                "revision": 7,
+                "stateChanged": false,
+                "stateHashStatus": "not-applicable",
+                "stateHashReason": "unsupported-registration-version"
+            })]
+        );
     }
 }
 

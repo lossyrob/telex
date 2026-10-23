@@ -360,11 +360,9 @@ impl Registry {
         let state_audit = if opaque_removal {
             json!({
                 "revision": watch.registration_revision,
-                "oldStateHash": null, "newStateHash": null,
-                "stateHashNotApplicable": {
-                    "reason": BlockedReason::UnsupportedRegistrationVersion,
-                    "schemaVersion": watch.schema_version
-                }
+                "stateChanged": false,
+                "stateHashStatus": "not-applicable",
+                "stateHashReason": BlockedReason::UnsupportedRegistrationVersion
             })
         } else {
             json!({
