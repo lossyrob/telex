@@ -2593,6 +2593,153 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 requested one separate discovery-only record; sentinel comment 6375033191 records deferred triage. Neither is implementation acceptance, issue #181 scope, readiness, merge or gate authority.",
       "terminalPath": "Retain the attributed summary and its limits. After the performance PR and active repair land, the sentinel may consider a separate improvement issue only if the evidence supports useful local test-lint cleanup without adding CI jobs or a test battery. Obtain separate implementation authority before changes. Preserve required CI, workstation freeze, issue #181 and Watcher gates, and all existing runtime/marker evidence."
+    },
+    {
+      "id": "local-daemon-macos-persistent-lock-acquisition-time-bound",
+      "sourceNode": null,
+      "source": "PR #185 direct source head 7b11b92630d0b2cf63423a77fc19232aff368825; required macOS boundary job 120664829096 in run 40026777909 attempt 1, reported separately during issue #181 repair validation.",
+      "crossReference": "Separate from the optional Clippy hygiene entry, the partial-page repair signature, Windows LockFileEx OS33 and both recording-marker candidates. No issue #153 or Watcher scope promotion.",
+      "evidence": {
+        "intakePacket": {
+          "file": "pr185-macos-persistent-lock-discovery-20261023.json",
+          "bytes": 6372,
+          "sha256": "1df39f637884b09d9112c75c1d4951cfb35f7535e9025d6a518aa7dc4dcae70d"
+        },
+        "reportedSource": {
+          "pullRequest": "https://github.com/lossyrob/telex/pull/185",
+          "issue": 181,
+          "reporterSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+          "evidenceComment": "https://github.com/lossyrob/telex/pull/185#issuecomment-6375263838",
+          "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+          "runId": "40026777909",
+          "attempt": 1,
+          "jobId": "120664829096",
+          "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40026777909/job/120664829096",
+          "jobName": "Cooperative partial-page boundary (macos-latest)",
+          "step": "Test station-intent boundaries",
+          "test": "station_intent::tests::persistent_os_lock_is_bounded_and_never_removed"
+        },
+        "retainedLog": {
+          "file": "pr185-7b11b926-macos-120664829096.txt",
+          "bytes": 68750,
+          "sha256": "f306e9dc28502d6b040171dd6a2338cd5f1b0e88da97e32e3956674396eaa1ed",
+          "captureKind": "Owner-retained UTF-8 gh API job-log capture",
+          "localVerification": "Local independently matched bytes/hash, read checkout/source-verifier lines, relevant test pass/failure lines and terminal failure summary. No log refetch or full-file-read claim.",
+          "checkout": "Direct exact-head checkout and explicit source-head verifier both show 7b11b92630d0b2cf63423a77fc19232aff368825, not a provider test merge.",
+          "reconcilerVerification": "The reconciler matched the supplied retained capture's bytes/hash and read selected checkout/source-verifier, named pass/failure, panic and terminal-summary excerpts. This is not a new provider job/log query, complete log read, product-source inspection or test execution. The hash identifies the retained UTF-8 capture, not a separately downloaded provider archive."
+        },
+        "failure": {
+          "path": "src/station_intent.rs",
+          "line": 4979,
+          "thread": 20643,
+          "message": "the contender must honor the bounded acquisition policy, allowing scheduler delay under the full parallel workspace suite",
+          "assertion": "start.elapsed() < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1)",
+          "currentConstants": {
+            "intentLockAttempts": 25,
+            "intentLockRetryMilliseconds": 20,
+            "assertionBoundMilliseconds": 1540
+          },
+          "actualElapsedPrinted": false,
+          "priorAssertion": "The contending acquisition returned an error while the first lock remained held.",
+          "subsequentAssertions": "File-persistence, holder-release and reacquisition assertions were not reached.",
+          "moduleResult": {
+            "passed": 58,
+            "failed": 1,
+            "ignored": 0,
+            "measured": 0,
+            "filteredOut": 436,
+            "durationSeconds": 14.16,
+            "stepExitCode": 101
+          },
+          "moduleDurationIsNotFailingTestElapsed": true,
+          "panicReportTimestamp": "2026-10-23T21:32:59.2368590Z",
+          "stepExitTimestamp": "2026-10-23T21:32:59.4066870Z"
+        },
+        "reportedScope": {
+          "localComparison": "The complete named test body is byte-equal after LF extraction between base 36155b1ed000e7668f1ea51589772207d1fb5134 and repair head 7b11b92630d0b2cf63423a77fc19232aff368825.",
+          "ownerReported": "Lock implementation and constants are unchanged by the repair; this failure was exposed by the new macOS module job.",
+          "verifiedPassesInSameLog": [
+            "a_cooperatively_truncated_phase_still_returns_its_partial_page",
+            "cancellable_phase_admission_and_worker_share_one_completion_deadline",
+            "cancellable_phase_admission_timeout_never_starts_a_worker",
+            "cancellable_phase_unbounded_completion_returns_the_worker_result",
+            "cancellable_phase_worker_panic_is_not_a_partial_page"
+          ],
+          "positiveCaseRepetitions": "Owner reports the ten repetitions were skipped after module failure. The retained log goes from module exit 101 to post-job cleanup; no repetition pass is credited.",
+          "historicalRootCause": "Unknown. This is not established as the partial-page failure, Windows LockFileEx OS33, a lock-theft defect or any other existing signature."
+        },
+        "sourceBoundary": "failure and reportedScope preserve the packet's observations and source-derived statements with their attribution. Local compared the complete named test body; implementation/constants unchangedness remains owner-reported. The reconciler verified retained-log excerpts and the public summary, not product source, constants or execution. The actual failing-test elapsed is unknown; 14.16 seconds is the module duration. Assertion wording about scheduler allowance does not establish scheduler delay as the cause. Later persistence/release/reacquisition assertions supply no passing coverage.",
+        "localDeduplicationSnapshot": {
+          "canonicalSnapshot": "67f845713b2773575f05c7e0c54f03ce02bb3b7f",
+          "checks": [
+            "Exact test name and macOS/lock combinations in canonical Local discovery ledger and graph returned no match.",
+            "GitHub issue search for the exact test identifier across open and closed issues returned no match."
+          ],
+          "limit": "Bounded signature search only; not proof that all related history or issues were exhaustively searched."
+        },
+        "freshCanonicalDeduplication": {
+          "base": "7b2516e3e05d0e2ba9a5d858d9ebaab6ac3810d5",
+          "scope": "The reconciler searched all four canonical discovered-work ledgers at this base for the candidate ID, exact test identifier, comment ID, job ID, intake hash and retained-log hash; no prior match.",
+          "limit": "Canonical exact-signature dedup only. Local's earlier issue search remains attributed to its historical snapshot; the reconciler did not repeat it or claim exhaustive issue/history coverage."
+        },
+        "ownerSummary": {
+          "url": "https://github.com/lossyrob/telex/pull/185#issuecomment-6375263838",
+          "providerAuthor": "lossyrob",
+          "providerCreatedAt": "2026-10-23T21:39:06Z",
+          "providerUpdatedAt": "2026-10-23T21:39:06Z",
+          "retainedSnapshotBytes": 2271,
+          "retainedSnapshotSha256": "37428efbd1f8fad6cbc01c29e9b62e961cfda3d08fabbd569f5e17766c8e5129",
+          "verificationBoundary": "Local and the reconciler read the owner comment in full. Source-review completion, zero current substantive findings and DI-185-01 source-review resolution remain owner-reported; neither reader independently inspected the App source-review artifact for this discovery. The no-rerun statement is the comment's dated snapshot, not evidence about any later attempt."
+        },
+        "otherEvidence": {
+          "sourceReview": "Owner's public comment reports independent App source review complete at this exact head/tree with zero current substantive findings and DI-185-01 resolved. Local read the comment, not the independent source-review artifact.",
+          "designReview": "The separate retained exact-head steward design-only approval remains recorded; neither review waives hosted CI."
+        },
+        "designReceiptReference": {
+          "canonicalRecord": ".streamliner/workstreams/local-daemon/tasks/cooperative-partial-page-repair.md",
+          "file": "pr185-local-design-inspection-7b11b926-20261023.md",
+          "bytes": 7852,
+          "sha256": "5c9eb56e372fefdc36e3d9a359d7df5b56d809031ce30d9201ddc71162b60c1d",
+          "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+          "tree": "5582a2ca68d9c67a1dbfe99edd35842abb239d5f",
+          "scope": "Previously recorded bounded DI-185-01 design-only source resolution, zero open design findings in that inspected scope. The immutable old-head changes-required history remains preserved. No fresh App source-review, runtime, hosted CI, accepted delivery, merge or Campaign gate credit."
+        },
+        "reportedDisposition": {
+          "status": "candidate",
+          "owner": "Local coordinates shared-CI triage; existing issue181 owner retains this run's evidence and bounded retry responsibility.",
+          "repairReadiness": "Required CI remains non-green; no gate waiver.",
+          "scopeDecision": "Separate discovered work. Do not absorb a speculative lock fix, skip, threshold change or workaround into issue181.",
+          "implementationOwnerAuthorized": false,
+          "graphPromotionAuthorized": false,
+          "issueCreationAuthorizedByThisPacket": false
+        },
+        "retryDispositionSnapshot": {
+          "decision": "Use the existing v2 one-unchanged-head retry allowance for this named failed macOS job only, after the original run is terminal and the PR still has the exact same head.",
+          "executorSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+          "maximumRetriesUnderThisDisposition": 1,
+          "wholeWorkflowOrOtherFailedJobsAuthorized": false,
+          "observer": "Existing coordinator 2a4bc4c8 owns the single wait; retry attempt/job identities require explicit re-registration and original failure remains retained.",
+          "limits": "No retry has been performed or observed by Local. A passing retry does not establish cause or close this candidate. A recurrence must return for upstream-repair disposition, not a further unchanged-head retry. No advance CI-success or failed-check supersession claim."
+        },
+        "retrySnapshotQualification": "This is Local's supplied intake disposition, not a new retry authorization or an observation of later execution. Its not-performed/not-observed statement is historical. This proposal credits no retry execution, terminal-original-run confirmation, unchanged-current-head confirmation, retry registration, result or failed-check supersession. Any later receipt must identify the named job/attempt and stay under the existing single observer; do not infer or await an unsupplied receipt.",
+        "boundaries": [
+          "Keep the optional Clippy test-hygiene candidate separate.",
+          "Preserve all prior discovery evidence, markers, issue153, Watcher dependency and hardening/closure gates.",
+          "No local tests, runtime/proofs, process control, ACL/registry/root actions or installed-state operations."
+        ],
+        "limits": "The retained failure is exact-head attempt-1 evidence, not coverage of a later head or attempt. Cause and actual elapsed remain unknown. Relevant named tests passed in this log; the ten repetitions are not credited. Owner-reported source review and separately retained design-only approval do not waive required CI. No CI-result polling, log refetch, retry, local runtime action, source correction, new observer or gate acceptance was performed for this reconciliation."
+      },
+      "description": "Retain the distinct macOS persistent-lock acquisition timing failure from required PR #185 boundary validation; actual elapsed and cause remain unknown.",
+      "affectedOutcome": "Required hosted validation for the issue #181 repair remains unresolved at this failure snapshot. This does not diagnose the partial-page defect, Windows locks, recording markers or issue #153.",
+      "requiredness": "Required CI failure, unlike the separate optional lint entry; no skip, timeout inflation or gate waiver. Recording this candidate creates no new dependency or accepted implementation scope.",
+      "sequencing": "Preserve the original failure and Local's conditional, at-most-one named-job retry disposition under the existing v2 allowance. No whole-workflow or other-job retry, speculative fix or second unchanged-head retry is authorized here. Any observed retry needs its own exact identities and existing-observer registration receipt; recurrence returns for separate upstream-repair disposition.",
+      "selectedDisposition": "Separate shared-CI discovery candidate only; retain the existing bounded-retry disposition without executing, observing or pre-adjudicating it.",
+      "target": "Local shared-CI triage only; no new issue, graph node, dependency or hardening/closure promotion.",
+      "owner": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates triage. Existing issue #181 owner 9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c retains evidence and the reported bounded retry role. Implementation is unassigned; no new owner or launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 requested a distinct discovery-only append after optional lint using the supplied packet. No implementation, issue creation, graph promotion, new observer, readiness, merge or gate acceptance is granted.",
+      "terminalPath": "Retain the original failed-job evidence independently of any later retry. A passing retry establishes neither cause nor candidate closure; a recurrence needs upstream-repair disposition rather than another unchanged-head retry. Any root correction, issue or node requires separate authorization. Preserve required exact-head validation, Campaign acceptance, workstation freeze and every existing issue #181, Watcher, marker, issue #153 and hardening/closure boundary."
     }
   ]
 }
