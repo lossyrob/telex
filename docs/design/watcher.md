@@ -1176,7 +1176,7 @@ may ignore them and author a detector directly.
 | Templates/manifests/preflight/tests | Optional project/tooling choices, absent from v2 registration/runtime semantics. |
 | V1 migration | Explicit new watch ID, detector update/wrapper, and reviewed state decision. Optional adapter deferred. |
 | Shared Application Client | Required; no private fallback. |
-| macOS detached-descendant containment | Closed by ADR 0054. macOS uses the non-detaching detector and assigned-process-group contract. The specific ordinary-user guard and group-empty mechanism remain implementation proof in issue #165, not an open product-contract decision. |
+| macOS detached-descendant containment | Closed by ADR 0054. macOS uses the non-detaching detector and assigned-process-group contract. The specific ordinary-user guard and group-empty mechanism remain implementation proof in issue #172, not an open product-contract decision. |
 | Machine-readable v2 metadata and health | Closed by `watcher-event-metadata-v2.schema.json` and `watcher-health-v2.schema.json`, with executable schema and concrete-model conformance owned by `watcher-runtime-core`. |
 
 ## Test isolation

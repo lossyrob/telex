@@ -2633,7 +2633,7 @@ privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
 or VM-backed component.
 
 The Windows/Linux-only runtime in issue #162 continues to fail closed on macOS.
-macOS support begins only after issue #165 implements and proves this decision,
+macOS support begins only after issue #172 implements and proves this decision,
 sequenced after #162 merges.
 
 ### Consequences
@@ -2650,5 +2650,5 @@ sequenced after #162 merges.
   abrupt-runtime-death cleanup, guard-failure behavior, group-empty evidence,
   PID/PGID reuse safety, and restart recovery on native ARM64 and x64 hosts.
 - If ordinary-user process-group machinery cannot provide race-safe terminal
-  proof, issue #165 returns `decision-needed`; the contract revision does not
+  proof, issue #172 returns `decision-needed`; the contract revision does not
   permit an unproven success claim.
