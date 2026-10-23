@@ -1,0 +1,54 @@
+name: Static macOS RIDIFF ancestry
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-containment-proof
+    paths:
+      - tests/macos_static_ridiff.py
+      - tests/macos_static_cache.py
+      - tests/macos_static_cache_test.py
+      - .github/workflows/macos-static-ridiff.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static-resolution:
+    name: Authenticated arm64e static cache resolution
+    runs-on: macos-latest
+    timeout-minutes: 55
+    if: github.run_attempt <= 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test offline parsers
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests -p macos_static_cache_test.py
+      - name: Reconstruct only the authenticated selected arm64e data
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tests/macos_static_ridiff.py \
+            "$RUNNER_TEMP/telex-static-ridiff-work" "$RUNNER_TEMP/telex-static-ridiff-evidence"
+      - name: Verify artifact output bound
+        id: bound
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ["RUNNER_TEMP"]) / "telex-static-ridiff-evidence"
+          files = list(p.iterdir()) if p.is_dir() else []
+          assert files and all(f.is_file() and not f.is_symlink() for f in files)
+          assert sum(f.stat().st_size for f in files) <= 16 * 1024 * 1024
+          assert (p / "sha256.json").is_file()
+          PY
+      - name: Preserve bounded receipts, not OS images
+        if: always() && steps.bound.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-static-ridiff-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/telex-static-ridiff-evidence
+          if-no-files-found: error
+          retention-days: 30
