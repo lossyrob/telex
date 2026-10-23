@@ -233,30 +233,11 @@ fn platform_file_identity(path: &Path) -> (u64, u64) {
 }
 
 fn build_public_fixture() -> PathBuf {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("application-client-consumer");
-    let mut command = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()));
-    command
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(fixture.join("Cargo.toml"))
-        .arg("--no-default-features")
-        .arg("--features")
-        .arg(if process_postgres_enabled() {
-            "postgres"
-        } else {
-            "sqlite"
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    isolation::run_with_timeout(command, Duration::from_secs(900))
-        .assert_success("build public selector-client fixture");
-    fixture.join("target").join("debug").join(format!(
-        "telex-application-client-consumer{}",
-        std::env::consts::EXE_SUFFIX
-    ))
+    isolation::build_consumer_fixture(if process_postgres_enabled() {
+        "postgres"
+    } else {
+        "sqlite"
+    })
 }
 
 fn process_postgres_enabled() -> bool {
