@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T06:21:42.555Z",
+  "updatedAt": "2026-10-23T06:41:24.826Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -143,7 +143,7 @@
         "watcher-runtime-core"
       ],
       "requiredness": "not-required-for-source-items",
-      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness: PR #168 run 39902791837 attempt 1, PR #170 run 39902271641 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
+      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
       "disposition": "external",
       "target": {
         "workstream": "local-daemon",
@@ -154,7 +154,8 @@
           "https://github.com/lossyrob/telex/issues/166",
           "https://github.com/lossyrob/telex/issues/167",
           "https://github.com/lossyrob/telex/issues/169",
-          "https://github.com/lossyrob/telex/issues/171"
+          "https://github.com/lossyrob/telex/issues/171",
+          "https://github.com/lossyrob/telex/issues/174"
         ],
         "ledgerCommit": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
         "ledgerItems": [
@@ -164,7 +165,7 @@
       },
       "status": "routed",
       "decisionState": "accepted",
-      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
+      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. #174 is root fallback and process-harness work in the Local Daemon domain, distinct from #166, #167, and #171. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
       "terminalPath": "Local Daemon owns triage and disposition in its own ledger and trackers. This entry closes no Watcher item and adds no Watcher dependency.",
       "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as external, owned by Local Daemon, under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
       "evidence": [
@@ -205,6 +206,28 @@
           "repositoryMain": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
           "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
           "details": "Candidates local-daemon-ubuntu-installed-current-crash-reattach-timeout (job 120247904851) and local-daemon-windows-station-restart-lockfileex-33 (job 120247904932), both from PR #168 run 39902791837."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/174",
+          "createdAt": "2026-10-23T06:38:27Z",
+          "details": "Windows CI: Copilot fallback test times out waiting for wait.pid; open. In PR #173 run 39910906688 attempt 1 at head f1c25007ae63738b039c8eb8a9ac141238ac4472, job 120273437980 (Build and test, windows-latest) failed in real_process_copilot_fallback_cross_platform: the root daemon_process_sqlite target reported 48 passed and 1 failed, with a five-second wait.pid timeout at tests/daemon_process_sqlite.rs:558. The timeout alone does not identify the cause. The root fallback implementation, process test, and CI workflow are unchanged by PR #173. Retained artifact 12483117851 (windows-build-test-crash-f1c25007ae63738b039c8eb8a9ac141238ac4472).",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39910906688",
+          "job": "120273437980",
+          "artifact": "12483117851"
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6359016085",
+          "createdAt": "2026-10-23T06:34:34Z",
+          "details": "Recurrence for #166, with no new disposition. In the same run, job 120273438217 (Windows heap diagnostics) failed: real_process_01_concurrent_first_use reported native exit 0xc0000005 under PageHeap at tests/daemon_process_sqlite.rs:518, during concurrent first-use attachment rather than the original status-hints and cleanup case. A common root cause is not established. Retained artifact 12482574496 (windows-heap-diagnostics-f1c25007ae63738b039c8eb8a9ac141238ac4472).",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39910906688",
+          "job": "120273438217",
+          "artifact": "12482574496"
+        },
+        {
+          "source": "coordinator-report",
+          "details": "Owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe requested exactly one failed-job retry at unchanged head f1c25007. A green retry is CI evidence only, not a fix."
         }
       ]
     },
