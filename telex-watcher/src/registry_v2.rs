@@ -266,7 +266,12 @@ impl Registry {
         if let Some(reason) = refusal {
             return mutation_refused(tx, Some(watch), id, action, reason);
         }
-        let previous_state_hash = hash_value(&watch.state)?;
+        let opaque_removal = watch.schema_version != 2 && matches!(&change, Change::Remove);
+        let previous_state_hash = if opaque_removal {
+            None
+        } else {
+            Some(hash_value(&watch.state)?)
+        };
         if watch.running_attempt_id.is_some()
             && matches!(
                 &change,
@@ -352,15 +357,22 @@ impl Registry {
             watch.block(BlockedReason::LogicalStoreMismatch);
         }
         save_watch(&tx, &watch)?;
-        audit(
-            &tx,
-            Some(id),
-            action,
-            &json!({
+        let state_audit = if opaque_removal {
+            json!({
+                "revision": watch.registration_revision,
+                "oldStateHash": null, "newStateHash": null,
+                "stateHashNotApplicable": {
+                    "reason": BlockedReason::UnsupportedRegistrationVersion,
+                    "schemaVersion": watch.schema_version
+                }
+            })
+        } else {
+            json!({
                 "revision": watch.registration_revision,
                 "oldStateHash": previous_state_hash, "newStateHash": hash_value(&watch.state)?
-            }),
-        )?;
+            })
+        };
+        audit(&tx, Some(id), action, &state_audit)?;
         bump(&tx)?;
         tx.commit()?;
         Ok(Mutation {

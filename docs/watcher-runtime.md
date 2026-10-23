@@ -57,6 +57,14 @@ runtime tables. Existing v1 watch IDs are isolated as
 `unsupported-registration-version`; their state and historical tables remain
 intact. A new v2 registration requires a new ID.
 
+Unsupported legacy watches remain removable even when their opaque state is not
+valid v2 I-JSON. Removal preserves the state, historical evidence, and permanent
+ID tombstone without migrating them. Its audit records `oldStateHash` and
+`newStateHash` as `null`, with `stateHashNotApplicable` identifying
+`reason: "unsupported-registration-version"` and the watch's `schemaVersion`.
+This exception applies only to admitted unsupported-registration removal; v2
+mutations still require valid canonical state hashes and fail on hash errors.
+
 An event first becomes one atomic staged operation containing:
 
 - permanent watch ID, monotonic sequence, event ID, and operation ID;
