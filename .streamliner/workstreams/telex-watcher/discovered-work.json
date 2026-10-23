@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T07:22:02.044Z",
+  "updatedAt": "2026-10-23T07:41:06.365Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -159,7 +159,7 @@
         "watcher-runtime-core"
       ],
       "requiredness": "not-required-for-source-items",
-      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #168 run 39911899397 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
+      "description": "CI failures on Watcher PRs and merges carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #168 run 39911899397 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, main run 39916429612 attempt 1 at the PR #173 merge 55cb6b11, and PR #164 CI. Neither source item's changes are implicated.",
       "disposition": "external",
       "target": {
         "workstream": "local-daemon",
@@ -171,7 +171,9 @@
           "https://github.com/lossyrob/telex/issues/167",
           "https://github.com/lossyrob/telex/issues/169",
           "https://github.com/lossyrob/telex/issues/171",
-          "https://github.com/lossyrob/telex/issues/174"
+          "https://github.com/lossyrob/telex/issues/174",
+          "https://github.com/lossyrob/telex/issues/175",
+          "https://github.com/lossyrob/telex/issues/176"
         ],
         "ledgerCommit": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
         "ledgerItems": [
@@ -181,7 +183,7 @@
       },
       "status": "routed",
       "decisionState": "accepted",
-      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. #174 is root fallback and process-harness work in the Local Daemon domain, distinct from #166, #167, and #171. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
+      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. #174 is root fallback and process-harness work in the Local Daemon domain, distinct from #166, #167, and #171. #175 and #176 are Windows PageHeap deadline and waiter-refusal failures in unchanged root daemon_process_sqlite process-suite assertions; #176 is distinct from #174. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
       "terminalPath": "Local Daemon owns triage and disposition in its own ledger and trackers. This entry closes no Watcher item and adds no Watcher dependency.",
       "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as external, owned by Local Daemon, under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
       "evidence": [
@@ -258,6 +260,47 @@
         {
           "source": "coordinator-report",
           "details": "Owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b owns exactly one bounded failed-job retry of run 39911899397 at unchanged head 151ade14. A green retry is CI evidence only, not a fix."
+        },
+        {
+          "source": "ci-run",
+          "url": "https://github.com/lossyrob/telex/actions/runs/39911899397",
+          "details": "PR #168 run 39911899397 attempt 2 at unchanged head 151ade144795ff275eb416eed3dc5d071f85fa81 completed successfully: all 18 jobs passed, including Build and test (windows-latest) job 120284136297. This was the single bounded retry after the #167 recurrence. It is CI evidence only, not a fix; #167 remains unresolved.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39911899397",
+          "issue": "https://github.com/lossyrob/telex/issues/167"
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/175",
+          "createdAt": "2026-10-23T07:31:29Z",
+          "details": "New external issue. In main run 39916429612 attempt 1 at the PR #173 merge 55cb6b116607bceccf3ce0b72550e2d849ca5426, 16 of 18 jobs passed. Windows heap diagnostics job 120290894587 reported two PageHeap deadline failures: the store-lock contention timeout in real_process_02_second_instance_and_store_lock at tests/daemon_process_sqlite.rs:873, and a daemon readiness HelloAck timeout through the success assertion at line 24. Retained artifact 12485336229. Neither #162 repair is shown failing.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39916429612",
+          "job": "120290894587",
+          "artifact": "12485336229",
+          "issue": "https://github.com/lossyrob/telex/issues/175"
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/176",
+          "createdAt": "2026-10-23T07:31:44Z",
+          "details": "New external issue, distinct from #174. In the same job, real_process_copilot_fallback_cross_platform at tests/daemon_process_sqlite.rs:3157 got generic waiter exit 2 (idle-timeout) where it expected push-coverage refusal exit 5. Retained artifact 12485336229.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39916429612",
+          "job": "120290894587",
+          "artifact": "12485336229",
+          "issue": "https://github.com/lossyrob/telex/issues/176"
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/169#issuecomment-6359912330",
+          "createdAt": "2026-10-23T07:34:33Z",
+          "details": "Recurrence for #169, with no new disposition. The station-intent restoration-counter signature recurred in the ordinary Build and test (windows-latest) job 120290894538 of main run 39916429612 attempt 1, not the PageHeap job: station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one failed at tests/daemon_process_sqlite.rs:5790 with restored 0. Retained artifact 12484703988 (windows-build-test-crash-55cb6b116607bceccf3ce0b72550e2d849ca5426).",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39916429612",
+          "job": "120290894538",
+          "artifact": "12484703988",
+          "issue": "https://github.com/lossyrob/telex/issues/169"
+        },
+        {
+          "source": "coordinator-report",
+          "details": "Owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe requested exactly one failed-job retry of main run 39916429612 at unchanged 55cb6b11. A green retry is CI evidence only, not a fix."
         }
       ]
     },
@@ -364,6 +407,18 @@
         {
           "source": "coordinator-report",
           "details": "The owner found the matching x64 Libc-1698.140.3 tag and is incorporating it."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6359563395",
+          "createdAt": "2026-10-23T07:11:49Z",
+          "details": "Design steward verdict: approves the bounded native-evidence component at exact probe head ff02b8bf52dde4a1f40e7954a98fef661660dff0, run 39909079250 attempt 1. Final implementation authorization remains HOLD."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6359785305",
+          "createdAt": "2026-10-23T07:26:37Z",
+          "details": "Owner source/provenance packet: the published XNU family comparison found no change to the relevant transitions, as a source-only result. Provenance for the two tested patched kernels and the ARM64 libraries remains open. Steward adjudication is pending; product integration stays held."
         }
       ]
     },
@@ -414,6 +469,68 @@
           "planningLedgerCommit": "353d371c4451254cc87390f3cab3e153b04b2d98",
           "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
           "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426. Its deferred list includes an optional watcher.md note that detector stdin bytes are not RFC 8785 canonical and on the Remove audit shape."
+        }
+      ]
+    },
+    {
+      "id": "macos-contract-host-neutral-handshake-receipt-overstatement",
+      "sourceNodeId": "watcher-macos-containment",
+      "requiredness": "required-for-closure",
+      "description": "Debt item 1 from Campaign's PR #168 merge gate, carried from the c3a3cc21 gate. The host-neutral MUST in docs/design/watcher.md lines 690-694 at bc1e02ed requires a containment-owner handshake and a terminal receipt on every host, but the WindowsJob mechanism has neither.",
+      "disposition": "new-item",
+      "target": {
+        "id": "watcher-host-containment-doc-alignment",
+        "tracker": "https://github.com/lossyrob/telex/issues/177",
+        "task": ".streamliner/workstreams/telex-watcher/tasks/watcher-host-containment-doc-alignment.md"
+      },
+      "status": "planned",
+      "decisionState": "accepted",
+      "rationale": "The design steward ruled this a documentation overstatement, not a Windows runtime gap. Windows uses atomic kill-on-close Job assignment plus durable pre-resume identity, with no guard or receipt by design, and no Windows duty is added. #177 Replacement 1 makes the launch paragraph host-specific. The steward rejected watcher-cli-ux, which excludes containment, and runtime-hardening, which is too late because the normative text is inaccurate now.",
+      "terminalPath": "Completes when the docs-only #177 PR applies Replacement 1 to docs/design/watcher.md and Campaign merges it at the exact cleared SHA.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as a new item under #177 under the Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6). Design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved the item and its graph placement.",
+      "evidence": [
+        {
+          "source": "merge-gate-debt",
+          "url": "https://github.com/lossyrob/telex/pull/168#issuecomment-6359852865",
+          "createdAt": "2026-10-23T07:30:49Z",
+          "details": "Debt item 1: the host-neutral MUST text in watcher.md requires a containment-owner handshake and terminal receipt on every host, but the merged runtime has these only for LinuxGuard; WindowsJob uses neither."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/177",
+          "createdAt": "2026-10-23T07:37:41Z",
+          "details": "Tracker for watcher-host-containment-doc-alignment. Its body records the outcome, docs/design/watcher.md-only scope, both exact replacements, and success criteria."
+        }
+      ]
+    },
+    {
+      "id": "macos-contract-interim-fail-closed-status",
+      "sourceNodeId": "watcher-macos-containment",
+      "requiredness": "required-for-closure",
+      "description": "Debt item 2 from Campaign's PR #168 merge gate, carried from the c3a3cc21 gate. The macOS bullet in docs/design/watcher.md lines 683-686 at bc1e02ed is in present tense with no interim statement that macOS fails closed until #172.",
+      "disposition": "new-item",
+      "target": {
+        "id": "watcher-host-containment-doc-alignment",
+        "tracker": "https://github.com/lossyrob/telex/issues/177",
+        "task": ".streamliner/workstreams/telex-watcher/tasks/watcher-host-containment-doc-alignment.md"
+      },
+      "status": "planned",
+      "decisionState": "accepted",
+      "rationale": "#177 Replacement 2 adds the interim fail-closed statement now. The final rewrite is absorbed into #172: The shipping PR must remove the temporary fail-closed sentence in `docs/design/watcher.md` and rewrite the macOS containment bullet into unqualified present tense only if the complete runtime implementation, source/native proof, guard-loss/restart behavior, and final design authorization land together at that exact head. The steward rejected watcher-cli-ux, which excludes containment, and runtime-hardening, which is too late because the normative text is inaccurate now.",
+      "terminalPath": "Completes when the docs-only #177 PR applies Replacement 2 to docs/design/watcher.md and Campaign merges it at the exact cleared SHA. The later #172 rewrite is a watcher-macos-containment-runtime success criterion and does not hold this entry.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as a new item under #177 under the Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6). Design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved the item and its graph placement.",
+      "evidence": [
+        {
+          "source": "merge-gate-debt",
+          "url": "https://github.com/lossyrob/telex/pull/168#issuecomment-6359852865",
+          "createdAt": "2026-10-23T07:30:49Z",
+          "details": "Debt item 2: the watcher.md macOS bullet is present tense with no interim line that macOS stays fail-closed until #172; only ADR 0054 says so."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/177",
+          "createdAt": "2026-10-23T07:37:41Z",
+          "details": "Tracker for watcher-host-containment-doc-alignment. Its body records the outcome, docs/design/watcher.md-only scope, both exact replacements, and success criteria."
         }
       ]
     }

@@ -21,12 +21,16 @@ This node was split from #165 on 2026-10-23 under the operator's one-item,
 one-PR rule. Issue #172 holds the full successor specification. #165 now covers
 only the macOS non-detaching detector contract delivered by PR #168.
 
-The node depends on `watcher-macos-containment` and `watcher-runtime-core`. The
+The node depends on `watcher-macos-containment`, `watcher-runtime-core`, and
+`watcher-host-containment-doc-alignment` under #177. #177 is a prerequisite
+for #172 product-PR readiness and closure only; it does not stop the active
+source and native proof work and grants no implementation authorization. The
 runtime-core merge prerequisite was satisfied by PR #164 merge
 `d0237dbb0b50dafd5518d403a5ff8d81cd5ee25c`; PR #170 merged #162's independent
-documentation correction as main 2513ccda, and issue #162 may remain open for
-its bounded unsupported-v1 removal repair, post-merge validation, and field
-report. This node is not blocked on #162 closure. On 2026-10-23 the design
+documentation correction as main 2513ccda. PR #173 merged #162's bounded repairs
+on 2026-10-23 as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`, and issue #162
+closed on merge; its post-merge validation and field report remain outstanding.
+This node does not depend on that validation or report. On 2026-10-23 the design
 steward approved the candidate Phase 2 proof shape, subject to corrections, and
 kept product implementation on hold.
 
@@ -213,6 +217,11 @@ establishes fork closure and PID/PGID reuse safety.
   VM architecture is introduced.
 - When the capability ships, the same product PR updates the macOS tracker
   reference in `docs/watcher-runtime.md` from #165 to #172.
+- The shipping PR must remove the temporary fail-closed sentence in
+  `docs/design/watcher.md` and rewrite the macOS containment bullet into
+  unqualified present tense only if the complete runtime implementation,
+  source/native proof, guard-loss/restart behavior, and final design
+  authorization land together at that exact head.
 - One product PR says `Closes #172`. Required CI, independent implementation
   review, and exact-head design review pass at the final head; Campaign runs the
   merge gate and merges at the exact cleared SHA.

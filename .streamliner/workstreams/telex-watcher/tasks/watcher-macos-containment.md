@@ -13,8 +13,8 @@ continues to fail closed on macOS until #172 lands.
 
 ## Status and sequencing
 
-Status: in progress, with focus attention, until PR #168 merges; then completed,
-with watch attention.
+Status: in progress, with focus attention, until post-merge validation and
+the #165 field report are posted; then completed, with watch attention.
 
 On 2026-10-23 the design steward approved splitting the former #165 scope under
 the operator's one-item, one-PR rule. This node now covers only the macOS
@@ -26,8 +26,9 @@ receipt and restart integration, and the implementation authorization gate.
 Phase 1 investigation is complete. On 2026-10-22 the operator selected
 `Revise macOS to the non-detaching detector contract` in issue #165.
 
-Owner session `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b` holds this node through the
-PR #168 merge. Campaign runs the merge gate and merges at the exact cleared SHA.
+Owner session `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b` holds this node through
+post-merge validation and the #165 field report. Campaign runs the merge gate
+and merges at the exact cleared SHA.
 
 ## Delivery
 
@@ -35,7 +36,14 @@ PR #168 delivers this node. It must change exactly `docs/design/watcher.md` and
 ADR 0054 in `docs/design/DECISIONS.md`, and it must say `Closes #165`. At this
 reconciliation, PR #168 was an open draft at
 `d4dad4e73bf65cd3957a3a9560877865cb57058e` that referenced issue #165 without
-closing it.
+closing it. PR #168 later moved to exact head
+`151ade144795ff275eb416eed3dc5d071f85fa81`, says `Closes #165`, and became
+non-draft. At that head, the design steward and an independent review approved
+it with no material findings, and all 18 CI checks passed after one bounded
+failed-job retry. Campaign's merge gate cleared that head, and Campaign merged
+it on 2026-10-23 as main `bc1e02edf43490c41dbc3628b692c4cbf822c5ef`; issue #165
+closed on merge. Post-merge main CI and the #165 field report remain
+outstanding.
 
 ## Outcome
 
