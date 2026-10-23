@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T06:45:10.579Z",
+  "updatedAt": "2026-10-23T06:50:05.891Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -143,7 +143,7 @@
         "watcher-runtime-core"
       ],
       "requiredness": "not-required-for-source-items",
-      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
+      "description": "CI failures on Watcher PRs carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #168 run 39911899397 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, and PR #164 CI. Neither source item's changes are implicated.",
       "disposition": "external",
       "target": {
         "workstream": "local-daemon",
@@ -228,6 +228,20 @@
         {
           "source": "coordinator-report",
           "details": "Owner session 42c1104a-7eb2-477e-a574-2bffb1cd06fe requested exactly one failed-job retry at unchanged head f1c25007. A green retry is CI evidence only, not a fix."
+        },
+        {
+          "source": "ci-job",
+          "url": "https://github.com/lossyrob/telex/actions/runs/39911899397/job/120276576196",
+          "createdAt": "2026-10-23T06:42:57Z",
+          "details": "Recurrence for #167, with no new disposition. In PR #168 run 39911899397 attempt 1 at head 151ade144795ff275eb416eed3dc5d071f85fa81, 17 of 18 jobs passed. Job 120276576196 (Build and test, windows-latest) failed in credential_command_shell_exit_preserves_delayed_inherited_writer with Elapsed at tests/credential_command.rs:516:6; the target reported 10 passed, 1 failed, and 2 ignored. Retained artifact 12483414257 (windows-build-test-crash-151ade144795ff275eb416eed3dc5d071f85fa81, archive SHA-256 577ea4813eb4841dbbabc440ba616a97aac954b54bc5995d182397b2bf765aa9). The owner also retained the raw job log, SHA-256 dd77635c36e54034a2860eb6c5ae8b7b1dbf261eb5b739302b7a50d9feff3184.",
+          "run": "https://github.com/lossyrob/telex/actions/runs/39911899397",
+          "job": "120276576196",
+          "artifact": "12483414257",
+          "issue": "https://github.com/lossyrob/telex/issues/167"
+        },
+        {
+          "source": "coordinator-report",
+          "details": "Owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b owns exactly one bounded failed-job retry of run 39911899397 at unchanged head 151ade14. A green retry is CI evidence only, not a fix."
         }
       ]
     },
