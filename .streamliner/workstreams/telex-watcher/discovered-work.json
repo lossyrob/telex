@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-10-23T07:05:32.739Z",
+  "updatedAt": "2026-10-23T07:22:02.044Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
@@ -80,7 +80,7 @@
       "status": "in-progress",
       "decisionState": "accepted",
       "rationale": "Issue #162 cannot close while public removal of an isolated unsupported row fails. The design steward approved a bounded repair that preserves unsupported state losslessly, keeps the permanent ID and tombstone, explicitly audits when v2 state hashes do not apply, and leaves strict v2 canonicalization unchanged. PR #170 remains independently valid.",
-      "terminalPath": "Completes when PR #173, which says Closes #162, passes required CI and review at its final head and Campaign merges it at the exact cleared SHA. Post-merge validation, the #162 field report, and final reconciliation follow under #162.",
+      "terminalPath": "PR #173, which said Closes #162, passed required CI and review at exact head f1c25007, and Campaign merged it at that cleared SHA as main 55cb6b11. Completes when post-merge validation and the #162 field report are posted and the Watcher coordinator sends completion for watcher-runtime-core.",
       "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into #162 and PR #173 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23. The design steward approved the repair.",
       "evidence": [
         {
@@ -94,6 +94,14 @@
           "url": "https://github.com/lossyrob/telex/pull/173",
           "head": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
           "details": "PR #173 is open, not draft, and its body says Closes #162. At this head its commits are 137aaf6b (allow removal of opaque legacy state), 5d9b8567 (align opaque removal audit and rollback proofs), and f1c25007 (separate request transport from canonical evidence). All 18 checks at this head were pending when recorded; exact-head CI and review remain outstanding."
+        },
+        {
+          "source": "merge-gate-clearance",
+          "url": "https://github.com/lossyrob/telex/pull/173#issuecomment-6359708571",
+          "createdAt": "2026-10-23T07:21:34Z",
+          "planningLedgerCommit": "353d371c4451254cc87390f3cab3e153b04b2d98",
+          "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
+          "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426."
         }
       ]
     },
@@ -115,7 +123,7 @@
       "status": "in-progress",
       "decisionState": "accepted",
       "rationale": "The repair is needed for #162's outcome. It separates transport serialization from JCS validation, hash, and evidence encoding, with no admission-policy change. Design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved it at 02:13 on 2026-10-23.",
-      "terminalPath": "Commit f1c25007 in PR #173 implements the repair. Completes when PR #173 passes required CI and review at its final head and Campaign merges it at the exact cleared SHA.",
+      "terminalPath": "Commit f1c25007 in PR #173 implements the repair. PR #173 passed required CI and review at that exact head, and Campaign merged it at that cleared SHA as main 55cb6b11. Completes when post-merge validation and the #162 field report are posted and the Watcher coordinator sends completion for watcher-runtime-core.",
       "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as absorb into #162 and PR #173 under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
       "evidence": [
         {
@@ -133,6 +141,14 @@
           "url": "https://github.com/lossyrob/telex/pull/173",
           "head": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
           "details": "PR #173 is open, not draft, and its body says Closes #162. At this head its commits are 137aaf6b (allow removal of opaque legacy state), 5d9b8567 (align opaque removal audit and rollback proofs), and f1c25007 (separate request transport from canonical evidence). All 18 checks at this head were pending when recorded; exact-head CI and review remain outstanding."
+        },
+        {
+          "source": "merge-gate-clearance",
+          "url": "https://github.com/lossyrob/telex/pull/173#issuecomment-6359708571",
+          "createdAt": "2026-10-23T07:21:34Z",
+          "planningLedgerCommit": "353d371c4451254cc87390f3cab3e153b04b2d98",
+          "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
+          "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426."
         }
       ]
     },
@@ -348,6 +364,56 @@
         {
           "source": "coordinator-report",
           "details": "The owner found the matching x64 Libc-1698.140.3 tag and is incorporating it."
+        }
+      ]
+    },
+    {
+      "id": "runtime-core-post-merge-documentation-clarifications",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "required-for-target-item-outcome",
+      "description": "Post-merge documentation clarification that Campaign suggested and owner 42c1104a raised. Two shipped v2 behaviors repaired by PR #173 need explicit user-facing documentation: detector-request stdin transport is ordinary valid JSON rather than RFC 8785/JCS-canonical bytes, and unsupported-v1 Remove reports a not-applicable state-hash audit that omits both hash keys.",
+      "disposition": "downstream",
+      "target": {
+        "id": "watcher-cli-ux",
+        "task": ".streamliner/workstreams/telex-watcher/tasks/watcher-cli-ux.md"
+      },
+      "status": "planned",
+      "decisionState": "accepted",
+      "rationale": "Both points clarify shipped behavior at the detector-authoring and removal-audit boundary that watcher-cli-ux owns. This is an absorbed documentation duty in that existing downstream item. It does not reopen #162 and creates no separate item. The watcher-cli-ux PR may update docs/design/watcher.md, docs/watcher-runtime.md, and CLI guidance, but must not change the runtime contract. If implementation would need to change either shipped behavior, that item returns decision-needed.",
+      "terminalPath": "Completes when the watcher-cli-ux PR documents both behaviors as specified in its task subsection Runtime-core documentation clarifications and Campaign merges it at the exact cleared SHA. This entry adds no Watcher dependency and changes no graph or status.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as downstream into watcher-cli-ux under the Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6). The coordinator reports that design steward session 4745cca8-006f-4422-9d35-cf056f28c31f approved the task-specification wording.",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/162#issuecomment-6358391843",
+          "createdAt": "2026-10-23T05:49:24Z",
+          "details": "Owner post-merge report of the unsupported-v1 removal defect: removal computed v2 canonical state hashes for an unsupported legacy row. The bounded repair explicitly audits when v2 state hashes do not apply."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/162#issuecomment-6358767711",
+          "createdAt": "2026-10-23T06:17:06Z",
+          "details": "Owner report that detector-request serialization through the canonical encoder could emit JSON the strict request parser rejects. The approved repair uses an explicit ordinary-JSON request transport encoder and keeps canonical bytes for hashes and durable evidence."
+        },
+        {
+          "source": "pull-request-merge",
+          "url": "https://github.com/lossyrob/telex/pull/173",
+          "mergeCommit": "55cb6b116607bceccf3ce0b72550e2d849ca5426",
+          "head": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
+          "details": "PR #173 implemented both repairs and merged on 2026-10-23 as main 55cb6b11 at exact head f1c25007."
+        },
+        {
+          "source": "task",
+          "path": ".streamliner/workstreams/telex-watcher/tasks/watcher-cli-ux.md",
+          "details": "Subsection Runtime-core documentation clarifications, plus one success criterion and one validation bullet, record the documentation duty."
+        },
+        {
+          "source": "merge-gate-clearance",
+          "url": "https://github.com/lossyrob/telex/pull/173#issuecomment-6359708571",
+          "createdAt": "2026-10-23T07:21:34Z",
+          "planningLedgerCommit": "353d371c4451254cc87390f3cab3e153b04b2d98",
+          "planningLedgerPath": "streamliner/telex/prompts/v2/merge-gate-ledger.md",
+          "details": "Campaign merge gate cleared PR #173 at exact head f1c25007ae63738b039c8eb8a9ac141238ac4472 before the merge and posted the record after it. Preflight: Closes #162; CI run 39910906688 attempt 2 passed all 18 checks after one unchanged-head failed-job retry; source review 5624817107 found no blocking findings; design inspection approved; merge-tree clean against main 479fb993 and open PR #168; head rechecked immediately before merge. Preference gate verdict merge, confidence high. Campaign merged with --match-head-commit, producing main 55cb6b116607bceccf3ce0b72550e2d849ca5426. Its deferred list includes an optional watcher.md note that detector stdin bytes are not RFC 8785 canonical and on the Remove audit shape."
         }
       ]
     }

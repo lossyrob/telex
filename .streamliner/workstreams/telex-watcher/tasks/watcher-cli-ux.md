@@ -110,6 +110,33 @@ Service installation and supervision are later work.
 - No command prints credentials, inherited secret values, raw daemon frames,
   private backend rows, or unrestricted detector state by default.
 
+### Runtime-core documentation clarifications
+
+The one item PR must make these shipped v2 behaviors explicit in the user-facing
+Watcher documentation and machine-readable management guidance. This is
+clarification only; it must not change runtime, schema, numeric admission,
+canonicalization, hashing, evidence, removal, or migration semantics.
+
+- **Detector request transport:** Watcher writes the v2 detector request to
+  detector stdin as ordinary valid JSON. The transport bytes are not required to
+  be RFC 8785/JCS-canonical. Existing strict request validation, I-JSON and
+  canonicalizability requirements, schema and byte limits, and admitted numeric
+  model remain unchanged. RFC 8785 canonical JSON remains authoritative for
+  hashes and durable evidence and must not be substituted for detector-request
+  transport.
+- **Unsupported-v1 removal audit:** After the existing rules admit `Remove` for
+  an unsupported-v1 record, Watcher retains the opaque state and permanent
+  identity/evidence without applying v2 state hashing. The removal audit reports
+  `stateChanged: false`, `stateHashStatus: "not-applicable"`, and
+  `stateHashReason: "unsupported-registration-version"`, and omits
+  `oldStateHash` and `newStateHash` entirely. It must not emit null hash keys, a
+  legacy digest, or fallback hash semantics. Other unsupported-v1 mutations
+  remain refused, and strict v2 hashing and removal audit behavior remain
+  unchanged.
+
+Evidence: issue #162 comments `6358391843` and `6358767711`, implemented by
+PR #173 and merged as main `55cb6b116607bceccf3ce0b72550e2d849ca5426`.
+
 ### Required operation semantics
 
 #### Register
@@ -238,6 +265,10 @@ builder-owned gate.
   mutation, private Telex seam, or issue #144 launch.
 - Every material discovery has a durable disposition; no accepted node-owned
   CLI or diagnostics work remains deferred at merge readiness.
+- Detector authors and operators can distinguish request transport from
+  canonical hash/evidence encoding, and unsupported-v1 removal output exposes
+  the exact non-applicable audit semantics without implying migration, state
+  change, or relaxed v2 validation.
 
 ## Validation, review, and reporting
 
@@ -260,6 +291,10 @@ builder-owned gate.
   corresponding delta or full rerun under campaign policy.
 - The field report must distinguish CLI guarantees, detector policy, exact PR
   coverage/exclusions, and remaining five-minute, packaging, and hardening work.
+- Validate the documentation and CLI JSON examples against the shipped runtime:
+  distinguish ordinary detector-request wire bytes from RFC 8785 hash/evidence
+  bytes, and snapshot the exact unsupported-v1 `Remove` audit shape including
+  omission of both hash keys.
 
 ## Invalidation conditions
 
