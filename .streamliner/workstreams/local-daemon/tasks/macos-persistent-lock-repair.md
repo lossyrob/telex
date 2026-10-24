@@ -3,8 +3,8 @@
 - **Workstream:** `local-daemon`
 - **Node:** `macos-persistent-lock-repair`
 - **Type:** implementation
-- **Status:** in progress; one v2 owner authorized, preparation and launch
-  pending canonical landing and Local verification
+- **Status:** in progress; v2 preparation complete and real kickoff delivered
+  to the one bound owner; no implementation or CI result claimed
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `local-daemon/cooperative-partial-page-repair`, issue #181 /
@@ -12,7 +12,7 @@
   dependency
 - **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187)
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
-  one new worker authorized, concrete identity pending
+  implementation owner `5d9b3155-0327-40d1-936d-7a3652ea90c3`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:**
   [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
@@ -171,7 +171,7 @@ installed/user/campaign state actions. Runtime validation belongs to
 authorized hosted disposable CI. This task does not grant runtime-isolation
 clearance.
 
-## Launch - pending Local verification
+## Launch requirements - promotion-time snapshot
 
 One owner is authorized but not yet created. After canonical
 issue/node/task landing and Local verification, Local runs the v2 App
@@ -190,6 +190,66 @@ session-online/write-authorized handshake, sibling worktree, duplicate
 owner or hand-written preparation bypass. The reconciler does not launch
 the owner.
 
+### Actual v2 launch receipt - 2026-10-24
+
+The pending/not-created preparation and launch statements above are the
+promotion-time snapshot, qualified only for launch by this later receipt.
+Local reports packet 05 preparation verified and one real kickoff delivered
+to owner `5d9b3155-0327-40d1-936d-7a3652ea90c3` from canonical promotion
+`970be041537d11a4e29e5c62b8aaf884646120b6`. Initial checkout and branch were
+`lossyrob-stunning-telegram`; the same checkout now uses
+`lossyrob-macos-persistent-lock-repair`. Local's later branch observation
+records the owner's pre-edit rename and the same initial HEAD. The handoff,
+kickoff and Task receipt retain their initial branch and hashes; this is
+not a new checkout or second owner. The reconciler's receipt-time App read
+observed the same owner/checkout/current branch with busy activity.
+
+The launched v2 binding is
+`prompts\v2\launches\macos-persistent-lock-repair-20261024.json`
+in the Telex prompt pack. Its retained snapshot is 4,956 bytes, SHA-256
+`3a446633b479d7219ea775c723835174bf9c8ec241509e2a4fcba11752a57a12`.
+It records `launched` and `kickoffDelivered`, delivery observed by
+2026-10-24T22:04:09.2658667Z, and the later branch observation at
+2026-10-24T22:05:04.7267257Z. Local reports immediate App delivery by verified
+file reference, no mode override, and one delivery. These transport and
+preparation claims remain attributed; busy activity is not implementation
+or runtime proof.
+
+The reconciler matched the 13,070-byte kickoff at SHA-256
+`d55d9a1b43448d4a4e10a7921bd7cf277e7e818c4be722e9bd40c060d2712f09`
+and its byte equality to the original handoff. The 14,820-byte handoff
+snapshot has SHA-256
+`122aa6bd35745065c6fb98bb60229a13baf4e60b5d05d8f18dc683d0354247f8`.
+No delivery count or effective model/context capacity was independently
+replayed or proved.
+
+The binding records a parent context correction removing an unrequested
+implementation-subagent ban introduced during preparation. The single App
+owner and independent review roles remain; scope, freeze and kickoff are
+unchanged. The reconciler matched the current 12,439-byte package context
+to the installed Streamliner context, both at SHA-256
+`af941df33f9f34d941f250005c5a8a5d97e6602eaa995e7442a58913fa88e1a1`.
+The original Task preparation receipt is a distinct 4,117-byte snapshot at
+SHA-256
+`14871baa7c94883670fd4c4ddc39b1d61eedcd98716a7557e4861e6fc9911f3f`.
+Its `prepared-not-delivered` state, initial branch, binding fingerprint and
+old 12,518-byte context fingerprint are historical. That context SHA-256 is
+`1d3897a7db5358645b7e52fa1735811e75e8c0fde1b3f3a3ca1456e02d60156e`.
+It is not the current context fingerprint or evidence of a repeated Task.
+The parent correction, rather than a rewritten Task receipt, records the
+current context. The reason for the correction remains parent-reported;
+the reconciler verified current bytes/equality, not a reconstructed
+pre-correction context or every preparation check.
+
+The requested initializer and owner profiles remain `gpt-6.1-sol` / high /
+default, with the owner interactive. They are requests, not effective
+runtime-capacity proof. No product implementation, local runtime/test,
+hosted CI result, accepted repair delivery, readiness, merge or gate
+acceptance is claimed by the launch receipt. Issue #181 remains blocked,
+PR #185 stays draft at `7b11b926` unchanged, and the workstation freeze and
+all existing gates remain.
+The reconciler did not prepare, launch or replace an owner.
+
 ## Workflow
 
 Use paw-lite for planning, implementation and testing under the v2 owner
@@ -205,7 +265,8 @@ directive override older generic guide defaults.
 
 ## Ownership and handoff
 
-Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57` coordinates one new owner.
+Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57` coordinates launched owner
+`5d9b3155-0327-40d1-936d-7a3652ea90c3` under the v2 receipt above.
 Steward `af271672-5d33-418c-bb9c-0f4d4570c7d7` handles design; reconciler
 `b737a932-c687-4b95-b273-8335a59f6e89` alone writes canonical geometry.
 Existing #181 owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` keeps PR #185

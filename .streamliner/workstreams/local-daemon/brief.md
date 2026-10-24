@@ -165,6 +165,18 @@ completion. Earlier launch/review/wait statements above are historical;
 all terminal, retry, recurrence and delayed-writer evidence is preserved.
 The workstation freeze and every unrelated gate remain unchanged.
 
+The pending-launch statement above is the promotion-time snapshot. Local
+later reports completed v2 preparation and one real kickoff delivered to
+owner `5d9b3155-0327-40d1-936d-7a3652ea90c3` from main `970be041`, initial
+checkout/branch `lossyrob-stunning-telegram`. The same checkout now uses
+`lossyrob-macos-persistent-lock-repair`; a receipt-time App read observed
+that same owner/checkout/current branch busy. The requested
+`gpt-6.1-sol` / high / default / interactive profile is not effective-capacity
+proof. The launched binding qualifies only old pending preparation/launch
+text: no implementation, runtime, CI result or gate acceptance follows.
+Issue #181 stays blocked and PR #185 stays draft and unchanged; the freeze
+and every unrelated gate remain.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
