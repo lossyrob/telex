@@ -3,9 +3,10 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** in progress; v2 preparation complete and real kickoff delivered
+- **Status:** blocked on issue #187; existing v2 owner and draft PR retained
 - **Attention:** focus
-- **Depends on:** none
+- **Depends on:** `macos-persistent-lock-repair`,
+  [#187](https://github.com/lossyrob/telex/issues/187)
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
 - **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft
@@ -253,6 +254,30 @@ Draft association does not accept the proposed repair, establish runtime
 success, conclude a historical root cause, or clear the Watcher dependency,
 marker candidates, issue #153 or any existing gate. The original outcome,
 evidence histories, workstation freeze and Campaign merge gate remain.
+
+## Upstream dependency - 2026-10-24
+
+Campaign authorized the separate `macos-persistent-lock-repair`, tracked by
+[#187](https://github.com/lossyrob/telex/issues/187), upstream of this task.
+Issue #181 is blocked on its accepted delivery. Existing owner
+`9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` retains OPEN/draft PR #185 unchanged
+at `7b11b92630d0b2cf63423a77fc19232aff368825`; its branch, scope and closing
+issue remain unchanged. The new root repair has its own owner and PR.
+
+The launch/draft-association review/wait snapshots above are historical.
+The ledger separately retains attempt-1 terminal evidence, the guarded
+attempt-2 submission/registration and its recurrent failure. The one retry
+allowance is consumed and exhausted. Those receipts preserve attribution,
+distinct captures, unknown cause/actual test elapsed and required-CI failure;
+no source-review, design, runtime or Campaign acceptance is added here.
+No further retry, skip or threshold workaround is authorized.
+
+Resume only after accepted upstream delivery and its field report permit
+reconsidering this prerequisite. Neither this task nor Watcher #179 / PR #180
+is automatically complete. The entire earlier outcome, authority, evidence,
+launch, design and wait history remains; the workstation freeze, marker,
+issue #153 and hardening/closure gates are unchanged. PR #185 is not edited
+or absorbed by the new repair.
 
 ## Workflow
 

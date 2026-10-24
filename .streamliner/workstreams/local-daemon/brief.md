@@ -152,6 +152,19 @@ The two marker candidates, issue #153, and hardening/closure decisions are
 unchanged. This is bounded repair authority, not product-design acceptance
 or a merge authorization.
 
+On 2026-10-24 Campaign authorized the separate
+`macos-persistent-lock-repair`, tracked by
+[#187](https://github.com/lossyrob/telex/issues/187), upstream of #181.
+Issue #181 is blocked; owner `9d4fee6c` and OPEN/draft PR #185 remain
+unchanged at `7b11b92630d0b2cf63423a77fc19232aff368825`. One new v2
+`gpt-6.1-sol` / high / default / interactive owner is authorized but not yet
+prepared or launched; Local acts after canonical landing verification.
+No further retry, skip or threshold workaround. Accepted upstream delivery
+permits reconsidering the prerequisite, not automatic #181 or Watcher
+completion. Earlier launch/review/wait statements above are historical;
+all terminal, retry, recurrence and delayed-writer evidence is preserved.
+The workstation freeze and every unrelated gate remain unchanged.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
