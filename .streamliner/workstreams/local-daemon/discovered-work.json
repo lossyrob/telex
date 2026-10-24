@@ -3147,6 +3147,97 @@
       "decisionState": "accepted",
       "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 accepted the narrow in-scope correction in pr189-canonical-parent-fixture-disposition-20261024.json, relayed by call_uAoqcvJ3df82PV02kdxhefVs; later call_SwmD5dRNuypit2bozS36gCpR confirms source implementation only. This does not change the Campaign-authorized outcome or geometry.",
       "terminalPath": "The same PR189 closes187 after current-head hosted required validation, independent source review, exact-head design inspection and Campaign gate approval. Preserve all eight creators/barrier/joins/assertions, the still-absent child race and production canonical/privacy behavior. Only accepted terminal repair delivery and field report permit reconsidering the181 prerequisite; this routed disposition, source correction or design receipt alone does not."
+    },
+    {
+      "id": "local-daemon-windows-copilot-fallback-send-timeout",
+      "sourceNode": null,
+      "source": "Direct main head b0510ba2d275b431319392d17057bb014b414b37, run40134893983 / Windows job120994212559; sentinel health-log report and Local's bounded evidence-only intake.",
+      "crossReference": "Existing campaign-wide test sentinel / issue #182 triage only. Distinct boundary from issue #174 wait.pid, issue #176 push-coverage refusal, issue #175 initial attach and the delayed inherited credential-writer signature; no common cause established.",
+      "evidence": {
+        "intakePacket": {
+          "file": "main40134893983-fallback-send-intake-20261024.json",
+          "bytes": 5147,
+          "sha256": "faae6e51740c125e7ab25f002231929572a686d6b0f3bef170f7a8d15f09f4c3"
+        },
+        "reportedSource": {
+          "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+          "sourceMessageCallId": "call_TSE8wFJYkabC8nFMCULF6I7j",
+          "healthLogComment": "https://github.com/lossyrob/telex/issues/182#issuecomment-6389967672",
+          "commentAuthor": "lossyrob",
+          "commentCreatedAt": "2026-10-24T21:50:24Z",
+          "runId": "40134893983",
+          "jobId": "120994212559",
+          "head": "b0510ba2d275b431319392d17057bb014b414b37",
+          "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40134893983/job/120994212559",
+          "jobName": "Build and test (windows-latest)"
+        },
+        "retainedLog": {
+          "file": "main-40134893983-job-120994212559.log",
+          "bytes": 436053,
+          "sha256": "c97ef67787434f714f69fecee18ba1518bf184a076e1162eb2c44d8f7486b574",
+          "checkoutOutputTimestamp": "2026-10-24T21:35:41.0596350Z",
+          "verificationBoundary": "Local matched the supplied capture hash, read the provider health-log comment in full and inspected checkout/failure/summary excerpts. The reconciler independently matched bytes/hash and selected checkout, panic, caller and target-summary excerpts only. Neither supplied capture nor this reconciliation is an independently downloaded provider archive or a full-log-read claim."
+        },
+        "reportedFailure": {
+          "test": "real_process_copilot_fallback_cross_platform",
+          "path": "tests/daemon_process_sqlite.rs",
+          "panicLine": 24,
+          "column": 9,
+          "callerLine": 3026,
+          "thread": 7000,
+          "output": "send to fallback waiter failed: code=Some(1) timed_out=true stdout= stderr=",
+          "panicReportTimestamp": "2026-10-24T21:45:34.5200913Z",
+          "targetResult": {
+            "passed": 48,
+            "failed": 1,
+            "ignored": 0,
+            "measured": 0,
+            "filteredOut": 0,
+            "durationSeconds": 25.74,
+            "stepExitCode": 1
+          },
+          "sourceBoundary": "Local read immutable source at the tested head, lines2990-3040. A sender attach precedes run_with_session(send, Duration::from_secs(5)); sent.assert_success at3026 fails before fallback-waiter completion/status/delivery assertions. This is the outer sender-command timeout boundary, not proof of daemon/protocol latency, a leak or a delivery-state defect.",
+          "actualCause": "Unknown. Empty stdout/stderr and code/timed_out fields do not discriminate the underlying wait or process failure.",
+          "durationBoundary": "25.74s is the test-target duration, not measured sender-command or daemon latency."
+        },
+        "classification": {
+          "decision": "Separate Local shared-CI discovery candidate for the outer fallback-send command timeout.",
+          "notCredentialWriter": "Do not append to local-daemon-windows-credential-writer-timeout.",
+          "issue174": "Same test name, different earlier boundary: issue174 waits for launcher wait.pid. No common cause established.",
+          "issue176": "Same test name, different later boundary: issue176 expects push-coverage refusal after reattach. No common cause established.",
+          "issue175": "The existing deadline candidate includes an outer initial-attach timeout in another test; generic timed_out=true does not establish the same subcase.",
+          "deduplication": "At canonical d0da34d915edefb595552c837ca7f8722164587c, Local searched ledger/graph for the test/fallback-send/output signature and read related issues174/176 in full. Exact GitHub test-name search returned174,176,182. This is bounded signature mapping, not exhaustive history search.",
+          "sourceContext": "Tested main b0510ba2 was independently verified as a ledger-only update relative to9c2a306b; no PR or source-change causality follows."
+        },
+        "classificationAttribution": "The classification and immutable-source inspection above are Local's supplied assessment, not independent product-source, issue-history or provider-comment inspection by the reconciler. Fresh bounded search of all four canonical ledgers at f712ab4b found no prior candidate ID or exact fallback-send failure output; no exhaustive-history claim.",
+        "reportedSample": {
+          "reviewedMainRuns": 27,
+          "successful": 17,
+          "failed": 10,
+          "delayedInheritedWriterTimeoutCount": 3,
+          "attribution": "Sentinel health-log comment; Local read the report, not every run in the cohort.",
+          "limit": "Selected bounded sample, not global recurrence counts, independent trials or population failure-rate estimates. This fallback-send failure does not increment the delayed-writer signature."
+        },
+        "limits": [
+          "The five-second command budget and outer failure boundary are Local's source assessment, not measured daemon or protocol latency. The retained excerpts independently establish only direct checkout, reported panic/caller and target result.",
+          "No actual cause, process leak, delivery-state defect, current-head validation, aggregate CI-green, readiness or gate credit follows.",
+          "Uploaded CI archive contents are unknown; no executable or dump was inspected or executed.",
+          "No new retry, poller, implementation owner, issue, graph node, dependency, runtime action or gate waiver is authorized.",
+          "Preserve every prior candidate and evidence history, the187/181/185 and Watcher boundaries, issue153, hardening/closure and workstation freeze."
+        ]
+      },
+      "description": "Retain one distinct evidence-only discovery for the Windows fallback test's outer sender-command timeout before fallback-waiter completion and delivery assertions.",
+      "affectedOutcome": "Shared-CI reliability triage of this exact test boundary, with no established underlying cause or accepted implementation scope.",
+      "requiredness": "Evidence-only candidate; no new requiredness or current gate. Separate from187 lock repair,181 partial-page repair, optional lint and prior marker failures.",
+      "sequencing": "Queue separately after the already-authorized187 promotion and owner binding. Do not delay or expand187, infer common cause, append this to the inherited-writer signature or authorize another retry.",
+      "recommendedDisposition": "Retain the bounded signature and attribution under existing Local shared-CI triage; obtain separate scope and implementation authority before any correction.",
+      "selectedDisposition": "Candidate/proposed evidence only, implementation unassigned; no issue or workstream-node promotion.",
+      "target": "Existing campaign-wide test sentinel / issue #182 triage record only; no new issue or workstream node.",
+      "owner": "Local shared-CI triage only; implementation unassigned. No new owner or launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 requested this separate evidence-only candidate via call_1QToP4ggUpdaURjJIQwbaeGz and main40134893983-fallback-send-intake-20261024.json. No cause, issue/node, owner, retry or gate authority was granted.",
+      "terminalPath": "Retain exact source/capture/signature and attribution limits for later bounded triage under existing authority. Any new diagnosis, issue/node, implementation, owner, runtime action or retry needs separate authorization and exact-head evidence; this candidate alone closes no outcome and changes no gate."
     }
   ]
 }
