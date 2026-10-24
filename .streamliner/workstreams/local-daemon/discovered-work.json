@@ -1777,6 +1777,89 @@
             "sourceReceipt": "https://github.com/lossyrob/telex/pull/178#issuecomment-6368917054",
             "attribution": "Watcher handoff and provider PR comment; Local did not query CI or download/hash this artifact.",
             "disposition": "Recurrence of issue 167; preserve prior occurrences and existing candidate status. Existing single unchanged-head retry is separate evidence, not a causal fix."
+          },
+          {
+            "head": "7b2516e3e05d0e2ba9a5d858d9ebaab6ac3810d5",
+            "run": "40028895852",
+            "job": "120671911324",
+            "intakePacket": {
+              "file": "main40028895852-credential-writer-recurrence-20261023.json",
+              "bytes": 4480,
+              "sha256": "fb38b8f0ebbcef95accb844e72187a4a5758fb35f5953424bf0d0dce876b8b4a"
+            },
+            "reportedSource": {
+              "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+              "reportMessageCallId": "call_mAWzRsxlgaw6Jk1maerNbx6Y",
+              "custodyMessageCallId": "call_dGVRKhX2dNUt2NT1b5k19jeK",
+              "runId": "40028895852",
+              "jobId": "120671911324",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40028895852/job/120671911324",
+              "head": "7b2516e3e05d0e2ba9a5d858d9ebaab6ac3810d5",
+              "platform": "Windows",
+              "branch": "main"
+            },
+            "retainedEvidence": {
+              "file": "main-40028895852-windows-failure.log",
+              "bytes": 422333,
+              "sha256": "911747ef5b0b7c0b6a06665bf02a2456a18bd3fa0a60daf1b95e80540f7e831d",
+              "captureKind": "Existing UTF-8 gh API job-log capture with terminal escape sequences removed; hash identifies that retained capture, not a provider archive.",
+              "custodyFile": "main-40028895852-evidence-custody.json",
+              "custodyBytes": 767,
+              "custodySha256": "5ba0e2864f8d8fdf4454fa4aae409b4f0fe6755187ac7463534319f957bc41d8",
+              "localVerification": "Local independently matched the retained log and custody hashes, read the custody file in full, and inspected checkout, failure and target-summary excerpts. No full-log-read claim, provider refetch, rerun or runtime action.",
+              "checkout": "Fetch and git log -1 output identify direct main commit 7b2516e3e05d0e2ba9a5d858d9ebaab6ac3810d5; not a provider test-merge checkout.",
+              "checkoutOutputTimestamp": "2026-10-23T21:44:14.0424648Z"
+            },
+            "failure": {
+              "test": "credential_command_shell_exit_preserves_delayed_inherited_writer",
+              "path": "tests/credential_command.rs",
+              "line": 516,
+              "column": 6,
+              "thread": 7296,
+              "message": "called `Result::unwrap()` on an `Err` value: Elapsed(())",
+              "panicReportTimestamp": "2026-10-23T21:53:59.9121947Z",
+              "targetResult": {
+                "passed": 10,
+                "failed": 1,
+                "ignored": 2,
+                "measured": 0,
+                "filteredOut": 0,
+                "durationSeconds": 12.3
+              },
+              "targetDurationIsNotMeasuredChildWriterDelay": true,
+              "classification": "Another observation of the existing delayed inherited-writer timeout signature; no root cause or common-cause inference."
+            },
+            "reportedSample": {
+              "file": "main-pattern-sample-24.json",
+              "bytes": 616,
+              "sha256": "6a38b6dae47d7971a0669759d17aead88108e6bb1f47dd20e6360eea9b777723",
+              "reviewedMainRuns": 24,
+              "successes": 15,
+              "failures": 9,
+              "allObservedFailedJobsWindows": true,
+              "delayedWriterTimeoutCount": 3,
+              "scope": "Sentinel's initial20 plus completed main runs40023009051,40025397114,40027947004 and40028895852.",
+              "verificationBoundary": "Local read and hash-verified the sample artifact, not every provider run in the sample. Counts remain attributed to the sentinel.",
+              "limits": "Bounded selected-main-run sample only, not all repository runs, the total canonical recurrence count, independent trials or a failure-rate estimate."
+            },
+            "sourceContext": {
+              "localCommitVerification": "The tested main commit7b2516e3 was independently verified during t185l landing as a one-file discovered-work ledger update relative to67f84571, with no product-code diff.",
+              "causalBoundary": "This occurrence does not establish a cause attributable to PR184, PR185, planning-only changes or another shared-CI signature."
+            },
+            "disposition": {
+              "statusChange": false,
+              "ownerChange": false,
+              "candidateCountChange": false,
+              "graphOrGateChange": false,
+              "routing": "Retain under the existing Local candidate and its current hardening-candidate triage. No new implementation, issue, node, owner, retry, observer or readiness authority."
+            },
+            "limits": [
+              "Preserve the candidate's original evidence and all prior successor occurrences.",
+              "Keep this separate from the macOS persistent-lock recurrence and optional Clippy hygiene entry.",
+              "No provider log or uploaded CI archive was fetched for this intake. Uploaded archive contents remain unknown; no executable or dump was inspected or executed.",
+              "The workstation freeze and all issue181, Watcher, issue153 and hardening/closure boundaries remain unchanged."
+            ],
+            "reconcilerVerification": "The reconciler matched retained log, custody and sample bytes/hashes, read custody and sample artifacts in full, and read selected direct-checkout, panic and target-summary log excerpts. It did not read the full log, query provider runs/jobs/logs, fetch an uploaded archive or inspect/execute a binary or dump. Git metadata independently confirms tested main 7b2516e3 is a one-file ledger-only update relative to 67f84571, not a product-code change. The 3-in-24 selected-main-run sample remains sentinel-attributed, not an independently observed run census, global recurrence count or failure probability. The target's 12.30 seconds is not a measured child-writer delay. No cause, retry, source/runtime action, status/owner/graph/gate change or issue #184/#185 attribution is established."
           }
         ]
       },
