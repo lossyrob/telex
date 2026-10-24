@@ -112,6 +112,44 @@ const ENUMERATION_DEADLINE_STRIDE: usize = 64;
 const INTENT_LOCK_SUFFIX: &str = ".lock";
 const INTENT_LOCK_ATTEMPTS: u32 = 25;
 const INTENT_LOCK_RETRY: Duration = Duration::from_millis(20);
+const INTENT_LOCK_TIMEOUT: Duration = INTENT_LOCK_RETRY.saturating_mul(INTENT_LOCK_ATTEMPTS - 1);
+
+fn acquire_intent_lock<T>(
+    id: &IntentId,
+    mut try_acquire: impl FnMut() -> platform_fs::Result<T>,
+    mut now: impl FnMut() -> Instant,
+    mut sleep: impl FnMut(Duration),
+) -> Result<T> {
+    let deadline = now() + INTENT_LOCK_TIMEOUT;
+    for attempt in 0..INTENT_LOCK_ATTEMPTS {
+        if now() >= deadline {
+            break;
+        }
+        match try_acquire() {
+            Ok(lock) => {
+                // A synchronous filesystem call cannot be preempted. A late acquisition must
+                // release its guard rather than admit a mutation after the budget is spent.
+                if now() < deadline {
+                    return Ok(lock);
+                }
+                break;
+            }
+            Err(platform_fs::FsError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(IntentError::from(error)),
+        }
+        if attempt + 1 < INTENT_LOCK_ATTEMPTS {
+            let remaining = deadline.saturating_duration_since(now());
+            if remaining.is_zero() {
+                break;
+            }
+            sleep(INTENT_LOCK_RETRY.min(remaining));
+        }
+    }
+    Err(IntentError::Io(format!(
+        "intent {id} is locked by another writer or its acquisition budget expired"
+    )))
+}
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -1885,7 +1923,9 @@ impl IntentStore {
 
     /// Acquire the per-intent write lock, or fail rather than write unserialized.
     ///
-    /// Bounded (never blocks a reconcile pass past its per-intent budget) and process-death-safe.
+    /// Retries share one elapsed-time budget and are process-death-safe. An entered synchronous
+    /// filesystem call or a descheduled thread cannot be interrupted, but once control returns a
+    /// spent budget admits neither another attempt nor a successful guard.
     ///
     /// The persistent lock file is owner-private and opened only after the platform verifies a
     /// supported local filesystem. Its OS lock is released by process death; it is never aged out,
@@ -1895,24 +1935,12 @@ impl IntentStore {
         let path = self
             .root
             .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
-        for attempt in 0..INTENT_LOCK_ATTEMPTS {
-            match platform_fs::try_acquire_owner_private_advisory_lock(&path) {
-                Ok(lock) => return Ok(lock),
-                Err(platform_fs::FsError::Io { source, .. })
-                    if source.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    if attempt + 1 < INTENT_LOCK_ATTEMPTS {
-                        std::thread::sleep(INTENT_LOCK_RETRY);
-                    }
-                }
-                Err(error) => {
-                    return Err(IntentError::from(error));
-                }
-            }
-        }
-        Err(IntentError::Io(format!(
-            "intent {id} is locked by another writer"
-        )))
+        acquire_intent_lock(
+            id,
+            || platform_fs::try_acquire_owner_private_advisory_lock(&path),
+            Instant::now,
+            std::thread::sleep,
+        )
     }
 
     /// **Withdraw** one binding's desired state: the single fallible, linearized operation behind
@@ -4766,6 +4794,165 @@ mod tests {
     }
 
     #[test]
+    fn lock_retry_budget_includes_attempt_cost_and_sleep_overshoot() {
+        use std::cell::{Cell, RefCell};
+
+        for (attempt_cost, overshoot, expected_attempts, expected_sleeps) in [
+            (
+                Duration::from_millis(200),
+                Duration::ZERO,
+                3,
+                vec![INTENT_LOCK_RETRY; 2],
+            ),
+            (
+                Duration::ZERO,
+                INTENT_LOCK_TIMEOUT,
+                1,
+                vec![INTENT_LOCK_RETRY],
+            ),
+            (
+                INTENT_LOCK_TIMEOUT - Duration::from_millis(5),
+                Duration::ZERO,
+                1,
+                vec![Duration::from_millis(5)],
+            ),
+        ] {
+            let start = Instant::now();
+            let elapsed = Cell::new(Duration::ZERO);
+            let attempts = Cell::new(0);
+            let sleeps = RefCell::new(Vec::new());
+            let result: Result<()> = acquire_intent_lock(
+                &sample_intent("sqlite:/a", "sess", "addr").id(),
+                || {
+                    assert!(elapsed.get() < INTENT_LOCK_TIMEOUT);
+                    attempts.set(attempts.get() + 1);
+                    elapsed.set(elapsed.get() + attempt_cost);
+                    Err(platform_fs::io_err(
+                        "contending test lock",
+                        std::io::ErrorKind::WouldBlock.into(),
+                    ))
+                },
+                || start + elapsed.get(),
+                |duration| {
+                    sleeps.borrow_mut().push(duration);
+                    elapsed.set(elapsed.get() + duration + overshoot);
+                },
+            );
+            assert!(matches!(result, Err(IntentError::Io(_))));
+            assert_eq!(attempts.get(), expected_attempts);
+            assert_eq!(*sleeps.borrow(), expected_sleeps);
+        }
+    }
+
+    #[test]
+    fn lock_retry_budget_keeps_attempt_cap_and_propagates_other_errors() {
+        use std::cell::Cell;
+
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let start = Instant::now();
+        let attempts = Cell::new(0);
+        let sleeps = Cell::new(0);
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                attempts.set(attempts.get() + 1);
+                Err(platform_fs::io_err(
+                    "contending test lock",
+                    std::io::ErrorKind::WouldBlock.into(),
+                ))
+            },
+            || start,
+            |_| sleeps.set(sleeps.get() + 1),
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), INTENT_LOCK_ATTEMPTS);
+        assert_eq!(sleeps.get(), INTENT_LOCK_ATTEMPTS - 1);
+
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                Err(platform_fs::io_err(
+                    "test lock privacy refusal",
+                    std::io::ErrorKind::PermissionDenied.into(),
+                ))
+            },
+            || start,
+            |_| panic!("a non-contention error must not retry"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Io(detail)) if detail.contains("test lock privacy refusal"))
+        );
+
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                Err(platform_fs::FsError::Unsupported {
+                    capability: "test lock filesystem",
+                    message: "unproven local storage".into(),
+                })
+            },
+            || start,
+            |_| panic!("unsupported storage must not retry"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Insecure(detail)) if detail.contains("unproven local storage"))
+        );
+    }
+
+    #[test]
+    fn lock_retry_budget_releases_late_success_and_accepts_timely_reacquisition() {
+        use std::cell::Cell;
+
+        struct Guard<'a>(&'a Cell<bool>);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let dropped = Cell::new(false);
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                elapsed.set(INTENT_LOCK_TIMEOUT);
+                Ok(Guard(&dropped))
+            },
+            || start + elapsed.get(),
+            |_| panic!("a late success must not retry"),
+        );
+        assert!(result.is_err());
+        assert!(dropped.get(), "a late guard must release its OS lock");
+
+        elapsed.set(Duration::ZERO);
+        dropped.set(false);
+        let attempts = Cell::new(0);
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    return Err(platform_fs::io_err(
+                        "contending test lock",
+                        std::io::ErrorKind::WouldBlock.into(),
+                    ));
+                }
+                Ok(Guard(&dropped))
+            },
+            || start + elapsed.get(),
+            |duration| elapsed.set(elapsed.get() + duration),
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(elapsed.get(), INTENT_LOCK_RETRY);
+        assert!(!dropped.get(), "a timely success retains the guard");
+        drop(result);
+        assert!(dropped.get());
+    }
+
+    #[test]
     fn persistent_os_lock_is_bounded_and_never_removed() {
         let run_dir = temp_run_dir("persistent-advisory-lock");
         let store = IntentStore::open(&run_dir, "hash").expect("store");
@@ -4776,25 +4963,36 @@ mod tests {
 
         let first = store.lock_intent(&id).expect("first lock");
         let start = Instant::now();
+        let contender = store.lock_intent(&id);
+        let elapsed = start.elapsed();
+        eprintln!("persistent OS lock contention elapsed: {elapsed:?}");
         assert!(
-            store.lock_intent(&id).is_err(),
-            "a live lock holder must cause a bounded failure, not lock theft"
+            matches!(contender, Err(IntentError::Io(ref detail)) if detail.contains("locked by another writer")),
+            "a live lock holder must cause a bounded contention failure, got {contender:?}"
         );
         assert!(
-            start.elapsed()
-                < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1),
-            "the contender must honor the bounded acquisition policy, allowing scheduler delay \
-             under the full parallel workspace suite"
+            elapsed < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1),
+            "the contender took {elapsed:?}; it must honor the bounded acquisition policy, \
+             allowing scheduler delay under the full parallel workspace suite"
         );
         assert!(lock_path.exists(), "the advisory lock file is persistent");
+        assert!(
+            matches!(
+                platform_fs::try_acquire_owner_private_advisory_lock(&lock_path),
+                Err(platform_fs::FsError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::WouldBlock
+            ),
+            "a failed contender must leave the original holder's OS lock intact"
+        );
         drop(first);
-        store
+        let second = store
             .lock_intent(&id)
             .expect("dropping a holder releases the OS lock");
         assert!(
             lock_path.exists(),
             "releasing the OS lock must not delete or replace its file"
         );
+        drop(second);
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

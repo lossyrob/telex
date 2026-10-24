@@ -215,6 +215,48 @@ jobs:
             target\debug\telex.pdb
           if-no-files-found: error
 
+  station-intent-lock:
+    name: Station-intent lock boundary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify source identity and isolate runtime state
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_SOURCE_HEAD) {
+            throw "Source head mismatch: expected $env:EXPECTED_SOURCE_HEAD, got $actual"
+          }
+          Write-Output "Direct source head: $actual; provider event SHA: $env:GITHUB_SHA"
+          $root = Join-Path $env:RUNNER_TEMP "intent-lock-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os }}"
+          "TELEX_HOME=$(Join-Path $root 'home')" >> $env:GITHUB_ENV
+          "TELEX_DB=$(Join-Path $root 'store.db')" >> $env:GITHUB_ENV
+          "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')" >> $env:GITHUB_ENV
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Exercise complete station-intent unit boundary
+        run: cargo test --locked --no-default-features --features sqlite --lib station_intent::tests:: -- --nocapture
+
+      - name: Exercise owner-private filesystem validation
+        run: cargo test --locked --no-default-features --features sqlite --lib platform_fs::tests:: -- --nocapture
+
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
