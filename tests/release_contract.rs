@@ -336,7 +336,7 @@ fn build_id_rebuilds_when_packed_branch_gains_a_loose_ref() {
     std::fs::create_dir_all(root.join("src")).expect("create fixture src");
     std::fs::write(
         root.join("Cargo.toml"),
-        "[package]\nname = \"build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        "[package]\nname = \"build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n",
     )
     .expect("write fixture Cargo.toml");
     std::fs::write(root.join("build.rs"), read("build.rs")).expect("write fixture build.rs");
@@ -363,63 +363,186 @@ fn build_id_rebuilds_when_packed_branch_gains_a_loose_ref() {
     git(&["init", "--quiet"]);
     git(&["config", "user.email", "telex-test@example.invalid"]);
     git(&["config", "user.name", "Telex Test"]);
+    git(&["config", "commit.gpgsign", "false"]);
     git(&["add", "."]);
     git(&["commit", "--quiet", "-m", "initial"]);
-
-    let symbolic_ref = String::from_utf8(git(&["symbolic-ref", "HEAD"]).stdout)
-        .expect("symbolic ref utf8")
+    git(&["branch", "-M", "nested/current"]);
+    let first = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+        .expect("initial head utf8")
         .trim()
         .to_string();
-    git(&["pack-refs", "--all", "--prune"]);
-    let loose_ref = String::from_utf8(git(&["rev-parse", "--git-path", &symbolic_ref]).stdout)
-        .expect("loose ref path utf8");
+    let packed_refs = root.join(".git").join("packed-refs");
     assert!(
-        !root.join(loose_ref.trim()).exists(),
-        "fixture branch ref should start packed-only"
+        !packed_refs.exists(),
+        "fixture should start without packed refs"
     );
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let target = root.join("target");
-    let run = || {
+    let run = |repo: &std::path::Path, overrides: &[(&str, &str)]| {
         let output = Command::new(&cargo)
-            .args(["run", "--quiet"])
-            .current_dir(&root)
-            .env("CARGO_TARGET_DIR", &target)
+            .args(["build", "--message-format=json"])
+            .current_dir(repo)
+            .env("CARGO_TARGET_DIR", repo.join("target"))
             .env_remove("TELEX_BUILD_ID")
             .env_remove("GITHUB_SHA")
+            .envs(overrides.iter().copied())
             .output()
-            .expect("run fixture cargo");
+            .expect("build fixture");
         assert!(
             output.status.success(),
-            "fixture cargo run failed: {}",
+            "fixture cargo build failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        String::from_utf8(output.stdout)
+        let messages: Vec<Value> = String::from_utf8(output.stdout)
+            .expect("fixture Cargo output utf8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("fixture Cargo JSON"))
+            .collect();
+        let artifact = messages
+            .iter()
+            .find(|message| {
+                message["reason"] == "compiler-artifact"
+                    && message["target"]["name"] == "build-id-fixture"
+            })
+            .expect("fixture executable artifact");
+        let fresh = artifact["fresh"].as_bool().expect("artifact freshness");
+        let executable = artifact["executable"]
+            .as_str()
+            .expect("artifact executable");
+        let output = Command::new(executable)
+            .output()
+            .expect("run exact fixture");
+        assert!(
+            output.status.success(),
+            "fixture executable failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let id = String::from_utf8(output.stdout)
             .expect("fixture output utf8")
             .trim()
-            .to_string()
+            .to_string();
+        (id, fresh)
     };
 
-    let first = run();
+    assert_eq!(run(&root, &[]), (first.clone(), false));
+    assert_eq!(
+        run(&root, &[]),
+        (first.clone(), true),
+        "an unchanged loose checkout without packed-refs must stay fresh"
+    );
+
+    git(&["pack-refs", "--all", "--prune"]);
+    let loose_ref = root
+        .join(".git")
+        .join("refs")
+        .join("heads")
+        .join("nested")
+        .join("current");
+    assert!(!loose_ref.exists(), "fixture branch should be packed-only");
+    let nested_parent = loose_ref.parent().expect("nested ref parent");
+    if nested_parent.exists() {
+        std::fs::remove_dir(nested_parent).expect("remove empty nested ref directory");
+    }
+    assert_eq!(run(&root, &[]), (first.clone(), false));
+    assert_eq!(
+        run(&root, &[]),
+        (first.clone(), true),
+        "a packed-only nested branch must stay fresh"
+    );
+    let packed_modified = std::fs::metadata(&packed_refs)
+        .expect("packed refs metadata")
+        .modified()
+        .expect("packed refs modification time");
+
     std::fs::write(root.join("tracked.txt"), "two\n").expect("advance fixture source");
     git(&["add", "tracked.txt"]);
     git(&["commit", "--quiet", "-m", "advance"]);
     assert!(
-        root.join(loose_ref.trim()).exists(),
+        loose_ref.exists(),
         "advancing a packed branch should create its loose ref"
     );
-    let second = run();
-    let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+    assert_eq!(
+        std::fs::metadata(&packed_refs)
+            .expect("packed refs metadata after advance")
+            .modified()
+            .expect("packed refs modification time after advance"),
+        packed_modified,
+        "loose-ref creation must be detected without packed-refs changing"
+    );
+    let second = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
         .expect("head utf8")
         .trim()
         .to_string();
-
-    assert_ne!(
-        first, second,
-        "build ID must change when the branch advances"
+    assert_ne!(first, second, "fixture HEAD must advance");
+    assert_eq!(
+        run(&root, &[]),
+        (second.clone(), false),
+        "build ID must advance"
     );
-    assert_eq!(second, head, "rebuilt binary must report the advanced HEAD");
-    std::fs::remove_dir_all(root).ok();
+    assert_eq!(run(&root, &[]), (second.clone(), true));
+
+    git(&["checkout", "--quiet", "--detach", &first]);
+    std::fs::remove_file(&packed_refs).expect("remove fixture packed refs");
+    assert_eq!(run(&root, &[]), (first.clone(), false));
+    assert_eq!(
+        run(&root, &[]),
+        (first, true),
+        "an unchanged detached checkout without packed-refs must stay fresh"
+    );
+    git(&["checkout", "--quiet", "--detach", &second]);
+    assert_eq!(run(&root, &[]), (second.clone(), false));
+
+    assert_eq!(
+        run(
+            &root,
+            &[
+                ("TELEX_BUILD_ID", " explicit \t id "),
+                ("GITHUB_SHA", "ci-head")
+            ]
+        ),
+        ("explicit-id".to_string(), false)
+    );
+    assert_eq!(
+        run(&root, &[("GITHUB_SHA", " ci \t head ")]),
+        ("ci-head".to_string(), false)
+    );
+    assert_eq!(run(&root, &[]), (second.clone(), false));
+
+    let linked = root.join("linked-worktree");
+    let linked_path = linked.to_str().expect("linked fixture path utf8");
+    git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "linked/nested",
+        linked_path,
+    ]);
+    git(&["pack-refs", "--all", "--prune"]);
+    assert_eq!(run(&linked, &[]), (second.clone(), false));
+    assert_eq!(
+        run(&linked, &[]),
+        (second.clone(), true),
+        "a packed-only linked worktree must stay fresh"
+    );
+    std::fs::write(linked.join("tracked.txt"), "three\n").expect("advance linked source");
+    git(&["-C", linked_path, "add", "tracked.txt"]);
+    git(&[
+        "-C",
+        linked_path,
+        "commit",
+        "--quiet",
+        "-m",
+        "advance linked",
+    ]);
+    let linked_head = String::from_utf8(git(&["-C", linked_path, "rev-parse", "HEAD"]).stdout)
+        .expect("linked head utf8")
+        .trim()
+        .to_string();
+    assert_ne!(second, linked_head, "linked fixture HEAD must advance");
+    assert_eq!(run(&linked, &[]), (linked_head.clone(), false));
+    assert_eq!(run(&linked, &[]), (linked_head, true));
+    std::fs::remove_dir_all(root).expect("remove build-ID fixtures");
 }
 
 #[test]
