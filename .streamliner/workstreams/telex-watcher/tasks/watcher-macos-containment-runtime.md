@@ -269,3 +269,43 @@ Return `decision-needed` and do not call the node ready if:
   or
 - Windows/Linux guarantees, receipt-gated state, store binding, sender
   reconciliation, or readiness fences are weakened.
+
+## Support-scope decision - 2026-10-23
+
+The owner recorded the operator's selection in [comment 6374496868](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6374496868),
+following [steward clarification 6372381064](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6372381064):
+
+> Physical Apple Silicon and Intel on both named releases; fail closed
+> outside validated coverage
+
+The desired initial admission domain has four physical classes:
+
+| Physical architecture | macOS release | Build |
+|---|---|---|
+| Apple Silicon | 15.7.9 | 24G830 |
+| Intel | 15.7.9 | 24G830 |
+| Apple Silicon | 26.6.2 | 25G83 |
+| Intel | 26.6.2 | 25G83 |
+
+Approved evidence so far covers only ARM64 VMAPPLE on 25G83 and x86_64 on
+24G830. Those two exercised images do not establish the four desired
+physical classes or authorize their admission. Still open are authenticated
+mapping of production (non-development, non-KASAN) kernel variants and native
+libsystem images for all four classes, proof-relevant per-difference
+equivalence reasoning, and a reliable runtime admission key.
+
+Watcher must refuse detector launch, before release, for an unrecognized
+build, architecture or kernel flavor, or a failed identity/capability check.
+Admission failure is neither a terminal receipt nor group-absence evidence.
+Existing native evidence transfers only where equivalence is justified.
+No per-device or per-UUID native matrix is planned by default. A class whose
+equivalence cannot be justified stays unadmitted and returns to the operator;
+it is not silently dropped from the desired support scope.
+
+This records a support-scope choice only, not implementation authorization.
+Kernel/wrapper synthesis, the corrected runtime plan and final steward
+authorization remain open. Status stays in progress/focus, owner
+`d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`, with implementation HOLD unchanged.
+No new item, graph, dependency, gate or native-run authority follows.
