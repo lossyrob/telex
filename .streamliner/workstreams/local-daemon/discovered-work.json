@@ -3054,6 +3054,99 @@
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly authorized one bounded issue/node/owner repair upstream of181 on2026-10-24, with its own closing PR and v2 profile. Earlier no-promotion/no-implementation statements and conditional-retry allowance in retained evidence are historical snapshots; they do not override this later directive or authorize another retry.",
       "terminalPath": "One complete repair PR closes187 after evidence-backed diagnosis, meaningful regression coverage, exact-head hosted macOS and relevant required validation, independent source review/design inspection and Campaign gate approval. Preserve persistent owner-private locks, non-theft/release and bounded acquisition semantics. Only accepted terminal delivery permits reconsidering the181 prerequisite; source approval or a retry alone does not clear it."
+    },
+    {
+      "id": "local-daemon-macos-concurrent-directory-canonical-parent-fixture",
+      "sourceNode": "macos-persistent-lock-repair",
+      "source": "lossyrob/telex#187 / PR#189; run40137584510, job121002280897 at direct source add79d51760909bedff2d4d9e329d445806548ce",
+      "evidence": {
+        "dispositionPacket": {
+          "file": "pr189-canonical-parent-fixture-disposition-20261024.json",
+          "bytes": 5240,
+          "sha256": "e5af2da25ea367e3b497c1cd7605d1b67a0434183ae1e3db93aa9903338afa69",
+          "historicalQualification": "The immutable packet records implementationConfirmed=false at intake. Later Local source inspection and the separate exact-d0b1010 design receipt qualify that snapshot as implemented in source only; the original packet is not rewritten."
+        },
+        "failureIdentity": {
+          "head": "add79d51760909bedff2d4d9e329d445806548ce",
+          "runId": "40137584510",
+          "jobId": "121002280897",
+          "jobName": "Station-intent lock boundary (macos-latest)",
+          "providerEventSha": "b8eb4954bb8ddf1fe74ee2d8a0627a63dfc6f05c",
+          "checkoutBoundary": "The retained checkout and explicit source verifier identify direct add79d51760909bedff2d4d9e329d445806548ce. The separately printed provider event SHA is not this job's checkout."
+        },
+        "retainedLog": {
+          "file": "pr189-add79d5-macos-121002280897.txt",
+          "bytes": 70647,
+          "sha256": "ab8f97976bb8b5bb4952fae5610c5bb81c41d53839564434dd9ab3166a48426b",
+          "verificationBoundary": "Local and the reconciler matched retained bytes/hash and read relevant checkout/verifier, station-intent result and platform_fs failure excerpts. Neither claims a full-log read or provider log refetch; no local execution or mutable product-source inspection was performed by the reconciler."
+        },
+        "observedResults": {
+          "stationIntent": {
+            "passed": 58,
+            "failed": 0,
+            "ignored": 0,
+            "filteredOut": 436,
+            "durationSeconds": 5.05,
+            "persistentLockContentionMilliseconds": 483.77725
+          },
+          "platformFs": {
+            "passed": 12,
+            "failed": 1,
+            "ignored": 0,
+            "filteredOut": 481,
+            "durationSeconds": 0.69,
+            "stepExitCode": 101,
+            "test": "platform_fs::tests::concurrent_owner_private_directory_creation_is_idempotent",
+            "panicLocation": "src/platform_fs.rs:3308:13",
+            "thread": 12979,
+            "mismatch": "Returned canonical /private/var/.../scope differs from expected unresolved /var/.../scope.",
+            "panicReportTimestamp": "2026-10-24T22:14:52.5146270Z"
+          },
+          "limit": "Station-intent module success and its measured contention are exact-head partial evidence, not aggregate CI success or certification of a later head."
+        },
+        "localSourceAssessment": {
+          "head": "add79d51760909bedff2d4d9e329d445806548ce",
+          "unchangedPlatformModuleBase": "49635ff71fd39aff05026d852d06c8de4b15dc3e",
+          "assessment": "Local read the canonical-return API contract, existing temp-parent helper and eight-creator test. The unchanged platform module returns a canonical path while this fixture compared it to an unresolved temporary-parent spelling. Canonicalize the already-existing fixture parent before deriving the absent scope, preserving the race and equality assertions.",
+          "limit": "Attributed immutable-source and retained-log analysis; no local reproduction or historical lock-acquisition cause conclusion."
+        },
+        "laterSourceImplementation": {
+          "head": "d0b1010594aff7c27f7629ceb43ddad3c79118be",
+          "tree": "b8bd08f36a9a2a377358ba5cc7c1468fc5e8cdf8",
+          "stage": "implemented-in-source only",
+          "localReceipt": "Local call_SwmD5dRNuypit2bozS36gCpR verified the existing temp-base canonicalization before scope join, all eight creators/barrier/joins/assertions, and byte-identical station_intent/daemon-doc/CI files versus add79. The owner reports rebase onto ef975014; the retained steward independently separates those upstream PR188 paths from the fixture delta.",
+          "limit": "No new-head source-review, hosted execution, CI-green, accepted delivery or gate credit follows."
+        },
+        "designOnlyReceipt": {
+          "file": "pr189-local-design-inspection-d0b1010-20261024.md",
+          "bytes": 8771,
+          "sha256": "95ee6a7e920e240d7e7d6290d147e1c096885fe40bd54a7975f968748e66c88e",
+          "head": "d0b1010594aff7c27f7629ceb43ddad3c79118be",
+          "tree": "b8bd08f36a9a2a377358ba5cc7c1468fc5e8cdf8",
+          "verdict": "APPROVED",
+          "newDesignFindings": 0,
+          "verificationBoundary": "Local and the reconciler fully read/hash-verified the immutable steward artifact. This is bounded delta design approval, invalidated by head movement, not App source-review, runtime, CI, delivery, readiness, merge or Campaign gate acceptance. The earlier add79 design receipt remains historical."
+        },
+        "limits": [
+          "This is a distinct fixture-precondition finding, not the cause of the original persistent-lock timing failures or optional Clippy cleanup.",
+          "The old add79 module pass and 483.77725ms measurement do not certify d0b1010 or aggregate CI.",
+          "Source implementation and design-only approval are not hosted validation or terminal completion.",
+          "No timeout/tolerance change, retry, skip, pre-created child, production privacy change, new upstream/node/owner/dependency or gate waiver is authorized.",
+          "The workstation freeze, PR185 draft/head, issue153, Watcher dependency chain and all unrelated evidence/gates remain unchanged."
+        ]
+      },
+      "description": "Align the concurrent owner-private-directory fixture's expected child path with the existing canonical-return API by canonicalizing only its already-created temporary parent before deriving the absent scope.",
+      "affectedOutcome": "The existing issue187 repair needs meaningful hosted owner-private-filesystem coverage without weakening the eight-creator absent-child race, equality assertions or production canonical/privacy behavior.",
+      "requiredness": "Required for current PR189 validation correctness; a bounded in-scope test-precondition correction, not a separate upstream outcome.",
+      "sequencing": "Absorb into existing issue187 / PR189, preserve its owner and graph geometry, then obtain exact-new-head hosted CI and independent delta source/design review through the existing roles and sole observer.",
+      "recommendedDisposition": "Absorb the existing-parent canonicalization into PR189 without changing production semantics or pre-creating the raced child.",
+      "selectedDisposition": "Local approved absorption into the existing issue187 outcome; the later d0b1010 receipt confirms implementation in source only. No terminal validation, readiness or downstream release is accepted.",
+      "target": "local-daemon/macos-persistent-lock-repair / https://github.com/lossyrob/telex/issues/187 / https://github.com/lossyrob/telex/pull/189",
+      "owner": "Existing issue187 implementation owner5d9b3155-0327-40d1-936d-7a3652ea90c3, coordinated by Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57; no new owner.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 accepted the narrow in-scope correction in pr189-canonical-parent-fixture-disposition-20261024.json, relayed by call_uAoqcvJ3df82PV02kdxhefVs; later call_SwmD5dRNuypit2bozS36gCpR confirms source implementation only. This does not change the Campaign-authorized outcome or geometry.",
+      "terminalPath": "The same PR189 closes187 after current-head hosted required validation, independent source review, exact-head design inspection and Campaign gate approval. Preserve all eight creators/barrier/joins/assertions, the still-absent child race and production canonical/privacy behavior. Only accepted terminal repair delivery and field report permit reconsidering the181 prerequisite; this routed disposition, source correction or design receipt alone does not."
     }
   ]
 }

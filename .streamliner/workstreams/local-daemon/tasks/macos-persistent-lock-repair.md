@@ -3,14 +3,16 @@
 - **Workstream:** `local-daemon`
 - **Node:** `macos-persistent-lock-repair`
 - **Type:** implementation
-- **Status:** in progress; v2 preparation complete and real kickoff delivered
-  to the one bound owner; no implementation or CI result claimed
+- **Status:** in progress; one bound v2 owner and OPEN/draft repair PR;
+  current-head source review, hosted validation and delivery not accepted
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `local-daemon/cooperative-partial-page-repair`, issue #181 /
   draft PR #185; transitively Watcher #179 / PR #180 through its existing
   dependency
 - **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187)
+- **PR:** [#189](https://github.com/lossyrob/telex/pull/189), OPEN/draft;
+  head `d0b1010594aff7c27f7629ceb43ddad3c79118be`
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `5d9b3155-0327-40d1-936d-7a3652ea90c3`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
@@ -249,6 +251,71 @@ acceptance is claimed by the launch receipt. Issue #181 remains blocked,
 PR #185 stays draft at `7b11b926` unchanged, and the workstation freeze and
 all existing gates remain.
 The reconciler did not prepare, launch or replace an owner.
+
+### Draft repair and absorbed fixture state - 2026-10-24
+
+PR #189 is OPEN/draft at `d0b1010594aff7c27f7629ceb43ddad3c79118be`,
+tree `b8bd08f36a9a2a377358ba5cc7c1468fc5e8cdf8`, branch
+`lossyrob-macos-persistent-lock-repair`, base `main`, body `Closes #187`.
+Provider metadata snapshot: 3,075 bytes, SHA-256
+`c6d90ba18274c8acff452bb664a74faf4db0ea24f2735cd0ef3a0eba75c228d3`.
+The owner reports rebase onto `ef975014`; the product merge-base is that
+commit. Canonical `917a0564` adds only the separate owner-launch receipt.
+
+Local verified new run `40138318787` metadata matches this head,
+`pull_request` event and attempt 1, without querying results. Same-role
+reviewer/steward delta coverage and sole-wait replacement were requested;
+Local's registration receipt is still pending. Owner-reported PAW-Review
+recovery and requested `gpt-6.1-sol` / high / default are not a verdict or
+effective-capacity proof. Local resolves reviewer alias `81c3b103` to
+`d258aeb7-1af0-4587-bdcc-76f43f03b7d6`; no App review polling or new role
+launch is performed by the reconciler.
+
+The owner's initial `b03a2c2` / run `40137413218` invalid-workflow report is
+historical and supplies no test credit. At corrected old head `add79d51`,
+run `40137584510` / macOS job `121002280897` directly checked out that source
+and printed its provider event SHA separately. The retained 70,647-byte log
+has SHA-256
+`ab8f97976bb8b5bb4952fae5610c5bb81c41d53839564434dd9ab3166a48426b`.
+Selected excerpts show station-intent 58/0 in 5.05s and measured lock
+contention 483.77725ms, then platform_fs 12/1 in 0.69s/exit 101. Those are
+old-head partial results, not aggregate CI or current-head validation.
+The reconciler matched bytes/hash and read named excerpts, not the whole
+log; no provider log refetch or local runtime action occurred.
+
+The distinct failure is
+`concurrent_owner_private_directory_creation_is_idempotent` comparing a
+canonical returned child with an unresolved temporary-parent spelling.
+Local approved absorbing only existing-parent canonicalization before the
+still-absent `scope` join, preserving eight creators, barrier, joins,
+assertions and all production canonical/privacy behavior. The ledger entry
+`local-daemon-macos-concurrent-directory-canonical-parent-fixture` records
+the disposition, not a new upstream. Its source packet is 5,240 bytes at
+SHA-256
+`e5af2da25ea367e3b497c1cd7605d1b67a0434183ae1e3db93aa9903338afa69`.
+Original `implementationConfirmed=false` remains historical; later Local
+inspection confirms the correction in `d0b1010` source only. This does not
+diagnose the original lock failure or absorb unrelated lint work.
+
+The retained steward's bounded delta design receipt APPROVES exact
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`, zero new design findings:
+`pr189-local-design-inspection-d0b1010-20261024.md`, 8,771 bytes, SHA-256
+`95ee6a7e920e240d7e7d6290d147e1c096885fe40bd54a7975f968748e66c88e`.
+Local and the reconciler read/hash-verified it fully. It preserves the
+eight-creator race, separates upstream PR #188 changes from the fixture
+delta, and verifies the prior three repair files byte-identical to
+`add79d51`. The earlier 14,575-byte design receipt at SHA-256
+`f71e15d7581398d4a069afc17fcfa0e5515c095f6fd4c657f6943a418d4dc5f1`
+remains historical, not new-head runtime clearance. The delta receipt's
+canonical-main `ef975014` is its inspection-time snapshot. Design-only
+coverage is exact-head and invalidated by head movement.
+
+No current-head App source review, hosted execution, CI-green, delivery,
+readiness, historical-cause conclusion, runtime-isolation clearance,
+merge or Campaign gate is credited by this record. No timeout/tolerance,
+retry or skip workaround follows. The #187 scope, #181 block, PR #185,
+Watcher dependency chain, workstation freeze, #153 and every unrelated gate
+remain unchanged.
 
 ## Workflow
 

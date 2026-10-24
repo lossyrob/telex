@@ -177,6 +177,17 @@ text: no implementation, runtime, CI result or gate acceptance follows.
 Issue #181 stays blocked and PR #185 stays draft and unchanged; the freeze
 and every unrelated gate remain.
 
+PR [#189](https://github.com/lossyrob/telex/pull/189) now carries the proposed
+#187 repair, OPEN/draft at `d0b1010594aff7c27f7629ceb43ddad3c79118be`,
+with the same owner/branch, base `main` and `Closes #187`. Local absorbed the
+bounded canonical-parent fixture correction in that source, preserving the
+eight-creator race and production privacy behavior; no new upstream exists.
+Old `add79d51` module passes and design approval remain historical. The
+current-head delta design receipt is APPROVED only for design; App source
+review, hosted CI, wait-registration receipt, delivery/readiness and every
+downstream gate are not credited. #181 remains blocked, PR #185 unchanged,
+and the workstation freeze and all unrelated boundaries remain.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
