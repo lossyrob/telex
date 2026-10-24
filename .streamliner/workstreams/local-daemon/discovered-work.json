@@ -2663,7 +2663,101 @@
           "reconsideration": "Reconsider after the performance PR and active repair land, and only if evidence supports useful test-only cleanup for a local lint check. File a separate improvement issue before implementation; add no CI job or test battery and do not expand or block issue #181.",
           "sourceBoundary": "Local and the reconciler read the provider comment in full. Local's earlier account of pending-output wording is a historical intake snapshot; the later updated comment links the owner-authored evidence summary. That summary remains neither a raw output archive nor independent execution proof. Sentinel triage is not a new implementation owner, node or dependency."
         },
-        "limits": "All execution, unchanged-code, optional/non-required-CI and compile/format success statements remain attributed to the owner. The broader --tests command failed; it is not reported as passing and required CI is not waived. zombie_processes names a lint, not an observed process leak, runtime defect or security vulnerability. Evidence belongs to old PR head 57fdc975 and does not validate a later head or diagnose the separate runtime/marker failures. No command, test, runtime, CI query or rerun was performed for this reconciliation."
+        "limits": "All execution, unchanged-code, optional/non-required-CI and compile/format success statements remain attributed to the owner. The broader --tests command failed; it is not reported as passing and required CI is not waived. zombie_processes names a lint, not an observed process leak, runtime defect or security vulnerability. Evidence belongs to old PR head 57fdc975 and does not validate a later head or diagnose the separate runtime/marker failures. No command, test, runtime, CI query or rerun was performed for this reconciliation.",
+        "successorObservations": [
+          {
+            "intakePacket": {
+              "file": "issue187-optional-clippy-successor-20261024.json",
+              "bytes": 4858,
+              "sha256": "74dca8fdaf44fc51dc563d5af043919e2efd0d745a0b9c8f599bde2f9c09b4df"
+            },
+            "reportedSource": {
+              "issue": "https://github.com/lossyrob/telex/issues/187",
+              "reporterSessionId": "5d9b3155-0327-40d1-936d-7a3652ea90c3",
+              "reportMessageCallId": "call_vR8rmUS4m6KGJo4voadNryW5",
+              "retentionMessageCallId": "call_kNoGqT2i3g5GqoeIHJlYSdbH",
+              "reportedAt": "2026-10-24",
+              "reportedHead": "970be041537d11a4e29e5c62b8aaf884646120b6",
+              "reportedBranch": "lossyrob-macos-persistent-lock-repair",
+              "reportedUncommittedTrackedChanges": [
+                {
+                  "path": "src/station_intent.rs",
+                  "description": "absolute acquisition budget, deterministic regression tests, strengthened persistent OS-lock test"
+                },
+                {
+                  "path": "docs/design/daemon.md",
+                  "description": "acquisition budget and synchronous-call limit"
+                },
+                {
+                  "path": ".github/workflows/ci.yml",
+                  "description": "direct-head hosted station-intent boundary matrix"
+                }
+              ],
+              "sourceQualification": "HEAD plus owner-described uncommitted changes, not validation of the clean commit alone. No invocation-time diff snapshot or tree hash is supplied; Local did not independently inspect the invocation worktree.",
+              "untrackedArtifacts": "Owner reports .paw artifacts present, not product sources."
+            },
+            "retainedTranscription": {
+              "file": "issue187-optional-clippy-observation.txt",
+              "bytes": 4205,
+              "sha256": "0601da6e066ddf33744460fc43843518c34cc8868258d7d5d3be52d71e23dec6",
+              "kind": "Owner transcription of previously returned tool output, not a new run or independently captured raw-output archive."
+            },
+            "reportedInvocation": {
+              "command": "cargo fmt --check && cargo check --quiet --locked --no-default-features --features sqlite --lib --tests && cargo clippy --quiet --locked --no-default-features --features sqlite --lib --tests -- -D warnings",
+              "formatResult": "passed",
+              "compileOnlyCheckResult": "passed",
+              "optionalClippyResult": "failed",
+              "optionalClippyExitCode": 101,
+              "runtimeTestsExecuted": false,
+              "explicitToolchainIdentity": null,
+              "toolchainQualification": "Diagnostic URLs name rust-1.98.0 documentation. That is not an independently captured rustc, cargo or Clippy version and does not establish the executed toolchain."
+            },
+            "diagnostics": [
+              {
+                "path": "tests/copilot_plugin.rs",
+                "lines": "304-307",
+                "lint": "double_ended_iterator_last"
+              },
+              {
+                "path": "tests/conformance.rs",
+                "lines": "322",
+                "lint": "useless_vec"
+              },
+              {
+                "path": "src/daemon_bootstrap.rs",
+                "lines": "3480",
+                "lint": "zombie_processes"
+              },
+              {
+                "path": "src/daemon_bootstrap.rs",
+                "lines": "3481",
+                "lint": "print_literal"
+              }
+            ],
+            "classification": {
+              "mapping": "The same four lint diagnostics in three files match the existing optional Clippy candidate.",
+              "unchangedLocations": "Owner reports none of the diagnostic locations were touched by its uncommitted repair changes; Local has not independently verified that invocation-time comparison.",
+              "notRuntimeProof": "The zombie_processes lint name and quoted generic compiler advice do not prove a process leak, runtime defect or security vulnerability.",
+              "baselineCandidateSnapshot": "49635ff71fd39aff05026d852d06c8de4b15dc3e: existing candidate/proposed, deferred test-sentinel triage, implementation unassigned."
+            },
+            "disposition": {
+              "scope": "Deferred, non-gating optional test hygiene outside issue187; retain the existing sentinel triage disposition.",
+              "candidateStatusChange": false,
+              "ownerOrImplementationAssignmentChange": false,
+              "graphGateOrRequiredCiChange": false,
+              "newIssueOrNodeAuthorized": false,
+              "newRunOrProbeRequested": false,
+              "preserve": "Keep all original57fdc975 evidence, exact historical toolchain reports and sentinel disposition unchanged. This later dirty-worktree observation is separate evidence, not a rewrite of the original run."
+            },
+            "verificationBoundary": "Local and the reconciler matched bytes/hash and read the complete supplied transcription and intake packet. Commands, results, dirty-worktree identity and unchanged-location claims remain owner-attributed, not independent execution or invocation-time diff/tree proof. Documentation URLs do not establish the executed toolchain and the original57fdc975 reported toolchain is not inherited. No lint, test, runtime, provider or CI probe was run for this reconciliation.",
+            "limits": [
+              "No claim that the broader command passed, required CI passed, the lock repair is correct or its source review is complete.",
+              "No inheritance of the original observation's captured toolchain into this observation.",
+              "No runtime execution, lint rerun, new probe or product edit by Local.",
+              "Do not block or expand187, alter181/185 or Watcher dependencies, or change153/hardening/freeze boundaries."
+            ]
+          }
+        ]
       },
       "description": "Retain one attributed optional test-lint hygiene candidate for the four owner-reported Clippy warnings, outside the issue #181 repair.",
       "affectedOutcome": "Potentially useful local test-lint ergonomics after higher-priority measured test-performance work; not evidence that the issue #181 runtime outcome failed.",
