@@ -252,10 +252,14 @@ jobs:
           toolchain: stable
 
       - name: Exercise complete station-intent unit boundary
-        run: cargo test --locked --no-default-features --features sqlite --lib station_intent::tests:: -- --nocapture
+        run: >-
+          cargo test --locked --no-default-features --features sqlite
+          --lib station_intent::tests:: -- --nocapture
 
       - name: Exercise owner-private filesystem validation
-        run: cargo test --locked --no-default-features --features sqlite --lib platform_fs::tests:: -- --nocapture
+        run: >-
+          cargo test --locked --no-default-features --features sqlite
+          --lib platform_fs::tests:: -- --nocapture
 
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
