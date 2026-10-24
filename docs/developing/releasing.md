@@ -60,6 +60,21 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
   package's lockfile entry. Independent workspace packages, dependencies, minimum
   compatible versions, and historical fixtures are not mechanically bumped.
 
+## Source build identity
+
+The version surfaces include a build identifier in addition to the package
+version. Its precedence is `TELEX_BUILD_ID`, then `GITHUB_SHA`, then the source
+repository's Git HEAD, otherwise `unknown`. A metadata-less copy cannot borrow
+an unrelated ancestor repository's identity.
+
+Cargo tracks HEAD, the active branch and packed refs in the owning Git metadata,
+including linked worktrees. When a metadata file is absent, it watches the
+nearest existing ancestor instead: creating a loose ref or `packed-refs` still
+invalidates the build, while unchanged builds can reuse their artifacts.
+Directory watches conservatively include other changes within that metadata
+directory. The dependency-free build-ID fixtures in `tests/release_contract.rs`
+check both exact identity transitions and unchanged-build freshness.
+
 ## Immutable candidate proof
 
 For the [v0.2.1 corrective schema-3 candidate](../releases/v0.2.1.md), preparation and
