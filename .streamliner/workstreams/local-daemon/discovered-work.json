@@ -2727,6 +2727,237 @@
           "Preserve all prior discovery evidence, markers, issue153, Watcher dependency and hardening/closure gates.",
           "No local tests, runtime/proofs, process control, ACL/registry/root actions or installed-state operations."
         ],
+        "attempt1TerminalSupplement": {
+          "packet": {
+            "file": "pr185-macos-terminal-supplement-20261023.json",
+            "bytes": 3798,
+            "sha256": "cd58d19c6244b5558bbbc6c39df1e51eac93ddbd8f1707345b7c13a2c7510119"
+          },
+          "receipt": {
+            "reporterSessionId": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+            "sourceMessageCallId": "call_4AK25WQuYieMjenbcZs2BdCD",
+            "receivedAt": "2026-10-23T21:58:41.412Z",
+            "kind": "wait-terminal-failure",
+            "waitId": "wait-pr185-ci40026777909-7b11b92",
+            "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+            "runId": "40026777909",
+            "attempt": 1
+          },
+          "coordinatorReportedTerminalState": {
+            "conclusion": "failure",
+            "exactIdentityGuards": "intact",
+            "inventoryCount": 21,
+            "passedJobs": 20,
+            "failedJobs": 1,
+            "onlyFailedJobId": "120664829096",
+            "onlyFailedJob": "Cooperative partial-page boundary (macos-latest)",
+            "namedPassedCoverage": [
+              "Cooperative partial-page boundary (windows-latest)",
+              "Cooperative partial-page boundary (ubuntu-latest)",
+              "Live Postgres parity",
+              "Windows InstalledCurrent PostgreSQL"
+            ],
+            "observerLifecycle": "Observer closing; sole schedule disarming. This is not an independently verified schedule-disabled receipt."
+          },
+          "terminalCapture": {
+            "sourceTemporaryFile": "telex-run40026777909-failed.log",
+            "retainedFile": "pr185-attempt1-terminal-failed-20261023.log",
+            "bytes": 48198,
+            "lines": 289,
+            "sha256": "950f60dda3ae67d7dbc4a6e441386faa54d939856427c4399ef5f65888ab0b63",
+            "format": "Coordinator-provided formatted failed-step log, distinct from the owner's full job-log capture.",
+            "localVerification": "Local matched source bytes/hash, retained a byte-identical session copy, checked line count and read matching failure/panic/module-summary/exit excerpts. No provider query or refetch was used.",
+            "matchedFailure": "persistent_os_lock_is_bounded_and_never_removed at src/station_intent.rs:4979:9; 58 passed, 1 failed, 0 ignored, 436 filtered out, 14.16s module duration, step exit 101.",
+            "originalOwnerCapture": "The original 68750-byte capture at SHA-256 f306e9dc28502d6b040171dd6a2338cd5f1b0e88da97e32e3956674396eaa1ed remains separate and unchanged. These captures are not byte-identical or interchangeable."
+          },
+          "verificationBoundary": "The terminal run conclusion, complete 21-job inventory and all-other-20-passed statement are attributed to the coordinator's provider observation, not independently established by Local's failed-step log read.",
+          "retryState": {
+            "terminalPrerequisite": "Coordinator terminal receipt satisfies the terminal-run condition of the existing bounded retry disposition.",
+            "remainingExecutorChecks": "The retained owner must verify the current PR head is still the exact permitted head and avoid duplicate submission before retrying the named macOS job once.",
+            "observerRequirement": "Actual retry attempt/job identities must be registered with the existing coordinator; the closing attempt-1 observer is not assumed to cover a retry.",
+            "executionOrResultCredited": false,
+            "additionalRetryAuthority": false
+          },
+          "limits": [
+            "Keep this additive to the original failed-job evidence and historical conditional-retry snapshot.",
+            "Required CI is not green; other-job successes do not waive the failed job or credit the skipped positive repetitions.",
+            "No cause, actual test elapsed, candidate closure, runtime acceptance, node promotion, implementation authority or Campaign gate acceptance follows.",
+            "No Local retry, provider refetch, new observer, local runtime action or source change occurred."
+          ],
+          "reconcilerVerification": "The reconciler matched the supplied 48198-byte/289-line formatted capture's hash and read selected failure, panic, module-summary and exit excerpts. It did not refetch provider logs, independently verify aggregate run/inventory or scheduler state, or replace the original 68750-byte owner capture. The retryState fields are Local's terminal-receipt snapshot, not an independent replay of owner checks."
+        },
+        "attempt2RetryRegistration": {
+          "packet": {
+            "file": "pr185-macos-retry-registration-20261023.json",
+            "bytes": 3895,
+            "sha256": "b68ff3a1cc3890c350e234517ff41c5c43eaa49f1f26858cef914b51c2e9a772"
+          },
+          "ownerSubmissionReceipt": {
+            "reporterSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+            "sourceMessageCallId": "call_GBouwGUnys7Zi2q0juhC0ZH9",
+            "runId": "40026777909",
+            "attempt": 2,
+            "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+            "originalTargetJobId": "120664829096",
+            "actualRetryJobId": "120677596239",
+            "reportedGuards": "POST targeted only the original macOS job after attempt1 terminal failure, OPEN PR, exact-head and job guards.",
+            "reportedScope": "One named-job retry submitted; no second retry or other-job execution requested. Twenty new API job IDs are reported retained-success aliases."
+          },
+          "localIdentityVerification": {
+            "method": "One bounded read each of provider run and retry-job identity metadata; no CI-result or log polling.",
+            "run": {
+              "id": "40026777909",
+              "headSha": "7b11b92630d0b2cf63423a77fc19232aff368825",
+              "event": "pull_request",
+              "runAttempt": 2
+            },
+            "job": {
+              "id": "120677596239",
+              "runId": "40026777909",
+              "runAttempt": 2,
+              "headSha": "7b11b92630d0b2cf63423a77fc19232aff368825",
+              "name": "Cooperative partial-page boundary (macos-latest)",
+              "url": "https://github.com/lossyrob/telex/actions/runs/40026777909/job/120677596239"
+            },
+            "limits": "These metadata reads establish the attempt/job/head association, not the POST history, independent replay of the owner's preconditions, executed checkout bytes, all-alias inventory, or test result."
+          },
+          "observerRegistrationReceipt": {
+            "reporterSessionId": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+            "sourceMessageCallId": "call_ok9cCzlr6fHnu6M86Rgp1mXt",
+            "waitId": "wait-pr185-ci40026777909-7b11b92-attempt2",
+            "runId": "40026777909",
+            "attempt": 2,
+            "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+            "reportedIdentityGuards": "Unchanged head/tree/base.",
+            "reportedInventory": "All 21 attempt aliases validated; only authorized actual rerun is macOS job120677596239, with the other20 aliases retained-success.",
+            "reportedSchedule": "Existing sole five-minute native schedule rearmed and verified.",
+            "priorAttempt": "Attempt1 failure remains preserved; the prior observer closed before this distinct attempt-specific registration.",
+            "localVerificationBoundary": "Local received this registration receipt; it did not independently inspect scheduler state or the complete alias inventory."
+          },
+          "historicalQualification": "The earlier no-retry-performed/not-observed and re-registration-pending statements are historical intake snapshots. This later owner receipt, independently verified identity metadata and attributed observer registration qualify only submission and registration. They do not rewrite the original failure or claim a result.",
+          "retryAuthorityBoundary": {
+            "allowance": "The existing one named-job unchanged-head retry allowance is used by this attempt.",
+            "additionalRetryAuthorized": false,
+            "resultObservedByLocal": false,
+            "failedCheckSupersessionAccepted": false,
+            "candidateClosureAccepted": false
+          },
+          "limits": [
+            "No aggregate-green, runtime acceptance, successful repetitions, cause, actual failing-test elapsed or Campaign gate credit is established.",
+            "A passing retry would not diagnose or close the candidate; recurrence returns for upstream-repair disposition, not another unchanged-head retry.",
+            "Keep the original owner full-job capture and coordinator terminal failed-step capture distinct.",
+            "No Local retry, new parallel observer, source change or local runtime action occurred."
+          ],
+          "reconcilerVerification": "The reconciler read and hash-matched the supplied packet, not provider run/job metadata, submission history, full alias inventory or scheduler state. Owner-reported POST/preconditions, Local's bounded attempt/job/head identity reads and coordinator-reported registration/alias/schedule verification remain separate. The 20 retained-success aliases are not new executions. Its no-result snapshot precedes the recurrence supplement."
+        },
+        "attempt2Recurrence": {
+          "packet": {
+            "file": "pr185-macos-attempt2-recurrence-20261023.json",
+            "bytes": 6684,
+            "sha256": "03eb5796676053bdc0a94a12ad6e496619fd18d1003c381cb3bb94fc39d212ce"
+          },
+          "coordinatorReceipt": {
+            "reporterSessionId": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+            "sourceMessageCallId": "call_IcVERFrTtvPToXdU2LW0vouv",
+            "receivedAt": "2026-10-23T22:06:02.392Z",
+            "kind": "wait-terminal-failure",
+            "waitId": "wait-pr185-ci40026777909-7b11b92-attempt2",
+            "runId": "40026777909",
+            "attempt": 2,
+            "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+            "jobId": "120677596239",
+            "reportedIdentityGuards": "Unchanged exact head/tree/base.",
+            "reportedInventory": "All21 attempt aliases present;20 retained-success aliases and the sole authorized actual macOS rerun failed.",
+            "observerLifecycle": "Observer closing and sole schedule disarming; not independently verified disabled by Local."
+          },
+          "ownerReceipt": {
+            "reporterSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+            "sourceMessageCallId": "call_ajkoJ05UIg4B5xGYbut8oh3Q",
+            "reportedTerminalAt": "2026-10-23T22:01:07Z",
+            "request": "Route a separate upstream repair so the existing owner can preserve PR185 and resume after delivery.",
+            "noFurtherRetryOrWorkaround": true,
+            "sourceReview": "Owner reports exact-head source review cleared; Local has not independently read that review artifact.",
+            "designReview": "The exact-head design-only approval is separately retained."
+          },
+          "retainedFailedStepCapture": {
+            "sourceTemporaryFile": "telex-run40026777909-attempt2-failed.log",
+            "retainedFile": "pr185-attempt2-terminal-failed-20261023.log",
+            "bytes": 19299,
+            "lines": 104,
+            "sha256": "6ed24edb90bb47d522d48f51202440ec5b84e509ca326b8a34ed7fccaf295a25",
+            "localVerification": "Local matched source bytes/hash, retained a byte-identical session copy, checked line count and read the named failure, panic, relevant test-pass and terminal module-result excerpts. No provider log refetch.",
+            "kind": "Formatted failed-step capture, not a full job-log archive.",
+            "checkoutBoundary": "Local previously verified retry run/job/head metadata. Full attempt2 checkout/source-verifier evidence has been requested from the existing owner; this failed-step capture is not independent proof of executed checkout bytes."
+          },
+          "laterFullJobArchive": {
+            "reporterSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+            "sourceMessageCallId": "call_Y3XAHi61j8S0dM2CaH69rwBr",
+            "file": "pr185-7b11b926-macos-attempt2-120677596239-full.txt",
+            "bytes": 54733,
+            "sha256": "a9b994da7f3fab26df4c44f36681d517dae89beb548536b9dc99d60146fae221",
+            "ownerRetrieval": "Owner reports one bounded archival retrieval of the completed attempt2 job log.",
+            "localVerification": "Local independently matched bytes/hash and read checkout, source-head verifier, five relevant test passes, failure and terminal-summary excerpts. This is not a full-file-read claim or a second provider retrieval.",
+            "checkout": {
+              "kind": "direct exact-head checkout",
+              "head": "7b11b92630d0b2cf63423a77fc19232aff368825",
+              "gitLogOutputTimestamp": "2026-10-23T21:59:20.6579930Z",
+              "explicitVerifierOutputTimestamp": "2026-10-23T21:59:22.5780450Z"
+            },
+            "qualification": "The earlier failed-step capture's checkoutBoundary describes the historical state before this archive arrived. This later verified full-job capture establishes direct checkout/source-verifier evidence without replacing the distinct failed-step capture or inferring a root cause.",
+            "publicRecurrenceComment": {
+              "url": "https://github.com/lossyrob/telex/pull/185#issuecomment-6375688185",
+              "author": "lossyrob",
+              "createdAt": "2026-10-23T22:06:44Z",
+              "localVerification": "Provider comment read in full; it reports recurrence, exhausted retry allowance and the unresolved required-CI blocker."
+            }
+          },
+          "recurrence": {
+            "test": "station_intent::tests::persistent_os_lock_is_bounded_and_never_removed",
+            "path": "src/station_intent.rs",
+            "line": 4979,
+            "column": 9,
+            "thread": 17045,
+            "message": "the contender must honor the bounded acquisition policy, allowing scheduler delay under the full parallel workspace suite",
+            "panicReportTimestamp": "2026-10-23T22:00:59.4111940Z",
+            "moduleResult": {
+              "passed": 58,
+              "failed": 1,
+              "ignored": 0,
+              "measured": 0,
+              "filteredOut": 436,
+              "durationSeconds": 4.61,
+              "stepExitCode": 101
+            },
+            "actualFailingTestElapsed": "Not printed; 4.61s is module duration, not the measured contending-acquisition elapsed.",
+            "relevantPasses": "The real partial-page test and four admission/shared-window/unbounded/panic tests explicitly passed in this capture. No credit is given for the ten repetitions after the failed module.",
+            "rootCause": "Unknown. A repeated assertion is established, not scheduler-delay causality, lock theft, file removal or a partial-page regression."
+          },
+          "disposition": {
+            "unchangedHeadRetryAllowance": "Exhausted by the single authorized attempt2 macOS rerun.",
+            "furtherRetryAuthorized": false,
+            "requiredCiReady": false,
+            "candidateClosed": false,
+            "currentRepair": "PR185 remains draft and non-ready; preserve its owner, branch and scope.",
+            "routing": "Request Campaign's decision to promote a separate bounded Local repair as an upstream dependency of issue181. Until that decision, this packet is evidence and a routing request only.",
+            "issueNodeOwnerOrDependencyAuthorized": false
+          },
+          "limits": [
+            "Preserve both attempt1 captures and the failed retry independently; no failure is erased or superseded as successful.",
+            "Full alias inventory, terminal run state and scheduler lifecycle remain attributed to the coordinator; Local verified the retained excerpts and prior retry identity metadata only.",
+            "No skip, waiver, unsupported timeout increase, speculative source fix, third unchanged-head attempt or new observer is authorized.",
+            "No Campaign merge/readiness, hardening/closure, Watcher dependency release or issue153 authority follows.",
+            "The workstation freeze remains unchanged; no local runtime action occurred."
+          ],
+          "recurrenceCommentArchive": {
+            "file": "t185mr-comment-6375688185.json",
+            "bytes": 1717,
+            "sha256": "cf6534e56b44e76d59aba14b94c6f8c2abdd7c21301b34dc1bdef86735e23777",
+            "providerUpdatedAt": "2026-10-23T22:06:44Z",
+            "verificationBoundary": "The reconciler read the owner recurrence comment in full and retained its provider identity/body snapshot. Statements about the guarded request, alias inventory, runtime readiness and source review remain attributed; this is not a CI-result poll or independent source-review artifact."
+          },
+          "reconcilerVerification": "The reconciler matched the distinct 19299-byte/104-line failed-step capture and 54733-byte full-job archive hashes and read selected named-pass, panic, failure and module-summary excerpts. It also read direct 7b11b926 checkout/git-log/source-verifier excerpts from the full archive. Both show the same assertion and 58/1 module failure in 4.61 seconds; neither prints actual failing-test elapsed or establishes cause. No full-file-read claim, provider log refetch, independent full-inventory/scheduler inspection, runtime action or retry occurred here."
+        },
+        "laterReceiptQualification": "All original fields remain unchanged. The original no-retry/no-registration and the terminal/registration packets' remaining-checks/no-result statements are historical snapshots, qualified in sequence by the owner-reported submission, Local's limited identity metadata verification, attributed attempt2 registration, and later failed retry evidence. The earlier failed-step checkout request is historical; the distinct later full-job archive supplies direct exact-head checkout/verifier evidence. Coordinator-reported run conclusions, 21 aliases/20 retained-success entries and schedule close/rearm/disarm claims are not independently established by Local's metadata/log reads or by this reconciliation. The one named-job unchanged-head retry allowance is consumed and exhausted; no further retry is authorized. The recurrence packet's currentRepair/routing/no-promotion statements describe its own intake time, not a claim about later Campaign decisions. Any later promotion direction requires a separate scoped proposal; this evidence-only update implements none. Required CI is not accepted green, no failure is superseded as successful, no skipped repetitions are credited, and no candidate closure, cause, actual elapsed, implementation, issue/node/owner/dependency, graph/status or gate change follows. The queued credential-writer occurrence and landed optional-lint record remain separate.",
         "limits": "The retained failure is exact-head attempt-1 evidence, not coverage of a later head or attempt. Cause and actual elapsed remain unknown. Relevant named tests passed in this log; the ten repetitions are not credited. Owner-reported source review and separately retained design-only approval do not waive required CI. No CI-result polling, log refetch, retry, local runtime action, source correction, new observer or gate acceptance was performed for this reconciliation."
       },
       "description": "Retain the distinct macOS persistent-lock acquisition timing failure from required PR #185 boundary validation; actual elapsed and cause remain unknown.",
