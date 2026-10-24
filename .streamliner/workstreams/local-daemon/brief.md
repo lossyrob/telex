@@ -188,6 +188,22 @@ review, hosted CI, wait-registration receipt, delivery/readiness and every
 downstream gate are not credited. #181 remains blocked, PR #185 unchanged,
 and the workstation freeze and all unrelated boundaries remain.
 
+The preceding PR #189 draft/review/CI-pending paragraph is historical.
+Local now qualifies the same `d0b1010`/`b8bd08f3` OPEN/non-draft/CLEAN PR
+as ready for the operator: finalized App source verdict has zero #187
+blockers, zero ready comments and one skipped advisory, exact-head design
+is APPROVED, and all 21 reported CI entries succeeded in `40138318787`.
+The retained macOS log verifies direct head, 58+13 passing tests and
+514.511584ms contention below the unchanged 1,540ms assertion, not a hard
+480ms return guarantee. Local supplies bounded verification; the reconciler
+matched retained sources without independently querying CI or the scheduler.
+Later coordinator-attributed wait receipt qualifies the old receipt-pending
+wording; the existing lifecycle-only merge wait grants no merge permission.
+This is operator-ready, not merged/done. Main CI, field report and accepted
+delivery remain pending; #187 stays in progress, #181 blocked and PR #185
+draft. All ledger records, owners, dependencies, Watcher, freeze and every
+unrelated gate remain unchanged. Head movement invalidates this readiness.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design

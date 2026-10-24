@@ -3,15 +3,15 @@
 - **Workstream:** `local-daemon`
 - **Node:** `macos-persistent-lock-repair`
 - **Type:** implementation
-- **Status:** in progress; one bound v2 owner and OPEN/draft repair PR;
-  current-head source review, hosted validation and delivery not accepted
+- **Status:** in progress; OPEN/non-draft PR ready for operator;
+  exact-head source/design/hosted evidence aligned; delivery/gates pending
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `local-daemon/cooperative-partial-page-repair`, issue #181 /
   draft PR #185; transitively Watcher #179 / PR #180 through its existing
   dependency
 - **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187)
-- **PR:** [#189](https://github.com/lossyrob/telex/pull/189), OPEN/draft;
+- **PR:** [#189](https://github.com/lossyrob/telex/pull/189), OPEN/non-draft;
   head `d0b1010594aff7c27f7629ceb43ddad3c79118be`
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `5d9b3155-0327-40d1-936d-7a3652ea90c3`
@@ -316,6 +316,92 @@ merge or Campaign gate is credited by this record. No timeout/tolerance,
 retry or skip workaround follows. The #187 scope, #181 block, PR #185,
 Watcher dependency chain, workstation freeze, #153 and every unrelated gate
 remain unchanged.
+
+### Operator-ready receipt - 2026-10-24
+
+The preceding draft, source-only, review/CI/wait-pending statements are
+historical snapshots. This later bounded receipt qualifies them without
+rewriting their evidence. Local independently verified OPEN/non-draft,
+CLEAN, zero review threads and sole `Closes #187` at the same exact
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`,
+tree `b8bd08f36a9a2a377358ba5cc7c1468fc5e8cdf8`. The same owner, branch and
+base `main` remain. The provider's returned base SHA `ef975014` is not
+silently equated with canonical `9b5a89e2`; the product comparison base
+remains `ef975014`, while subsequent canonical advances are artifacts.
+
+Local's full qualification is
+`pr189-operator-ready-qualification-20261024.json`, 12,200 bytes, SHA-256
+`7f76d4eff30a59ab1ec0d249243ef7c95a4b6103fbdb57a3c70771c403b4fb28`.
+The later owner
+[receipt](https://github.com/lossyrob/telex/pull/189#issuecomment-6390571479)
+is by `lossyrob`, created/updated 2026-10-24T22:54:22Z. Local and the
+reconciler read that comment fully; its use of the finalized source verdict
+qualifies the review artifact's earlier owner-delivery-pending snapshot.
+
+App reviewer `d258aeb7-1af0-4587-bdcc-76f43f03b7d6` finalized the exact-head
+source verdict against `ef975014`: zero demonstrated #187 blockers, zero
+ready comments and one retained, reasonedly skipped advisory C1. Skipping
+that optional adjacent-boundary suggestion skipped no test or check.
+IMP-01 is resolved in both folded YAML command scalars. The scope covers
+all four candidate files and final YAML/fixture deltas, excluding inherited
+PR #188 paths and PR #185. The external disposition is
+`no-comments-to-post`, not a submitted GitHub approval; an empty provider
+review-decision field is not approval. Retained `ReviewComments.md` is
+39,919 bytes, SHA-256
+`7c9b665ccc2d3f34c7ed3e449b102b1a51659ceb758df0972d44a75fcb4da3b6`.
+Local and the reconciler matched its bytes/hash and read selected identity,
+final-verdict/C1/disposition sections, not its full history or product code.
+The exact-head design receipt above remains APPROVED, zero new findings.
+
+Local's one bounded readiness read verified all 21 reported check entries
+COMPLETED/SUCCESS and separately matched run `40138318787`, attempt 1,
+`pull_request`, exact head and terminal success:
+[run 40138318787](https://github.com/lossyrob/telex/actions/runs/40138318787).
+This is not a recurring observer or branch-protection/ruleset audit. The
+reconciler did not independently query CI results. Retained CI-only receipt
+`pr189-final-ci-receipt.txt`, 1,338 bytes, SHA-256
+`d15ce38ad131b102fa94c17950a45df4740a4551763da39e62b521fb75e628f7`,
+was read fully. Its draft/source-review-pending/not-ready statements are
+historical; its CI facts remain unchanged, not rewritten.
+
+Retained macOS job `121004496256` directly verified `d0b1010`; separately
+printed provider event SHA is
+`578da1a18610d4d593d00674d85f675d7a9955a1`.
+`pr189-d0b1010-macos-121004496256.txt` is 53,641 bytes, SHA-256
+`1387dee909b5ae501fa98dddb4a9bfb745520b33235b2cd2c2244f88f0efe12b`.
+Local and the reconciler matched bytes/hash and selected verifier, named
+passes and complete-module summaries only, not the full log or a refetch.
+Station-intent passed 58/0 in 2.73s; platform_fs passed 13/0 in 1.18s.
+Measured contention was 514.511584ms, below the unchanged 1,540ms assertion,
+not a hard 480ms synchronous-return guarantee. The fixture pass retains the
+inspected eight-creator/barrier/assertion structure; the log does not trace
+each creator. Other direct-matrix/provider-merge provenance remains the
+owner/coordinator report, not independently inspected logs here.
+
+The packet's owner-reported observer/request-pending wording is historical
+for receipt custody. Later Local receipt `call_wn8etHPLWc0mly1Bc8Qh90ln`
+relays coordinator `2a4bc4c8` source `call_PMjPjqPXbawyeLK9XHhnf4aE`:
+`wait-pr189-ci40138318787-d0b1010` was done at 2026-10-24T22:39:01Z with
+21 inventoried successes under exact-head/tree/base guards. Matrix jobs
+`121004496153`/`121004496256`/`121004496284` used direct head; Live Postgres
+`121004496197` and InstalledCurrent `121004496247` used provider merge.
+The separate owner-requested lifecycle-only `wait-pr189-merge-d0b1010`
+remains active, so the existing sole schedule stays armed. This is
+coordinator-attributed registry/scheduler state, not an independent Local
+or reconciler scheduler audit, a new observer or merge permission.
+The immutable 12,200-byte packet is unchanged; later source capture
+`r189-observer-later.txt` is 942 bytes, SHA-256
+`823126e0ff79b3cf0266ed2b8286da63e868a02ab53b52fcb14058835e7e6773`.
+
+This qualifies operator/Campaign consideration only at this head. Any head
+movement invalidates readiness pending new evidence. Merge remains the
+operator's decision; actual merged identity, main CI, field report and
+accepted delivery remain pending. Node #187 stays in progress, #181 blocked
+solely on it, and PR #185 draft/unchanged. No ledger, owner, dependency,
+Watcher, #153, hardening/closure, freeze or gate state changes. Neither CI,
+source/design approval, ready status nor issue closure alone releases a
+downstream obligation. No retry, local proof, source re-review or provider
+mutation was performed for this reconciliation.
 
 ## Workflow
 
