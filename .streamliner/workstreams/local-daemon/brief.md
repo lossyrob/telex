@@ -121,6 +121,23 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 ## Current State
 
+On 2026-10-25 Campaign accepted the fixture/precondition assessment for
+[#193](https://github.com/lossyrob/telex/issues/193) and authorized one
+immediate bounded Local repair owner. The new
+`intent-seed-precondition-repair` node establishes successful seed setup
+while preserving the production 480ms budget, non-theft and generation
+fencing. Its hosted check must distinguish relevant admission causes; no
+widening, retry, skipped seed or flake exception is authorized.
+Local owns the single v2 launch after canonical preparation; the concrete
+implementation owner is pending that launch. Steward contract confirmation
+is already available and gates the PR, not staffing. The repair delivers
+one PR closing #193 and returns to the Campaign gate. Watcher PR #180 still
+needs its own strictly green current-head default Windows build/test;
+critical-path priority adds no Watcher graph edge or readiness waiver.
+Accepted #181/#187 delivery, retained debts and the workstation freeze
+remain unchanged. Original candidate/no-owner and conditional-staffing
+source snapshots are historical, not a further launch gate.
+
 On 2026-10-23 Campaign promoted the repeated Windows partial-page candidate
 into active `cooperative-partial-page-repair`, tracked by
 [#181](https://github.com/lossyrob/telex/issues/181). After canonical

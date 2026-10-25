@@ -3882,6 +3882,155 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 requested this separate evidence-only candidate via call_1QToP4ggUpdaURjJIQwbaeGz and main40134893983-fallback-send-intake-20261024.json. No cause, issue/node, owner, retry or gate authority was granted.",
       "terminalPath": "Retain exact source/capture/signature and attribution limits for later bounded triage under existing authority. Any new diagnosis, issue/node, implementation, owner, runtime action or retry needs separate authorization and exact-head evidence; this candidate alone closes no outcome and changes no gate."
+    },
+    {
+      "id": "local-daemon-windows-intent-seed-lock-admission-refusal",
+      "sourceNode": null,
+      "source": "Issue #193 and main CI 40220058150, Windows default workspace job 121249478906 at34cfdee7",
+      "evidence": {
+        "originalCandidateIntake": {
+          "artifact": "main40220058150-intent-seed-refusal-intake-20261025.json",
+          "bytes": 5520,
+          "sha256": "8f2b7e29b97776580d3acbf2d2b8966fd046a94e57304b7e26146a737bba4485",
+          "source": {
+            "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "sourceMessage": "call_OPeMEpmI4fR2UhHBvi8SsJCd",
+            "head": "34cfdee7fb1f31eef6f0025f7a7b5b1af8bd2a11",
+            "runId": "40220058150",
+            "jobId": "121249478906",
+            "platform": "Windows",
+            "reportedProfile": "Default workspace suite",
+            "reportedOtherResults": "Sentinel reports20/21 jobs successful and all three consolidated station jobs passed; Local did not independently query the complete run inventory."
+          },
+          "historicalDisposition": {
+            "sourceNode": null,
+            "status": "candidate",
+            "decisionState": "proposed",
+            "owner": "Local shared-CI triage; implementation unassigned.",
+            "newIssueOrNodeAuthorized": false,
+            "retryOrWorkaroundAuthorized": false,
+            "scope": "Retain one evidence-only candidate with distinct setup/admission boundary. Any later correction needs evidence distinguishing intended fail-closed policy, fixture preconditions and a product defect.",
+            "currentGateImpact": "A failed main job is retained, not waived. This intake does not automatically change PR180 or another PR's readiness, or negate accepted181/187 delivery."
+          }
+        },
+        "retainedFailure": {
+          "test": "daemon::p3_tests::a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member",
+          "path": "src/daemon.rs",
+          "helper": "seed_pending_intent",
+          "line": 8511,
+          "column": 52,
+          "callerLine": 8692,
+          "thread": 4116,
+          "message": "seed: Io(\"intent 20925d3b460e3bef3316a173b96ff3b8 is locked by another writer or its acquisition budget expired\")",
+          "panicReportTimestamp": "2026-10-25T18:17:02.5532165Z",
+          "targetResult": {
+            "passed": 571,
+            "failed": 1,
+            "ignored": 4,
+            "measured": 0,
+            "filteredOut": 0,
+            "durationSeconds": 21.89
+          },
+          "boundary": "Setup fails while write_pending seeds an intent, before register_push_with_interleave, deliberate manifest corruption and refusal/no-member assertions.",
+          "actualAcquisitionElapsed": "Not printed;21.89s is the full root-target duration, not lock elapsed.",
+          "underlyingCause": "Unknown."
+        },
+        "retainedLog": {
+          "file": "main-40220058150-job-121249478906.log",
+          "bytes": 320580,
+          "sha256": "403046b0afffec29ff94c48b2ea16cd50ed86b86c08d8efc0e6ae685df7179bd",
+          "localVerification": "Local matched retained bytes/hash and read checkout, panic/call stack and complete target-result excerpts. No provider log refetch, full-log-read claim or runtime execution.",
+          "checkout": "Retained fetch and git log -1 output identify direct main34cfdee7.",
+          "checkoutOutputTimestamp": "2026-10-25T18:12:48.3811102Z",
+          "attribution": "Owning Local verification, not a new reconciler log read, source inspection or provider run inventory audit."
+        },
+        "classification": {
+          "family": "Station-intent lock admission",
+          "decision": "New distinct candidate, not an additional occurrence of the old completed macOS lock timing assertion.",
+          "not187Recurrence": "The old187 observation exceeded a1.54s contention assertion. This observation is a seed admission error before the test's intended registration-proof scenario. Do not reopen or declare187's bounded correction failed solely from this different signature.",
+          "notPartialPage": "No BoundedPhase::Overran or missing mandatory partial-page result is reported; do not add it to the181 partial-page recurrence count.",
+          "notProofRefusalDefect": "The registration/corruption/refusal assertions never ran, so this does not demonstrate a failure to refuse an unwritable proof or leaked membership.",
+          "deduplication": "Bounded exact test/run/candidate search across canonical workstream ledgers at34cfdee7 returned no match.",
+          "causalAttribution": "No PR192 or common-cause attribution. Separate passing station jobs do not diagnose or erase this failed default-suite setup."
+        },
+        "laterAssessment": {
+          "artifact": "issue193-seed-precondition-assessment-20261025.json",
+          "bytes": 4927,
+          "sha256": "e8305927b9efb9dbcec200d49642aecb2571d6f0ee20479111a4423ab742486a",
+          "localSourceAssessment": {
+            "head": "34cfdee7fb1f31eef6f0025f7a7b5b1af8bd2a11",
+            "facts": [
+              "daemon.rs8064-8099 allocates an atomic-sequence test root and a new DaemonState with empty stores/members and default intent runtime; it does not start a producer.",
+              "The failing test calls seed_pending_intent immediately, before registration work or the intentional corruption closure.",
+              "Store scope uses that root and singleton identity; the supplied setup does not introduce a competing writer in this process.",
+              "The lock policy starts one480ms elapsed budget before native/file validation and refuses a late successful guard; the native attempt includes owner-private creation/open/security/local-volume validation and nonblocking OS locking.",
+              "The combined error does not distinguish pre-attempt expiry, late acquired guard, WouldBlock exhaustion or actual timing/holder history."
+            ],
+            "limits": "Unique per-test setup does not prove timely acquisition or exhaustively exclude other-process/environment conditions. No actual failure branch or production-policy violation is established."
+          },
+          "stewardAssessment": {
+            "sessionId": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+            "sourceMessage": "call_i20IwhS7fH0KOVkhzIqwMrEF",
+            "basis": "Retained design plus Local's reported trace only; steward did not inspect this run/current source or execute anything.",
+            "classification": "Provisionally a setup-budget/precondition problem, not established lock contention or a production-policy violation.",
+            "importantQualification": "An expect on a fallible setup operation is not inherently wrong. The relevant question is whether this test establishes the successful-acquisition preconditions needed for its intended downstream assertion.",
+            "allowedDesignDirection": "A minimal test-setup correction may establish those preconditions independently of the behavior under test. Any test-only seam must remain test-only and preserve meaningful separate production-budget/native lock coverage.",
+            "prohibited": [
+              "Widening, pausing, refreshing or bypassing the production budget.",
+              "Skipping the seed/error or accepting missing pending intent as successful setup.",
+              "Making the production timing assertion tautological.",
+              "Dropping real contention, non-theft, persistence, release or elapsed-budget regressions."
+            ],
+            "authorityBoundary": "Contract clarification only, not staffing, specific implementation, retry or runtime authority."
+          },
+          "historicalDisposition": {
+            "candidateId": "local-daemon-windows-intent-seed-lock-admission-refusal",
+            "tracker": "https://github.com/lossyrob/telex/issues/193",
+            "classification": "Real hosted validation failure; provisional fixture success-precondition gap within the lock-admission family. Actual budget/contention mechanism remains unknown.",
+            "implementationOwner": "unassigned",
+            "conditionalStaffing": "No new owner launched on an invented production-defect claim. Campaign has received the narrower assessment and proposed setup/precondition repair direction for its staffing decision.",
+            "noWaiver": "The Windows build-test requirement remains strict; no retry or flake exception.",
+            "futureEvidence": "If bounded authorized evidence shows incorrect accounting or unexpected sharing, route that concrete defect within the unchanged lock contract."
+          },
+          "historicalArtifactBoundary": "Associate the new193 tracker and this later assessment with the pending seed-lock candidate as a separate scoped intake. Keep the original no-issue/no-owner snapshot historical; do not promote a workstream node or claim implementation authority before staffing/scope is settled."
+        },
+        "campaignLaunchAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "sourceMessage": "toolu_01X4YTjtnHnE76rNwKipSSUn",
+          "verbatim": "Campaign: your #193 assessment is accepted. Don't serialize staffing behind the steward. Main is red, and Watcher #180 needs this job strictly green, so launch the bounded owner now for the setup/precondition repair. The repair must keep the 480ms budget, non-theft and fencing, with no widening, retry or flake exception, and needs a hosted check that tells the causes apart. The steward's contract-boundary confirmation can run in parallel and gate the PR, not the launch. My earlier \"if real defect\" condition is met: a fixture that unconditionally expects bounded acquisition to succeed, and turns main red, is a real defect.",
+          "earlierDirection": "toolu_01373p3wpWnKG5P8sJNEzf5R: new lock-family item, not Overran or192; Watcher180 critical path, no retry/flake exception.",
+          "scope": "One new bounded setup/precondition repair owner. No new operator or steward approval is required before launch; source/design/CI still gate its PR."
+        },
+        "promotionReceipt": {
+          "artifact": "issue193-active-repair-promotion-20261025.json",
+          "bytes": 11140,
+          "sha256": "dbfa17670719a09dbb13f4b80df357370bd5b1270ac9e6920380ea192bc1eaf6",
+          "owningScopeSource": "call_aWPigszop0sFoMiNotMBtQkH",
+          "issue": {
+            "url": "https://github.com/lossyrob/telex/issues/193",
+            "number": 193,
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T18:28:44Z",
+            "updatedAt": "2026-10-25T18:28:44Z",
+            "bodyBytes": 4519,
+            "bodySha256": "7dae19693e46cc04bfe36eb085bcad2b00c8e351e17f68aed0140e04bc52347b"
+          }
+        },
+        "qualification": "Earlier candidate/no-owner/conditional-staffing statements are historical and superseded only by the explicit Campaign launch decision. Actual failing admission path remains unknown; accepted fixture-defect scope is not a claim of proved contention or production-policy violation.",
+        "reconcilerEvidenceBoundary": "Read the complete owning scope, original candidate and later assessment packets and complete public issue body, and matched private copies byte-exact to owning originals. No new log/source/provider-CI-inventory/runtime/observer inspection or execution. All retained-log/source/steward observations remain attributed; the actual admission path and production-policy violation are not established."
+      },
+      "description": "Repair the Windows pending-intent fixture success precondition so the intended registration-proof corruption/refusal scenario is actually exercised under the accepted bounded lock contract.",
+      "affectedOutcome": "A setup admission refusal currently prevents registration, corruption and refusal/no-member assertions. Establish meaningful setup without weakening production acquisition, non-theft or fencing.",
+      "requiredness": "Campaign-priority repair of a red main Windows build-test fixture; Watcher180's own current-head build-test must be strictly green.",
+      "sequencing": "Launch one bounded setup/precondition owner immediately after canonical preparation prerequisites. Contract confirmation may run in parallel and gates the PR, not staffing. No retry, widening, flake exception or new Watcher implementation.",
+      "recommendedDisposition": "One separate bounded Local setup/precondition repair under issue #193, with hosted cause-discriminating validation.",
+      "selectedDisposition": "Promote intent-seed-precondition-repair and exactly one Campaign-authorized Local v2 owner after canonical preparation; no further steward launch review.",
+      "target": "local-daemon/intent-seed-precondition-repair / https://github.com/lossyrob/telex/issues/193",
+      "owner": "Local aeae4fa9 coordinates one Campaign-authorized193 v2 owner; concrete identity pending canonical preparation/launch. No root fix is assigned to Watcher.",
+      "terminalPath": "One separate PR closes193 after a discriminating hosted check, minimal justified correction, exact-head source review with reviewer-origin public receipt, design inspection and Campaign gate. Preserve480ms/non-theft/fencing and meaningful native/budget regressions.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01X4YTjtnHnE76rNwKipSSUn accepts the fixture-defect assessment and authorizes immediate bounded staffing. Local coordinates launch; source/design/hosted CI and the Campaign gate still control the closing PR."
     }
   ]
 }
