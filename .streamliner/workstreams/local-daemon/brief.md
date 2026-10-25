@@ -999,3 +999,23 @@ This supplements, rather than replaces, the original #193 obligation.
 An artifact landing, diagnostic green or readiness report is not the
 trigger. No retry, waiver, repair, source/CI/readiness/debt/HOLD acceptance
 or workstation-freeze exception follows.
+
+## 2026-10-25 - Later #166 identity and diagnostic-draft metadata
+
+Local's separate 19:51:53Z observation resolves both identifiers to the
+same canonical owner `d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`.
+`57bcb249-2ec6-4272-be67-31b9f0f59d7d` is the observed reply alias
+requested by that owner, not another owner or a rebind. The checkout
+remains `lossyrob-special-meme`; the observed current branch remains
+`lossyrob-windows-heap-av-repair`. Original launch history is unchanged.
+
+Local reports [PR #196](https://github.com/lossyrob/telex/pull/196)
+OPEN/draft against main at
+`b0f59d408b32d61cc4cfd9c5a5310a8c522567e1`, as of that observation.
+This is attributed diagnostic-draft metadata, not a completed repair,
+source/design approval, causal finding, CI pass or readiness. This snapshot
+supplies no actual repair merge or Local #193 wake.
+
+The later #166 heap-routing qualification and BOTH still-pending
+#193/#198 actual-repair-merge wakes remain unchanged. This older
+identity/draft snapshot supplies no delivery or current gate credit.

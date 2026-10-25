@@ -2138,6 +2138,39 @@
           "bodySha256": "67e7340195e0e9a469cbd01b75d5dd5ee952ee119776ba20cca0b08608ef336d"
         },
         "boundary": "One existing #166 investigation and owner. Keep default-Windows 0xc0000374 and prior PageHeap 0xc0000005 stages distinct; no common cause is established. No new candidate, occurrence count, owner or node, automatic dependency/status edit, retry, waiver, abnormal-exit suppression, diagnosis, repair, source/review/CI/readiness/debt/HOLD acceptance or workstation-freeze exception follows. Split only if diagnosis establishes a distinct defect. Both future wakes require a verified actual #166 product repair merge, not an artifact landing, diagnostic green or readiness."
+      },
+      "laterOwnerIdentityAndDiagnosticPrQualification": {
+        "kind": "later-local-attributed-owner-identity-and-diagnostic-pr-metadata",
+        "observedAt": "2026-10-25T19:51:53.4869007Z",
+        "canonicalOwnerSessionId": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+        "observedAppAlias": "57bcb249-2ec6-4272-be67-31b9f0f59d7d",
+        "ownerRequestedReplyAlias": "57bcb249-2ec6-4272-be67-31b9f0f59d7d",
+        "checkoutName": "lossyrob-special-meme",
+        "currentBranch": "lossyrob-windows-heap-av-repair",
+        "localAttributedIdentityMethod": "Local called App get_session independently with both identifiers. Both resolved to canonical d7a17cd2, the same creation, parent, checkout, current branch and draft PR196 association.",
+        "identityQualification": "An observed alias for the same owner, not a replacement, second owner or rebind. Keep original canonical owner and launch history. The owner labels the alias App identity and d7a17cd2 CLI history; Local independently establishes resolution equivalence, not internal namespace implementation.",
+        "providerMetadata": {
+          "method": "Direct personal-profile gh pr view196 metadata only, without CI inventory.",
+          "url": "https://github.com/lossyrob/telex/pull/196",
+          "number": 196,
+          "state": "OPEN",
+          "isDraft": true,
+          "head": "b0f59d408b32d61cc4cfd9c5a5310a8c522567e1",
+          "headBranch": "lossyrob-windows-heap-av-repair",
+          "baseBranch": "main",
+          "author": "lossyrob",
+          "title": "Repair Windows named-pipe native failures with retained crash evidence"
+        },
+        "providerQualification": "Local-attributed direct metadata as of observedAt, not current source/review/CI evidence or a reconciler provider replay.",
+        "ownerReportedStage": "Diagnostic draft adds hosted postmortem capture and child PID/argv/output/native-stack retention while preserving runtime/lock behavior. Sole external wait coordinator has a bounded CI wait; no retry. Source candidate remains unproved.",
+        "limits": "Local verified App identity and provider metadata, not source changes, capture correctness, effective runtime behavior, cause, CI, review or readiness. Diagnostic draft is not a completed fix. No193 wake until actual166 repair merge is verified.",
+        "originalLaunchHistoryPreserved": true,
+        "sourceSnapshot": {
+          "file": "b166alias-owner-qualification.json",
+          "bytes": 2847,
+          "sha256": "19023dd3e62f77f7f3c703b96d00888c8e0d297f530ca23343fdc2005abed1be"
+        },
+        "boundary": "Separate successor after b166; preserve complete actualOwnerLaunchQualification and all original launch/branch/history/evidence. No second owner, replacement, namespace inference, diagnosis, source/design/CI/readiness, actual repair merge or193wake."
       }
     },
     {

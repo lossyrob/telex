@@ -349,3 +349,34 @@ readiness, debt/HOLD or workstation-permission credit follows. #198 remains
 in progress; its CI-blocked stage on external #166/#167 is attributed
 metadata, not readiness. All original launch history, distinct AV evidence,
 strict exact-head hosted gates and workstation restrictions remain.
+
+## 2026-10-25 - Later observed reply alias and diagnostic draft
+
+In a separate observation at `2026-10-25T19:51:53.4869007Z`, Local
+queried both identifiers and reports that each resolves to canonical owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, the same creation/parent,
+checkout `lossyrob-special-meme`, current branch
+`lossyrob-windows-heap-av-repair` and draft PR association.
+The owner requests replies via observed alias
+`57bcb249-2ec6-4272-be67-31b9f0f59d7d`.
+This records observed resolution equivalence, not internal namespace
+implementation, replacement, a second owner or preparation.
+
+Local's direct provider metadata then showed
+[PR #196](https://github.com/lossyrob/telex/pull/196) OPEN/draft,
+base main, head
+`b0f59d408b32d61cc4cfd9c5a5310a8c522567e1`.
+The described capture instrumentation and unproved source candidate remain
+owner-reported, not source/design/CI acceptance or a diagnosed cause.
+The reconciler read/captured the complete Local packet, not the live App,
+provider inventory, source, archive, native execution or hosted result.
+
+The complete original launch qualification, 4,407-byte binding,
+15,666-byte kickoff and earlier branch observations remain unchanged.
+No actual repair merge or Local #193 wake is evidenced by this metadata.
+Fresh exact-head review, CI, Campaign and post-merge obligations continue;
+no retry, readiness, dependency/status, debt/HOLD/release/freeze credit.
+
+The later #166 heap-routing qualification and BOTH still-pending
+#193/#198 actual-repair-merge wakes remain unchanged. This older
+identity/draft snapshot supplies no delivery or current gate credit.
