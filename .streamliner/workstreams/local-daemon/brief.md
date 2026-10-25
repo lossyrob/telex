@@ -948,3 +948,25 @@ closing PR, not an extra launch vote. The workstation freeze and accepted
 #181/#187 delivery/debts remain; no release, #153, admission or closure
 clearance follows. The complete scoped task carries evidence distinctions,
 single-owner v2 preparation/launch rules and validation boundaries.
+
+## 2026-10-25 - Actual single #166 owner launched
+
+Local reports existing #166 owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c` launched once in
+`lossyrob-special-meme`, observed busy at 19:44:19Z. The requested profile is
+`gpt-6.1-sol / high / default / interactive`, without idle notification.
+Local's later same-identity/checkout App observation qualifies the current
+branch as `lossyrob-windows-heap-av-repair`; the launch branch stays history.
+Preparation stays pinned to `f0053e3b`; the observed `df37d568` movement was
+three Watcher artifacts only, not source integration or review/CI carry.
+The complete original 4,407-byte launch binding and 15,666-byte kickoff
+are retained by exact digest; all old pending-owner snapshots remain
+historical. No second launch, repair, diagnosis or readiness is claimed.
+Later archive-inventory and dependency-candidate reports are not folded in.
+
+The delivered kickoff records a future event-driven obligation: after
+the #166 repair actually merges, its owner immediately reports that merge
+to Local; Local verifies it and wakes the existing #193 owner to integrate
+main, obtain fresh CI and request the PR #194 gate. This is not a completed
+merge/wake, an automatic edge/status change or a CI/readiness waiver.
+#193/#194, accepted #181/#187, all Watcher state and debts remain separate.

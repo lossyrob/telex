@@ -1741,7 +1741,7 @@
       "requiredness": "Campaign-priority separate repair of native crashes in required Windows heap diagnostics. PR194 remains subject to strict CI.",
       "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
       "target": "local-daemon/windows-pageheap-av-repair / https://github.com/lossyrob/telex/issues/166",
-      "owner": "Local aeae4fa9 coordinates one Campaign-authorized166 v2 owner; actual owner identity pending canonical preparation/launch.",
+      "owner": "Actual single owner d7a17cd2-08c2-4760-b1a6-1209c2d0f80c; checkout/launch branch lossyrob-special-meme, later Local-observed branch lossyrob-windows-heap-av-repair. Original promotion owner text retained as history: Local aeae4fa9 coordinates one Campaign-authorized166 v2 owner; actual owner identity pending canonical preparation/launch.",
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01RiD7o4ZxQLma9dbVQPkPSx authorizes the separate priority #166 repair owner; Local coordinates one v2 launch after actual canonical receipt. Source/design/hosted CI and the Campaign merge gate still control the closing PR. Earlier candidate/no-owner authority below is historical: Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
@@ -1874,6 +1874,63 @@
           }
         ],
         "boundary": "Complete owning packet/domain notes and public issue/comment/sentinel report read. Raw-log hashes and exact helper/caller checks remain Local-attributed; no reconciler log, source, provider-CI-inventory, archive/dump or native-fault inspection. Historical one-retry statements do not authorize a retry. Existing193/PR194/owner, all other records and Watcher remain unchanged; no common-cause, validation, readiness, debt/HOLD/release/freeze credit. Actual166 owner preparation/identity/launch remain pending."
+      },
+      "actualOwnerLaunchQualification": {
+        "ownerSessionId": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+        "checkoutName": "lossyrob-special-meme",
+        "launchBranch": "lossyrob-special-meme",
+        "contextPackageName": "ctx-20261025193837-7445b42c",
+        "requestedProfile": {
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": "high",
+          "contextTier": "default",
+          "mode": "interactive"
+        },
+        "requestedNoIdleNotification": true,
+        "profileQualification": "Requested Local launch profile, not an independent live-provider/effective-capacity verification.",
+        "originalLaunchBinding": {
+          "bytes": 4407,
+          "sha256": "9c36cb79f92ae6defc70faed72a5455c872cd9aeec2dc1a7fdf165e66be030a3"
+        },
+        "kickoff": {
+          "bytes": 15666,
+          "sha256": "54b679962dc4fd1f01a7e98340185d76fe630108735a291295675784b7a55086",
+          "completeHandoffByteEqualityVerifiedByReconciler": true,
+          "deliveredOnceReportedByLocal": true
+        },
+        "launchObservation": {
+          "observedAt": "2026-10-25T19:44:19.2231752Z",
+          "observedSessionId": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+          "observedBranch": "lossyrob-special-meme",
+          "observedActivity": "busy after kickoff admission",
+          "qualification": "Launch observed, not implementation, diagnosis, PR creation, CI success or readiness."
+        },
+        "preparation": {
+          "head": "f0053e3b94349b91dace2ca691d03fb281815c76",
+          "observedOriginMain": "df37d5683683662db3ede85b86d7b66e9f4064cb",
+          "mainMovement": "Forward descendant changing only three Watcher artifact files. Selected166 node, complete task and launch policy remain exact. Preparation stays pinned to f005; no integration, new preparation or review/CI carry.",
+          "workflowContextBytes": 2076,
+          "workflowContextSha256": "d9a96c3bab4a350171f5fb6c2add0b3582857e11c3e436fa750e30d35c73e183",
+          "installedContextBytes": 10825,
+          "installedContextSha256": "2ac2317d4651b9b8ba39acb001db67dcba26c0e2591b49479e6f93fb0c9571b1",
+          "domainNotesSha256": "5f62fd5eadd495f01f582922ded04b874db44090481f82df56e31e0938d8e5ef",
+          "localAttributedChecks": "Same App cwd/branch; kickoff byte-equals handoff, full unmodified guide and current overrides retained, UTF8 no BOM/LF/final newline, four ordered context layers, Additional Inputs, never-commit lifecycle, package/installed context equality, only two untracked .paw files and unchanged source/index verified. Merge-notification instruction is present."
+        },
+        "laterBranchObservation": {
+          "branch": "lossyrob-windows-heap-av-repair",
+          "sourceReceivedAt": "2026-10-25T19:47:02.524Z",
+          "sourceMessage": "call_qYZ9Oh2ST3YCJPZ2O1UXTNDq",
+          "localAttributedAppVerification": "Same canonical owner and checkout, busy on current branch; original launch branch preserved. No second owner/preparation/launch."
+        },
+        "historicalPromotionOwner": "Local aeae4fa9 coordinates one Campaign-authorized166 v2 owner; actual owner identity pending canonical preparation/launch.",
+        "futureMergeWake": {
+          "authority": "toolu_01KB1nMvqiqDxQiC7MQkUWPP",
+          "action": "On verified actual166 repair merge, Local must ring existing193 owner519693a5-0607-4aba-a968-345f3b1cd1b5 to integrate main, run fresh CI and request194gate. The166 owner must report the merge to Local without waiting for post-merge validation completion.",
+          "delivered": false
+        },
+        "futureMergeWakeQualification": "Future verified actual166 repair merge -> Local wakes existing193 owner to integrate main, obtain fresh CI and request194 gate; delivered=false refers to that future wake, not kickoff delivery. Actual merge/wake is not evidenced here. No automatic dependency/status change.",
+        "laterDiagnosticReportsExcluded": true,
+        "authorityBoundary": "Launch/branch metadata only. Old pending/unassigned and uninspected-archive source snapshots remain historical. Preparation/App observations remain Local-attributed. No later archive/dependency-candidate/native diagnosis, implementation, source/design/CI/integration acceptance, readiness, owner replacement, retry/waiver,193/Watcher change, debt/HOLD/release/freeze clearance."
       }
     },
     {

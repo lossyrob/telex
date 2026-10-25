@@ -197,3 +197,62 @@ Reviewer/steward results use direct messages.
 No new Watcher edge, #153/closure/hardening completion, product runtime
 action, admission/debt/release clearance or workstation-freeze waiver
 follows from this artifact promotion.
+
+## 2026-10-25 - Actual owner launch and future merge notification
+
+This is an additive current-owner qualification. The original promotion's
+pending preparation/owner statements above remain the historical snapshot,
+not a claim that no owner has now launched.
+
+Local reports one actual v2 owner:
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, checkout and launch branch
+`lossyrob-special-meme`, context package
+`ctx-20261025193837-7445b42c`. Its requested profile is
+`gpt-6.1-sol / high / default / interactive`, no idle notification.
+Local reports the kickoff delivered once and that same identity, checkout
+and branch observed busy at `2026-10-25T19:44:19.2231752Z`.
+Those are Local-attributed observations, not a reconciler App/provider
+query or independent verification of effective model/capacity.
+
+Local's separate branch packet received at
+`2026-10-25T19:47:02.524Z` reports independent App confirmation of that same
+owner/checkout, busy on current branch `lossyrob-windows-heap-av-repair`.
+The original preparation/delivery branch remains `lossyrob-special-meme`.
+This is not another owner, checkout or preparation. The packet's later
+archive-inventory and dependency-candidate reports are excluded from this
+launch-only successor; they are not diagnosis or source/design approval.
+
+The original immutable launch-binding snapshot is 4,407 bytes, SHA-256:
+`9c36cb79f92ae6defc70faed72a5455c872cd9aeec2dc1a7fdf165e66be030a3`.
+Kickoff is 15,666 bytes, SHA-256:
+`54b679962dc4fd1f01a7e98340185d76fe630108735a291295675784b7a55086`.
+The reconciler read/captured the full binding, kickoff and handoff and
+verified exact kickoff/handoff byte equality. Full guide/current overrides,
+installed context equality, only two untracked `.paw` preparation files and
+unchanged source/index checks remain Local-attributed; no replay is claimed.
+
+Preparation is pinned to actual promotion
+`f0053e3b94349b91dace2ca691d03fb281815c76`. The later observed
+`df37d5683683662db3ede85b86d7b66e9f4064cb` changed only three Watcher
+artifacts; Local reports the selected #166 node/task/policy exact.
+This is not source integration, new preparation or review/CI carry.
+
+### Event-driven follow-through, not completed delivery
+
+Campaign authority `toolu_01KB1nMvqiqDxQiC7MQkUWPP`, relayed in the
+original Local binding and complete delivered kickoff, requires the #166
+owner to report its actual repair merge immediately to Local rather than
+waiting for post-merge validation or the field report. Local verifies the
+actual merge and then wakes the existing #193 owner,
+`519693a5-0607-4aba-a968-345f3b1cd1b5`, to integrate main, run fresh CI
+and request the PR #194 gate. The #166 owner continues its own post-merge
+obligations separately.
+
+This future merge/wake has not occurred in these sources. It does not
+change #193/#194 ownership, scope, dependencies, status or gates; a future
+fresh gate is not readiness now. There is no second launch/preparation,
+product/source/diagnostic/CI replay, shared native-cause conclusion,
+rerun/waiver, debt/HOLD/release or workstation-freeze clearance.
+All original distinct AV observations and hosted-only exact-head review,
+public reviewer receipt, diagnostic coverage and non-theft/fencing/480ms
+requirements remain controlling.
