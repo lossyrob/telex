@@ -261,6 +261,12 @@ jobs:
           cargo test --locked --no-default-features --features sqlite
           --lib platform_fs::tests:: -- --nocapture
 
+      - name: Exercise real pending seed and proof-write refusal
+        run: >-
+          cargo test --locked --no-default-features --features sqlite
+          --lib daemon::p3_tests::a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member
+          -- --exact --nocapture
+
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
