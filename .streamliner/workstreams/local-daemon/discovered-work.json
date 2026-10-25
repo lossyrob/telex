@@ -1738,14 +1738,143 @@
       },
       "description": "Diagnose the intermittent Windows access violation in the hosted daemon process diagnostics target.",
       "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
-      "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
+      "requiredness": "Campaign-priority separate repair of native crashes in required Windows heap diagnostics. PR194 remains subject to strict CI.",
       "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
-      "target": "hardening-gate (candidate scope)",
-      "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
-      "status": "candidate",
-      "decisionState": "proposed",
-      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
-      "terminalPath": "Obtain a native fault stack or a bounded reproducible diagnosis on an isolated hosted Windows runner, fix a confirmed defect in a separate PR, and validate with the full diagnostic target at an exact head. A green rerun is not a causal fix, and abnormal exit statuses keep failing."
+      "target": "local-daemon/windows-pageheap-av-repair / https://github.com/lossyrob/telex/issues/166",
+      "owner": "Local aeae4fa9 coordinates one Campaign-authorized166 v2 owner; actual owner identity pending canonical preparation/launch.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01RiD7o4ZxQLma9dbVQPkPSx authorizes the separate priority #166 repair owner; Local coordinates one v2 launch after actual canonical receipt. Source/design/hosted CI and the Campaign merge gate still control the closing PR. Earlier candidate/no-owner authority below is historical: Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+      "terminalPath": "One separate PR closes166 after causal diagnosis, minimal justified correction, full hosted diagnostic and relevant profile coverage, exact-head reviewer-origin source receipt, design inspection and Campaign merge gate.",
+      "promotionQualification": {
+        "date": "2026-10-25",
+        "historicalFields": "The original candidate/proposed status, target, unassigned owner, hardening requiredness, terminal path and disposition authority remain in historicalCandidateSnapshot. Every original evidence field is unchanged. This promotion does not repeat the deferred prior-main receipt as a new discovered-work item.",
+        "historicalCandidateSnapshot": {
+          "id": "local-daemon-windows-pageheap-access-violation",
+          "sourceNode": null,
+          "source": "lossyrob/telex#166, found by watcher-runtime-core owner 42c1104a-7eb2-477e-a574-2bffb1cd06fe on PR #164",
+          "crossReference": "telex-watcher/watcher-runtime-core / issue #162 / PR #164",
+          "evidence": {
+            "head": "40a5c916d839dc81432738f122e03a00fd31628e",
+            "run": "CI run 39854080691, Windows heap diagnostics job 120087601259: failure.",
+            "artifact": "windows-heap-diagnostics-40a5c916d839dc81432738f122e03a00fd31628e, ID 12458867179, 49,342,145 bytes; no .dmp file.",
+            "details": "Under PageHeap, a Telex child exited with 0xc0000005 during root daemon_process_sqlite test real_process_status_hints_when_address_active_on_other_store. The job ran the full target three times: two passed 49/49, and the third passed 48/49. Root cause and fault location are unknown; no causal link to the #154 TOKEN_USER fix is established.",
+            "predecessor": "d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the daemon test or daemon, backend, or Watcher runtime source in the final-head delta."
+          },
+          "description": "Diagnose the intermittent Windows access violation in the hosted daemon process diagnostics target.",
+          "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
+          "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
+          "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
+          "target": "hardening-gate (candidate scope)",
+          "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+          "status": "candidate",
+          "decisionState": "proposed",
+          "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+          "terminalPath": "Obtain a native fault stack or a bounded reproducible diagnosis on an isolated hosted Windows runner, fix a confirmed defect in a separate PR, and validate with the full diagnostic target at an exact head. A green rerun is not a causal fix, and abnormal exit statuses keep failing."
+        },
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "sourceMessage": "toolu_01RiD7o4ZxQLma9dbVQPkPSx",
+          "verbatim": "Campaign: PR #194 (#193 fix) is blocked under strict CI by a Windows heap diagnostics access violation (0xc0000005) during busy-station successor handoff/status: run 40224540059, job 121263011458, at f8b42d20. This is at least the second heap-diagnostics AV, after the prior-main PageHeap teardown AV that the sentinel reported in #182 (issuecomment-6401222833). A recurring AV in a required job now blocks every PR. Please file it as its own item, if you haven't already, and staff an owner now, in parallel with #194. No retry, flake exception or waiver. If you judge the two AVs to be distinct defects, say so and give each its own item.",
+          "scope": "Activate existing issue166 and one bounded Local AV repair owner immediately after canonical launch prerequisites. Keep193/PR194 and its existing owner separate. No additional launch approval requested."
+        },
+        "classification": {
+          "candidateId": "local-daemon-windows-pageheap-access-violation",
+          "decision": "One native-failure investigation/repair item with distinctly retained lifecycle observations, not a claim that their fault locations or causes are identical.",
+          "distinctDefects": "Different test/command stages alone do not establish distinct causal defects. If diagnosis establishes independent defects, report exact evidence to Local/Campaign for separate item dispositions under the explicit Campaign direction.",
+          "excludedSignatures": "Ordinary exit1 with SQLite LockFileEx os33, ForeignDaemon, seed-budget admission refusal, restoration counters, deadlines and Overran are not access violations and do not join this repair merely because they occur in the same CI target."
+        },
+        "laterLifecycleObservations": {
+          "originalCanonicalObservation": {
+            "head": "40a5c916d839dc81432738f122e03a00fd31628e",
+            "runId": "39854080691",
+            "jobId": "120087601259",
+            "test": "real_process_status_hints_when_address_active_on_other_store",
+            "status": "0xc0000005",
+            "artifactId": "12458867179",
+            "qualification": "Existing166 body and canonical evidence read. Original49/49,49/49,48/1 diagnostic repetitions and absence of a downloaded dump remain historical facts, not current validation or a native-stack diagnosis."
+          },
+          "priorMainTeardown": {
+            "head": "f603875bddd19a6f76f08a408ba3fbd98d3073bb",
+            "runId": "40217995470",
+            "jobId": "121243212833",
+            "test": "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token",
+            "boundary": "Destructor calls stop_daemon_best_effort; invoked daemon stop --drain child reports0xc0000005 after draining=true output. Harness518, helper201, Drop265, test scope1410. Not proof of successful drain or a long-lived-daemon fault location.",
+            "log": "main-40217995470-job-121243212833.log",
+            "logBytes": 107711,
+            "logSha256": "f182848a1ca3c3bb197717f8d19e1cb145bf9f90dbc92992ff5a15599d5a632b",
+            "localIntake": "main40217995470-pageheap-stop-drain-intake-20261025.json",
+            "publicReport": "https://github.com/lossyrob/telex/issues/182#issuecomment-6401222833",
+            "qualification": "Earlier Local retained-byte/source-excerpt verification remains attributed in the immutable intake. Local now also read the complete public report. Its former unfetched-comment/no-owner authorization snapshot stays historical; Campaign later authorizes this promotion."
+          },
+          "pr194BusyStationStatus": {
+            "reporter": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+            "sourceMessages": [
+              "call_BdzyiAgXu2qrfuYwWcms6jEr",
+              "call_iELH0IVYqVImk2cMp74JKgYc",
+              "call_39LbP4Em8ueQ5ZYnTUcE3nlP"
+            ],
+            "head": "f8b42d20acd3ae358a71a576d00c76b3f571ac6c",
+            "runId": "40224540059",
+            "attempt": 1,
+            "jobId": "121263011458",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40224540059/job/121263011458",
+            "artifactId": "12610344684",
+            "test": "station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone",
+            "boundary": "Invoked status child exits0xc0000005; harness518, run_with_session156, wait_until_push_restored4596/caller5701. Command --json --address <addr> status is identified from exact source, not argv printed in the log. The THIRD full repetition fails48/1 after TWO49/49 passes.",
+            "retainedLog": "pr194-40224540059-heap-121263011458.log",
+            "retainedLogBytes": 68029,
+            "retainedLogSha256": "ab83e9544bd72cdf257c70fb079dfe3798272bbe87e61904e3de64a9eece9954",
+            "evidencePacket": "pr194-pageheap-evidence-packet.txt",
+            "sourceBlob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+            "historicalCorrection": "The earlier owner tail-only report called this the second repetition. Later full result-site extraction corrects it to third, with raw result sites567/623/707; retain the original report as superseded history, not current fact.",
+            "artifactQualification": "Job reports artifact12610344684,49500264 compressed bytes, ZIP SHA256abcf936b532fd62b06053fad3d86a72bcf33a633f1ee5a811bb7bcf9f89ceba0. Neither Local nor owner downloaded/unpacked this archive or inspected dumps; its contents/native fault site are not independently verified.",
+            "qualification": "Local matched the retained68029-byte log/hash, read the complete owner evidence packet and inspected exact-source helper/caller lines. The reported stack is the Rust harness after a child exception, not a native child fault stack. No log refetch, runtime, archive inspection or provider CI inventory query. All three station-boundary passes remain owner-reported and do not waive the required failure. No193 causal attribution or scope expansion."
+          },
+          "existingIssueComment": "Issue166 also retains PR173 concurrent-first-use attachment AV evidence, run39910906688/job120273438217, as a separate lifecycle observation. Read as history; its old one-retry statement does not authorize a current retry."
+        },
+        "sourcePacket": {
+          "file": "issue166-active-repair-promotion-20261025.json",
+          "bytes": 13598,
+          "sha256": "96e827d7c0a2a7c0bfb5964e51282d06652c45c487db62bc740e43e3d2bb48e9",
+          "owningScopeSource": "call_bCDbqTNmnCk7tOVDMfy8GMuC"
+        },
+        "localDomainNotes": {
+          "file": "issue166-local-domain-notes.md",
+          "bytes": 5187,
+          "sha256": "5f62fd5eadd495f01f582922ded04b874db44090481f82df56e31e0938d8e5ef"
+        },
+        "publicIssue": {
+          "number": 166,
+          "url": "https://github.com/lossyrob/telex/issues/166",
+          "author": "lossyrob",
+          "createdAt": "2026-10-22T21:17:12Z",
+          "updatedAt": "2026-10-23T06:34:34Z",
+          "bodyBytes": 3058,
+          "bodySha256": "e5723669cf9793df2e9bab03420d22701d95678222cd9c27e56b32ba1cd4a723"
+        },
+        "publicHistoricalComments": [
+          {
+            "id": "6359016085",
+            "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6359016085",
+            "author": "lossyrob",
+            "createdAt": "2026-10-23T06:34:34Z",
+            "updatedAt": "2026-10-23T06:34:34Z",
+            "bodyBytes": 1654,
+            "bodySha256": "7afd5927cfd87a6075da42fd7aac46965845f36443d8c225ae35c1e3f2617ea4"
+          },
+          {
+            "id": "6401222833",
+            "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6401222833",
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T18:05:35Z",
+            "updatedAt": "2026-10-25T18:05:35Z",
+            "bodyBytes": 1699,
+            "bodySha256": "a1067a4ac7d95179c73fc084c7255442581aad82eecef106005c89ebf57132d7"
+          }
+        ],
+        "boundary": "Complete owning packet/domain notes and public issue/comment/sentinel report read. Raw-log hashes and exact helper/caller checks remain Local-attributed; no reconciler log, source, provider-CI-inventory, archive/dump or native-fault inspection. Historical one-retry statements do not authorize a retry. Existing193/PR194/owner, all other records and Watcher remain unchanged; no common-cause, validation, readiness, debt/HOLD/release/freeze credit. Actual166 owner preparation/identity/launch remain pending."
+      }
     },
     {
       "id": "local-daemon-windows-credential-writer-timeout",

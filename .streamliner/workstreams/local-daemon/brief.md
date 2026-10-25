@@ -911,3 +911,40 @@ Production 480ms/non-theft/fencing, hosted cause discrimination, no
 widening/retry/flake exception, independent source/design/CI/Campaign
 gates, retained debts and workstation freeze remain. No Watcher edge or
 state change, root-cause finding, second launch or readiness follows.
+
+### Priority native-AV repair, separate from #193 - 2026-10-25
+
+Campaign authorizes one separate Local owner under existing
+[#166](https://github.com/lossyrob/telex/issues/166). The active
+`windows-pageheap-av-repair` node promotes the existing AV candidate;
+preparation and concrete owner identity are pending the actual canonical
+receipt. Existing candidate/unassigned/no-owner authority is historical.
+Local reports no duplicate implementation owner. No new issue or record,
+second #193 owner, automatic dependency edge or Watcher state change
+follows.
+
+Keep the status-hint, concurrent-first-use, destructor stop/drain and
+busy-station status-child observations distinct. A shared `0xc0000005`
+does not establish one fault location or cause. Diagnose on authorized
+hosted disposable Windows infrastructure, preserve logs/symbols/dumps
+actually produced, fix the confirmed defect and validate the full required
+diagnostics/default workspace/relevant profiles at the final reviewed
+head. Rust harness backtraces are observation boundaries, not native
+fault stacks; printed `draining=true` is not proof of successful drain.
+
+Local's corrected PR #194 evidence is the THIRD full repetition failing
+48/1 after TWO 49/49 passes, not the earlier tail-only second-repetition
+report. Its retained 68,029-byte log and source boundary are Local-checked;
+the new artifact archive/dump contents remain uninspected. The earlier
+report stays historical. #193 / PR #194 and its existing owner remain
+separate, subject to strict CI. Ordinary SQLite os33, `ForeignDaemon`,
+seed-budget refusal and `Overran` are not AV evidence.
+
+No retry/rerun, flake exception, waiver, skip or abnormal-exit suppression.
+Preserve owner-private locks, non-theft, fencing and the production 480ms
+budget. Source-reviewer-owned exact-head public receipt, steward design
+inspection, full hosted validation and Campaign merge gates apply to the
+closing PR, not an extra launch vote. The workstation freeze and accepted
+#181/#187 delivery/debts remain; no release, #153, admission or closure
+clearance follows. The complete scoped task carries evidence distinctions,
+single-owner v2 preparation/launch rules and validation boundaries.
