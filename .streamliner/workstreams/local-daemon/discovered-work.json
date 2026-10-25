@@ -4941,6 +4941,119 @@
       "decisionState": "proposed",
       "dispositionAuthority": "Local bounded evidence-only intake. No new issue, node, implementation owner, observer, runtime action, retry or gate change.",
       "terminalPath": "Owning-role triage and tracker/causal disposition before separately authorized repair or hardening work. Preserve all historical evidence, accepted deliveries, current owners, debts, HOLDs and freeze obligations."
+    },
+    {
+      "id": "local-daemon-issue174-prepared-launcher-readiness-evidence",
+      "sourceNode": null,
+      "source": "Existing issue https://github.com/lossyrob/telex/issues/174; Local evidence-only classification of main run 40237210821 / job 121301214080 at c01651ecacdcb6cdd1e509ea6757ce08ee337be3.",
+      "evidence": {
+        "classificationPacket": {
+          "file": "second-launcher-local-intake.json",
+          "bytes": 6624,
+          "sha256": "63e83fdfd8215679870dcf7318dd0eb5e25d29a7ba83a3e64ba93809f4ae0998",
+          "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "localDeliverySource": "call_oXNzsqMpLgfEBv55RjGD41ve",
+          "captureReceipt": "second-launcher-source-capture.json"
+        },
+        "attribution": "The reconciler read the complete Local classification packet and checked packet custody only. Retained log/custody/source-boundary/run-receipt verification, the public comment read, immutable source comparison and checkout identification remain Local-attributed. No underlying log, source, archive, provider or runtime replay was performed by the reconciler.",
+        "projectionBoundary": "Every parsed source field is retained unchanged. No private-path redaction is needed for this packet. The complete original bytes remain separately hash-bound.",
+        "lifecycleBoundary": "Local classifies caller 3078/helper 558 as the second prepared launcher, after the earlier waiter exit 0, delivery checks and acknowledgment. Original issue #174 identifies the first prepared launcher at 2950. Later duplicate-launcher, push-refusal, explicit-stop and return-to-push stages are not reached. Equal test-source blob and helper do not establish equal runtime state or a common cause.",
+        "retainedLocalClassification": {
+          "kind": "bounded-existing-issue-subcase-classification",
+          "sourceMessage": "call_CG1GrqQgvkWtGuzc6EhD0i0T",
+          "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+          "decision": "Additional prepared-launcher wait.pid readiness evidence associated with existing issue174, but at the second prepared launcher rather than the original first-launcher subcase. Do not claim an identical failing subcase or common cause.",
+          "existingIssue": {
+            "number": 174,
+            "url": "https://github.com/lossyrob/telex/issues/174",
+            "stateAtRead": "OPEN",
+            "title": "Windows CI: Copilot fallback test times out waiting for wait.pid",
+            "originalHead": "f1c25007ae63738b039c8eb8a9ac141238ac4472",
+            "originalRun": "39910906688",
+            "originalJob": "120273437980",
+            "originalBoundary": "The issue body identifies the first prepared launcher at source2947-2950, with discarded stdout/stderr and a five-second wait.pid poll. Local read the complete issue body and those immutable source lines.",
+            "sourceComparison": "The original174 and new c016 test files share Git blob b1f708c5e8948884c49207fe4aba4e051dc7f23a. Same helper and test source do not establish the same runtime state or causal defect."
+          },
+          "newObservation": {
+            "head": "c01651ecacdcb6cdd1e509ea6757ce08ee337be3",
+            "runId": "40237210821",
+            "event": "push",
+            "attempt": 1,
+            "jobId": "121301214080",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40237210821/job/121301214080",
+            "profile": "Windows default workspace, recorded cargo test --workspace --verbose",
+            "test": "real_process_copilot_fallback_cross_platform",
+            "sourcePath": "tests/daemon_process_sqlite.rs",
+            "callerLine": 3078,
+            "helperLines": "550-558",
+            "panicLine": 558,
+            "message": "timed out waiting for the second prepared fallback launcher's wait.pid",
+            "configuredBudgetSeconds": 5,
+            "targetResult": {
+              "passed": 48,
+              "failed": 1,
+              "ignored": 0,
+              "durationSeconds": 25.38
+            },
+            "launcherExitStatus": "Not observed at this assertion; stdout/stderr were discarded.",
+            "sourceBoundary": "The source reaches3078 only after the earlier fallback waiter exits0, delivery.json/body checks and acknowledgment succeed, followed by a fresh prepare and distinct next_run_dir. The second launcher is spawned at3075-3077, then wait.pid readiness times out. Duplicate-launcher checks at3080+, push-refusal checks at3088+, and later explicit-stop/return-to-push assertions are not reached.",
+            "causeLimits": "The absent readiness artifact at the deadline does not distinguish early termination, initialization failure, refusal, publication delay or scheduling. It does not establish a process leak, successful launcher readiness or a native exception.25.38s is suite duration, not launcher/daemon latency."
+          },
+          "retainedEvidence": {
+            "custodyFile": "main-40237210821-evidence-custody.json",
+            "custodyBytes": 10193,
+            "custodySha256": "e6dba6b5c79a738df74d8d25c737bdc0e34d967cfc991dc3cf2578e0c60fa38c",
+            "logFile": "main-40237210821-job-121301214080.log",
+            "logBytes": 337419,
+            "logSha256": "d73b25c143c47f4ab0542ffffee41df39f981b9f713015e85e1495e2bc584f6c",
+            "sourceBoundaryFile": "main-40237210821-source-boundary.json",
+            "sourceBoundaryBytes": 7335,
+            "sourceBoundarySha256": "03bcf6771c02e1d144962b5bcfe91ae3c0349470244f89eba156db2fa080d466",
+            "sourceBlob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+            "sourceLinesMatched": 69,
+            "runReceiptFile": "main-40237210821-ci.json",
+            "runReceiptBytes": 45687,
+            "runReceiptSha256": "ab7d93f376259c781e49a32a82e420a4f5a2da11c69794ec40b3effb9314a2b8",
+            "verification": "Local matched custody, retained log, source-boundary and run-receipt bytes/hashes; read complete custody/source-boundary JSON; matched every supplied log excerpt and all69 numbered source lines. Retained checkout lines97-98 identify direct c016 main. Local also read original174 first-launcher lines and new downstream control flow. No full-log read or provider log refetch.",
+            "publicReport": "https://github.com/lossyrob/telex/issues/182#issuecomment-6403965337",
+            "publicReportRead": "Read complete comment updated2026-10-25T22:03:37Z.20/21 run inventory, boundary-job timing samples and cohort counts remain sentinel-reported; no independent full inventory or failure-rate claim.",
+            "headDelta": "Independently checked c016 changes only the Local discovery ledger; no source-change causality follows."
+          },
+          "uploadMetadata": {
+            "artifactId": "12615852027",
+            "reportedBytes": 72835394,
+            "reportedZipSha256": "9e9152c6659a5f6af92e8153fc92645d2d9b36897bfdac6baadd41d97fadd73f",
+            "qualification": "Matched upload lines2419-2423 in the retained log. Archive, executable, PDB and dump contents were not downloaded or inspected. The artifact's crash name does not classify this readiness timeout as a native crash."
+          },
+          "distinctions": [
+            "Original174 first-launcher readiness and this second-launcher readiness share a symptom family, not a proven common cause.",
+            "The earlier sender-command timeout at3026 fails before the delivery/ack stages reached here.",
+            "The separate return-to-push attach timeout at3141 occurs after successful explicit stop and waiter exit5, stages not reached here.",
+            "Issue176 reaches the later generic waiter and receives idle instead of expected push-coverage refusal; this new failure occurs earlier.",
+            "Do not conflate initial-attach/inherited-writer cases, native166 AV/heap corruption,193 seed-budget admission, SQLite store locking or Overran with a wait.pid readiness timeout.",
+            "Historical retry wording in174 does not authorize a new retry or budget increase."
+          ],
+          "disposition": {
+            "target": "Existing issue174 evidence-only intake, explicitly labeled second-prepared-launcher subcase.",
+            "newIssueOrNode": false,
+            "newImplementationOwnerOrObserver": false,
+            "retryOrRuntimeProbe": false,
+            "gateOrReadinessChange": false,
+            "canonicalBoundary": "Retain one separately identified observation associated with174, after fresh exact-run/job deduplication. Do not create a standalone new repair or fold it into the sender/return-to-push candidates. Return any canonical metadata projection for owning review; no canonical edits are made by this packet.",
+            "conservation": "Preserve existing174 history, all166/193/198 ownership and unresolved recovery state, both pending product-repair-merge wakes, accepted181/187 and all other evidence/debts. No PR attribution, waiver or freeze change."
+          }
+        }
+      },
+      "description": "Retain one separately labeled second-prepared-launcher wait.pid readiness observation associated with existing issue #174.",
+      "affectedOutcome": "Existing #174 readiness triage only. The original first-launcher failure at 2950 and this second-launcher failure at 3078 share a symptom family, not an identical runtime subcase or proven cause.",
+      "requiredness": "Evidence-only association with an existing tracker, not acceptance of a standalone repair, candidate scope, dependency or hardening-gate transition.",
+      "sequencing": "Keep this second-launcher observation distinct from original #174 first-launcher history, sender timeout, return-to-push timeout, #176 idle instead of expected refusal, initial attach/inherited writer, #166 native AV/heap corruption, #193 seed budget, SQLite locking and Overran. No retry or budget change is authorized.",
+      "target": "Existing issue https://github.com/lossyrob/telex/issues/174; second-prepared-launcher evidence only.",
+      "owner": "Existing Local evidence triage only. No new implementation owner or observer is assigned or launched.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 accepted this evidence-only association with existing issue #174 in actual decision call_hVzE6JhvBqtHKExZPe1oQTFV. Routed/accepted records the existing-tracker evidence association only, not repair scope, staffing, retry or gate authority. The rejected Watcher placement remains unlanded; the entire Watcher subtree remains unchanged.",
+      "terminalPath": "Preserve the exact Local classification and separately identified lifecycle boundary under existing #174. This evidence-only record grants no repair, source/review/CI/readiness, retry, waiver, debt/HOLD or freeze credit."
     }
   ]
 }
