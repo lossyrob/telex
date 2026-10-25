@@ -2233,6 +2233,215 @@
             },
             "limits": "The supplied extracted tree contains no dump, handler stdout/stderr, recording marker, or test fixture state files. This inventory is not proof that no crash or handler failure happened. No executable was run, no binary was loaded for debugging, and no PDB identity match was claimed."
           }
+        },
+        "mergeDebtAndFollowThrough": {
+          "kind": "historical-ready-and-actual-merge-with-retained-debt",
+          "historicalReadyPacket": {
+            "file": "pr185-operator-ready-qualification-20261025.json",
+            "bytes": 12565,
+            "sha256": "cb8f3b5253f169e5116c46af931e076c7d7250d22c20a65b44775a195ff59b2d",
+            "meaning": "Immutable pre-merge inspection, not current OPEN/ready state, merge permission, landed CI or accepted181 delivery.",
+            "head": "130be3b257e8208f521f9e4e91bc6795b991e023",
+            "tree": "fd53e11c478ae8e4b7ca19855734735803feac79",
+            "productBase": "d03492ea425f001df530f4405808d3a817558291",
+            "localVerification": "Local independently read live GraphQL identity, full refreshed description, complete empty review-thread connection and sole closing issue. The body reflects current130be3 validation and retains causal, old-head and downstream limitations.",
+            "historicalState": {
+              "state": "OPEN",
+              "isDraft": false,
+              "mergeable": "MERGEABLE",
+              "mergeStateStatus": "CLEAN",
+              "reviewThreads": 0,
+              "soleClosingIssue": 181
+            },
+            "readyReceipt": {
+              "url": "https://github.com/lossyrob/telex/pull/185#issuecomment-6400864642",
+              "author": "lossyrob",
+              "createdAt": "2026-10-25T17:32:35Z",
+              "updatedAt": "2026-10-25T17:32:35Z",
+              "localVerification": "Read the entire public owner receipt; it requests Campaign's gate, not merge or issue completion."
+            },
+            "sourceAndDesign": {
+              "qualificationPacket": "pr185-source-design-qualification-130be3-20261025.json",
+              "packetBytes": 6608,
+              "packetSha256": "d8ec5650ab81f38b34327dcab74300b7bf040f6a671c10e35c538488ef7b101b",
+              "sourceReceipt": "https://github.com/lossyrob/telex/pull/185#issuecomment-6400606700",
+              "sourceVerdict": "Zero blocking and zero non-blocking findings in the bounded current-head integration review; historical R1 remains resolved.",
+              "reviewerSessionId": "2d1c11d8-3a78-4818-8aec-7b8cbc845e8c",
+              "reviewerOriginConfirmation": "call_Zbws1bj5KatiKgUKMFy0lEKb",
+              "publication": "Local read the public exact130be3 receipt and received direct reviewer confirmation that its own session posted it. Shared account identity alone was not used; raw publisher execution history was not independently audited.",
+              "designArtifact": "pr185-local-design-inspection-130be3b-20261025.md",
+              "designBytes": 17092,
+              "designSha256": "270aa3da112b4e7f9c0acd536a87fb12b05db967dd815519c5e87b3afc60f8de",
+              "designVerdict": "Renewed exact130be3/treefd53 APPROVED, zero new/open findings, DI-185-01 resolved.",
+              "localVerification": "These exact-head receipts were independently read/hashed as recorded in the prior immutable qualification. No duplicate source/design review was performed.",
+              "historicalQualification": "Their earlier CI-queued/pending wording remains an inspection-time snapshot. The later terminal CI evidence below supplies current execution evidence without rewriting either report."
+            },
+            "prCi": {
+              "url": "https://github.com/lossyrob/telex/actions/runs/40214432369",
+              "head": "130be3b257e8208f521f9e4e91bc6795b991e023",
+              "event": "pull_request",
+              "attempt": 1,
+              "conclusion": "success",
+              "totalJobs": 24,
+              "localVerification": "One bounded live run read and complete jobs response establish exact head, terminal success and24 unique completed/successful jobs. This is not a recurring observer or branch-protection/ruleset audit."
+            },
+            "directHeadCooperativeCoverage": {
+              "head": "130be3b257e8208f521f9e4e91bc6795b991e023",
+              "logs": [
+                {
+                  "platform": "Windows",
+                  "jobId": "121232394151",
+                  "file": "pr185-130be3b-windows-121232394151.txt",
+                  "bytes": 56907,
+                  "sha256": "71bc8a640dcaf7620bc01253f01323823883957953843beaf4fc46576f74f1f2",
+                  "ownerReportedFormat": "Raw job-log API capture after gh run log-cache invalid-ZIP fallback.",
+                  "verifierTimestamp": "2026-10-25T17:01:23.4830163Z",
+                  "modulePassed": 62,
+                  "moduleFailed": 0,
+                  "moduleIgnored": 0,
+                  "moduleFilteredOut": 450,
+                  "moduleDurationSeconds": 19.35,
+                  "repetitions": 10,
+                  "singleTestPassResults": 10,
+                  "namedTestPassLinesIncludingModule": 11
+                },
+                {
+                  "platform": "macOS",
+                  "jobId": "121232394153",
+                  "file": "pr185-130be3b-macos-121232394153.txt",
+                  "bytes": 112100,
+                  "sha256": "5a736732678d22717a5a66e938e15c85b4e954f57808f962d42512542b5e6e4a",
+                  "ownerReportedFormat": "gh run job-labeled text, not a byte-identical provider-rendering claim.",
+                  "verifierTimestamp": "2026-10-25T17:01:21.9676110Z",
+                  "modulePassed": 62,
+                  "moduleFailed": 0,
+                  "moduleIgnored": 0,
+                  "moduleFilteredOut": 436,
+                  "moduleDurationSeconds": 5.08,
+                  "repetitions": 10,
+                  "singleTestPassResults": 10,
+                  "namedTestPassLinesIncludingModule": 11
+                },
+                {
+                  "platform": "Ubuntu",
+                  "jobId": "121232394220",
+                  "file": "pr185-130be3b-ubuntu-121232394220.txt",
+                  "bytes": 57404,
+                  "sha256": "e71261dc167d4fb801b1763cb3bd8b9371e313cfa1045a5c49a5db7e9dac115a",
+                  "ownerReportedFormat": "Raw job-log API capture after gh run log-cache invalid-ZIP fallback.",
+                  "verifierTimestamp": "2026-10-25T17:02:50.9278905Z",
+                  "modulePassed": 62,
+                  "moduleFailed": 0,
+                  "moduleIgnored": 0,
+                  "moduleFilteredOut": 438,
+                  "moduleDurationSeconds": 1.57,
+                  "repetitions": 10,
+                  "singleTestPassResults": 10,
+                  "namedTestPassLinesIncludingModule": 11
+                }
+              ],
+              "localVerification": "Local independently matched all three capture byte counts/hashes, read verifier/module/repetition excerpts, and mechanically verified actual attempts1 through10, ten1-pass/0-fail/0-ignored results and eleven named-test pass lines including the module pass in each log. No full-log-read claim or provider refetch.",
+              "provenanceBoundary": "These three logs independently establish direct130be3 source verification. Other jobs' success is provider-verified; their provider-selected checkout semantics are not independently established merely by the run head or these three logs.",
+              "reconcilerBoundary": "The reconciler read the full Local packet; no claim to repeat these three log reads or mechanics, retrieve provider logs, run tests or audit scheduler state."
+            },
+            "observerSnapshot": {
+              "source": "Owner message call_BIQDzmUK4opuAWbfL1UgMlFT relays existing coordinator receipt call_QEpldODNHyAqrTxs9mzMWPx3.",
+              "completedCiWait": "wait-pr185-ci40214432369-130be3b",
+              "reportedResult": "Run40214432369 attempt1 success24/24 under exact head/tree/originald034base guards; CI wait closed and old schedule disarmed/readback absent.",
+              "currentLifecycleWait": "wait-pr185-merge-130be3b",
+              "reportedScheduleId": "f6cfb013-2afc-4438-bdaa-96120575e363",
+              "qualification": "Owner-reported existing-coordinator lifecycle state, not Local scheduler inspection. The new wait observes reserved merge/head movement only and is not CI rebind or merge authorization."
+            },
+            "historicalRemaining": {
+              "campaignMergeDecision": "Pending; owner reports gate requested.",
+              "merged": false,
+              "issue181Complete": false,
+              "postMergeMainCi": "Future obligation after actual merge.",
+              "fieldReportAndAccepted181Delivery": "Future obligations.",
+              "watcher179Pr180Ready": false,
+              "headGuard": "Any head movement requires current-head source/design/publication/CI evidence before readiness."
+            }
+          },
+          "actualMergePacket": {
+            "file": "pr185-merge-debt-and-followthrough-20261025.json",
+            "bytes": 5195,
+            "sha256": "366424cf4f838e16e1a04f6b9727746e740e713c29ba08b92c26585447c38370",
+            "merge": {
+              "state": "closed",
+              "merged": true,
+              "mergedAt": "2026-10-25T17:35:55Z",
+              "commit": "65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b",
+              "tree": "144382f5b9bc4d5951113e3b588c4e23cab0530d",
+              "parents": [
+                "ea6230328da175d48d09435b26b81750c52b59b7",
+                "130be3b257e8208f521f9e4e91bc6795b991e023"
+              ],
+              "reviewedSourceHead": "130be3b257e8208f521f9e4e91bc6795b991e023",
+              "issueState": "closed",
+              "issueStateReason": "completed",
+              "issueClosedAt": "2026-10-25T17:35:56Z",
+              "localVerification": "Local independently read provider merge/issue metadata and immutable Git commit, ordered parents and tree."
+            },
+            "reconcilerVerification": "Read-only Git metadata matches exact merge/tree/ordered parents. Provider closure was independently read by owning Local, not independently re-queried by the reconciler."
+          },
+          "campaignGate": {
+            "url": "https://github.com/lossyrob/telex/pull/185#issuecomment-6400899418",
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T17:35:49Z",
+            "updatedAt": "2026-10-25T17:35:49Z",
+            "verdict": "merge + debt",
+            "confidence": "high",
+            "reviewedHead": "130be3b257e8208f521f9e4e91bc6795b991e023",
+            "localVerification": "Read the entire public Campaign gate record. Its recorded floor and merge-tree claims remain Campaign's adjudication, distinct from Local's separately verified source/design/CI/receipt evidence.",
+            "followThrough": "Main CI, then181 field report and Local acceptance before releasing PR180's external dependency. PR180 still needs its own current-head gates.",
+            "bodyBytes": 1914,
+            "bodySha256": "4e5e9cea19002bc59002870a9baa2253bb5c4f1130e8bc054ee2e5556b3a1d20",
+            "reconcilerVerification": "Full public body read; author/time/body matched. Gate floor and merge-tree/source/design/CI adjudication remain Campaign statements, not a new independent product review."
+          },
+          "retainedDebt": [
+            {
+              "id": "ci-matrix-duplication",
+              "owner": "Campaign test sentinel",
+              "disposition": "Post-landing consolidation assessment is already routed through182/comment6400512258. This intake does not authorize another consolidation edit, remove jobs or launch a new owner."
+            },
+            {
+              "id": "partial-page-real-time-validation-gap",
+              "owner": "Local Daemon",
+              "limitation": "The positive partial-page test pauses Tokio completion time; it does not directly test a real first read completing within the real200ms grace. Historical Windows Overran cause remains unknown.",
+              "followThrough": "Observe main CI on Windows/macOS through existing roles. If Overran recurs, open a new item rather than retrying.",
+              "acceptanceBoundary": "The accepted source and controlled-schedule regressions are not a universal timing guarantee or retrospective historical-cause proof. This debt is not cleared by the merge.",
+              "repetitionAssessment": "Campaign says the sentinel may trim the10x loop during its separately routed consolidation; Local performs no such change here."
+            },
+            {
+              "id": "optional-clippy-test-hygiene",
+              "owner": "Existing deferred sentinel triage",
+              "disposition": "Keep the existing candidate separate, with its attributed dirty-worktree/toolchain evidence and no absorption."
+            }
+          ],
+          "mergeTimeFollowThroughSnapshot": {
+            "qualification": "The original postMerge values below are explicitly historical merge-time pending/owner-reported observations, not a claim later CI, field or acceptance remains pending. Later delivery/resumption has a separate source packet and successor.",
+            "original": {
+              "ownerSessionId": "9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c",
+              "reportedCiRun": "40217242404",
+              "reportedDocsRun": "40217242455",
+              "reportedCiIdentity": "push/attempt1/exact65f5846d; queued in the owner's snapshot",
+              "localRunVerification": "Not queried for this merge-state intake.",
+              "observer": "Owner reports asking the same coordinator to transition its merge-only wait to a sole landed observer. No registration or scheduler state independently verified here.",
+              "fieldReport": "Owner retains the181 field report and readback obligation, including design impact updated-docs and Windows/macOS outcomes.",
+              "accepted181Delivery": false,
+              "watcherDependencyReleased": false
+            },
+            "boundary": "Merge/issue closure alone releases no dependency. No new observer/scheduler registration, CI dispatch/rerun, runtime or product action is requested."
+          },
+          "laterScopeClarification": {
+            "authority": "Owning Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_kvCIGy498BdId32Hapuf42aC",
+            "field": "evidence.mergeDebtAndFollowThrough",
+            "record": "local-daemon-windows-cooperative-partial-page-overrun",
+            "limits": "Exactly one additive key on this unique existing181 record; preserve every old field/evidence including nullsourceNode/routed/accepted. No new record or187lock/absorbedfixture/marker/optionalClippy absorption. Ready/merge original packets stay immutable."
+          },
+          "disposition": "Record observed merge and retained Local real-time200ms coverage/unknown historicalOverran cause debt. Future recurrence opens a new item, not retry. Existing sentinel consolidation and optionalClippy remain separate; reduced repetitions are reduced exposure, not equivalent ten-run proof or cleared coverage debt.",
+          "boundaries": "187 completion is already independently accepted. Keep181 in-progress with completed187 lineage for this merge-only receipt. Later181 terminal acceptance/Watcher resumption is a separate successor, not negated by this snapshot. No automatic delivery/dependencyrelease/readiness, publication debt clearance, source/runtime/CI/observer, product merge, release,153,hardening/closure or workstation-freeze change."
         }
       },
       "description": "Classify failure to observe the mandatory cooperative partial page on Windows without discarding the shared deadline or fairness contract.",

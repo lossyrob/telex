@@ -305,6 +305,32 @@ blocked statements above/below remain historical, not rewritten.
 PR #189 publication debt, CI-overlap/sentinel and optional Clippy evidence,
 all other ledger records, owners, attention, gates and freeze remain.
 
+A separate 2026-10-25 merge-history qualification records actual #185
+merge `65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
+tree `144382f5b9bc4d5951113e3b588c4e23cab0530d`, and completed #181
+provider closure; ordered parents are `ea623032` and reviewed `130be3`.
+The immutable 12,565-byte readiness packet,
+SHA-256 `cb8f3b5253f169e5116c46af931e076c7d7250d22c20a65b44775a195ff59b2d`,
+is explicitly pre-merge history, including Local's PR-head 24/24 and
+three-platform 62+10 repetition checks, not current OPEN/ready or main CI.
+The separate 5,195-byte merge packet,
+SHA-256 `366424cf4f838e16e1a04f6b9727746e740e713c29ba08b92c26585447c38370`,
+and full [Campaign gate](
+https://github.com/lossyrob/telex/pull/185#issuecomment-6400899418)
+record **merge + debt, confidence high**. Main CI/field/Local acceptance
+were distinct follow-through, not inferred from provider closure.
+The only ledger addition is `mergeDebtAndFollowThrough` on the existing
+partial-page overrun record, retaining routed/null-source/accepted and all
+prior evidence. Local retains the real-time 200ms positive-test coverage
+gap and unknown historical `Overran` cause; recurrence means a new item,
+not retry. Sentinel CI consolidation/repetition reduction and optional
+Clippy remain separate; fewer repetitions are reduced exposure.
+#187 stays completed and #181 in progress with their edge retained for
+this merge-only receipt. Original pending/observer/ready snapshots stay
+historical. Later accepted #181 delivery/Watcher resumption is a separate
+successor; this receipt supplies no such release, readiness, debt
+clearance, product/runtime/CI action or freeze change.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
