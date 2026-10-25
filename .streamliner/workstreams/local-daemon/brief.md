@@ -866,3 +866,48 @@ unconditional generation, discovery, GC, and over-cap authority.
 ## Closeout Observations
 
 (parking lot - populated during execution)
+
+## Actual bounded #193 owner - 2026-10-25
+
+Owning Local reports the single authorized owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` launched in existing checkout
+`lossyrob-upgraded-system`, with `gpt-6.1-sol` / high / default /
+interactive requested and no idle notification. Package
+`ctx-20261025185147-10f8a3ea` delivered one 14,556-byte kickoff
+(`ffd1f36d7e835d0f8243ef3b3d8f6fa39d05ac32806f0c8afe19f79ff6d2440f`);
+the exact launched-binding snapshot is 4,238 bytes
+(`ce9969d90ba623e1b5669f39399766b43bcbd300037927c0375f073528dc1c22`).
+Local observed the same session/path/launch branch busy after admission.
+Earlier pending-owner statements remain historical. This records launch,
+not implementation, source/design/CI or effective-capacity proof.
+
+Launch branch `lossyrob-upgraded-system` and preparation head `4deaf30cc`
+remain unchanged history. A later separate 2,289-byte Local observation
+(`a52c4a66e9f81c2cacd5c8a0339418c196e8f59e529bf3ae20fc711fc084eded`)
+verifies that same session/checkout busy on App-renamed branch
+`lossyrob-intent-seed-preconditions`, not a second owner or preparation.
+Owner-reported integration at `0d5347a6` and its test-only repair direction
+are not approvals; the main advance contains Watcher/Cargo.lock/design
+changes, not just artifacts. No old review or CI acceptance carries.
+
+Local later resolved observed App alias
+`1185656f-ec05-4f88-aacc-f09b2431f9ee` to the same canonical owner using
+both App lookups, with the same creation, parent, checkout and branch.
+Local reports App metadata associates open
+[#194](https://github.com/lossyrob/telex/pull/194); that is not a second
+owner/rebinding, provider-head verification or source/design/CI approval.
+
+Local's separate later provider read observed PR #194 OPEN/non-draft to
+main at `f8b42d20acd3ae358a71a576d00c76b3f571ac6c`, same owner branch,
+author `lossyrob`. The 2,286-byte immutable qualification has SHA-256
+`eb2240d119727ff7e7d889b6683f0a7b060a3e9f0763c9bfe4cfb0b2a755e3be`.
+This is attributed metadata at `2026-10-25T19:10:41.4572621Z`, not
+source/design/CI or readiness. The later durable-binding update does not
+rewrite the captured launch, branch and kickoff history.
+
+The node stays in-progress/focus; counts remain 26 nodes and 45 records.
+All earlier evidence and accepted #181/#187 delivery remain unchanged.
+Production 480ms/non-theft/fencing, hosted cause discrimination, no
+widening/retry/flake exception, independent source/design/CI/Campaign
+gates, retained debts and workstation freeze remain. No Watcher edge or
+state change, root-cause finding, second launch or readiness follows.

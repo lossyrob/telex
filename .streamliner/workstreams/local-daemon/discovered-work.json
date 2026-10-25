@@ -4026,11 +4026,93 @@
       "recommendedDisposition": "One separate bounded Local setup/precondition repair under issue #193, with hosted cause-discriminating validation.",
       "selectedDisposition": "Promote intent-seed-precondition-repair and exactly one Campaign-authorized Local v2 owner after canonical preparation; no further steward launch review.",
       "target": "local-daemon/intent-seed-precondition-repair / https://github.com/lossyrob/telex/issues/193",
-      "owner": "Local aeae4fa9 coordinates one Campaign-authorized193 v2 owner; concrete identity pending canonical preparation/launch. No root fix is assigned to Watcher.",
+      "owner": "Actual single owner 519693a5-0607-4aba-a968-345f3b1cd1b5 launched under Local; later same-checkout branch observed as lossyrob-intent-seed-preconditions. The following promotion-time pending-assignment snapshot is historical: Local aeae4fa9 coordinates one Campaign-authorized193 v2 owner; concrete identity pending canonical preparation/launch. No root fix is assigned to Watcher.",
       "terminalPath": "One separate PR closes193 after a discriminating hosted check, minimal justified correction, exact-head source review with reviewer-origin public receipt, design inspection and Campaign gate. Preserve480ms/non-theft/fencing and meaningful native/budget regressions.",
       "status": "routed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Campaign toolu_01X4YTjtnHnE76rNwKipSSUn accepts the fixture-defect assessment and authorizes immediate bounded staffing. Local coordinates launch; source/design/hosted CI and the Campaign gate still control the closing PR."
+      "dispositionAuthority": "Campaign toolu_01X4YTjtnHnE76rNwKipSSUn accepts the fixture-defect assessment and authorizes immediate bounded staffing. Local coordinates launch; source/design/hosted CI and the Campaign gate still control the closing PR.",
+      "actualOwnerLaunchQualification": {
+        "source": "Owning Local actual launch plus later same-owner App branch observation",
+        "owningLaunchMessage": "call_vmhmemA3eGud4ZyEIR0cpqdr",
+        "owningBranchMessage": "call_PA0Ng9Q6cfSjeNBotN1A2KE1",
+        "ownerBranchMessage": "call_B8ehaIZT5wXISiDchvg2iXIH",
+        "coordinatorSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+        "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+        "checkoutName": "lossyrob-upgraded-system",
+        "launchBranch": "lossyrob-upgraded-system",
+        "profile": {
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": "high",
+          "contextTier": "default",
+          "mode": "interactive"
+        },
+        "reportedIdleNotification": "none",
+        "contextPackageId": "ctx-20261025185147-10f8a3ea",
+        "kickoff": {
+          "bytes": 14556,
+          "sha256": "ffd1f36d7e835d0f8243ef3b3d8f6fa39d05ac32806f0c8afe19f79ff6d2440f",
+          "deliveredOnce": true,
+          "delivery": "Immediate App send_session_message by file reference, byte count and SHA256; no mode override"
+        },
+        "launchSnapshot": {
+          "artifact": "b193-launch-binding.json",
+          "bytes": 4238,
+          "sha256": "ce9969d90ba623e1b5669f39399766b43bcbd300037927c0375f073528dc1c22",
+          "observedAfterAdmissionAt": "2026-10-25T18:59:23.4882067Z",
+          "activity": "busy, 1 second, after kickoff admission"
+        },
+        "preparation": {
+          "head": "4deaf30cc6656d4807918fa42870db742d453bc4",
+          "promotionTree": "e89a5d63ff4a875e59bddb24909b398bf3b74738",
+          "laterObservedOriginMain": "0d5347a6e1b8a1716b524c537c4886d3f4d49b65",
+          "mainMovementQualification": "Forward ancestry and unchanged selected node, launch policy and complete issue193 task verified. Incoming changes include Watcher integration, Cargo.lock and design references, not only bookkeeping. Preparation remains pinned to its verified start; no integration or review/CI evidence carry is claimed.",
+          "verificationAttribution": "Handoff equals existing App cwd/branch; kickoff byte-equals handoff, UTF8 no BOM/LF/final newline; full owner guide exact and current overrides retained; Additional Inputs and four ordered context layers correct; package/installed context exact; only two untracked .paw files, source/index unchanged."
+        },
+        "laterBranchObservation": {
+          "sourceReceivedAt": "2026-10-25T19:01:48.042Z",
+          "branch": "lossyrob-intent-seed-preconditions",
+          "sameAppSessionAndCheckout": true,
+          "localObservedActivity": "busy",
+          "localObservedBusyForSeconds": 19,
+          "artifact": "b193-owner-branch-observation.json",
+          "bytes": 2289,
+          "sha256": "a52c4a66e9f81c2cacd5c8a0339418c196e8f59e529bf3ae20fc711fc084eded"
+        },
+        "identityAlias": {
+          "canonicalOwnerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+          "observedAppAlias": "1185656f-ec05-4f88-aacc-f09b2431f9ee",
+          "owningAppSource": "call_UtzzXkcm6TehxV3uVwfqtPMU",
+          "reportedAppPrAssociation": {
+            "repo": "lossyrob/telex",
+            "number": 194,
+            "state": "open",
+            "url": "https://github.com/lossyrob/telex/pull/194"
+          },
+          "owningProviderMetadataSource": "call_W0agCbytXP9sVD4SUyKsNafs",
+          "observedAt": "2026-10-25T19:10:41.4572621Z",
+          "artifact": "b193-owner-alias-qualification.json",
+          "bytes": 2286,
+          "sha256": "eb2240d119727ff7e7d889b6683f0a7b060a3e9f0763c9bfe4cfb0b2a755e3be",
+          "providerMetadata": {
+            "method": "Direct personal-profile gh pr view194 metadata read; no CI inventory query.",
+            "url": "https://github.com/lossyrob/telex/pull/194",
+            "number": 194,
+            "state": "OPEN",
+            "isDraft": false,
+            "head": "f8b42d20acd3ae358a71a576d00c76b3f571ac6c",
+            "headBranch": "lossyrob-intent-seed-preconditions",
+            "baseBranch": "main",
+            "author": "lossyrob",
+            "title": "[Intent Seed Preconditions] Separate proof-fixture setup from elapsed lock admission"
+          },
+          "qualification": "Local independently resolved both App identifiers to one canonical owner and separately read provider PR metadata. Alias namespace is not inferred; no new owner or rebinding. These are attributed identity/metadata snapshots, not reconciler provider-head inspection, source/design/CI or readiness approval."
+        },
+        "ownerReportedIntegrationAndPlan": "Current main including PR180 is integrated at 0d5347a6. The required App branch rename changed the owner branch to lossyrob-intent-seed-preconditions in the same checkout; the launch package is preserved as history. #193 plan is a scoped test-only seed clock with real native locking/pending writes, branch-specific admission diagnostics, and independent hosted budget/native coverage.",
+        "historicalPromotionOwner": "Local aeae4fa9 coordinates one Campaign-authorized193 v2 owner; concrete identity pending canonical preparation/launch. No root fix is assigned to Watcher.",
+        "qualification": "One existing owner and checkout, one actual launch only. Original launch branch/head/binding/kickoff and all older pending/no-owner snapshots remain historical. The later branch change is not a second preparation or owner. Configuration is not independent effective-capacity proof. Owner-reported integration and repair plan are not source/design/CI or readiness approval. The product/Cargo/design main advance is not artifact-only; no evidence carries.",
+        "reconcilerEvidenceBoundary": "Read and matched immutable launch/supplement bytes and source attribution only. Preparation, guide/context/kickoff equality and App identity/path/branch/busy checks are Local-reported. No reconciler target-checkout/source/runtime/CI/provider/observer inspection or new owner launch.",
+        "unchangedGates": "Production 480ms/non-theft/fencing; no widening/retry/flake exception; hosted cause-discriminating/default Windows coverage, reviewer-origin public source receipt, design/CI/Campaign gates and workstation freeze remain. No Watcher edge/status change, #181/#187 reversal, implementation/delivery/admission/debt/HOLD/release clearance."
+      }
     }
   ]
 }

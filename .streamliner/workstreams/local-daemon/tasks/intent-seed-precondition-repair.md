@@ -140,3 +140,69 @@ absorb earlier #181 Overran, marker or optional-Clippy work, or reopen
 accepted #181/#187 delivery by inference. No Watcher code, graph edge,
 dependency/status/gate change, issue #153 acceptance, hardening/closure,
 release or broader freeze authority follows.
+
+## Actual single-owner launch and branch qualification - 2026-10-25
+
+The promotion-time pending-owner and PR lines above are historical. Local
+reports one actual launch of `519693a5-0607-4aba-a968-345f3b1cd1b5` in the
+existing `lossyrob-upgraded-system` checkout. The requested profile was
+`gpt-6.1-sol` / high / default / interactive, with no idle notification;
+this records configuration, not independent effective-capacity proof.
+The original launch branch remains `lossyrob-upgraded-system`.
+
+Local verified package `ctx-20261025185147-10f8a3ea`, the full owner guide
+and current overrides, same-checkout handoff, installed context and only
+two preparation `.paw` files. It delivered the 14,556-byte kickoff once
+by file reference, SHA-256:
+`ffd1f36d7e835d0f8243ef3b3d8f6fa39d05ac32806f0c8afe19f79ff6d2440f`.
+The same session, checkout and launch branch were observed busy after
+admission at `2026-10-25T18:59:23.4882067Z`. The immutable launched-binding
+snapshot is 4,238 bytes, SHA-256:
+`ce9969d90ba623e1b5669f39399766b43bcbd300037927c0375f073528dc1c22`.
+
+Preparation remains pinned to
+`4deaf30cc6656d4807918fa42870db742d453bc4`. Later main
+`0d5347a6e1b8a1716b524c537c4886d3f4d49b65` includes Watcher, Cargo.lock
+and design changes, not only artifacts. Local reports the selected node,
+task and launch policy unchanged and notified the existing owner; no
+integration acceptance or old review/CI evidence carries forward.
+
+A separate Local observation received at `2026-10-25T19:01:48.042Z`
+verified the same App session and checkout busy on current branch
+`lossyrob-intent-seed-preconditions`. The 2,289-byte immutable supplement
+has SHA-256:
+`a52c4a66e9f81c2cacd5c8a0339418c196e8f59e529bf3ae20fc711fc084eded`.
+This is an App-managed rename, not a second owner, checkout or preparation.
+The original branch/head, binding and kickoff remain launch history.
+Integration at `0d5347a6` and the test-only seed-clock/real-locking/
+diagnostic direction are owner reports, not source/design/CI approval.
+
+Local subsequently resolved App alias
+`1185656f-ec05-4f88-aacc-f09b2431f9ee` to the same canonical owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` using both App lookups. Both
+returned the same creation, parent, checkout and current branch. Local
+reports an App association to open
+[#194](https://github.com/lossyrob/telex/pull/194), not provider-head,
+source/design/CI or readiness verification. This is an observed alias,
+not a second owner or rebinding; source `call_UtzzXkcm6TehxV3uVwfqtPMU`.
+
+Local's later independent provider read at
+`2026-10-25T19:10:41.4572621Z` observed PR #194 OPEN/non-draft to main,
+head `f8b42d20acd3ae358a71a576d00c76b3f571ac6c`, branch
+`lossyrob-intent-seed-preconditions`, author `lossyrob`. Its 2,286-byte
+immutable identity/metadata packet has SHA-256:
+`eb2240d119727ff7e7d889b6683f0a7b060a3e9f0763c9bfe4cfb0b2a755e3be`.
+Source `call_W0agCbytXP9sVD4SUyKsNafs` qualifies the earlier App-only
+association, not source/design/CI or readiness. No alias namespace is
+inferred. The durable launch binding advanced only after snapshot custody;
+the original binding, branch observation and kickoff are not rewritten.
+
+Local sources are `call_vmhmemA3eGud4ZyEIR0cpqdr` and
+`call_PA0Ng9Q6cfSjeNBotN1A2KE1`; the owner branch report is
+`call_B8ehaIZT5wXISiDchvg2iXIH`. The reconciler read and byte-captured
+the immutable source packets; it did not inspect the owner's checkout,
+contexts, source, runtime or hosted validation, or launch another owner.
+All production 480ms/non-theft/fencing, no-widening/retry/flake-exception,
+hosted discrimination, reviewer-publication, design and Campaign gates
+remain. Launch is not implementation completion, a PR, readiness or debt
+clearance; Watcher state and the workstation freeze are unchanged.
