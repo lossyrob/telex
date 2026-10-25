@@ -2808,6 +2808,18 @@ deliberately stops *at* the deadline still has to hand back the page it stopped 
 exactly the deadline would discard every truncated page and turn a large scope's normal progress
 into permanent starvation.
 
+The cancellable filesystem boundary has one process-wide slot. Admission and worker
+completion share the same absolute endpoint `D + RECONCILE_BLOCKING_GRACE`; waiting
+for the slot does not renew the grace. A caller that cannot obtain the slot by that
+endpoint reports `Overran` without spawning a worker. An admitted scan still
+receives the original cooperative deadline `D`. Its successful partial page must
+be returned when available within the remaining completion window, but admission
+alone does not guarantee completion: a stalled or late worker, or a worker failure,
+can still produce `Overran`. On worker timeout the cancellation signal is set and
+the worker retains the slot until it actually exits. Tests of successful
+partial-page delivery therefore establish uncontended admission separately from
+tests of admission exhaustion and worker overrun.
+
 Phases whose *side effect* is pass-visible get a stronger rule than "bound the wait":
 `run_blocking_reserved` **declines to start them at all** unless the named reserve is still intact.
 The evidence CAS write and the round-robin cursor advance take `RECONCILE_DURABLE_WRITE_RESERVE`, and
