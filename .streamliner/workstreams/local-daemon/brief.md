@@ -260,6 +260,26 @@ credited. The owner's accepted-upstream/blocker-resolved language does not
 establish #187 main-CI/field/terminal acceptance or remove #181's dependency.
 All statuses, owners, ledger, gates, Watcher and freeze boundaries remain.
 
+A later source/design-only qualification supersedes that pending wording
+for unchanged `130be3` / `fd53e11c`, product base `d03492ea`.
+The source reviewer's public
+[receipt](https://github.com/lossyrob/telex/pull/185#issuecomment-6400606700)
+records zero blocking and zero non-blocking findings, with R1 still resolved.
+Local and the reconciler read the full public receipt; Local separately
+received reviewer `2d1c11d8`'s direct confirmation of its own `gh` post and
+existing REST body/head checks. Shared account identity alone is not
+publisher proof; raw execution history was not independently audited.
+This supports the reviewer-origin exact-head publication sub-floor, not
+overall readiness. The renewed exact-head steward design report is
+APPROVED with zero new/open findings and DI-185-01 resolved; Local and the
+reconciler matched its 17,092 bytes/hash and read it fully. Its earlier
+source-publication-pending statement is historical, not rewritten.
+Source and design remain distinct bounded verdicts, not CI/runtime proof.
+Run `40214432369` results and observer-registration completion are not
+credited. #187 main-CI/field/terminal acceptance, #181's dependency, all
+statuses/owners/ledger/gates, Watcher, freeze and historical #189 receipt
+debt remain unchanged. Any PR-head movement invalidates these receipts.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design

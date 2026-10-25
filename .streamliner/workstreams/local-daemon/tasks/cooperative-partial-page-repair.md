@@ -3,8 +3,8 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** blocked on accepted #187 delivery; main integrated at 130be3;
-  current-head review/design/CI and terminal acceptance remain pending
+- **Status:** blocked on accepted #187 delivery; source/design bound at
+  130be3; fresh full CI and terminal acceptance remain pending
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
@@ -386,6 +386,79 @@ CI success, operator readiness or Watcher #179 / PR #180 acceptance follows.
 All ledger records, owners, gates, #153, hardening/closure and workstation
 freeze remain unchanged. No local runtime, new owner/reviewer/observer,
 retry, consolidation, provider mutation or receipt-debt clearance follows.
+
+## Source/design receipt qualification - 2026-10-25
+
+The earlier new-head source/design/publication-pending wording is
+historical. Later independent receipts bind unchanged head
+`130be3b257e8208f521f9e4e91bc6795b991e023`,
+tree `fd53e11c478ae8e4b7ca19855734735803feac79`, product comparison base
+`d03492ea425f001df530f4405808d3a817558291`. This is distinct from canonical
+artifact main `a94e3f49`; neither the packet nor this reconciliation moves
+the PR head. Local's full
+`pr185-source-design-qualification-130be3-20261025.json` is 6,608 bytes,
+SHA-256
+`d8ec5650ab81f38b34327dcab74300b7bf040f6a671c10e35c538488ef7b101b`.
+
+The source reviewer's public
+[receipt](https://github.com/lossyrob/telex/pull/185#issuecomment-6400606700)
+is by `lossyrob`, created/updated 2026-10-25T17:09:04Z. Local and the
+reconciler independently read the full comment and matched its exact
+head/tree/base and limitations. Its retained UTF-8 body is 3,804 bytes,
+SHA-256
+`a31323348765c036dd5c1e073866235276ebbb1f105d5a158583d82a01d1d1ff`.
+The verdict is no remaining demonstrated source-review blockers, zero
+blocking and zero non-blocking findings; historical R1 remains resolved.
+The reviewer reports all three residual diffs and affected integration
+checks for one production slot/shared endpoint, original cooperative
+deadline, cancellation/permit lifetime, mandatory partial-page/one-item
+progress and corrected clock origin, integrated locks/generation controls
+and both source-pinned three-OS matrices. This is a bounded source verdict,
+not broad upstream re-review, design clearance, CI success, formal GitHub
+approval, issue closure or merge authorization.
+
+Local received direct reviewer `2d1c11d8-3a78-4818-8aec-7b8cbc845e8c`
+confirmation `call_Zbws1bj5KatiKgUKMFy0lEKb` that its own session posted
+the receipt with `gh pr comment` and `SourceReviewReceipt-130be3b.md`,
+received the canonical URL and performed existing REST body/head checks.
+The owner and delegated activity reviewer did not post on its behalf,
+according to that direct confirmation. Public existence/content is
+independently verified; raw publisher execution history was not audited by
+Local or the reconciler. The shared GitHub account alone is not used to
+infer App-session authorship. No new post, review or verification action
+was requested from the reviewer for that confirmation. Together these
+support the prospective reviewer-origin exact-head PR-publication
+sub-floor for `130be3`, not the overall readiness floor or retrospective
+clearance of PR #189's separate receipt debt.
+
+Steward `af271672-5d33-418c-bb9c-0f4d4570c7d7`'s renewed report
+`pr185-local-design-inspection-130be3b-20261025.md` is 17,092 bytes,
+SHA-256
+`270aa3da112b4e7f9c0acd536a87fb12b05db967dd815519c5e87b3afc60f8de`.
+Local and the reconciler matched retained bytes/hash and read it fully:
+APPROVED, zero new/open design findings, DI-185-01 remains resolved at the
+same exact head/tree/product base. It is a renewed bounded integration
+inspection of #181 partial-page and merged #187 lock invariants, with both
+matrices retained, not inherited old-head approval. Normalized whole-delta
+equality and source-region comparisons remain inspector/steward evidence;
+neither Local nor the reconciler repeated the product-source inspection.
+The report separately records retained steward `gpt-6-astra` / high /
+`long_context` and fresh inspector `8d7909e3` using `gpt-6.1-sol` / high /
+default. Its configured/runtime provenance checks remain attributed to the
+steward; no numeric capacity inference or new session launch follows.
+
+The design report's source-publication-still-needed wording is its earlier
+inspection-time snapshot, qualified only on that point by the later public
+receipt and publisher confirmation. The report and all previous receipts
+remain unchanged. Queued-CI wording in either source or design receipt is
+historical, not a fresh CI-result query. Run `40214432369` terminal results
+and observer-registration receipt remain uncredited. No overall readiness,
+#187 post-merge main CI/field/accepted delivery, dependency release, Watcher,
+#153, hardening/closure or workstation-freeze acceptance follows. Every
+status, owner, dependency, ledger record and gate remains unchanged.
+Any head movement invalidates source/design coverage pending new evidence.
+No duplicate source/design review, reviewer post, CI/runtime probe,
+scheduler query, provider mutation or debt clearance was performed here.
 
 ## Workflow
 
