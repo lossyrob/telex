@@ -1,0 +1,144 @@
+{
+  "component": "arm24-intel25-static-v1",
+  "authority_comments": [6400716200, 6401198510],
+  "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
+  "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
+  "prelaunch_status": {
+    "launch_ready": false,
+    "decoder_pins": "decision-needed: prelaunch hashes of Apple's native decoder/tool components are missing. Host-build checks and future observed hashes do not waive the prelaunch pin requirement.",
+    "intel_family": "decision-needed preflight review: the patch's x86_64 tag does not establish the reconstructed dyld family. The exact x86_64/no-x86_64h rule below is a proposal, not a proven content identity.",
+    "required_owner_freeze_fields": ["decoder_pin_disposition", "intel_family_disposition"]
+  },
+  "runner": {
+    "label": "macos-latest",
+    "architecture": "arm64",
+    "product_version": "26.6.2",
+    "build": "25G83",
+    "role": "static decoder host only; not native evidence for either selected class"
+  },
+  "limits": {
+    "workflow_minutes_per_job": 55,
+    "processing_seconds": 2700,
+    "download_seconds": 1200,
+    "parser_command_seconds": 900,
+    "reconstruction_seconds": 900,
+    "artifact_bytes_per_job": 33554432,
+    "artifact_files_per_job": 600,
+    "per_file_bytes": 2097152,
+    "per_command_log_bytes": 2097152,
+    "read_bytes": 8388608,
+    "metadata_input_bytes": 20971520,
+    "image_bytes": 34359738368,
+    "reserve_bytes": 2147483648,
+    "tool_stage_bytes": 268435456,
+    "functions": 64,
+    "function_bytes": 32768,
+    "code_bytes": 1048576,
+    "helper_depth": 6,
+    "fixup_pages": 32,
+    "image_metadata_count": 24,
+    "image_metadata_bytes": 8388608,
+    "export_trie_bytes": 2097152,
+    "export_nodes": 100000,
+    "max_same_sha_infrastructure_retries_total": 1
+  },
+  "tools": {
+    "ipsw": {
+      "version": "3.1.739",
+      "build": "1f8b657858d7510219f59bf9ba183bf4c0a59104",
+      "url": "https://github.com/blacktop/ipsw/releases/download/v3.1.739/ipsw_3.1.739_macOS_arm64.tar.gz",
+      "archive_bytes": 28498196,
+      "archive_sha256": "c09e8eba02c332f5b50d15f94383e59dd35646d70f6ea9e78d185e9afda6abc2",
+      "binary_bytes": 86263634,
+      "binary_sha256": "3a5482a6a02369ebaaf37d651131d88e7b11193408690a86fa31f96fc7f86984"
+    },
+    "7zz": {
+      "version": "26.05",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.05/7z2605-mac.tar.xz",
+      "archive_bytes": 1868068,
+      "archive_sha256": "12ef6830317743cfd3f0ab1724bde43fcc270d8b6d8564f8c12c2a2b7f993570",
+      "binary_bytes": 6072912,
+      "binary_sha256": "8e495531e1b2b8cb169ca583493922d4ab386007756418c15b95f07f642c35fb"
+    },
+    "apple_system_tools": {
+      "scope": "hdiutil and xcrun-selected otool; Apple's libParallelCompression through pinned ipsw",
+      "binding": "Require decoder-host product26.6.2/build25G83/arm64. Record resolved tool path, SHA256 and version; do not substitute another disassembler or decoder.",
+      "binary_hashes_known_before_launch": false
+    }
+  },
+  "roots": ["proc_listpids", "kill", "waitid", "posix_spawn", "execve", "fork", "vfork"],
+  "query_wrapper_scope": {
+    "additional_query_roots_proposed": [],
+    "excluded_examples": ["sysctlbyname", "sysctl", "dlsym", "dladdr"],
+    "disposition": "Runtime/guard admission-query wrapper evidence remains a later owner obligation. The seven cleanup/fork/exec roots do not close query-wrapper admission."
+  },
+  "retry_policy": {
+    "automatic_retries": 0,
+    "maximum_additional_job_attempts_total": 1,
+    "same_sha_required": true,
+    "failed_job_only": true,
+    "successful_job_rerun_forbidden": true,
+    "record_required_on_frozen_issue_comment": true,
+    "nonretryable": ["capacity", "provenance", "identity", "decoder", "semantic discrepancy", "incomplete preflight"],
+    "owner_action": "After a documented genuine infrastructure failure, amend the unique exact-SHA freeze record with infrastructure_retry and rerun only its exact failed job ID. Never rerun the workflow or all failed jobs."
+  },
+  "jobs": {
+    "ARM24": {
+      "product": "140-85388",
+      "build": "24G830",
+      "version": "15.7.9",
+      "url": "https://swcdn.apple.com/content/downloads/16/08/140-85388-A_3LX3Q36I6P/zxod6nr7zkovvsml6s628z44gdbc4exa5p/InstallAssistant.pkg",
+      "package_bytes": 15655958320,
+      "range_offset": 15292005,
+      "catalog_toc_sha1": "9b45bc4ef6f36decb1e7b41915956193d98d01df",
+      "dmg": {"bytes": 15640665291, "sha1": "82726f6620a1f9f7b25ce054996ee0d07c5ea193", "sha256": "fd9f33091a442203e4fc365fac8d5a390d4a013f10d657618ba618204605cfce"},
+      "hfs": {"member": "5.hfs", "bytes": 16846385152, "sha256": "f67d3ce67abcecc723f2cc4d9fed685f764ce5376e526d6f3eede6138e8902bf"},
+      "zip": {"member": "com_apple_MobileAsset_MacSoftwareUpdate/9d95c64142a9a426f56d3265d4f8a6fa31585333.zip", "bytes": 15630394567, "sha1": "9d95c64142a9a426f56d3265d4f8a6fa31585333", "sha256": "1c76ee0ffbc8bcb4ec74e94d2b68fe31032f90a9a52f39847ae7fa946fa36d45"},
+      "patch": {"member": "AssetData/payloadv2/image_patches/cryptex-system-arm64e", "bytes": 3739720226, "sha256": "b52cea9e8a7669a14f2a9113d2b6e9b62261dd4bf37d8dcbfed990f3df09121c"},
+      "mounted_metadata": [
+        {"member": "InstallInfo.plist", "bytes": 181, "sha256": "97704a8960b4facceef54397a08fb5d0a456247c3627359215aa2a27df22656c"},
+        {"member": "com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml", "bytes": 1428236, "sha256": "2c3c461805a2305110eb9eafee76bd7cc9c440d66538b0b635cc388678bffdfb"}
+      ],
+      "zip_metadata": [
+        {"member": "Info.plist", "bytes": 5706, "sha256": "00b338ab95a1c9243c5c10ab8d2031256703553fba8d4244304bac4b53f04eba"},
+        {"member": "AssetData/Info.plist", "bytes": 2206, "sha256": "905e348f4516446c82ae1fb8b0400886c47cf3651862a72072edafb26a4b24b3"},
+        {"member": "AssetData/boot/BuildManifest.plist", "bytes": 13693069, "sha256": "7812eca53244c81ef8eaa8b8252dbbc343ef2a556750253ec4f20f39c32bac6a"}
+      ],
+      "catalog_entries": 84,
+      "manifest_variants": {"CustomerInstall": 17, "CustomerFirmwareUpdate": 17, "RecoveryBoot": 17, "macOS Customer Software Update": 48, "Customer Software Update": 48},
+      "cache_family": "arm64e",
+      "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_arm64e", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e"],
+      "family_rule": "Require exactly one regular nonsymlink primary among the two exact paths, matching arm64e magic and arm64e image CPU/subtype. No other family.",
+      "uuid_evidence": "new offline candidates; no expected native library UUIDs"
+    },
+    "Intel25": {
+      "product": "140-93587",
+      "build": "25G83",
+      "version": "26.6.2",
+      "url": "https://swcdn.apple.com/content/downloads/37/33/140-93587-A_GRFFH93NOL/f944yaqo1cjhh2m0kxrl0zhcpg9yb9qphv/InstallAssistant.pkg",
+      "package_bytes": 18384624402,
+      "range_offset": 17953771,
+      "catalog_toc_sha1": "9545b959cab5c536998c45f0fdd4b5d3832dc6f7",
+      "dmg": {"bytes": 18366669607, "sha1": "65adfb4192ad9e8b6282f3ecc480cd3cafdabfef", "sha256": "9327c292fb8f804f17b7bcde542aa523d27014606bc3d74e8f3dc3b892399354"},
+      "hfs": {"member": "5.hfs", "bytes": 19705679872, "sha256": "e81000d15749a312825ad4e4cbca959ef44bfd89ca0adf3e9415a2dc61d1a0b8"},
+      "zip": {"member": "com_apple_MobileAsset_MacSoftwareUpdate/60533a8ae8e47c23593a6965d64c1f00a6396cfe.zip", "bytes": 18356020461, "sha1": "60533a8ae8e47c23593a6965d64c1f00a6396cfe", "sha256": "0b44a71bd6a721f5ddfb46f8dba39b09ee46bf9678a1c3100b978f512acfc07c"},
+      "patch": {"member": "AssetData/payloadv2/image_patches/cryptex-system-x86_64", "bytes": 1598443858, "sha256": "8f53d47470e988b6a26ad392cb96ba8000898d4e9823145750c9da9178179d44"},
+      "mounted_metadata": [
+        {"member": "InstallInfo.plist", "bytes": 181, "sha256": "97704a8960b4facceef54397a08fb5d0a456247c3627359215aa2a27df22656c"},
+        {"member": "com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml", "bytes": 1518413, "sha256": "6942d65fc7fdfa2eb55dd44a9479d1358cbc1f91d7b7b031d5692c56e209fa9f"}
+      ],
+      "zip_metadata": [
+        {"member": "Info.plist", "bytes": 5257, "sha256": "8659fdc115aa7e26a3bce2b7637eccf748c94cfb89712f0d28b76e78eded14a1"},
+        {"member": "AssetData/Info.plist", "bytes": 2184, "sha256": "2c413816ba05814f4b5a04d0117eb2f7f57623dbd05c3e71ade78dd5bd2b3fb2"},
+        {"member": "AssetData/boot/BuildManifest.plist", "bytes": 16787198, "sha256": "8e5c69b36a0f7e4948e8164b86f2dcb6919cc079cbb7a2cfa988f91814553674"}
+      ],
+      "catalog_entries": 73,
+      "manifest_variants": {"CustomerInstall": 8, "CustomerFirmwareUpdate": 8, "RecoveryBoot": 8, "macOS Customer Software Update": 56, "Customer Software Update": 56},
+      "cache_family": "x86_64",
+      "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_x86_64", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64"],
+      "ambiguity_checks": ["System/Library/dyld/dyld_shared_cache_x86_64h", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64h"],
+      "family_rule": "PROPOSED ONLY, requiring prelaunch disposition: require exactly one x86_64 regular primary among the two exact paths and no x86_64h primary at either checked path. Validate x86_64 magic and CPU subtype3. The patch's x86_64 tag does not prove this family selection. Missing, duplicate, mixed-family or different-subtype content is decision-needed, not permission to pick x86_64h.",
+      "uuid_evidence": "new offline candidates; no expected native library UUIDs"
+    }
+  }
+}

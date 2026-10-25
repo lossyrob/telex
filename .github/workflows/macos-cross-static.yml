@@ -1,0 +1,72 @@
+name: ARM24 Intel25 offline candidates
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-containment-proof
+    paths:
+      - tests/macos_cross_static/**
+      - .github/workflows/macos-cross-static.yml
+
+permissions:
+  contents: read
+  issues: read
+  actions: read
+
+jobs:
+  ARM24:
+    name: ARM24
+    runs-on: macos-latest
+    timeout-minutes: 55
+    if: github.run_attempt <= 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline source tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests/macos_cross_static -p test_component.py
+      - name: Frozen ARM24 static processing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/macos_cross_static/run.py ARM24 "$RUNNER_TEMP/cross-arm24-work" "$RUNNER_TEMP/cross-arm24-evidence"
+      - name: Bound evidence
+        id: bound
+        if: always()
+        run: |
+          python3 -c 'from pathlib import Path; import os; p=Path(os.environ["RUNNER_TEMP"])/"cross-arm24-evidence"; f=list(p.iterdir()); assert len(f)<=600 and all(x.is_file() and not x.is_symlink() and x.stat().st_size<=2097152 for x in f); assert sum(x.stat().st_size for x in f)<=33554432; assert (p/"sha256.json").is_file()'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.bound.outcome == 'success'
+        with:
+          name: ARM24-static-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cross-arm24-evidence
+          if-no-files-found: error
+          retention-days: 30
+  Intel25:
+    name: Intel25
+    runs-on: macos-latest
+    timeout-minutes: 55
+    if: github.run_attempt <= 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline source tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests/macos_cross_static -p test_component.py
+      - name: Frozen Intel25 static processing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/macos_cross_static/run.py Intel25 "$RUNNER_TEMP/cross-intel25-work" "$RUNNER_TEMP/cross-intel25-evidence"
+      - name: Bound evidence
+        id: bound
+        if: always()
+        run: |
+          python3 -c 'from pathlib import Path; import os; p=Path(os.environ["RUNNER_TEMP"])/"cross-intel25-evidence"; f=list(p.iterdir()); assert len(f)<=600 and all(x.is_file() and not x.is_symlink() and x.stat().st_size<=2097152 for x in f); assert sum(x.stat().st_size for x in f)<=33554432; assert (p/"sha256.json").is_file()'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.bound.outcome == 'success'
+        with:
+          name: Intel25-static-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cross-intel25-evidence
+          if-no-files-found: error
+          retention-days: 30
