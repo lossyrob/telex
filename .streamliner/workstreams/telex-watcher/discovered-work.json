@@ -341,6 +341,16 @@
         {
           "source": "coordinator-report",
           "details": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 reports that the #177 owner took one failed-job retry of run 39978847760 at unchanged head 439eeb6c329591fcab6ace1ea1ee9c81f381d1fc. Attempt 2 was independently observed in progress at that same head. The owner posted the linked retention records for both complete first-attempt artifacts and raw logs, retained before that retry; downloaded executables were not run. A green retry is CI evidence only, not a causal fix. The external Local Daemon disposition and ledger status remain unchanged; no Watcher graph or status change is made."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/167#issuecomment-6402916045",
+          "createdAt": "2026-10-25T20:36:34Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40230509989",
+          "job": "121280997219",
+          "head": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
+          "issue": "https://github.com/lossyrob/telex/issues/167",
+          "details": "Recurrence for #167, with no new disposition. Owning Watcher's complete public comment records the PR #202 (#198 classifier) owner's report: run 40230509989 attempt 1 at head 02d2cbbdb93af264d46763c6d86b0b8ea5691f14 failed only in credential_command_shell_exit_preserves_delayed_inherited_writer, tests/credential_command.rs:516 Elapsed(()), job 121280997219. The claims that #202 does not touch credential code and that classifier tests passed remain owner-reported, not a reconciler source or CI inspection. The comment also reports one failed-job rerun at the same head; this is a reported owner action, not a new retry authorization, repair, waiver or readiness credit, and does not erase the first failed attempt. The reconciler captured and read the complete public comment, not the raw job log, source or retry outcome. Existing Local Daemon ownership, routing and all prior observations remain unchanged; no new issue, node, owner, dependency, status, disposition or debt/HOLD clearance follows."
         }
       ]
     },
