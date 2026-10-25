@@ -3,14 +3,16 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** blocked on accepted #187 delivery; existing owner authorized
-  to integrate main into draft PR #185 and revalidate
+- **Status:** blocked on accepted #187 delivery; main integrated at 130be3;
+  current-head review/design/CI and terminal acceptance remain pending
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
-- **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft
+- **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft;
+  head `130be3b257e8208f521f9e4e91bc6795b991e023`,
+  tree `fd53e11c478ae8e4b7ca19855734735803feac79`
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
@@ -323,6 +325,67 @@ No retrospective receipt, new review, posting for a reviewer, empty formal
 approval, merge reversal or issue reopening is requested. Reviewer
 publication alone establishes no CI, merge authority, accepted delivery,
 Watcher readiness or gate completion.
+
+## Integrated draft-head receipt - 2026-10-25
+
+The earlier `7b11b926` and integration-pending statements are historical
+snapshots. PR #185 is OPEN/draft at
+`130be3b257e8208f521f9e4e91bc6795b991e023`,
+tree `fd53e11c478ae8e4b7ca19855734735803feac79`, same owner and branch
+`lossyrob-cooperative-partial-page-repair`, base `main`, `Closes #181`.
+Local and the reconciler verified PR identity and immutable commit
+metadata: ordered parents are
+`7b11b92630d0b2cf63423a77fc19232aff368825` and actual PR #189 merge
+`d03492ea425f001df530f4405808d3a817558291`. This verifies the authorized
+main integration, not the complete merge diff, source correctness or
+runtime behavior. The reconciler read no product contents; neither
+executed validation for this qualification.
+
+Local's full `pr185-integrated-head-qualification-20261025.json` is
+4,830 bytes, SHA-256
+`9b9954f20a44c3d2fea5be94e94ed0c98a69ee9d6d1ce04f8c0580158fa38354`.
+The owner
+[receipt](https://github.com/lossyrob/telex/pull/185#issuecomment-6400532965)
+is by `lossyrob`, created/updated 2026-10-25T17:02:17Z. Local and the
+reconciler read it fully. Its retained body is 1,447 UTF-8 bytes, SHA-256
+`202c4022ec5217ca87056e2a8308a09386870f1fbb97a47230457eb78f2179ed`.
+
+The owner reports a clean main merge with no additional lock workaround,
+retry, skip or threshold change. Both three-OS cooperative partial-page
+and upstream station-intent-lock matrices, ten real partial-page
+repetitions, owner-private filesystem coverage and existing provider-merge
+suites remain. The owner reports later Campaign routing defers
+consolidation assessment to the sentinel until after #185 lands and the
+uncommitted consolidation draft was withdrawn before publication. These
+are attributed source/routing claims, not the reconciler's product/YAML
+inspection or authority for consolidation, matrix removal or another retry.
+Formatting, SQLite library unit-test compilation without execution,
+strict production-library Clippy and whitespace checks passed according to
+the owner, not independent execution here. This does not validate the
+broader optional test-Clippy command or rewrite its separate evidence.
+
+Local's one bounded provider read confirmed
+[run 40214432369](https://github.com/lossyrob/telex/actions/runs/40214432369),
+`pull_request`, attempt 1 at exact head `130be3`; Local queried no result
+or log. The reconciler did not query the run, CI results or scheduler.
+The owner reports asking the existing sole coordinator to register it;
+registration receipt is pending in this snapshot. No new observer or
+registration completion is credited. New-head source/design requests are
+owner-reported and outstanding, not completed verdicts. The reviewer must
+publish its own exact-current-head PR receipt under the prospective floor,
+including for no findings; no one posts on the reviewer's behalf here.
+
+The owner's accepted-upstream/blocker-resolved wording does not establish
+#187 post-merge main CI, field report or accepted terminal delivery. This
+packet supplies neither that evidence nor dependency-removal authority.
+Campaign's integration/revalidation permission is observed without
+clearing those separate obligations. #187 remains in progress and this
+node blocked with its sole #187 dependency intact. Old-head review/design
+and failed-CI evidence cannot clear `130be3`; no current-head source/design/
+CI success, operator readiness or Watcher #179 / PR #180 acceptance follows.
+All ledger records, owners, gates, #153, hardening/closure and workstation
+freeze remain unchanged. No local runtime, new owner/reviewer/observer,
+retry, consolidation, provider mutation or receipt-debt clearance follows.
 
 ## Workflow
 

@@ -238,6 +238,28 @@ clearance, merge reversal, issue reopening or runtime action is authorized.
 This supplement changes no ledger, owner, status, dependency, workstation
 freeze, #153, Watcher or hardening/closure gate.
 
+A later Local qualification records OPEN/draft
+[PR #185](https://github.com/lossyrob/telex/pull/185) at
+`130be3b257e8208f521f9e4e91bc6795b991e023`,
+tree `fd53e11c478ae8e4b7ca19855734735803feac79`, with ordered parents
+`7b11b92630d0b2cf63423a77fc19232aff368825` and actual PR #189 merge
+`d03492ea425f001df530f4405808d3a817558291`. Local and the reconciler
+verified PR and immutable commit metadata, not the complete merge diff.
+This observes the authorized integration; the older `7b11b926` and
+integration-pending statements are historical. Local verified the identity
+of run `40214432369`, `pull_request`, attempt 1 at this head, not its
+results; the reconciler did not query CI. The owner's public receipt
+reports both three-OS matrices and ten real partial-page repetitions kept,
+no workaround or threshold change, compile-only checks passed, and new-head
+source/design requests pending. Its reported later Campaign routing defers
+consolidation assessment until after #185 lands; this authorizes no
+consolidation or matrix removal. Sole-observer registration is pending in
+this snapshot. Fresh head-bound review/design/CI evidence and the source
+reviewer's own exact-head public receipt remain pending; no readiness is
+credited. The owner's accepted-upstream/blocker-resolved language does not
+establish #187 main-CI/field/terminal acceptance or remove #181's dependency.
+All statuses, owners, ledger, gates, Watcher and freeze boundaries remain.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
