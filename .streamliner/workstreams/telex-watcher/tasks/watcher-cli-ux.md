@@ -452,3 +452,114 @@ Stop and report `decision-needed` if implementation requires:
 - a split without an independently useful boundary and explicit join
   conditions; or
 - launch before the completed and reconciled `watcher-runtime-core`.
+
+## Accepted terminal delivery - 2026-10-25
+
+Campaign accepted bounded #179 delivery after PR #180 merged as
+`0d5347a6e1b8a1716b524c537c4886d3f4d49b65`, exact-main CI passed 21/21
+and the owner published the
+[final field report](
+https://github.com/lossyrob/telex/issues/179#issuecomment-6401968111).
+Owning Watcher separately directs completed status with watch attention.
+Owner `c90bafbb-6e49-4ced-a684-e15cfadfc69e` is finished and retained as
+historical owner; no replacement or new launch follows. Earlier
+pending, blocked, in-progress and readiness statements above are snapshots,
+not the current terminal disposition. Their policy and evidence limits
+remain in force.
+
+### Distinct readiness, proof, gate and terminal facts
+
+**Owner readiness, not merge authority.** The
+[ready packet](
+https://github.com/lossyrob/telex/pull/180#issuecomment-6401567213)
+reports source `05d48500d47418e5cffddfcc619d7d6117af784a`,
+[required run 40220250174](
+https://github.com/lossyrob/telex/actions/runs/40220250174) successful
+21/21, fresh reviewer-owned source/R17 and design receipts. The full
+Windows job executed provider merge
+`f909b296dcc1a2c11edaf65eb983e173ef023f75`; this is not direct
+source-head execution. Dedicated boundary jobs separately verified the
+direct source head. Readiness requested Campaign's gate, not self-merge.
+
+**Proof applicability, not a rerun.** The isolated proof actually ran at
+`2a04cd1a5ec48578efeefe739f8c9ce91691575f`. Campaign's
+[explicit applicability decision](
+https://github.com/lossyrob/telex/pull/180#issuecomment-6401339475)
+carries it to `05d48500` on product-tree equivalence across exactly seven
+CI, CONTRIBUTING and Local-ledger paths. The proof stays an execution at
+its original head; old reviews or CI are not silently carried forward.
+No new local or hosted field proof was directed. Receipt-time push,
+recipient consumption and workflow disposition remain distinct axes.
+
+**Campaign gate and operator approval.** The
+[public gate](
+https://github.com/lossyrob/telex/pull/180#issuecomment-6401765994)
+cleared exact source `05d48500` as **merge + debt (medium-high)**. The
+security/ACL hard stop went to the operator. Campaign reports the actual
+ask_user choice "Merge it (Recommended)" at about 18:53Z, under section 2
+of the v2 merge gate; planning ledger commit `dd857a7` records the gate.
+The public gate, operator decision and technical readiness are separate
+facts. Operator approval does not establish missing cross-user evidence.
+
+**Actual merge.** PR #180 merged on 2026-10-25 as
+`0d5347a6e1b8a1716b524c537c4886d3f4d49b65`; Campaign reports use of
+`--match-head-commit 05d48500`. Merge and issue closure alone are not
+delivery acceptance.
+
+**Merged-main CI.** The owner reports
+[run 40223537702](
+https://github.com/lossyrob/telex/actions/runs/40223537702), attempt 1 at
+that exact merge, completed 21/21 successfully, observed at
+`2026-10-25T19:12:23.746Z`. Its full Windows job checked out exact main,
+not a PR provider merge. This is the field report's hosted observation,
+not a new reconciler log inspection, retry or runtime execution.
+
+**Field report and accepted delivery.** The report submitted acceptance
+separately and retained the gate's debts. Campaign subsequently accepted
+terminal delivery directly at `0d5347a6`; the owner reports Campaign's
+acceptance at 19:13:53Z. Owning Watcher then separately completed #179.
+No owned proof process or CI observer remains, according to the owner.
+Design impact is `updated-docs`: the product/design references and ADR
+0055 already landed through PR #180. This artifact section changes none
+of those documents.
+
+### Accepted debt retained without upgrading evidence
+
+The field report's four debt paragraphs are retained below, with line
+wrapping only:
+
+1. Different-OS-user refusal has **not been exercised at runtime**.
+   Access-rule assertions, same-user behavior and manual-check guidance
+   do not substitute for an actual cross-user connection/refusal test.
+2. The PR's recorded consequence is `normal`; Campaign says it arguably
+   should be `high`. The security/ACL stop therefore went to the operator,
+   who approved the merge. This report does not silently relabel that
+   history.
+3. Reviews since `8826fad7` have been delta-only and from the same model
+   family as the owner. Exact-head reviewer-owned receipts exist; they do
+   not supply cross-family or fresh full-diff assurance.
+4. The reviewer's earlier workstation `ApplicationClient::connect` setup
+   observation remains unconfirmed and excluded from validation. Prior
+   owner local test shells also lacked imposed outer TELEX overrides.
+   Those execution disclosures are retained, not the validation basis or
+   a diagnosis. If the connection observation recurs in hosted evidence,
+   Local owns attribution.
+
+The successful main job also passed the #193 seed candidate, but does not
+establish the cause or resolution of Local's earlier refusal. Separate
+Local #193 remains Local-owned; no retry, skipped assertion, lock-policy
+change, flake exception or shared-component repair is inferred.
+
+### Readiness consequence and unchanged closure
+
+Both dependencies of `five-minute-custom-watch-gate` are now completed.
+Its status stays planned and attention stays focus: ready is derived,
+not a new status value. It is pending with the operator/Campaign, with
+no Watcher owner or launch. Completing #179 does not pass that usability
+gate or complete the product-level usable checkpoint.
+
+`closure-gate` still depends on `runtime-hardening` and
+`watcher-macos-containment-runtime` (#172). The #172 HOLD, all other
+nodes/checkpoints/edges, the Watcher ledger and every Local record remain
+unchanged. No packaging, service installation, hardening/admission,
+release, debt clearance or workstation-freeze waiver follows.
