@@ -2348,6 +2348,11 @@ daemon is running **and** this producer proves it is alive, restore this exact p
   `LockFileEx` on fixed local Windows volumes). The file is never deleted, renamed, replaced, aged
   out, or stolen. An unprovable owner/privacy/local-filesystem/lock condition fails closed; a live
   hung holder yields bounded degradation. Kernel process-death cleanup releases a held lock.
+  Acquisition shares one monotonic 480ms budget (the existing 24 retries at 20ms), with at most
+  25 attempts. Filesystem-call time and sleep overshoot consume that same budget; sleeps are
+  capped by its remainder. No attempt starts, and no acquired guard is granted to a writer, once
+  the budget is spent. A synchronous filesystem call or a descheduled thread cannot be preempted:
+  after control returns, a late successful guard is released and acquisition fails closed.
 - A bounded scan reports `discovery_truncated`; an incomplete GC also degrades the enclosing pass.
   In either case `observed_count` and `over_cap` are lower bounds only, and automatic discovery and
   GC have only conditional eventual coverage. They make no stable-tail fairness, complete-GC, or
@@ -2802,6 +2807,18 @@ the cooperative deadline from the hard one for the two scanning phases, because 
 deliberately stops *at* the deadline still has to hand back the page it stopped on — waiting to
 exactly the deadline would discard every truncated page and turn a large scope's normal progress
 into permanent starvation.
+
+The cancellable filesystem boundary has one process-wide slot. Admission and worker
+completion share the same absolute endpoint `D + RECONCILE_BLOCKING_GRACE`; waiting
+for the slot does not renew the grace. A caller that cannot obtain the slot by that
+endpoint reports `Overran` without spawning a worker. An admitted scan still
+receives the original cooperative deadline `D`. Its successful partial page must
+be returned when available within the remaining completion window, but admission
+alone does not guarantee completion: a stalled or late worker, or a worker failure,
+can still produce `Overran`. On worker timeout the cancellation signal is set and
+the worker retains the slot until it actually exits. Tests of successful
+partial-page delivery therefore establish uncontended admission separately from
+tests of admission exhaustion and worker overrun.
 
 Phases whose *side effect* is pass-visible get a stronger rule than "bound the wait":
 `run_blocking_reserved` **declines to start them at all** unless the named reserve is still intact.

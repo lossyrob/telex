@@ -112,6 +112,44 @@ const ENUMERATION_DEADLINE_STRIDE: usize = 64;
 const INTENT_LOCK_SUFFIX: &str = ".lock";
 const INTENT_LOCK_ATTEMPTS: u32 = 25;
 const INTENT_LOCK_RETRY: Duration = Duration::from_millis(20);
+const INTENT_LOCK_TIMEOUT: Duration = INTENT_LOCK_RETRY.saturating_mul(INTENT_LOCK_ATTEMPTS - 1);
+
+fn acquire_intent_lock<T>(
+    id: &IntentId,
+    mut try_acquire: impl FnMut() -> platform_fs::Result<T>,
+    mut now: impl FnMut() -> Instant,
+    mut sleep: impl FnMut(Duration),
+) -> Result<T> {
+    let deadline = now() + INTENT_LOCK_TIMEOUT;
+    for attempt in 0..INTENT_LOCK_ATTEMPTS {
+        if now() >= deadline {
+            break;
+        }
+        match try_acquire() {
+            Ok(lock) => {
+                // A synchronous filesystem call cannot be preempted. A late acquisition must
+                // release its guard rather than admit a mutation after the budget is spent.
+                if now() < deadline {
+                    return Ok(lock);
+                }
+                break;
+            }
+            Err(platform_fs::FsError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(IntentError::from(error)),
+        }
+        if attempt + 1 < INTENT_LOCK_ATTEMPTS {
+            let remaining = deadline.saturating_duration_since(now());
+            if remaining.is_zero() {
+                break;
+            }
+            sleep(INTENT_LOCK_RETRY.min(remaining));
+        }
+    }
+    Err(IntentError::Io(format!(
+        "intent {id} is locked by another writer or its acquisition budget expired"
+    )))
+}
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -1264,6 +1302,9 @@ where
 
 /// Run blocking work with a cooperative cancellation signal for work that can mutate durable state.
 ///
+/// Admission and completion share `deadline + grace`. A cooperative partial page is returned
+/// only if admission and successful worker completion both fit inside that window.
+///
 /// On timeout the caller stops waiting and signals the worker before returning. The worker must
 /// check the signal immediately before every durable commit. A signal prevents new work where it
 /// is observed, but cannot interrupt a syscall that already entered rename or unlink; a timed-out
@@ -1277,29 +1318,44 @@ where
     F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
     T: Send + 'static,
 {
+    run_blocking_cancellable_in_slot(filesystem_phase_slot(), deadline, grace, work).await
+}
+
+fn filesystem_phase_slot() -> Arc<tokio::sync::Semaphore> {
     // Discovery and GC can block on a filesystem indefinitely. Permit at most one such phase for
     // the process, so a wedged scope cannot consume Tokio's shared blocking capacity on every
     // heartbeat and starve unrelated backend work.
     static FILESYSTEM_PHASE_SLOT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-    let slot = FILESYSTEM_PHASE_SLOT
+    FILESYSTEM_PHASE_SLOT
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
-        .clone();
+        .clone()
+}
+
+async fn run_blocking_cancellable_in_slot<T, F>(
+    slot: Arc<tokio::sync::Semaphore>,
+    deadline: PassDeadline,
+    grace: Duration,
+    work: F,
+) -> BoundedPhase<T>
+where
+    F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
+    T: Send + 'static,
+{
     // Permit acquisition and cooperative completion share one absolute
     // `deadline + grace` boundary. A spent cooperative deadline must still be
     // able to acquire an immediately available slot and return its mandatory
     // partial page, but contention must not receive one grace window for the
     // slot and a second grace window for the work.
-    let completion_deadline = deadline.0.map(|deadline| deadline + grace);
+    let completion_deadline = deadline
+        .0
+        .map(|deadline| tokio::time::Instant::from_std(deadline + grace));
     let permit = match completion_deadline {
-        Some(completion_deadline) => match tokio::time::timeout(
-            completion_deadline.saturating_duration_since(Instant::now()),
-            slot.acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
-        },
+        Some(completion_deadline) => {
+            match tokio::time::timeout_at(completion_deadline, slot.acquire_owned()).await {
+                Ok(Ok(permit)) => permit,
+                Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
+            }
+        }
         None => match slot.acquire_owned().await {
             Ok(permit) => permit,
             Err(_) => return BoundedPhase::Overran,
@@ -1312,19 +1368,16 @@ where
         work(worker_cancelled)
     });
     match completion_deadline {
-        Some(completion_deadline) => match tokio::time::timeout(
-            completion_deadline.saturating_duration_since(Instant::now()),
-            handle,
-        )
-        .await
-        {
-            Ok(Ok(value)) => BoundedPhase::Completed(value),
-            Ok(Err(_)) => BoundedPhase::Overran,
-            Err(_) => {
-                cancelled.store(true, Ordering::Release);
-                BoundedPhase::Overran
+        Some(completion_deadline) => {
+            match tokio::time::timeout_at(completion_deadline, handle).await {
+                Ok(Ok(value)) => BoundedPhase::Completed(value),
+                Ok(Err(_)) => BoundedPhase::Overran,
+                Err(_) => {
+                    cancelled.store(true, Ordering::Release);
+                    BoundedPhase::Overran
+                }
             }
-        },
+        }
         None => match handle.await {
             Ok(value) => BoundedPhase::Completed(value),
             Err(_) => BoundedPhase::Overran,
@@ -1885,7 +1938,9 @@ impl IntentStore {
 
     /// Acquire the per-intent write lock, or fail rather than write unserialized.
     ///
-    /// Bounded (never blocks a reconcile pass past its per-intent budget) and process-death-safe.
+    /// Retries share one elapsed-time budget and are process-death-safe. An entered synchronous
+    /// filesystem call or a descheduled thread cannot be interrupted, but once control returns a
+    /// spent budget admits neither another attempt nor a successful guard.
     ///
     /// The persistent lock file is owner-private and opened only after the platform verifies a
     /// supported local filesystem. Its OS lock is released by process death; it is never aged out,
@@ -1895,24 +1950,12 @@ impl IntentStore {
         let path = self
             .root
             .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
-        for attempt in 0..INTENT_LOCK_ATTEMPTS {
-            match platform_fs::try_acquire_owner_private_advisory_lock(&path) {
-                Ok(lock) => return Ok(lock),
-                Err(platform_fs::FsError::Io { source, .. })
-                    if source.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    if attempt + 1 < INTENT_LOCK_ATTEMPTS {
-                        std::thread::sleep(INTENT_LOCK_RETRY);
-                    }
-                }
-                Err(error) => {
-                    return Err(IntentError::from(error));
-                }
-            }
-        }
-        Err(IntentError::Io(format!(
-            "intent {id} is locked by another writer"
-        )))
+        acquire_intent_lock(
+            id,
+            || platform_fs::try_acquire_owner_private_advisory_lock(&path),
+            Instant::now,
+            std::thread::sleep,
+        )
     }
 
     /// **Withdraw** one binding's desired state: the single fallible, linearized operation behind
@@ -2460,10 +2503,26 @@ impl IntentStore {
         scope: Option<String>,
         deadline: PassDeadline,
     ) -> BoundedPhase<Result<ScanPage>> {
+        self.scan_bounded_in_slot(budget, scope, deadline, filesystem_phase_slot())
+            .await
+    }
+
+    async fn scan_bounded_in_slot(
+        &self,
+        budget: usize,
+        scope: Option<String>,
+        deadline: PassDeadline,
+        slot: Arc<tokio::sync::Semaphore>,
+    ) -> BoundedPhase<Result<ScanPage>> {
         let store = self.clone();
-        run_blocking_cancellable_within(deadline, RECONCILE_BLOCKING_GRACE, move |cancelled| {
-            store.scan_bounded_cancellable(budget, scope.as_deref(), deadline, Some(&cancelled))
-        })
+        run_blocking_cancellable_in_slot(
+            slot,
+            deadline,
+            RECONCILE_BLOCKING_GRACE,
+            move |cancelled| {
+                store.scan_bounded_cancellable(budget, scope.as_deref(), deadline, Some(&cancelled))
+            },
+        )
         .await
     }
 
@@ -3825,10 +3884,11 @@ mod tests {
             .expect("seed");
 
         let page = store
-            .scan_bounded_within(
+            .scan_bounded_in_slot(
                 64,
                 None,
                 PassDeadline::at(Instant::now() + RECONCILE_SCAN_BOUND),
+                Arc::new(tokio::sync::Semaphore::new(1)),
             )
             .await
             .completed()
@@ -3856,14 +3916,23 @@ mod tests {
                 .expect("seed");
         }
 
-        // Already spent, so discovery stops after its mandatory first read — the worst case for
-        // the outer wait, which has only the grace period to work with.
+        // Establish uncontended admission and timely completion independently of other tests and
+        // OS scheduling. Tokio does not auto-advance its paused clock while spawn_blocking runs;
+        // the scan's std::time deadline still expires and enforces the mandatory partial page.
+        tokio::time::pause();
+        let completion_clock = tokio::time::Instant::now();
         let page = store
-            .scan_bounded_within(64, None, spent_deadline())
+            .scan_bounded_in_slot(
+                64,
+                None,
+                PassDeadline::at(completion_clock.into_std()),
+                Arc::new(tokio::sync::Semaphore::new(1)),
+            )
             .await
             .completed()
             .expect("a cooperative stop must be returned to the caller, not abandoned")
             .expect("scan");
+        assert_eq!(tokio::time::Instant::now(), completion_clock);
         assert!(
             page.discovery_truncated,
             "this asserts nothing unless discovery actually stopped short"
@@ -3874,6 +3943,161 @@ mod tests {
             "the mandatory first read is the progress a spent pass still owes the scope"
         );
         let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellable_phase_admission_timeout_never_starts_a_worker() {
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slot.clone().acquire_owned().await.expect("hold slot");
+        let started = Arc::new(AtomicBool::new(false));
+        let worker_started = started.clone();
+        let phase = run_blocking_cancellable_in_slot(
+            slot.clone(),
+            spent_deadline(),
+            RECONCILE_BLOCKING_GRACE,
+            move |_| worker_started.store(true, Ordering::Release),
+        )
+        .await;
+
+        assert!(phase.overran(), "an unavailable slot cannot yield a page");
+        assert!(!started.load(Ordering::Acquire), "no worker was admitted");
+        assert_eq!(
+            slot.available_permits(),
+            0,
+            "the holder still owns the slot"
+        );
+        drop(permit);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellable_phase_admission_and_worker_share_one_completion_deadline() {
+        use std::future::{poll_fn, Future};
+        use std::sync::mpsc;
+        use std::task::Poll;
+
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slot.clone().acquire_owned().await.expect("hold slot");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let committed = Arc::new(AtomicBool::new(false));
+        let worker_committed = committed.clone();
+        let clock_origin = tokio::time::Instant::now();
+        let deadline = PassDeadline::at(clock_origin.into_std());
+        let completion_deadline = clock_origin + RECONCILE_BLOCKING_GRACE;
+        let phase = run_blocking_cancellable_in_slot(
+            slot.clone(),
+            deadline,
+            RECONCILE_BLOCKING_GRACE,
+            move |cancelled| {
+                started_tx
+                    .send(cancelled.clone())
+                    .expect("report worker entry");
+                let _ = release_rx.recv();
+                if !cancelled.load(Ordering::Acquire) {
+                    worker_committed.store(true, Ordering::Release);
+                }
+            },
+        );
+        tokio::pin!(phase);
+
+        poll_fn(|cx| {
+            assert!(phase.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert!(matches!(
+            started_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        tokio::time::advance(RECONCILE_BLOCKING_GRACE / 2).await;
+        drop(permit);
+        poll_fn(|cx| {
+            assert!(phase.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        // Synchronize with the blocking thread without allowing the paused clock to auto-advance.
+        let cancelled = started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("admitted worker started");
+        tokio::time::advance(RECONCILE_BLOCKING_GRACE / 2 + Duration::from_millis(1)).await;
+        poll_fn(|cx| {
+            assert!(
+                matches!(phase.as_mut().poll(cx), Poll::Ready(BoundedPhase::Overran)),
+                "the original completion deadline must end the wait for the admitted worker"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        assert!(
+            tokio::time::Instant::now() <= completion_deadline + Duration::from_millis(1),
+            "admission must not renew the worker's grace"
+        );
+        assert!(
+            cancelled.load(Ordering::Acquire),
+            "timeout signals cancellation"
+        );
+        assert_eq!(slot.available_permits(), 0, "the worker retains its permit");
+
+        let next_started = Arc::new(AtomicBool::new(false));
+        let next_worker_started = next_started.clone();
+        assert!(
+            run_blocking_cancellable_in_slot(
+                slot.clone(),
+                deadline,
+                RECONCILE_BLOCKING_GRACE,
+                move |_| next_worker_started.store(true, Ordering::Release),
+            )
+            .await
+            .overran(),
+            "timing out must not admit another worker while the first is still alive"
+        );
+        assert!(!next_started.load(Ordering::Acquire));
+        drop(release_tx);
+        let _permit = slot
+            .acquire_owned()
+            .await
+            .expect("worker released slot on exit");
+        assert!(
+            !committed.load(Ordering::Acquire),
+            "the worker observes cancellation before a new commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellable_phase_unbounded_completion_returns_the_worker_result() {
+        let slot = Arc::new(tokio::sync::Semaphore::new(1));
+        assert_eq!(
+            run_blocking_cancellable_in_slot(
+                slot.clone(),
+                PassDeadline::unbounded(),
+                Duration::ZERO,
+                |cancelled| {
+                    assert!(!cancelled.load(Ordering::Acquire));
+                    42
+                },
+            )
+            .await
+            .completed(),
+            Some(42)
+        );
+        assert_eq!(slot.available_permits(), 1);
+        assert!(Arc::ptr_eq(
+            &filesystem_phase_slot(),
+            &filesystem_phase_slot()
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellable_phase_worker_panic_is_not_a_partial_page() {
+        assert!(run_blocking_cancellable_in_slot(
+            Arc::new(tokio::sync::Semaphore::new(1)),
+            PassDeadline::unbounded(),
+            Duration::ZERO,
+            |_| panic!("injected worker failure"),
+        )
+        .await
+        .overran());
     }
 
     #[test]
@@ -4766,6 +4990,165 @@ mod tests {
     }
 
     #[test]
+    fn lock_retry_budget_includes_attempt_cost_and_sleep_overshoot() {
+        use std::cell::{Cell, RefCell};
+
+        for (attempt_cost, overshoot, expected_attempts, expected_sleeps) in [
+            (
+                Duration::from_millis(200),
+                Duration::ZERO,
+                3,
+                vec![INTENT_LOCK_RETRY; 2],
+            ),
+            (
+                Duration::ZERO,
+                INTENT_LOCK_TIMEOUT,
+                1,
+                vec![INTENT_LOCK_RETRY],
+            ),
+            (
+                INTENT_LOCK_TIMEOUT - Duration::from_millis(5),
+                Duration::ZERO,
+                1,
+                vec![Duration::from_millis(5)],
+            ),
+        ] {
+            let start = Instant::now();
+            let elapsed = Cell::new(Duration::ZERO);
+            let attempts = Cell::new(0);
+            let sleeps = RefCell::new(Vec::new());
+            let result: Result<()> = acquire_intent_lock(
+                &sample_intent("sqlite:/a", "sess", "addr").id(),
+                || {
+                    assert!(elapsed.get() < INTENT_LOCK_TIMEOUT);
+                    attempts.set(attempts.get() + 1);
+                    elapsed.set(elapsed.get() + attempt_cost);
+                    Err(platform_fs::io_err(
+                        "contending test lock",
+                        std::io::ErrorKind::WouldBlock.into(),
+                    ))
+                },
+                || start + elapsed.get(),
+                |duration| {
+                    sleeps.borrow_mut().push(duration);
+                    elapsed.set(elapsed.get() + duration + overshoot);
+                },
+            );
+            assert!(matches!(result, Err(IntentError::Io(_))));
+            assert_eq!(attempts.get(), expected_attempts);
+            assert_eq!(*sleeps.borrow(), expected_sleeps);
+        }
+    }
+
+    #[test]
+    fn lock_retry_budget_keeps_attempt_cap_and_propagates_other_errors() {
+        use std::cell::Cell;
+
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let start = Instant::now();
+        let attempts = Cell::new(0);
+        let sleeps = Cell::new(0);
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                attempts.set(attempts.get() + 1);
+                Err(platform_fs::io_err(
+                    "contending test lock",
+                    std::io::ErrorKind::WouldBlock.into(),
+                ))
+            },
+            || start,
+            |_| sleeps.set(sleeps.get() + 1),
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), INTENT_LOCK_ATTEMPTS);
+        assert_eq!(sleeps.get(), INTENT_LOCK_ATTEMPTS - 1);
+
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                Err(platform_fs::io_err(
+                    "test lock privacy refusal",
+                    std::io::ErrorKind::PermissionDenied.into(),
+                ))
+            },
+            || start,
+            |_| panic!("a non-contention error must not retry"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Io(detail)) if detail.contains("test lock privacy refusal"))
+        );
+
+        let result: Result<()> = acquire_intent_lock(
+            &id,
+            || {
+                Err(platform_fs::FsError::Unsupported {
+                    capability: "test lock filesystem",
+                    message: "unproven local storage".into(),
+                })
+            },
+            || start,
+            |_| panic!("unsupported storage must not retry"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Insecure(detail)) if detail.contains("unproven local storage"))
+        );
+    }
+
+    #[test]
+    fn lock_retry_budget_releases_late_success_and_accepts_timely_reacquisition() {
+        use std::cell::Cell;
+
+        struct Guard<'a>(&'a Cell<bool>);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let dropped = Cell::new(false);
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                elapsed.set(INTENT_LOCK_TIMEOUT);
+                Ok(Guard(&dropped))
+            },
+            || start + elapsed.get(),
+            |_| panic!("a late success must not retry"),
+        );
+        assert!(result.is_err());
+        assert!(dropped.get(), "a late guard must release its OS lock");
+
+        elapsed.set(Duration::ZERO);
+        dropped.set(false);
+        let attempts = Cell::new(0);
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    return Err(platform_fs::io_err(
+                        "contending test lock",
+                        std::io::ErrorKind::WouldBlock.into(),
+                    ));
+                }
+                Ok(Guard(&dropped))
+            },
+            || start + elapsed.get(),
+            |duration| elapsed.set(elapsed.get() + duration),
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(elapsed.get(), INTENT_LOCK_RETRY);
+        assert!(!dropped.get(), "a timely success retains the guard");
+        drop(result);
+        assert!(dropped.get());
+    }
+
+    #[test]
     fn persistent_os_lock_is_bounded_and_never_removed() {
         let run_dir = temp_run_dir("persistent-advisory-lock");
         let store = IntentStore::open(&run_dir, "hash").expect("store");
@@ -4776,25 +5159,36 @@ mod tests {
 
         let first = store.lock_intent(&id).expect("first lock");
         let start = Instant::now();
+        let contender = store.lock_intent(&id);
+        let elapsed = start.elapsed();
+        eprintln!("persistent OS lock contention elapsed: {elapsed:?}");
         assert!(
-            store.lock_intent(&id).is_err(),
-            "a live lock holder must cause a bounded failure, not lock theft"
+            matches!(contender, Err(IntentError::Io(ref detail)) if detail.contains("locked by another writer")),
+            "a live lock holder must cause a bounded contention failure, got {contender:?}"
         );
         assert!(
-            start.elapsed()
-                < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1),
-            "the contender must honor the bounded acquisition policy, allowing scheduler delay \
-             under the full parallel workspace suite"
+            elapsed < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1),
+            "the contender took {elapsed:?}; it must honor the bounded acquisition policy, \
+             allowing scheduler delay under the full parallel workspace suite"
         );
         assert!(lock_path.exists(), "the advisory lock file is persistent");
+        assert!(
+            matches!(
+                platform_fs::try_acquire_owner_private_advisory_lock(&lock_path),
+                Err(platform_fs::FsError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::WouldBlock
+            ),
+            "a failed contender must leave the original holder's OS lock intact"
+        );
         drop(first);
-        store
+        let second = store
             .lock_intent(&id)
             .expect("dropping a holder releases the OS lock");
         assert!(
             lock_path.exists(),
             "releasing the OS lock must not delete or replace its file"
         );
+        drop(second);
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

@@ -121,6 +121,165 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 ## Current State
 
+On 2026-10-23 Campaign promoted the repeated Windows partial-page candidate
+into active `cooperative-partial-page-repair`, tracked by
+[#181](https://github.com/lossyrob/telex/issues/181). After canonical
+promotion landed as `3d517e17`, Local completed v2 preparation and delivered
+the real kickoff to owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` in
+checkout `lossyrob-expert-doodle`, initially on that branch and main commit.
+The requested profile is `gpt-6.1-sol` / high reasoning / default context
+tier / interactive. The launched v2 binding supersedes the earlier pending
+preparation and v1 identity-exchange wording; no API/SDK/v1 handshake is
+required. Launch does not establish implementation or hosted-validation
+completion.
+Draft [PR #185](https://github.com/lossyrob/telex/pull/185) now carries the
+proposed repair at head
+`7b11b92630d0b2cf63423a77fc19232aff368825`, base `main`, branch
+`lossyrob-cooperative-partial-page-repair`; its body says `Closes #181`.
+The PR is OPEN/draft. The owner reports the DI-185-01 same-origin fixture
+correction. A later exact-head steward inspection approves its bounded
+design-only source resolution, with zero open design findings in that
+scope. Independent App review and new-head hosted validation remain
+unresolved, not Campaign-ready. Earlier head `57fdc975` and its registered
+CI wait are historical, not current coverage. This association establishes
+no runtime acceptance or historical root-cause conclusion; no old-head
+acceptance carries over.
+The repair blocks delivery of Watcher CLI #179 / PR #180, whose existing
+owner and Watcher-only scope remain intact. Diagnosis precedes correction;
+the repair PR must close #181 and earn exact-head hosted validation and
+Campaign merge authorization. The workstation freeze remains in force.
+The two marker candidates, issue #153, and hardening/closure decisions are
+unchanged. This is bounded repair authority, not product-design acceptance
+or a merge authorization.
+
+On 2026-10-24 Campaign authorized the separate
+`macos-persistent-lock-repair`, tracked by
+[#187](https://github.com/lossyrob/telex/issues/187), upstream of #181.
+Issue #181 is blocked; owner `9d4fee6c` and OPEN/draft PR #185 remain
+unchanged at `7b11b92630d0b2cf63423a77fc19232aff368825`. One new v2
+`gpt-6.1-sol` / high / default / interactive owner is authorized but not yet
+prepared or launched; Local acts after canonical landing verification.
+No further retry, skip or threshold workaround. Accepted upstream delivery
+permits reconsidering the prerequisite, not automatic #181 or Watcher
+completion. Earlier launch/review/wait statements above are historical;
+all terminal, retry, recurrence and delayed-writer evidence is preserved.
+The workstation freeze and every unrelated gate remain unchanged.
+
+The pending-launch statement above is the promotion-time snapshot. Local
+later reports completed v2 preparation and one real kickoff delivered to
+owner `5d9b3155-0327-40d1-936d-7a3652ea90c3` from main `970be041`, initial
+checkout/branch `lossyrob-stunning-telegram`. The same checkout now uses
+`lossyrob-macos-persistent-lock-repair`; a receipt-time App read observed
+that same owner/checkout/current branch busy. The requested
+`gpt-6.1-sol` / high / default / interactive profile is not effective-capacity
+proof. The launched binding qualifies only old pending preparation/launch
+text: no implementation, runtime, CI result or gate acceptance follows.
+Issue #181 stays blocked and PR #185 stays draft and unchanged; the freeze
+and every unrelated gate remain.
+
+PR [#189](https://github.com/lossyrob/telex/pull/189) now carries the proposed
+#187 repair, OPEN/draft at `d0b1010594aff7c27f7629ceb43ddad3c79118be`,
+with the same owner/branch, base `main` and `Closes #187`. Local absorbed the
+bounded canonical-parent fixture correction in that source, preserving the
+eight-creator race and production privacy behavior; no new upstream exists.
+Old `add79d51` module passes and design approval remain historical. The
+current-head delta design receipt is APPROVED only for design; App source
+review, hosted CI, wait-registration receipt, delivery/readiness and every
+downstream gate are not credited. #181 remains blocked, PR #185 unchanged,
+and the workstation freeze and all unrelated boundaries remain.
+
+The preceding PR #189 draft/review/CI-pending paragraph is historical.
+Local now qualifies the same `d0b1010`/`b8bd08f3` OPEN/non-draft/CLEAN PR
+as ready for the operator: finalized App source verdict has zero #187
+blockers, zero ready comments and one skipped advisory, exact-head design
+is APPROVED, and all 21 reported CI entries succeeded in `40138318787`.
+The retained macOS log verifies direct head, 58+13 passing tests and
+514.511584ms contention below the unchanged 1,540ms assertion, not a hard
+480ms return guarantee. Local supplies bounded verification; the reconciler
+matched retained sources without independently querying CI or the scheduler.
+Later coordinator-attributed wait receipt qualifies the old receipt-pending
+wording; the existing lifecycle-only merge wait grants no merge permission.
+This is operator-ready, not merged/done. Main CI, field report and accepted
+delivery remain pending; #187 stays in progress, #181 blocked and PR #185
+draft. All ledger records, owners, dependencies, Watcher, freeze and every
+unrelated gate remain unchanged. Head movement invalidates this readiness.
+
+The OPEN/operator-ready and PR #185 unchanged-hold statements above are
+historical snapshots. PR [#189](https://github.com/lossyrob/telex/pull/189)
+merged on 2026-10-25T16:55:54Z as
+`d03492ea425f001df530f4405808d3a817558291`, from unchanged reviewed head
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`; issue #187 closed as completed
+at 16:55:56Z. Local and the reconciler verified those provider identities.
+Campaign directed the existing #181 owner to merge main into PR #185 and
+run CI again, superseding the unchanged hold for that integration and
+validation only. No new-head review/CI success or readiness is established.
+The existing #187 owner retains post-merge main CI and field-report
+obligations; neither is verified or accepted here. Node #187 remains in
+progress and #181 blocked on accepted upstream delivery, with the existing
+dependency intact. The direction permits integration/revalidation, not
+automatic dependency clearance, Watcher readiness or gate acceptance.
+
+Campaign's prospective Local source-review floor took effect on
+2026-10-25T12:56:34.591-04:00: the source reviewer itself must post an
+exact-current-head verdict receipt on the reviewed PR, retaining scope and
+limits distinct from design, CI and merge authority. This also applies to a
+finalized `no-comments-to-post` review with no inline findings or formal
+GitHub approval. An owner attestation, private artifact or coordinator relay
+alone does not satisfy publication; an older-head receipt stays historical.
+Before future floor-complete readiness, verify the reviewer-origin receipt
+at the current reviewed head. Missing publication is now a floor miss.
+Include this additive instruction in new Local owner/reviewer kickoffs and
+delta-review requests, preserving `gpt-6.1-sol` / high / default for new
+sessions. Campaign reports PR #189's owner-only publication gap was accepted
+as debt this time, like the gap it names on PR #184. Prior private review
+and readiness records remain historical, not retroactively floor-complete.
+No receipt backfill, review, empty approval, posting for the reviewer, debt
+clearance, merge reversal, issue reopening or runtime action is authorized.
+This supplement changes no ledger, owner, status, dependency, workstation
+freeze, #153, Watcher or hardening/closure gate.
+
+A later Local qualification records OPEN/draft
+[PR #185](https://github.com/lossyrob/telex/pull/185) at
+`130be3b257e8208f521f9e4e91bc6795b991e023`,
+tree `fd53e11c478ae8e4b7ca19855734735803feac79`, with ordered parents
+`7b11b92630d0b2cf63423a77fc19232aff368825` and actual PR #189 merge
+`d03492ea425f001df530f4405808d3a817558291`. Local and the reconciler
+verified PR and immutable commit metadata, not the complete merge diff.
+This observes the authorized integration; the older `7b11b926` and
+integration-pending statements are historical. Local verified the identity
+of run `40214432369`, `pull_request`, attempt 1 at this head, not its
+results; the reconciler did not query CI. The owner's public receipt
+reports both three-OS matrices and ten real partial-page repetitions kept,
+no workaround or threshold change, compile-only checks passed, and new-head
+source/design requests pending. Its reported later Campaign routing defers
+consolidation assessment until after #185 lands; this authorizes no
+consolidation or matrix removal. Sole-observer registration is pending in
+this snapshot. Fresh head-bound review/design/CI evidence and the source
+reviewer's own exact-head public receipt remain pending; no readiness is
+credited. The owner's accepted-upstream/blocker-resolved language does not
+establish #187 main-CI/field/terminal acceptance or remove #181's dependency.
+All statuses, owners, ledger, gates, Watcher and freeze boundaries remain.
+
+A later source/design-only qualification supersedes that pending wording
+for unchanged `130be3` / `fd53e11c`, product base `d03492ea`.
+The source reviewer's public
+[receipt](https://github.com/lossyrob/telex/pull/185#issuecomment-6400606700)
+records zero blocking and zero non-blocking findings, with R1 still resolved.
+Local and the reconciler read the full public receipt; Local separately
+received reviewer `2d1c11d8`'s direct confirmation of its own `gh` post and
+existing REST body/head checks. Shared account identity alone is not
+publisher proof; raw execution history was not independently audited.
+This supports the reviewer-origin exact-head publication sub-floor, not
+overall readiness. The renewed exact-head steward design report is
+APPROVED with zero new/open findings and DI-185-01 resolved; Local and the
+reconciler matched its 17,092 bytes/hash and read it fully. Its earlier
+source-publication-pending statement is historical, not rewritten.
+Source and design remain distinct bounded verdicts, not CI/runtime proof.
+Run `40214432369` results and observer-registration completion are not
+credited. #187 main-CI/field/terminal acceptance, #181's dependency, all
+statuses/owners/ledger/gates, Watcher, freeze and historical #189 receipt
+debt remain unchanged. Any PR-head movement invalidates these receipts.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design

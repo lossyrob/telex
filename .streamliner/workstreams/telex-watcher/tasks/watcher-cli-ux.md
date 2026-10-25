@@ -3,9 +3,14 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-cli-ux`
 - **Type:** implementation
-- **Status:** in progress; owner session `c90bafbb-6e49-4ced-a684-e15cfadfc69e`
+- **Status:** blocked delivery; existing owner session
+  `c90bafbb-6e49-4ced-a684-e15cfadfc69e` retained
 - **Attention:** watch
 - **Depends on:** completed `watcher-runtime-core`
+- **External dependency:** pending Local
+  `local-daemon/cooperative-partial-page-repair`, tracker
+  [#181](https://github.com/lossyrob/telex/issues/181)
+- **PR:** [#180](https://github.com/lossyrob/telex/pull/180), retained in place
 - **Tracker:** [lossyrob/telex#179](https://github.com/lossyrob/telex/issues/179)
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
@@ -70,16 +75,34 @@ Do not create the CLI implementation worker until:
 Issue #144, broad packaging, runtime hardening, and Operator Station issue #153
 are not prerequisites.
 
-Prerequisite 1 is met: `watcher-runtime-core` completed on 2026-10-23, so this
-node's only graph dependency is satisfied. The Watcher coordinator opened
-tracker issue #179 and launched owner session
+Prerequisite 1 is met: `watcher-runtime-core` completed on 2026-10-23, so the
+original runtime-core graph dependency is satisfied. The Watcher coordinator
+opened tracker issue #179 and launched owner session
 `c90bafbb-6e49-4ced-a684-e15cfadfc69e` on 2026-10-23 from main
 `6dc79e40dfacba8c1e71ac46ef1be376d43a50ad`. The launch used the
-`gpt-6.1-sol` / high reasoning / default context tier profile. The node is in
-progress with watch attention. The launch binding record is
+`gpt-6.1-sol` / high reasoning / default context tier profile. The node launched
+in progress with watch attention. The launch binding record is
 `watcher-cli-ux-20261023.json` under
 `streamliner/telex/prompts/v2/launches/` in the planning repository, with
 kickoff SHA-256 `71f5b924`.
+
+### Pending Local repair dependency
+
+On 2026-10-23 Campaign authorized one separate Local repair,
+`cooperative-partial-page-repair`, tracked by
+[#181](https://github.com/lossyrob/telex/issues/181), and made it an upstream
+blocker of this node. Delivery is blocked with watch attention; PR #180 and
+its existing owner remain in place. The root repair is not absorbed into
+this PR and changes no Watcher implementation scope or product semantics.
+
+The pending external dependency clears only after the Local repair is
+merged with exact-head hosted validation and Campaign acceptance, then
+reconciled from actual terminal evidence. Existing review, design and
+field-proof evidence keeps its exact-head coverage and limitations; this
+dependency neither discards it nor upgrades it to current-head acceptance.
+PR #180's own current-head review, design, required CI and live owned-PR
+proof remain required. No check waiver, third unchanged-head retry,
+hardening acceptance or immediate merge is authorized.
 
 ## Deliverables
 

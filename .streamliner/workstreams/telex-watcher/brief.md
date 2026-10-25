@@ -89,6 +89,17 @@ The richer rationale and detector protocol sketch are preserved in
 
 ## Current State
 
+On 2026-10-23 Campaign made the separately owned Local repair
+`cooperative-partial-page-repair`
+([#181](https://github.com/lossyrob/telex/issues/181)) a pending external
+upstream dependency of `watcher-cli-ux`. Delivery of #179 / PR #180 is
+blocked until accepted repair delivery with exact-head hosted validation
+and Campaign acceptance. PR #180 and owner
+`c90bafbb-6e49-4ced-a684-e15cfadfc69e` stay in place; no root repair is
+absorbed into Watcher. The completed runtime-core dependency and Watcher's
+own current-head review, design, CI and field-proof requirements remain;
+none is waived. This dependency changes no Watcher product semantics.
+
 The workstream is part of the
 **[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)**
 and is tracked by parent issue
