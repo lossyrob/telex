@@ -1805,7 +1805,103 @@
             "logSha256": "f182848a1ca3c3bb197717f8d19e1cb145bf9f90dbc92992ff5a15599d5a632b",
             "localIntake": "main40217995470-pageheap-stop-drain-intake-20261025.json",
             "publicReport": "https://github.com/lossyrob/telex/issues/182#issuecomment-6401222833",
-            "qualification": "Earlier Local retained-byte/source-excerpt verification remains attributed in the immutable intake. Local now also read the complete public report. Its former unfetched-comment/no-owner authorization snapshot stays historical; Campaign later authorizes this promotion."
+            "qualification": "Earlier Local retained-byte/source-excerpt verification remains attributed in the immutable intake. Local now also read the complete public report. Its former unfetched-comment/no-owner authorization snapshot stays historical; Campaign later authorizes this promotion.",
+            "laterRetainedCustodyQualification": {
+              "scope": "Additional byte-bound custody detail for the SAME already canonical f603875b / run 40217995470 / job 121243212833 destructor stop/drain observation, not a new occurrence or candidate.",
+              "classificationPacket": {
+                "file": "pageheap-stop-drain-local-intake.json",
+                "bytes": 5424,
+                "sha256": "eeb1b1e3c4cc3c82213b790408e0d6be439432d1bff9c1e603eb70f4c03e02be",
+                "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+                "localDeliverySource": "call_OKfA4kyJb5vFGtwaCqd1d3Nx",
+                "captureReceipt": "stopdrain-source-capture.json"
+              },
+              "attribution": "Local reports matching retained log/custody hashes, reading the complete custody JSON and selected log excerpts, and matching all 108 supplied immutable source-excerpt lines. The reconciler read the complete Local classification packet, not those raw log/custody/source artifacts or a provider refetch. Custody byte counts/digests, iteration outcomes and source-excerpt qualifications remain Local-attributed.",
+              "historicalBoundary": "The packet preserves its earlier unfetched-public-report and no-new-owner authorization snapshot. The existing promotion separately records the later Local public-report read and Campaign-approved single-owner launch. None of that later authority or evidence is revoked or replayed here.",
+              "privatePathRedaction": "Only the private retainedEvidence.directory is omitted. Every other parsed source field remains exact; the full original packet stays private and hash-bound.",
+              "retainedLocalClassification": {
+                "schemaVersion": 1,
+                "candidateId": "local-daemon-windows-pageheap-access-violation",
+                "operation": "Append one distinctly labeled destructor stop/drain subcase to the existing broad PageHeap access-violation candidate; do not assert a common underlying defect.",
+                "source": {
+                  "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+                  "sourceMessage": "call_ygMOfCErspMwbSZaAPFJfSE8",
+                  "head": "f603875bddd19a6f76f08a408ba3fbd98d3073bb",
+                  "runId": "40217995470",
+                  "jobId": "121243212833",
+                  "jobName": "Windows heap diagnostics",
+                  "healthLogUrl": "https://github.com/lossyrob/telex/issues/182#issuecomment-6401222833",
+                  "healthLogVerification": "Sentinel supplied URL; Local has not fetched this comment."
+                },
+                "retainedEvidence": {
+                  "log": {
+                    "file": "main-40217995470-job-121243212833.log",
+                    "bytes": 107711,
+                    "sha256": "f182848a1ca3c3bb197717f8d19e1cb145bf9f90dbc92992ff5a15599d5a632b",
+                    "format": "Supplied job-labeled text capture; hash identifies these retained bytes, not a provider archive."
+                  },
+                  "custody": {
+                    "file": "main-40217995470-evidence-custody.json",
+                    "bytes": 5651,
+                    "sha256": "1694a520a923a2a9dd941a77ea9843a8570b9eb4df825edb8e3cfad9ec076f78"
+                  },
+                  "localVerification": "Matched log/custody bytes and hashes, read custody JSON in full and selected job-log failure/stack/iteration-result excerpts. Matched all108 numbered source-excerpt lines to the supplied immutable source blob. No full-log-read claim, provider fetch or runtime execution."
+                },
+                "failure": {
+                  "test": "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token",
+                  "stage": "ProcessEnv destructor invoking stop_daemon_best_effort, then daemon stop --drain.",
+                  "status": "0xc0000005",
+                  "harnessPanic": "tests/daemon_process_sqlite.rs:518:9",
+                  "thread": 8292,
+                  "panicReportTimestamp": "2026-10-25T17:47:37.2252114Z",
+                  "output": "The captured stop command printed JSON with draining=true before its abnormal exit was surfaced.",
+                  "iteration1": {
+                    "passed": 49,
+                    "failed": 0,
+                    "ignored": 0,
+                    "durationSeconds": 30.39
+                  },
+                  "iteration2": {
+                    "passed": 48,
+                    "failed": 1,
+                    "ignored": 0,
+                    "durationSeconds": 29.81
+                  },
+                  "durationBoundary": "These are full test-target iteration durations, not the child command or drain elapsed time.",
+                  "faultBoundary": "The harness reports abnormal exit of the invoked command child. This is not a native faulting instruction/stack, proof that the long-lived daemon crashed, or proof that draining completed successfully."
+                },
+                "immutableSource": {
+                  "head": "f603875bddd19a6f76f08a408ba3fbd98d3073bb",
+                  "path": "tests/daemon_process_sqlite.rs",
+                  "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+                  "matchedExcerpts": "108 supplied lines covering193-210 stop helper,263-267 Drop,505-526 command-capture abnormal-exit check and1363-1410 ordinary-send parity test.",
+                  "assessment": "Drop calls stop_daemon_best_effort; it invokes the selected executable with --json daemon stop --drain using a30s capture budget, then would observe retained daemon PID/start-time exit. The captured child exception panics inside run_command_with_capture before the later exit-observation loop. The ignored Result binding does not swallow that panic.",
+                  "limits": "Source identifies the failing harness/lifecycle boundary, not the underlying native memory defect. No timing or successful-cleanup guarantee is inferred from the30s budget or draining=true output."
+                },
+                "classification": {
+                  "decision": "New distinctly identified teardown subcase under the existing Windows PageHeap access-violation investigation.",
+                  "existingCandidate": "At canonical6f085783, the candidate covers intermittent0xc0000005 child exits in hosted daemon_process_sqlite diagnostics. Its original observation is a different status-hint test/command.",
+                  "notCommonCause": "Same native exception class and target do not establish the same fault location or shared cause.",
+                  "notDeadlineSubcase": "The ordinary-send test name also appears in earlier deadline intake; this native exception during destructor stop/drain is not that earlier attach/deadline failure.",
+                  "dedup": "Bounded canonical ledger search at6f085783 found no exact run/stop-helper observation; preserve all prior candidate evidence and counts rather than replacing the original signature."
+                },
+                "disposition": {
+                  "statusChange": false,
+                  "ownerChange": false,
+                  "graphOrGateChange": false,
+                  "newIssueOrNode": false,
+                  "implementationOrRetryAuthorized": false,
+                  "routing": "Existing Local native-failure triage only. Preserve the original166 investigation and attach this as separate-stage evidence, not a proven recurrence of its causal defect."
+                },
+                "limits": [
+                  "No PR185/189/source-change causal attribution or reversal of their bounded accepted delivery.",
+                  "No PageHeap/WER configuration, debugger, dump/executable inspection, log refetch, process control, cleanup, retry or new observer by Local.",
+                  "Uploaded CI artifact contents and exact native fault site remain unknown.",
+                  "Local200ms partial-page coverage debt, Watcher own gates, other candidates and workstation freeze remain unchanged."
+                ]
+              },
+              "limits": "No new occurrence, record, issue, node, owner, cause, retry, runtime action, completed-drain claim, long-lived-daemon fault, native fault instruction/stack, current source/review/CI/readiness, debt/HOLD or freeze credit. Preserve all original #166 launch/alias/heap qualifications and both pending #193/#198 product-repair-merge wakes. Keep this PageHeap 0xc0000005 stage distinct from default-Windows 0xc0000374."
+            }
           },
           "pr194BusyStationStatus": {
             "reporter": "519693a5-0607-4aba-a968-345f3b1cd1b5",
