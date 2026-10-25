@@ -3135,7 +3135,88 @@
           "reconcilerVerification": "The reconciler matched the distinct 19299-byte/104-line failed-step capture and 54733-byte full-job archive hashes and read selected named-pass, panic, failure and module-summary excerpts. It also read direct 7b11b926 checkout/git-log/source-verifier excerpts from the full archive. Both show the same assertion and 58/1 module failure in 4.61 seconds; neither prints actual failing-test elapsed or establishes cause. No full-file-read claim, provider log refetch, independent full-inventory/scheduler inspection, runtime action or retry occurred here."
         },
         "laterReceiptQualification": "All original fields remain unchanged. The original no-retry/no-registration and the terminal/registration packets' remaining-checks/no-result statements are historical snapshots, qualified in sequence by the owner-reported submission, Local's limited identity metadata verification, attributed attempt2 registration, and later failed retry evidence. The earlier failed-step checkout request is historical; the distinct later full-job archive supplies direct exact-head checkout/verifier evidence. Coordinator-reported run conclusions, 21 aliases/20 retained-success entries and schedule close/rearm/disarm claims are not independently established by Local's metadata/log reads or by this reconciliation. The one named-job unchanged-head retry allowance is consumed and exhausted; no further retry is authorized. The recurrence packet's currentRepair/routing/no-promotion statements describe its own intake time, not a claim about later Campaign decisions. Any later promotion direction requires a separate scoped proposal; this evidence-only update implements none. Required CI is not accepted green, no failure is superseded as successful, no skipped repetitions are credited, and no candidate closure, cause, actual elapsed, implementation, issue/node/owner/dependency, graph/status or gate change follows. The queued credential-writer occurrence and landed optional-lint record remain separate.",
-        "limits": "The retained failure is exact-head attempt-1 evidence, not coverage of a later head or attempt. Cause and actual elapsed remain unknown. Relevant named tests passed in this log; the ten repetitions are not credited. Owner-reported source review and separately retained design-only approval do not waive required CI. No CI-result polling, log refetch, retry, local runtime action, source correction, new observer or gate acceptance was performed for this reconciliation."
+        "limits": "The retained failure is exact-head attempt-1 evidence, not coverage of a later head or attempt. Cause and actual elapsed remain unknown. Relevant named tests passed in this log; the ten repetitions are not credited. Owner-reported source review and separately retained design-only approval do not waive required CI. No CI-result polling, log refetch, retry, local runtime action, source correction, new observer or gate acceptance was performed for this reconciliation.",
+        "terminalDeliveryQualification": {
+          "kind": "later-accepted-bounded-terminal-delivery",
+          "intake": {
+            "file": "issue187-terminal-delivery-qualification-20261025.json",
+            "bytes": 10480,
+            "sha256": "d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa"
+          },
+          "campaignSupplement": {
+            "file": "issue187-campaign-terminal-acceptance-supplement-20261025.json",
+            "bytes": 2821,
+            "sha256": "fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109",
+            "campaignSource": "toolu_01T7gVEqEnV9oYLgQTUPzKcv"
+          },
+          "authority": "Owning Local explicitly accepts bounded187 delivery; Campaign separately expressly accepts it. Earlier completion sends were only queue admission, and merge/issue closure alone were not terminal acceptance.",
+          "merge": {
+            "pullRequest": "https://github.com/lossyrob/telex/pull/189",
+            "issue": "https://github.com/lossyrob/telex/issues/187",
+            "commit": "d03492ea425f001df530f4405808d3a817558291",
+            "tree": "39a45aa5e238fcb86e67eebef85a08f00030ebf1",
+            "reviewedSourceParent": "d0b1010594aff7c27f7629ceb43ddad3c79118be"
+          },
+          "mainCi": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40214028177",
+            "head": "d03492ea425f001df530f4405808d3a817558291",
+            "event": "push",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "verification": "Local independently read run metadata and the complete unique 21-job successful inventory; the reconciler did not repeat these provider queries."
+          },
+          "docs": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40214028168",
+            "head": "d03492ea425f001df530f4405808d3a817558291",
+            "event": "push",
+            "attempt": 1,
+            "conclusion": "success",
+            "totalJobs": 2,
+            "verification": "Local independently read terminal metadata and both successful jobs; observation of an existing deployment, not a new deployment."
+          },
+          "retainedMainMacos": {
+            "file": "pr189-main-d03492e-macos-121231165074.txt",
+            "bytes": 68143,
+            "sha256": "9c92e2426834425b51333996cdf5627c9d2e7b093c8eb41cef0982f3092c59ab",
+            "jobId": "121231165074",
+            "directSourceHead": "d03492ea425f001df530f4405808d3a817558291",
+            "providerEventSha": "d03492ea425f001df530f4405808d3a817558291",
+            "measuredContentionMilliseconds": 510.866708,
+            "unchangedAssertionCeilingMilliseconds": 1540,
+            "stationIntent": {
+              "passed": 58,
+              "failed": 0,
+              "ignored": 0
+            },
+            "platformFs": {
+              "passed": 13,
+              "failed": 0,
+              "ignored": 0
+            },
+            "verification": "Local and reconciler matched retained bytes/hash and read direct-source/provider-SHA verifier, measurement, named passes and module-result excerpts. No complete log read, provider log refetch or local execution."
+          },
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517",
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T17:24:02Z",
+            "updatedAt": "2026-10-25T17:24:02Z",
+            "designImpact": "updated-docs",
+            "bodyBytes": 3228,
+            "bodySha256": "ce2fa2d26cd4d365782f8bc3092275a80e34adfc8dc682574e9e454ea9a16d11",
+            "verification": "Local and reconciler read the entire public field report; its exact merge/outcome/causal and debt limits match the supplied qualification and selected retained-log evidence."
+          },
+          "disposition": "Complete only the bounded187 acquisition-policy outcome and its accepted same-PR canonical-parent fixture. Node187 completed;181 in-progress with the existing completed187 edge retained as satisfied lineage. All old fields and evidence below remain historical and byte-exact.",
+          "limits": [
+            "510.866708ms is below the unchanged1540ms assertion, not a hard480ms return guarantee, entered-call preemption, per-creator trace, historical-cause finding or heavy-load rate.",
+            "Earlier failed/retry/source-only/pending snapshots are qualified only by this later delivery; no old result is relabeled or original evidence rewritten.",
+            "No181 current-head/readiness/merge/accepted-delivery or Watcher179/PR180 readiness/release follows from187 completion. Earlier Campaign integration permission remains separate; the185owner does not wait on artifact publication.",
+            "PR189 reviewer-origin receipt debt, sentinel CI-overlap assessment, optional Clippy dirty-worktree/toolchain evidence and unrelated records/gates remain unchanged; no retroactive public receipt or debt clearance.",
+            "No new source review, runtime test, CI retry/dispatch/log refetch, observer, product merge, release,153,hardening/closure or workstation-freeze authority.",
+            "Existing mainCI success is exactd03492ea only, not proof for later unrelated commits or PR185."
+          ]
+        }
       },
       "description": "Campaign-authorized separate repair of the recurrent macOS persistent-lock acquisition/test boundary; diagnosis precedes the minimal correction. The recorded failure alone does not identify the cause or actual acquisition elapsed.",
       "affectedOutcome": "Required hosted validation for the issue #181 repair remains unresolved at this failure snapshot. This does not diagnose the partial-page defect, Windows locks, recording markers or issue #153.",
@@ -3144,7 +3225,7 @@
       "selectedDisposition": "Promoted to one active Local upstream repair under Campaign's2026-10-24 directive; this is implementation-scope acceptance, not cause, runtime, readiness or merge acceptance.",
       "target": "local-daemon/macos-persistent-lock-repair / https://github.com/lossyrob/telex/issues/187",
       "owner": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates launched v2 owner 5d9b3155-0327-40d1-936d-7a3652ea90c3. Concrete identity was pending at promotion; the later binding and Local receipt record completed preparation and one real kickoff delivery from 970be041, initial checkout/branch lossyrob-stunning-telegram, current branch lossyrob-macos-persistent-lock-repair. Requested gpt-6.1-sol/high/default/interactive is not effective-capacity or implementation/CI proof. Existing issue181 owner9d4fee6c retains PR185 and evidence, not this root repair.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly authorized one bounded issue/node/owner repair upstream of181 on2026-10-24, with its own closing PR and v2 profile. Earlier no-promotion/no-implementation statements and conditional-retry allowance in retained evidence are historical snapshots; they do not override this later directive or authorize another retry.",
       "terminalPath": "One complete repair PR closes187 after evidence-backed diagnosis, meaningful regression coverage, exact-head hosted macOS and relevant required validation, independent source review/design inspection and Campaign gate approval. Preserve persistent owner-private locks, non-theft/release and bounded acquisition semantics. Only accepted terminal delivery permits reconsidering the181 prerequisite; source approval or a retry alone does not clear it."
@@ -3227,7 +3308,88 @@
           "Source implementation and design-only approval are not hosted validation or terminal completion.",
           "No timeout/tolerance change, retry, skip, pre-created child, production privacy change, new upstream/node/owner/dependency or gate waiver is authorized.",
           "The workstation freeze, PR185 draft/head, issue153, Watcher dependency chain and all unrelated evidence/gates remain unchanged."
-        ]
+        ],
+        "terminalDeliveryQualification": {
+          "kind": "later-accepted-bounded-terminal-delivery",
+          "intake": {
+            "file": "issue187-terminal-delivery-qualification-20261025.json",
+            "bytes": 10480,
+            "sha256": "d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa"
+          },
+          "campaignSupplement": {
+            "file": "issue187-campaign-terminal-acceptance-supplement-20261025.json",
+            "bytes": 2821,
+            "sha256": "fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109",
+            "campaignSource": "toolu_01T7gVEqEnV9oYLgQTUPzKcv"
+          },
+          "authority": "Owning Local explicitly accepts bounded187 delivery; Campaign separately expressly accepts it. Earlier completion sends were only queue admission, and merge/issue closure alone were not terminal acceptance.",
+          "merge": {
+            "pullRequest": "https://github.com/lossyrob/telex/pull/189",
+            "issue": "https://github.com/lossyrob/telex/issues/187",
+            "commit": "d03492ea425f001df530f4405808d3a817558291",
+            "tree": "39a45aa5e238fcb86e67eebef85a08f00030ebf1",
+            "reviewedSourceParent": "d0b1010594aff7c27f7629ceb43ddad3c79118be"
+          },
+          "mainCi": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40214028177",
+            "head": "d03492ea425f001df530f4405808d3a817558291",
+            "event": "push",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "verification": "Local independently read run metadata and the complete unique 21-job successful inventory; the reconciler did not repeat these provider queries."
+          },
+          "docs": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40214028168",
+            "head": "d03492ea425f001df530f4405808d3a817558291",
+            "event": "push",
+            "attempt": 1,
+            "conclusion": "success",
+            "totalJobs": 2,
+            "verification": "Local independently read terminal metadata and both successful jobs; observation of an existing deployment, not a new deployment."
+          },
+          "retainedMainMacos": {
+            "file": "pr189-main-d03492e-macos-121231165074.txt",
+            "bytes": 68143,
+            "sha256": "9c92e2426834425b51333996cdf5627c9d2e7b093c8eb41cef0982f3092c59ab",
+            "jobId": "121231165074",
+            "directSourceHead": "d03492ea425f001df530f4405808d3a817558291",
+            "providerEventSha": "d03492ea425f001df530f4405808d3a817558291",
+            "measuredContentionMilliseconds": 510.866708,
+            "unchangedAssertionCeilingMilliseconds": 1540,
+            "stationIntent": {
+              "passed": 58,
+              "failed": 0,
+              "ignored": 0
+            },
+            "platformFs": {
+              "passed": 13,
+              "failed": 0,
+              "ignored": 0
+            },
+            "verification": "Local and reconciler matched retained bytes/hash and read direct-source/provider-SHA verifier, measurement, named passes and module-result excerpts. No complete log read, provider log refetch or local execution."
+          },
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517",
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T17:24:02Z",
+            "updatedAt": "2026-10-25T17:24:02Z",
+            "designImpact": "updated-docs",
+            "bodyBytes": 3228,
+            "bodySha256": "ce2fa2d26cd4d365782f8bc3092275a80e34adfc8dc682574e9e454ea9a16d11",
+            "verification": "Local and reconciler read the entire public field report; its exact merge/outcome/causal and debt limits match the supplied qualification and selected retained-log evidence."
+          },
+          "disposition": "Complete only the bounded187 acquisition-policy outcome and its accepted same-PR canonical-parent fixture. Node187 completed;181 in-progress with the existing completed187 edge retained as satisfied lineage. All old fields and evidence below remain historical and byte-exact.",
+          "limits": [
+            "510.866708ms is below the unchanged1540ms assertion, not a hard480ms return guarantee, entered-call preemption, per-creator trace, historical-cause finding or heavy-load rate.",
+            "Earlier failed/retry/source-only/pending snapshots are qualified only by this later delivery; no old result is relabeled or original evidence rewritten.",
+            "No181 current-head/readiness/merge/accepted-delivery or Watcher179/PR180 readiness/release follows from187 completion. Earlier Campaign integration permission remains separate; the185owner does not wait on artifact publication.",
+            "PR189 reviewer-origin receipt debt, sentinel CI-overlap assessment, optional Clippy dirty-worktree/toolchain evidence and unrelated records/gates remain unchanged; no retroactive public receipt or debt clearance.",
+            "No new source review, runtime test, CI retry/dispatch/log refetch, observer, product merge, release,153,hardening/closure or workstation-freeze authority.",
+            "Existing mainCI success is exactd03492ea only, not proof for later unrelated commits or PR185."
+          ]
+        }
       },
       "description": "Align the concurrent owner-private-directory fixture's expected child path with the existing canonical-return API by canonicalizing only its already-created temporary parent before deriving the absent scope.",
       "affectedOutcome": "The existing issue187 repair needs meaningful hosted owner-private-filesystem coverage without weakening the eight-creator absent-child race, equality assertions or production canonical/privacy behavior.",
@@ -3237,7 +3399,7 @@
       "selectedDisposition": "Local approved absorption into the existing issue187 outcome; the later d0b1010 receipt confirms implementation in source only. No terminal validation, readiness or downstream release is accepted.",
       "target": "local-daemon/macos-persistent-lock-repair / https://github.com/lossyrob/telex/issues/187 / https://github.com/lossyrob/telex/pull/189",
       "owner": "Existing issue187 implementation owner5d9b3155-0327-40d1-936d-7a3652ea90c3, coordinated by Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57; no new owner.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 accepted the narrow in-scope correction in pr189-canonical-parent-fixture-disposition-20261024.json, relayed by call_uAoqcvJ3df82PV02kdxhefVs; later call_SwmD5dRNuypit2bozS36gCpR confirms source implementation only. This does not change the Campaign-authorized outcome or geometry.",
       "terminalPath": "The same PR189 closes187 after current-head hosted required validation, independent source review, exact-head design inspection and Campaign gate approval. Preserve all eight creators/barrier/joins/assertions, the still-absent child race and production canonical/privacy behavior. Only accepted terminal repair delivery and field report permit reconsidering the181 prerequisite; this routed disposition, source correction or design receipt alone does not."

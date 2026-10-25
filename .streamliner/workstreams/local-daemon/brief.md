@@ -280,6 +280,31 @@ credited. #187 main-CI/field/terminal acceptance, #181's dependency, all
 statuses/owners/ledger/gates, Watcher, freeze and historical #189 receipt
 debt remain unchanged. Any PR-head movement invalidates these receipts.
 
+On 2026-10-25, Local and Campaign accepted bounded #187 terminal delivery
+at PR #189 merge `d03492ea425f001df530f4405808d3a817558291`,
+tree `39a45aa5e238fcb86e67eebef85a08f00030ebf1`.
+The separate 10,480-byte Local qualification, SHA-256
+`d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa`,
+independently verifies main CI `40214028177` attempt 1, all 21 jobs,
+Docs `40214028168`, both jobs, and the full
+[field report](
+https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517).
+The reconciler read the report, matched the retained main macOS log and
+read only verifier/measurement/named-result excerpts: direct merged SHA,
+510.866708ms below the unchanged 1,540ms ceiling, 58+13 passing tests.
+This is not a full-log read, repeated CI query, hard 480ms return guarantee
+or historical timeout-cause conclusion. Design impact is `updated-docs`.
+The later 2,821-byte Campaign supplement, SHA-256
+`fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109`,
+confirms express terminal acceptance; #185's gate does not wait on
+artifact publication. #187 and only its two linked ledger records are
+completed; #181 is in progress with its completed #187 edge retained as
+satisfied lineage. This receipt supplies no #181 readiness, merge,
+accepted delivery or Watcher #179 / PR #180 release. Earlier pending and
+blocked statements above/below remain historical, not rewritten.
+PR #189 publication debt, CI-overlap/sentinel and optional Clippy evidence,
+all other ledger records, owners, attention, gates and freeze remain.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design

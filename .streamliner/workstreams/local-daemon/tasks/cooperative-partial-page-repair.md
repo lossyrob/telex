@@ -3,11 +3,12 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** blocked on accepted #187 delivery; source/design bound at
-  130be3; fresh full CI and terminal acceptance remain pending
+- **Status:** in progress; #187 delivery accepted; own current-head and
+  merged-head delivery requirements remain separate
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
+  (completed; satisfied lineage)
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
 - **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft;
@@ -459,6 +460,39 @@ status, owner, dependency, ledger record and gate remains unchanged.
 Any head movement invalidates source/design coverage pending new evidence.
 No duplicate source/design review, reviewer post, CI/runtime probe,
 scheduler query, provider mutation or debt clearance was performed here.
+
+## Accepted upstream delivery - 2026-10-25
+
+Local and Campaign explicitly accept bounded #187 terminal delivery at
+PR #189 merge `d03492ea425f001df530f4405808d3a817558291`,
+tree `39a45aa5e238fcb86e67eebef85a08f00030ebf1`.
+Local's 10,480-byte terminal qualification, SHA-256
+`d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa`,
+independently verifies main CI `40214028177` attempt 1 at that merge,
+21/21 successful jobs, Docs `40214028168` with 2/2, and the full
+[field report](
+https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517).
+The later Campaign acceptance supplement is 2,821 bytes, SHA-256
+`fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109`.
+This is accepted delivery, not an inference from merge, issue closure,
+owner completion sends or earlier source/design approval alone.
+
+Node #187 is completed and #181 is in progress. Keep the existing
+`macos-persistent-lock-repair` edge as satisfied completed-node lineage;
+do not delete the dependency or change attention/owner/tracker fields.
+Only the #187 prerequisite is discharged. This upstream receipt does not
+itself supply #181 current-head CI/readiness, merge or accepted delivery.
+The #185 owner's gate does not wait on this canonical artifact update.
+Earlier authorized integration/revalidation did not require this later
+acceptance retrospectively. All prior OPEN/draft, blocked and
+upstream-pending statements remain historical snapshots; #185's later
+gate/merge facts are a separate qualification, not asserted here.
+
+The exact-merge macOS 510.866708ms / 58+13 passing results support #187's
+exercised bounded outcome, not a hard 480ms return or historical cause.
+PR #189 publication debt, CI-overlap assessment and optional Clippy remain.
+No Watcher #179 / PR #180 release, #181 terminal completion, new observer,
+CI/runtime action, retry, #153, hardening/closure or freeze change follows.
 
 ## Workflow
 
