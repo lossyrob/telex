@@ -272,6 +272,32 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
 }
 
 #[test]
+fn hosted_native_capture_preserves_abnormal_child_status_and_invocation() {
+    let ci = read(".github/workflows/ci.yml");
+    let setup = read("tests/configure_windows_postmortem.ps1");
+    let process = read("tests/daemon_process_sqlite.rs");
+    assert!(
+        ci.contains("configure_windows_postmortem.ps1")
+            && ci.contains("Unregister disposable postmortem debugger")
+            && setup.contains("github-hosted")
+            && setup.contains("Get-AuthenticodeSignature")
+            && setup.contains("postmortem preflight produced no native dump")
+            && setup.contains("capture changed the probe exit status")
+            && setup.contains("0xc0000005"),
+        "hosted postmortem capture must verify a dump and the original native status"
+    );
+    assert!(
+        ci.contains("TELEX_PROCESS_EVIDENCE")
+            && process.contains("cmd.get_program()")
+            && process.contains("cmd.get_args()")
+            && process.contains("invocation[\"pid\"]")
+            && process.contains("preserve child stdout")
+            && process.contains("preserve child stderr"),
+        "native failures must retain the child PID, argv and captures"
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version

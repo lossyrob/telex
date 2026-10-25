@@ -679,6 +679,11 @@ jobs:
           New-Item -ItemType Directory -Path $dumps, $logs -Force | Out-Null
           "TELEX_HEAP_EVIDENCE=$evidence" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_PROCESS_EVIDENCE=$(Join-Path $evidence 'commands')" >> $env:GITHUB_ENV
+          $root = Join-Path $env:RUNNER_TEMP "heap-runtime-${{ github.run_id }}-${{ github.run_attempt }}"
+          "TELEX_HOME=$(Join-Path $root 'home')" >> $env:GITHUB_ENV
+          "TELEX_DB=$(Join-Path $root 'store.db')" >> $env:GITHUB_ENV
+          "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')" >> $env:GITHUB_ENV
 
           $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
           New-Item -Path $wer -Force | Out-Null
@@ -695,6 +700,10 @@ jobs:
             -PropertyType DWord -Force | Out-Null
           New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
             -PropertyType DWord -Force | Out-Null
+
+      - name: Verify native postmortem capture without changing child status
+        shell: pwsh
+        run: tests/configure_windows_postmortem.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
 
       - name: Stress the full Windows process suite under PageHeap
         shell: pwsh
@@ -741,6 +750,20 @@ jobs:
           if (-not (Test-Path -LiteralPath "target\debug\telex.exe") -or
               -not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
             throw "matching telex.exe and telex.pdb were not generated"
+          }
+
+      - name: Preserve native fault stacks from hosted dumps
+        if: always()
+        shell: pwsh
+        run: tests/analyze_windows_crash_evidence.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
+
+      - name: Unregister disposable postmortem debugger
+        if: always() && env.TELEX_POSTMORTEM_EXE != ''
+        shell: pwsh
+        run: |
+          & $env:TELEX_POSTMORTEM_EXE -u
+          if ($LASTEXITCODE -ne 0) {
+            throw "unregistering the hosted postmortem debugger failed"
           }
 
       - name: Upload heap diagnostic evidence
