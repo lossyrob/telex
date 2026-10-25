@@ -24,6 +24,8 @@ use crate::model::{now_ms, Attention};
 use crate::output::emit;
 use crate::station_intent::ProducerIdentity;
 
+pub mod session_state;
+
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
 const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
@@ -82,6 +84,16 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
         CopilotCmd::Skill(args) => skill(args),
+        CopilotCmd::SessionState(args) => {
+            let result = session_state::classify_local(&args.session)?;
+            emit(ctx.fmt, &result, || {
+                println!(
+                    "{}: {} ({})",
+                    result.session_id, result.state, result.reason
+                )
+            });
+            Ok(0)
+        }
         CopilotCmd::Push(args) => push(ctx, args).await,
         CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,

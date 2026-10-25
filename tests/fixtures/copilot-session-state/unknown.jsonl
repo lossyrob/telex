@@ -1,0 +1,2 @@
+{"type":"hook.end","id":"stop-end-1","timestamp":"2026-10-25T20:00:00Z","data":{"hookType":"agentStop","hookInvocationId":"stop-1","success":true,"output":{"decision":"allow"}}}
+{"type":"future.private.event","id":"unsupported-1","timestamp":"2026-10-25T20:00:01Z","data":{}}
