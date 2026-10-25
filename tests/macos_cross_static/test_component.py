@@ -244,6 +244,62 @@ def row(address, mnemonic, operands):
 
 
 class OwnerRegressionTests(unittest.TestCase):
+    def test_ld64b_implicit_register_range_discards_old_slot(self):
+        decoded = [row(0x1000, "adrp", "x9, 1 ; 0x2000"),
+                   row(0x1004, "ldr", "x9, [x9, #0x20]"),
+                   row(0x1008, "ld64b", "x8, [x0]"),
+                   row(0x100C, "br", "x9")]
+        raw = bytes.fromhex("090000b0291140f908d03ff820011fd6")
+        slots = []
+        def pointer(address):
+            slots.append(address)
+            return 0x9000, {"synthetic_slot": True}
+        branches = cache.edges(decoded, "arm64", 0x1000, 0x1010, pointer, raw)
+        self.assertEqual(slots, [])
+        self.assertIsNone(branches[-1]["target"])
+        self.assertIsNone(branches[-1]["identified_slot"])
+        self.assertIn("unclassified", branches[-1]["unresolved"])
+
+    def test_unsupported_instruction_with_unspelled_writes_loses_all_state(self):
+        for op, operands in (("ld64b", "x8, [x0]"), ("future_instruction", ""),
+                             ("add", "x0, x1, x2"), ("ldr", "x0, [sp, #0x20]"),
+                             ("adrp", "x0, unsupported-form")):
+            state = {"x9": ("slot", 0x2020), "x15": ("slot", 0x2028), "x28": 0x4000}
+            with self.subTest(op=op, operands=operands):
+                cache.arm_transfer(op, operands, state, 0x1000, 0x1000, None)
+                self.assertEqual(state, {})
+
+    def test_fully_supported_and_readonly_forms_preserve_unaffected_state(self):
+        for op, operands in (("nop", ""), ("cmp", "w0, #0"), ("cmn", "x0, #1"),
+                             ("tst", "x0, #1"), ("adrp", "x0, 1 ; 0x2000"),
+                             ("add", "x0, x1, #0x20"), ("ldr", "x0, [x1]")):
+            state = {"x9": ("slot", 0x2020), "x1": 0x2000}
+            with self.subTest(op=op):
+                cache.arm_transfer(op, operands, state, 0x1000, 0x1000, None)
+                self.assertEqual(state["x9"], ("slot", 0x2020))
+
+    def test_fresh_provenance_can_be_established_after_unknown_write(self):
+        decoded = [row(0x1000, "adrp", "x9, 1 ; 0x2000"),
+                   row(0x1004, "ldr", "x9, [x9, #0x20]"),
+                   row(0x1008, "ld64b", "x8, [x0]"),
+                   row(0x100C, "adrp", "x9, 1 ; 0x2000"),
+                   row(0x1010, "ldr", "x9, [x9, #0x28]"),
+                   row(0x1014, "br", "x9")]
+        slots = []
+        def pointer(address):
+            slots.append(address)
+            return 0x9000, {}
+        branches = cache.edges(decoded, "arm64", 0x1000, 0x1018, pointer)
+        self.assertEqual(slots, [0x2028])
+        self.assertEqual(branches[-1]["identified_slot"], "0x2028")
+
+    def test_undecoded_reachable_arm_gap_cannot_preserve_slot(self):
+        decoded = [row(0x1000, "adrp", "x9, 1 ; 0x2000"),
+                   row(0x1004, "ldr", "x9, [x9, #0x20]"),
+                   row(0x100C, "br", "x9")]
+        with self.assertRaises(cache.EvidenceError):
+            cache.edges(decoded, "arm64", 0x1000, 0x1010, lambda _: self.fail())
+
     def stale_sequence(self, overwrite):
         decoded = [row(0x1000, "adrp", "x17, 1 ; 0x2000"),
                    row(0x1004, "add", "x17, x17, #0x20"),

@@ -331,11 +331,11 @@ class CandidateCache(Cache):
 
 
 def arm_transfer(op, arg, regs, pc, start, machine_bytes):
-    """Track only exact supported forms; any other register write loses its provenance."""
+    """Only proven forms preserve unrelated provenance; unknown writes discard all state."""
     previous = dict(regs)
     if op in ("nop", "cmp", "cmn", "tst"):
         return
-    # Include w/x aliases, pair destinations, and writeback bases conservatively.
+    # This explicit write handling applies only to the fully matched forms below.
     for register in re.findall(r"\b[wx](\d+)\b", arg):
         regs.pop("x" + register, None)
     if op == "adrp":
@@ -347,19 +347,24 @@ def arm_transfer(op, arg, regs, pc, start, machine_bytes):
                 opcode = struct.unpack_from("<I", machine_bytes, pc - start)[0]
                 require(adrp_page(opcode, pc) == page, "raw/text ADRP disagreement")
             regs[match[1]] = page
+            return
     elif op == "add":
         match = re.fullmatch(r"(x\d+),\s*(x\d+),\s*#(0x[0-9a-fA-F]+|\d+)", arg)
-        if match and isinstance(previous.get(match[2]), int):
-            regs[match[1]] = previous[match[2]] + int(match[3], 0)
+        if match:
+            if isinstance(previous.get(match[2]), int):
+                regs[match[1]] = previous[match[2]] + int(match[3], 0)
+            return
     elif op == "ldr":
         match = re.fullmatch(r"(x\d+),\s*\[(x\d+)(?:,\s*#(0x[0-9a-fA-F]+|\d+))?\]", arg)
-        if match and isinstance(previous.get(match[2]), int):
-            regs[match[1]] = ("slot", previous[match[2]] + int(match[3] or "0", 0))
-            # A non-writeback base remains available.
-            if match[1] != match[2]:
-                regs[match[2]] = previous[match[2]]
-    elif op in ("svc", "hvc", "smc"):
-        regs.clear()
+        if match:
+            if isinstance(previous.get(match[2]), int):
+                regs[match[1]] = ("slot", previous[match[2]] + int(match[3] or "0", 0))
+                # A non-writeback base remains available.
+                if match[1] != match[2]:
+                    regs[match[2]] = previous[match[2]]
+            return
+    # Operand spelling cannot enumerate implicit writes (for example LD64B's register range).
+    regs.clear()
 
 
 def unresolved_classification(branch):
@@ -448,6 +453,8 @@ def edges(decoded, arch, start, end, pointer, machine_bytes=None, *, entry=None)
                     break
                 if is_call:
                     regs.clear()
+            if arch == "arm64":
+                require(following == pc + 4, "undecoded reachable ARM instruction gap; state is incomplete")
             pc = following
     merged = []
     for address in sorted({record["address"] for record in result}):
