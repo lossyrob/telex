@@ -747,6 +747,186 @@
         "mainCi": "https://github.com/lossyrob/telex/actions/runs/39985513856 attempt 1: success, 18 of 18 jobs at the exact merge, with no retry.",
         "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-host-containment-doc-alignment on 2026-10-23 and explicitly completed this debt terminal path. The interim macOS fail-closed statement is delivered. The existing later #172 rewrite duty, implementation HOLD, and final authorization gate remain unchanged."
       }
+    },
+    {
+      "id": "watcher-windows-lib-harness-abnormal-exit-0xc0000409",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "not-required-for-source-items",
+      "description": "On direct main cbbff03b, the ordinary Windows workspace job reported abnormal exit 0xc0000409 of the telex-watcher library test harness. The cause is unknown.",
+      "disposition": "external",
+      "target": {
+        "tracker": "https://github.com/lossyrob/telex/issues/203",
+        "owners": [],
+        "routing": "No owner is assigned. The operator routes existing issue #203 at check-in."
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "rationale": "Cargo identifies the affected Watcher library harness, not a culprit component or test. sourceNodeId watcher-runtime-core marks crate scope only; it is not causal attribution or a new dependency. This is separate from #166 command-child exits and the external Local signatures record.",
+      "terminalPath": "Watcher closes nothing and adds no dependency, gate or change to any existing item status. Further occurrences belong on existing issue #203 with run, job, head and printed progress. No implementation owner, retry, runtime probe or automatic edge to #198/#202 is created.",
+      "dispositionAuthority": "Owning Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 routed this evidence-only external record for existing issue #203 in actual message toolu_01MJApt8eW5Xi5tWXkaExKJE. The record accepts evidence routing only, not a repair, culprit, overrun finding, staffing or gate change.",
+      "evidence": [
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/203",
+          "createdAt": "2026-10-25T22:45:18Z",
+          "details": "Issue #203 is open, labeled bug and unassigned at capture. It records one main push-attempt-1 occurrence. Cargo reported telex-watcher --lib executable telex_watcher-adb209575102230f.exe exiting 0xc0000409, labeled STATUS_STACK_BUFFER_OVERRUN, in cargo test --workspace --verbose; the step exited 1. The harness announced 60 tests, printed 36 ok and 1 ignored, then terminated without an aggregate result or named failing test. The last printed runtime_tests::postgres_watcher_runtime_matrix result was ok; its output position identifies neither culprit nor teardown phase. These are progress counts, not a completed 36-pass/23-fail result.",
+          "triageHypothesis": "Issue #203 notes that Rust abort paths using __fastfail can also surface as 0xc0000409, including process abort, a panic while already panicking (for example in Drop during unwinding), or an abort-on-panic path. This is an issue-attributed hypothesis to check, not an observed abort path, proof of a stack-buffer overrun, exploitability, native fault location or root cause.",
+          "capture": {
+            "rawFile": "watch203-issue-raw.json",
+            "bodyFile": "watch203-issue-body.txt",
+            "updatedAt": "2026-10-25T22:45:18Z",
+            "bodySha256": "f2f02f3c92d899a4e1b7c9e916436c7cc72450f99f1ef01c71d9921f9bb7f693"
+          }
+        },
+        {
+          "source": "ci-job",
+          "url": "https://github.com/lossyrob/telex/actions/runs/40240112300/job/121309895502",
+          "head": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40240112300",
+          "job": "121309895502",
+          "details": "Main push event, attempt 1, ordinary Windows default workspace. Head cbbff03b only adds the Local #174 evidence record. Local matched the retained checkout output and bounded harness progress/exit excerpts. No reconciler CI refetch or execution occurred; the exited process is the library harness, not an established daemon crash."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6404410898",
+          "createdAt": "2026-10-25T22:41:06Z",
+          "details": "The sentinel reports 20/21 for the run, passing boundary jobs, timing samples and a 70-run cohort. Those aggregates remain sentinel-attributed, not an independent inventory, failure-rate trial or causal comparison. Local read an earlier body whose recorded updatedAt is 22:41:06Z; the reconciler separately captured the current complete public body. Its historical pending-routing and no-new-issue statements do not override later issue #203 creation or the owning Watcher routing decision.",
+          "capture": {
+            "rawFile": "watch203-report-raw.json",
+            "bodyFile": "watch203-report-body.txt",
+            "updatedAt": "2026-10-25T22:45:02Z",
+            "bodySha256": "1e344b1438308fd5c1f643e39b956514a7b07216d92201c210cba6c0d1c514e3"
+          }
+        },
+        {
+          "source": "local-classification",
+          "classificationPacket": {
+            "file": "watch203-local-intake.json",
+            "bytes": 7516,
+            "sha256": "680f59a9a2e0080a246f137f52a3ea45a96b9b882013752cefd8db63db4b646c",
+            "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "watcherRoutingSource": "toolu_01MJApt8eW5Xi5tWXkaExKJE",
+            "captureReceipt": "watch203-source-capture.json"
+          },
+          "details": "The complete 7,516-byte Local packet projects exactly below, without redaction. Local reports hash/byte matching of retained custody, log, source-boundary and run receipt, bounded progress counting, public-report reading and 74 immutable target-identity lines. Those checks remain Local-attributed. The reconciler read only the complete classification packet and public issue/report, not raw logs, underlying source excerpts, archives, executables or runtime state.",
+          "retainedLocalClassification": {
+            "kind": "bounded-watcher-library-harness-exit-classification",
+            "sourceMessage": "call_y12ceJ0y3xV5HRzL7FdyYYwh",
+            "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "classification": {
+              "decision": "New observed signature: abnormal termination of the telex-watcher library test harness with exit0xc0000409 in the ordinary Windows default-workspace job.",
+              "triageBoundary": "Route to the owning Watcher coordinator for evidence-only intake and disposition, because Cargo identifies the Watcher library harness as the terminated process. This identifies the affected target, not which component contains a defect.",
+              "distinctFrom166": "The retained166 observations concern0xc0000005 and0xc0000374 exits of invoked Telex command children in daemon_process_sqlite. This observation names the telex-watcher library harness itself and a different status. No common cause, additional166 occurrence or expansion of166 repair scope is established.",
+              "statusMeaning": "Cargo labels0xc0000409 as STATUS_STACK_BUFFER_OVERRUN. The label alone does not establish an actual stack-buffer overrun, exploitability, fault site, corrupting operation or root cause.",
+              "testAttribution": "No named failing test or aggregate target result was printed. Concurrent progress and the last printed test do not identify the culpable test, teardown phase or a daemon crash."
+            },
+            "observation": {
+              "head": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+              "runId": "40240112300",
+              "event": "push",
+              "attempt": 1,
+              "jobId": "121309895502",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40240112300/job/121309895502",
+              "command": "cargo test --workspace --verbose",
+              "target": "telex-watcher --lib",
+              "executable": "telex_watcher-adb209575102230f.exe",
+              "harnessExitCode": "0xc0000409",
+              "reportedStatus": "STATUS_STACK_BUFFER_OVERRUN",
+              "stepExitCode": 1,
+              "progress": {
+                "announcedTests": 60,
+                "printedOk": 36,
+                "printedIgnored": 1,
+                "aggregateResult": null,
+                "namedFailingTest": null,
+                "qualification": "These are printed progress counts, not a completed36-pass/23-fail result or proof that every other test started. No per-test failure count is inferred."
+              },
+              "lastPrintedTestQualification": "runtime_tests::postgres_watcher_runtime_matrix printed ok before Cargo reported abnormal termination. Its position in the output does not establish that it caused the termination or that failure occurred during its teardown."
+            },
+            "retainedEvidence": {
+              "custodyFile": "main-40240112300-evidence-custody.json",
+              "custodyBytes": 13278,
+              "custodySha256": "b195587ed805182f8eb0f1960fd44f3060d30dfbae20484d6a8a37a7d2cdd818",
+              "logFile": "main-40240112300-job-121309895502.log",
+              "logBytes": 358561,
+              "logSha256": "4c7ae4165f7d3e3c0291013c44615f86557117509248479d919d15235a2e7ac9",
+              "sourceBoundaryFile": "main-40240112300-source-boundary.json",
+              "sourceBoundaryBytes": 7962,
+              "sourceBoundarySha256": "02a6c25c521e63b8682c9b1a021a2f0632c110f8e85bb25426a429fa09937ef9",
+              "runReceiptFile": "main-40240112300-ci.json",
+              "runReceiptBytes": 45687,
+              "runReceiptSha256": "e79d44cc8f916867ba7991717f2d3be123a0563f7f4981017923e8498c4acd7a",
+              "logRanges": [
+                "94-99",
+                "1229-1232",
+                "2482-2527",
+                "2626-2630"
+              ],
+              "localVerification": "Read complete custody and source-boundary JSON; matched custody, retained log, source-boundary and run-receipt byte counts and SHA256. Matched every supplied log excerpt and mechanically counted36 ok plus1 ignored in the bounded harness output, without an aggregate result or named failure. Read the complete public health report. No full-log-read or complete-run-inventory audit is claimed.",
+              "checkout": "Retained git log -1 output at line98 identifies direct main cbbff03b2eeee7178ed3f9f33cf2314ee27899f8.",
+              "formatQualification": "Hashes identify the sentinel-retained capture bytes. They are not a downloaded artifact ZIP digest or proof of archive contents."
+            },
+            "immutableTargetIdentity": {
+              "matchedLines": 74,
+              "files": [
+                {
+                  "path": "telex-watcher/Cargo.toml",
+                  "blob": "1139b0176e06357c557307bddc8480950c8a6e42",
+                  "bytes": 1505,
+                  "sha256": "23bd7af2c8eaa56585f51284a258bc475acc7ea52c5c537a1e71d0374ff58548",
+                  "lines": "1-45"
+                },
+                {
+                  "path": "telex-watcher/src/lib.rs",
+                  "blob": "d7f56b05547e0f717315406240fa65ca1eb3e336",
+                  "bytes": 833,
+                  "sha256": "4d6dacb975a06078638ed7e99d7e80f7c2b1195a019f5bbc2ab87a4e1c839d60",
+                  "lines": "1-29"
+                }
+              ],
+              "verification": "Local matched all74 numbered lines and both complete immutable blob byte counts/hashes to the tested head. These identify the package, default features and library modules, not a fault-location trace or complete executed feature/dependency graph.",
+              "sourceComparison": "The cbb commit changes only the Local174 evidence record. An independent Git comparison from actual Watcher180 merge0d5347a6e1b8a1716b524c537c4886d3f4d49b65 to cbb shows nine changed paths, all under .streamliner.",
+              "comparisonLimit": "Equal committed nonplanning source does not establish identical executable/build identity, dependency resolution, runner state or runtime inputs. No controlled before/after or PR174/180/192/193/198/202 causal attribution follows."
+            },
+            "uploadMetadata": {
+              "artifactId": "12617062276",
+              "reportedBytes": 73044878,
+              "reportedZipSha256": "79e20a5d2311a67e8b09d89580222f5bfe60855d8a536b40f57f4a03fda36a65",
+              "qualification": "Matched upload lines2626-2630 in the retained log. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
+            },
+            "publicReport": {
+              "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6404410898",
+              "updatedAt": "2026-10-25T22:41:06Z",
+              "read": "Complete body read by Local.",
+              "attribution": "The20/21 aggregate, passing boundary jobs, timing samples and70-run cohort remain sentinel-reported; no independent full-run or failure-rate inference."
+            },
+            "deduplication": {
+              "base": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+              "scope": "Exact strings40240112300,121309895502,0xc0000409 and STATUS_STACK_BUFFER_OVERRUN searched in all canonical workstream discovery ledgers.",
+              "result": "No exact match found. This is a bounded signature check, not exhaustive history or authority to create an issue or record."
+            },
+            "disposition": {
+              "recipient": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407",
+              "request": "Owning Watcher evidence-only intake and record-placement decision for the affected library harness, preserving unknown cause and exact progress/exit evidence.",
+              "implementationOwner": "Unassigned by this classification.",
+              "newIssueOrNodeOrOwner": false,
+              "retryOrProbeOrObserver": false,
+              "canonicalMutation": false,
+              "gateOrReadinessChange": false,
+              "repairScopeExpansion": false,
+              "conservation": "Do not append to the Local166 native-command-child record or watcher-ci-local-daemon-signatures as a confirmed Local defect solely from the exit code. Keep existing ownership,166 recovery state, both pending193/198 product-repair-merge wakes and all prior deliveries/debts unchanged. Any canonical projection needs the owning role's consent and fresh review."
+            }
+          }
+        },
+        {
+          "source": "artifact-upload-metadata",
+          "id": "12617062276",
+          "bytes": 73044878,
+          "reportedZipSha256": "79e20a5d2311a67e8b09d89580222f5bfe60855d8a536b40f57f4a03fda36a65",
+          "details": "Artifact 12617062276 reports 73,044,878 bytes. The ZIP digest and ID are upload metadata only, not verification against downloaded bytes. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
+        }
+      ],
+      "limits": "One evidence-only external record for existing #203. No culprit, actual-overrun finding, common cause, PR attribution, implementation owner, observer, retry, probe, graph edge, source/review/CI/readiness, waiver, debt/HOLD or freeze credit. Equal committed nonplanning source to Watcher #180 does not establish identical executable/build/dependency/runner/input state or a controlled comparison. Keep #166 native command-child observations and watcher-ci-local-daemon-signatures distinct; preserve all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes. No automatic edge or disposition change to #198/#202."
     }
   ]
 }
