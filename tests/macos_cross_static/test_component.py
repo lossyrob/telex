@@ -462,6 +462,68 @@ class ImageContainmentTests(unittest.TestCase):
 
 
 class NativeBindingTests(unittest.TestCase):
+    def test_reviewer_valid_plus_truncated_selected_path_fails(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        prefix = "dyld[12]: <12345678-1234-1234-1234-1234567890ab> "
+        text = prefix + path + "\n" + prefix + "/usr/lib/libParallelCompression"
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                         "eff0a3ccffc48c8a761fb0da296c5cd277bed0d37e1034b8a31ed7217e719607")
+        with self.assertRaises(cache.EvidenceError):
+            native.decode_trace(text, path, identity, 12)
+
+    def test_partial_relevant_paths_fail_with_same_or_different_uuid(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        valid = "dyld[12]: <12345678-1234-1234-1234-1234567890ab> " + path
+        for observed_uuid in ("12345678-1234-1234-1234-1234567890ab",
+                              "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"):
+            for observed_path in ("/usr/lib/libParallelCompression", "/usr/lib/libP",
+                                  "/usr/lib/libParallelCompression.dyl", "/usr/lib/",
+                                  path + "/unexpected-suffix"):
+                with self.subTest(uuid=observed_uuid, pathname=observed_path), \
+                        self.assertRaises(cache.EvidenceError):
+                    native.decode_trace(valid + "\ndyld[12]: <" + observed_uuid + "> " + observed_path,
+                                        path, identity, 12)
+
+    def test_selected_uuid_at_another_path_is_not_ignored(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        prefix = "dyld[12]: <12345678-1234-1234-1234-1234567890ab> "
+        for other in ("/alternate/libParallelCompression.dylib", "/elsewhere/unrelated.dylib"):
+            with self.subTest(path=other), self.assertRaises(cache.EvidenceError):
+                native.decode_trace(prefix + path + "\n" + prefix + other, path, identity, 12)
+
+    def test_exact_child_incomplete_record_without_full_path_is_not_dropped(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        valid = "dyld[12]: <12345678-1234-1234-1234-1234567890ab> " + path
+        for partial in ("dyld[12]: <12345678-1234", "dyld[12]: <12345678-1234-1234-1234-1234567890ab>",
+                        "dyld[12] <12345678-1234-1234-1234-1234567890ab> /usr/lib/libParallelCompression"):
+            with self.subTest(partial=partial), self.assertRaises(cache.EvidenceError):
+                native.decode_trace(valid + "\n" + partial, path, identity, 12)
+
+    def test_unrelated_child_partial_path_cannot_supply_exact_match(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        prefix = "dyld[99]: <12345678-1234-1234-1234-1234567890ab> "
+        unrelated = prefix + "/usr/lib/libParallelCompression"
+        exact = prefix.replace("[99]", "[12]") + path
+        with self.assertRaises(cache.EvidenceError):
+            native.decode_trace(unrelated, path, identity, 12)
+        result = native.decode_trace(unrelated + "\n" + exact, path, identity, 12)
+        self.assertEqual([r["pid"] for r in result["exact_child"]], [12])
+        self.assertEqual(result["unrelated_children"][0]["pid"], 99)
+        self.assertFalse(result["unrelated_children"][0]["supplies_exact_child_evidence"])
+
+    def test_complete_other_exact_child_image_can_be_ignored_after_classification(self):
+        identity = "123456781234123412341234567890ab"
+        path = "/usr/lib/libParallelCompression.dylib"
+        selected = "dyld[12]: <12345678-1234-1234-1234-1234567890ab> " + path
+        other = "dyld[12]: <aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa> /usr/lib/libSystem.B.dylib"
+        result = native.decode_trace(other + "\n" + selected, path, identity, 12)
+        self.assertEqual(len(result["exact_child"]), 1)
+
     def test_actual_loader_trace_required_and_uuid_matched(self):
         identity = "123456781234123412341234567890ab"
         path = "/usr/lib/libParallelCompression.dylib"

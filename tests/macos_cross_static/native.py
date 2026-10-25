@@ -227,19 +227,48 @@ def backing_binding(loaded, policy, budget, deadline):
 
 
 def decode_trace(stderr, expected_path, expected_uuid, child_pid):
+    expected_uuid = uuid.UUID(expected_uuid).hex
+    expected_name = expected_path.rsplit("/", 1)[-1]
+    expected_stem = expected_name.removesuffix(".dylib")
+    uuid_pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+
+    def related_path(candidate):
+        name = candidate.rsplit("/", 1)[-1]
+        return (expected_path.casefold() in candidate.casefold() or
+                expected_path.casefold().startswith(candidate.casefold()) or
+                bool(name) and (expected_name.casefold().startswith(name.casefold()) or
+                                name.casefold().startswith(expected_name.casefold())))
+
+    def selected_hint(line):
+        folded = line.casefold()
+        return (expected_stem.casefold() in folded or expected_uuid in folded or
+                str(uuid.UUID(expected_uuid)) in folded)
+
     records, unrelated = [], []
     for line in stderr.splitlines():
-        if expected_path not in line:
+        prefix = re.fullmatch(r"dyld\[(\d+)\]:\s*(.*)", line)
+        if prefix is None:
+            require(not line.startswith("dyld[") and not selected_hint(line),
+                    "unclassifiable potentially relevant loader record")
             continue
-        match = re.fullmatch(r"dyld\[(\d+)\]:\s*<([0-9A-Fa-f-]{36})>\s+(\S+)\s*", line)
-        require(match and match[3] == expected_path, "actual decoder load trace unclassifiable")
-        identity = uuid.UUID(match[2]).hex
-        record = {"pid": int(match[1]), "path": match[3], "uuid": identity, "line": line}
-        if record["pid"] != child_pid:
-            unrelated.append(record)
+        pid = int(prefix[1])
+        match = re.fullmatch(r"<(" + uuid_pattern + r")>\s+(/\S*)\s*", prefix[2])
+        if pid != child_pid:
+            if match and (uuid.UUID(match[1]).hex == expected_uuid or related_path(match[2])):
+                unrelated.append({"pid": pid, "path": match[2], "uuid": uuid.UUID(match[1]).hex,
+                                  "line": line, "supplies_exact_child_evidence": False})
+            elif selected_hint(line):
+                unrelated.append({"pid": pid, "line": line, "unclassified": True,
+                                  "supplies_exact_child_evidence": False})
             continue
+        # Classify every exact-child dyld record before filtering for the selected image.
+        require(match is not None, "incomplete or ambiguous exact-child loader record")
+        identity, pathname = uuid.UUID(match[1]).hex, match[2]
+        if identity != expected_uuid and not related_path(pathname):
+            continue
+        require(pathname == expected_path, "incomplete or mismatching selected-library pathname")
         require(identity == expected_uuid, "exact ipsw child loaded a different decoder image")
-        records.append(record)
+        records.append({"pid": pid, "path": pathname, "uuid": identity, "line": line})
     require(len(records) == 1, "exact child decoder load missing/duplicated; unrelated children cannot supply it")
     return {"exact_child": records, "unrelated_children": unrelated}
 
