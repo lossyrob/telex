@@ -283,6 +283,9 @@ fn hosted_native_capture_preserves_abnormal_child_status_and_invocation() {
             && setup.contains("Get-AuthenticodeSignature")
             && setup.contains("postmortem preflight produced no native dump")
             && setup.contains("capture changed the probe exit status")
+            && setup.contains("[Convert]::ToUInt32(\"c0000005\", 16)")
+            && setup.contains("LocalDumps\\telex-capture-probe.exe")
+            && setup.contains("-Path $probeWer -Name DumpFolder -Value $probe")
             && setup.contains("0xc0000005"),
         "hosted postmortem capture must verify a dump and the original native status"
     );

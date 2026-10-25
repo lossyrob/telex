@@ -42,6 +42,12 @@ if ($LASTEXITCODE -ne 0) {
 
 # AeDebug captures second-chance failures even when WER produces no dump.
 # Verify capture and the original abnormal exit before running any Telex tests.
+$probeWer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\telex-capture-probe.exe"
+New-Item -Path $probeWer -Force | Out-Null
+New-ItemProperty -Path $probeWer -Name DumpFolder -Value $probe `
+    -PropertyType ExpandString -Force | Out-Null
+New-ItemProperty -Path $probeWer -Name DumpType -Value 2 `
+    -PropertyType DWord -Force | Out-Null
 & $procdump -accepteula -ma -i $probe
 if ($LASTEXITCODE -ne 0) {
     throw "installing probe postmortem capture failed"
@@ -54,7 +60,9 @@ try {
     }
     $child.Refresh()
     $status = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$child.ExitCode), 0)
-    if ($status -ne 0xc0000005) {
+    # PowerShell's unsuffixed 0xc0000005 literal is signed; compare unsigned values.
+    $expectedStatus = [Convert]::ToUInt32("c0000005", 16)
+    if ($status -ne $expectedStatus) {
         throw ("capture changed the probe exit status to 0x{0:x8}" -f $status)
     }
     $captured = @(Get-ChildItem -LiteralPath $probe -Filter "*.dmp" -File)
@@ -68,6 +76,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "uninstalling probe postmortem capture failed"
     }
+    Remove-Item -LiteralPath $probeWer
 }
 
 & $procdump -accepteula -ma -i $dumps
