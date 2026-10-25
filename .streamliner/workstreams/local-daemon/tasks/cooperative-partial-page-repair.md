@@ -3,7 +3,8 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** blocked on issue #187; existing v2 owner and draft PR retained
+- **Status:** blocked on accepted #187 delivery; existing owner authorized
+  to integrate main into draft PR #185 and revalidate
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
@@ -278,6 +279,50 @@ is automatically complete. The entire earlier outcome, authority, evidence,
 launch, design and wait history remains; the workstation freeze, marker,
 issue #153 and hardening/closure gates are unchanged. PR #185 is not edited
 or absorbed by the new repair.
+
+## Authorized upstream integration - 2026-10-25
+
+Campaign source `toolu_01PMvueoUjg24dodu9bGRnrR`, retained in Local's
+`pr189-merge-and-review-floor-intake-20261025.json`, directs this existing
+owner to merge main into PR #185 and run CI again. This explicitly
+supersedes the earlier unchanged-PR hold and resume-only wording for that
+integration and validation only; it does not remove the #187 dependency or
+accept its terminal delivery. PR #189 merged from reviewed head
+`d0b1010594aff7c27f7629ceb43ddad3c79118be` as
+`d03492ea425f001df530f4405808d3a817558291` at 2026-10-25T16:55:54Z;
+issue #187 closed as completed at 16:55:56Z. Local and the reconciler
+verified those provider facts separately from acceptance. The existing #187
+owner still owes post-merge main CI and a field report; neither is verified
+or accepted by this intake.
+
+Local's PR #185 OPEN/draft `7b11b926` read is an intake-time snapshot.
+The direction is not evidence of a new head, completed main integration,
+source review, design, CI success or readiness. Revalidation of an
+integrated head is not another authorized unchanged-head retry, skip,
+waiver or threshold workaround. Old-head evidence remains historical;
+current-head requirements are not waived. This node remains blocked on
+accepted upstream delivery and its Watcher dependency remains pending.
+Owner, scope, graph dependency, workstation freeze, marker candidates,
+#153 and hardening/closure gates are unchanged. No second owner, observer,
+runtime action or product edit by the reconciler is authorized.
+
+The later prospective Local source-review floor also applies: the source
+reviewer itself must publish an exact-current-head verdict receipt on this
+PR with necessary scope/limits. A finalized `no-comments-to-post` review
+still requires that receipt; owner attestation, a private artifact or
+coordinator relay alone does not satisfy it. Verify that receipt before
+future floor-complete readiness; a missing receipt is now a floor miss and
+an older-head receipt stays historical. Include this additive rule in new
+owner/reviewer kickoffs and delta-review requests, preserving the required
+`gpt-6.1-sol` / high / default profile for new sessions. Do not rewrite
+frozen kickoffs or prior review/readiness evidence.
+
+Campaign's accepted PR #189 publication-gap debt is recorded separately in
+the upstream task and brief, not cleared or retroactively satisfied here.
+No retrospective receipt, new review, posting for a reviewer, empty formal
+approval, merge reversal or issue reopening is requested. Reviewer
+publication alone establishes no CI, merge authority, accepted delivery,
+Watcher readiness or gate completion.
 
 ## Workflow
 

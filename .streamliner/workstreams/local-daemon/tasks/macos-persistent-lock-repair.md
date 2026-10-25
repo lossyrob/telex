@@ -3,16 +3,18 @@
 - **Workstream:** `local-daemon`
 - **Node:** `macos-persistent-lock-repair`
 - **Type:** implementation
-- **Status:** in progress; OPEN/non-draft PR ready for operator;
-  exact-head source/design/hosted evidence aligned; delivery/gates pending
+- **Status:** in progress; PR merged and tracker closed;
+  post-merge main CI, field report and accepted delivery/gates pending
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `local-daemon/cooperative-partial-page-repair`, issue #181 /
   draft PR #185; transitively Watcher #179 / PR #180 through its existing
   dependency
-- **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187)
-- **PR:** [#189](https://github.com/lossyrob/telex/pull/189), OPEN/non-draft;
-  head `d0b1010594aff7c27f7629ceb43ddad3c79118be`
+- **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187),
+  closed as completed; not terminal node acceptance
+- **PR:** [#189](https://github.com/lossyrob/telex/pull/189), merged;
+  reviewed head `d0b1010594aff7c27f7629ceb43ddad3c79118be`,
+  merge `d03492ea425f001df530f4405808d3a817558291`
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `5d9b3155-0327-40d1-936d-7a3652ea90c3`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
@@ -403,6 +405,62 @@ source/design approval, ready status nor issue closure alone releases a
 downstream obligation. No retry, local proof, source re-review or provider
 mutation was performed for this reconciliation.
 
+### Merge and review-floor qualification - 2026-10-25
+
+PR #189 merged at 2026-10-25T16:55:54Z as
+`d03492ea425f001df530f4405808d3a817558291`, from unchanged reviewed head
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`, base `main`. Issue #187 closed
+with reason `completed` at 16:55:56Z. Local and the reconciler independently
+read those live provider identities; these are merge/tracker facts, not
+post-merge CI or accepted terminal delivery. Node #187 remains in progress.
+The prior draft, ready, merge-pending and observer-active statements above
+remain historical snapshots. No current scheduler state is inferred.
+
+Local's full intake is `pr189-merge-and-review-floor-intake-20261025.json`,
+3,047 bytes, SHA-256
+`569e4b3fbfcff178aa614796c2673036029aaaa05c11161985c4e4fd6ba2ad0b`.
+The separate policy supplement is
+`local-reviewer-receipt-policy-20261025.json`, 2,785 bytes, SHA-256
+`2edcdc28dcddc3e79b9d102f6e63fc43e944eaff540916fe441192750ee6d4f4`.
+The reconciler read both completely and retained exact bytes/hash. Campaign
+source `toolu_01PMvueoUjg24dodu9bGRnrR` directs the existing #181 owner
+`9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` to merge main into PR #185 and run
+CI again. This supersedes the older unchanged-PR hold for that integration
+and validation only; it is not an additional unchanged-head retry, skip or
+threshold workaround. Local's OPEN/draft `7b11b926` PR #185 identity is its
+intake-time snapshot, not proof of a later head or successful integration.
+No new-head source review, design, CI success, readiness or Watcher
+acceptance follows.
+
+The existing #187 owner retains post-merge main CI and field-report
+responsibility under its established lifecycle. Neither has been verified
+or accepted by this intake. No second owner or observer is authorized.
+The #181 dependency and blocked status remain; Campaign's bounded direction
+permits integration/revalidation without accepting upstream terminal
+delivery or automatically releasing #181, Watcher #179 / PR #180, #153 or
+hardening/closure. The workstation freeze and all unrelated gates remain.
+
+The prospective Local reviewer-origin receipt floor is effective
+2026-10-25T12:56:34.591-04:00. The source reviewer itself must publish its
+exact-current-head verdict and necessary scope/limits on the PR, including
+for a finalized `no-comments-to-post` review. Owner attestation, a private
+artifact or a coordinator relay alone is not publication; an older-head
+receipt stays historical. Future floor-complete readiness requires checking
+that reviewer-origin current-head receipt; absence is now a floor miss.
+Campaign reports PR #189 had owner attestation but no reviewer-origin
+exact-head PR receipt and accepted that gap as debt for this merge, naming
+a similar PR #184 gap. This is Campaign-attributed debt, not an independent
+comment-history audit. The exact private source verdict and prior readiness
+receipt above remain unchanged; neither is retroactively declared to meet
+the new publication floor or erased by this later qualification.
+
+No retrospective receipt backfill, new review, posting for the reviewer,
+empty formal approval, debt clearance, merge reversal or issue reopening
+is authorized. Publication establishes no CI, merge authority, accepted
+delivery or downstream completion. The reconciler queried no CI result,
+review/comment history or scheduler, ran no product/runtime proof, and
+performed no provider mutation for this reconciliation.
+
 ## Workflow
 
 Use paw-lite for planning, implementation and testing under the v2 owner
@@ -416,15 +474,22 @@ coordinator for registered external CI waits; no duplicate observer or
 polling of App review/design completion. The freeze and no-further-retry
 directive override older generic guide defaults.
 
+Apply the later reviewer-origin exact-head PR receipt floor above to future
+readiness, new owner/reviewer kickoffs and delta-review requests. Frozen
+kickoff, review and readiness artifacts are not rewritten. This supplement
+launches no reviewer and authorizes no retrospective PR #189 publication.
+
 ## Ownership and handoff
 
 Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57` coordinates launched owner
 `5d9b3155-0327-40d1-936d-7a3652ea90c3` under the v2 receipt above.
 Steward `af271672-5d33-418c-bb9c-0f4d4570c7d7` handles design; reconciler
 `b737a932-c687-4b95-b273-8335a59f6e89` alone writes canonical geometry.
-Existing #181 owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` keeps PR #185
-draft and unchanged. Campaign `e06813c4-1db2-4d77-b8d3-3addc6a1824c` owns
-the final gate.
+Existing #181 owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c` now has
+Campaign's bounded direction to integrate main into draft PR #185 and
+revalidate, as qualified above. The unchanged hold is historical for that
+integration; no new-head success or downstream readiness is implied.
+Campaign `e06813c4-1db2-4d77-b8d3-3addc6a1824c` owns the final gate.
 
 Return the complete separate PR, explicit `Closes #187`, diagnosis,
 regression coverage, exact-head hosted results and independent

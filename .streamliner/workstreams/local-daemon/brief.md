@@ -204,6 +204,40 @@ delivery remain pending; #187 stays in progress, #181 blocked and PR #185
 draft. All ledger records, owners, dependencies, Watcher, freeze and every
 unrelated gate remain unchanged. Head movement invalidates this readiness.
 
+The OPEN/operator-ready and PR #185 unchanged-hold statements above are
+historical snapshots. PR [#189](https://github.com/lossyrob/telex/pull/189)
+merged on 2026-10-25T16:55:54Z as
+`d03492ea425f001df530f4405808d3a817558291`, from unchanged reviewed head
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`; issue #187 closed as completed
+at 16:55:56Z. Local and the reconciler verified those provider identities.
+Campaign directed the existing #181 owner to merge main into PR #185 and
+run CI again, superseding the unchanged hold for that integration and
+validation only. No new-head review/CI success or readiness is established.
+The existing #187 owner retains post-merge main CI and field-report
+obligations; neither is verified or accepted here. Node #187 remains in
+progress and #181 blocked on accepted upstream delivery, with the existing
+dependency intact. The direction permits integration/revalidation, not
+automatic dependency clearance, Watcher readiness or gate acceptance.
+
+Campaign's prospective Local source-review floor took effect on
+2026-10-25T12:56:34.591-04:00: the source reviewer itself must post an
+exact-current-head verdict receipt on the reviewed PR, retaining scope and
+limits distinct from design, CI and merge authority. This also applies to a
+finalized `no-comments-to-post` review with no inline findings or formal
+GitHub approval. An owner attestation, private artifact or coordinator relay
+alone does not satisfy publication; an older-head receipt stays historical.
+Before future floor-complete readiness, verify the reviewer-origin receipt
+at the current reviewed head. Missing publication is now a floor miss.
+Include this additive instruction in new Local owner/reviewer kickoffs and
+delta-review requests, preserving `gpt-6.1-sol` / high / default for new
+sessions. Campaign reports PR #189's owner-only publication gap was accepted
+as debt this time, like the gap it names on PR #184. Prior private review
+and readiness records remain historical, not retroactively floor-complete.
+No receipt backfill, review, empty approval, posting for the reviewer, debt
+clearance, merge reversal, issue reopening or runtime action is authorized.
+This supplement changes no ledger, owner, status, dependency, workstation
+freeze, #153, Watcher or hardening/closure gate.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design
