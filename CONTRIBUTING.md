@@ -52,6 +52,33 @@ from end-to-end SQL/scheduler latency. A separate virtual-time test proves that
 notification selection does not wait for the normal polling deadline. Production
 poll intervals remain unchanged.
 
+## Station-intent boundary coverage
+
+The `station-intent-lock` CI job runs the complete station-intent and
+owner-private filesystem modules on Linux, macOS, and Windows:
+
+```text
+cargo test --locked --no-default-features --features sqlite --lib station_intent::tests:: -- --nocapture
+cargo test --locked --no-default-features --features sqlite --lib platform_fs::tests:: -- --nocapture
+```
+
+This dedicated SQLite-only job verifies the checked-out source head separately
+from the provider event SHA and uses isolated runtime paths. It retains the
+ordinary test profile, default parallel scheduling, and hard failures. The
+broader `build-test` jobs remain separate because their default-feature
+workspace tests and provider-selected checkout cover a different configuration.
+
+The full station-intent module includes
+`a_cooperatively_truncated_phase_still_returns_its_partial_page`, which requires
+`Completed`, truthful truncation, and exactly one manifest. Its private blocking
+slot and paused Tokio clock make the result controlled; it does not prove that
+a first filesystem read completes within a real 200ms grace period. The
+separate `cooperative-partial-page` matrix and its ten extra invocations per OS
+were retired as duplicate execution. This intentionally reduces repeated-run
+exposure without removing the positive case or neighboring deadline, admission,
+cancellation, and permit-retention checks. Historical ten-run results are not
+evidence for a newer source head.
+
 ## Credential-command lifecycle tests
 
 Run the real OS lifecycle targets on Windows, Linux, and macOS:

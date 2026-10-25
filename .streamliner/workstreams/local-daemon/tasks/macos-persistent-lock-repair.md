@@ -3,15 +3,14 @@
 - **Workstream:** `local-daemon`
 - **Node:** `macos-persistent-lock-repair`
 - **Type:** implementation
-- **Status:** in progress; PR merged and tracker closed;
-  post-merge main CI, field report and accepted delivery/gates pending
+- **Status:** completed; bounded terminal delivery accepted
+  by Local and Campaign after exact-merge validation and field report
 - **Attention:** focus
 - **Depends on:** none
-- **Blocks:** `local-daemon/cooperative-partial-page-repair`, issue #181 /
-  draft PR #185; transitively Watcher #179 / PR #180 through its existing
-  dependency
+- **Blocks:** the #187 prerequisite of issue #181 / PR #185 is satisfied;
+  #181 delivery and Watcher #179 / PR #180 readiness remain separate
 - **Tracker:** [#187](https://github.com/lossyrob/telex/issues/187),
-  closed as completed; not terminal node acceptance
+  closed as completed; bounded terminal node delivery accepted
 - **PR:** [#189](https://github.com/lossyrob/telex/pull/189), merged;
   reviewed head `d0b1010594aff7c27f7629ceb43ddad3c79118be`,
   merge `d03492ea425f001df530f4405808d3a817558291`
@@ -460,6 +459,65 @@ is authorized. Publication establishes no CI, merge authority, accepted
 delivery or downstream completion. The reconciler queried no CI result,
 review/comment history or scheduler, ran no product/runtime proof, and
 performed no provider mutation for this reconciliation.
+
+## Accepted terminal delivery - 2026-10-25
+
+Local and Campaign now explicitly accept the bounded #187 repair and its
+absorbed canonical-parent fixture as delivered. This later receipt
+qualifies earlier merged-but-unverified, pending-CI/field-report and
+unaccepted-delivery statements as historical; their evidence remains
+unchanged. The actual PR #189 merge is
+`d03492ea425f001df530f4405808d3a817558291`,
+tree `39a45aa5e238fcb86e67eebef85a08f00030ebf1`, with reviewed source parent
+`d0b1010594aff7c27f7629ceb43ddad3c79118be`.
+
+Local's full `issue187-terminal-delivery-qualification-20261025.json`
+is 10,480 bytes, SHA-256
+`d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa`.
+Local independently read [main CI 40214028177](
+https://github.com/lossyrob/telex/actions/runs/40214028177), push attempt 1
+at that exact merge: 21 unique completed/successful jobs. The separate
+[Docs run 40214028168](
+https://github.com/lossyrob/telex/actions/runs/40214028168) passed both jobs
+at the same merge. These are existing hosted results, not new executions.
+No CI result for later unrelated artifact commits or PR #185 follows.
+
+Local and the reconciler matched retained macOS job `121231165074` capture
+`pr189-main-d03492e-macos-121231165074.txt`: 68,143 bytes, SHA-256
+`9c92e2426834425b51333996cdf5627c9d2e7b093c8eb41cef0982f3092c59ab`.
+Selected verifier/result lines establish direct source and provider event
+SHA equal to the merge, measured contention 510.866708ms, station-intent
+58 passed / zero failed or ignored and filesystem 13 passed / zero failed
+or ignored. The persistent-lock and canonical-parent test names pass.
+Neither reader claims a full-log inspection or provider-log refetch; the
+reconciler did not repeat Local's provider run/job inventory queries.
+
+The measured 510.866708ms is below the unchanged strict 1,540ms assertion.
+The 480ms endpoint governs sampled admission, not hard real-time return,
+entered-call preemption or a universal scheduling guarantee. Neither this
+result nor module duration identifies historical delay components or
+heavy-load degradation rates. No failure, retry or optional lint evidence
+is relabeled as passing; the old fixture/source-only limits remain.
+
+The full [field report](
+https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517),
+by `lossyrob` at 2026-10-25T17:24:02Z, records design impact `updated-docs`,
+the bounded outcome, causal/latency limits and retained debts. Local and
+the reconciler read it fully; retained body is 3,228 bytes, SHA-256
+`ce2fa2d26cd4d365782f8bc3092275a80e34adfc8dc682574e9e454ea9a16d11`.
+The separate Campaign acceptance supplement is 2,821 bytes, SHA-256
+`fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109`.
+Campaign expressly accepts terminal delivery and says the #185 owner
+must not wait on artifact publication to proceed to its gate.
+
+Node #187 and only its two linked discovery records are completed. #181
+is in progress; its edge to completed #187 remains satisfied lineage.
+This does not accept #181 delivery or release Watcher #179 / PR #180.
+The earlier authorized main integration was a separate decision.
+PR #189 reviewer-origin receipt debt, sentinel CI-overlap assessment and
+optional Clippy hygiene remain separate and uncleared. No retroactive
+public receipt, new review/CI/retry/observer/runtime, #153, hardening,
+closure, release or workstation-freeze authority follows.
 
 ## Workflow
 

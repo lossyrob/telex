@@ -3,16 +3,20 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** blocked on accepted #187 delivery; source/design bound at
-  130be3; fresh full CI and terminal acceptance remain pending
+- **Status:** in progress; PR merged and tracker closed;
+  accepted terminal delivery is a separate later receipt
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
+  (completed; satisfied lineage)
 - **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
-- **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181)
-- **PR:** [#185](https://github.com/lossyrob/telex/pull/185), OPEN/draft;
-  head `130be3b257e8208f521f9e4e91bc6795b991e023`,
-  tree `fd53e11c478ae8e4b7ca19855734735803feac79`
+- **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181);
+  closed as completed at 2026-10-25T17:35:56Z
+- **PR:** [#185](https://github.com/lossyrob/telex/pull/185), merged as
+  `65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`;
+  reviewed source `130be3b257e8208f521f9e4e91bc6795b991e023`,
+  source tree `fd53e11c478ae8e4b7ca19855734735803feac79`,
+  merge tree `144382f5b9bc4d5951113e3b588c4e23cab0530d`
 - **Owner coordination:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`;
   implementation owner `9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c`
 - **Parent workstream:** [#32](https://github.com/lossyrob/telex/issues/32)
@@ -459,6 +463,107 @@ status, owner, dependency, ledger record and gate remains unchanged.
 Any head movement invalidates source/design coverage pending new evidence.
 No duplicate source/design review, reviewer post, CI/runtime probe,
 scheduler query, provider mutation or debt clearance was performed here.
+
+## Accepted upstream delivery - 2026-10-25
+
+Local and Campaign explicitly accept bounded #187 terminal delivery at
+PR #189 merge `d03492ea425f001df530f4405808d3a817558291`,
+tree `39a45aa5e238fcb86e67eebef85a08f00030ebf1`.
+Local's 10,480-byte terminal qualification, SHA-256
+`d85bf58b789a643d5d6ca05c0d6c143d086d747d50e8202ff83a7923a3fff0fa`,
+independently verifies main CI `40214028177` attempt 1 at that merge,
+21/21 successful jobs, Docs `40214028168` with 2/2, and the full
+[field report](
+https://github.com/lossyrob/telex/issues/187#issuecomment-6400771517).
+The later Campaign acceptance supplement is 2,821 bytes, SHA-256
+`fdf82497a84ca6b14bce0ae42a274b428967415d64661c464f93c4a7b76e1109`.
+This is accepted delivery, not an inference from merge, issue closure,
+owner completion sends or earlier source/design approval alone.
+
+Node #187 is completed and #181 is in progress. Keep the existing
+`macos-persistent-lock-repair` edge as satisfied completed-node lineage;
+do not delete the dependency or change attention/owner/tracker fields.
+Only the #187 prerequisite is discharged. This upstream receipt does not
+itself supply #181 current-head CI/readiness, merge or accepted delivery.
+The #185 owner's gate does not wait on this canonical artifact update.
+Earlier authorized integration/revalidation did not require this later
+acceptance retrospectively. All prior OPEN/draft, blocked and
+upstream-pending statements remain historical snapshots; #185's later
+gate/merge facts are a separate qualification, not asserted here.
+
+The exact-merge macOS 510.866708ms / 58+13 passing results support #187's
+exercised bounded outcome, not a hard 480ms return or historical cause.
+PR #189 publication debt, CI-overlap assessment and optional Clippy remain.
+No Watcher #179 / PR #180 release, #181 terminal completion, new observer,
+CI/runtime action, retry, #153, hardening/closure or freeze change follows.
+
+## Merge history and retained debt - 2026-10-25
+
+PR #185 actually merged at 2026-10-25T17:35:55Z as
+`65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
+tree `144382f5b9bc4d5951113e3b588c4e23cab0530d`.
+Its ordered parents are main
+`ea6230328da175d48d09435b26b81750c52b59b7` and reviewed source
+`130be3b257e8208f521f9e4e91bc6795b991e023`.
+Local independently read provider merge/closed-completed #181 metadata
+and immutable Git identity; the reconciler checked the Git geometry.
+Provider merge and issue closure alone do not establish delivery.
+
+The original ready qualification is a pre-merge historical receipt:
+12,565 bytes, SHA-256
+`cb8f3b5253f169e5116c46af931e076c7d7250d22c20a65b44775a195ff59b2d`.
+It records Local's independently read OPEN/non-draft/MERGEABLE/CLEAN
+`130be3` / `fd53e11c`, full body, zero review threads and sole Closes #181.
+Local read the full owner
+[ready receipt](
+https://github.com/lossyrob/telex/pull/185#issuecomment-6400864642)
+and independently verified existing PR CI `40214432369` attempt 1,
+24/24 successful jobs. Three direct-head cooperative captures each
+matched bytes/hash and actual attempts 1..10, ten single-test pass
+results, eleven named positive-case passes and 62 module tests with zero
+ignored. These are Local's retained-log checks, not a new reconciler
+log read/refetch. Reviewer-origin source publication and renewed design
+approval were separately qualified; no duplicate review is claimed.
+This receipt does not describe current OPEN/ready state or landed CI.
+
+The separate merged-state qualification is 5,195 bytes, SHA-256
+`366424cf4f838e16e1a04f6b9727746e740e713c29ba08b92c26585447c38370`.
+Local and the reconciler read the full public
+[Campaign gate](
+https://github.com/lossyrob/telex/pull/185#issuecomment-6400899418):
+**merge + debt, confidence high**, at reviewed `130be3` / `fd53e11c`.
+Its source/design, clean merge-tree and readiness floor are Campaign's
+adjudication, not an independent full-source or runtime review here.
+The gate's required main CI, #181 field report and Local acceptance
+follow-through is distinct from the observed merge.
+
+Local retains the real-time positive-case coverage gap: pausing Tokio
+completion time does not directly test a real first read completing
+within the unchanged real-time 200ms grace. The historical Windows
+`Overran` cause remains unknown. Controlled semantic checks and passing
+repetitions establish neither a universal timing guarantee nor that
+historical cause. On recurrence, open a new item with exact source and
+failure evidence rather than retrying. CI consolidation remains with
+the existing sentinel; permitted repetition trimming is reduced exposure,
+not equivalent ten-run evidence or closure of the timing debt.
+Optional Clippy stays in its existing separate deferred item.
+
+Add only `evidence.mergeDebtAndFollowThrough` to existing discovery
+`local-daemon-windows-cooperative-partial-page-overrun`, retaining its
+`sourceNode: null`, `status: routed`, accepted decision and all old fields.
+No new record, #187 lock/fixture, marker or lint absorption occurs.
+The original ready and merge packets stay immutable; this later Local
+scope clarification expands only the bounded four-path artifact receipt.
+
+Merge-time CI/Docs/observer/field obligations in the original packet are
+historical pending/owner-reported snapshots, not a scheduler audit or
+assertion that later results remain pending. #187 completion is already
+accepted separately; retain its completed edge and #181 in progress in
+this merge-only receipt. Later verified #181 delivery and explicit
+Watcher resumption have their own successor and are not negated here.
+No terminal delivery, Watcher readiness/release, debt clearance, runtime,
+CI/retry/observer, product merge, release, #153, hardening/closure or
+workstation-freeze change is authorized by this receipt.
 
 ## Workflow
 
