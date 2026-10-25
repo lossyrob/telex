@@ -50,6 +50,28 @@ pub struct Mutation {
     pub refusal: Option<Refusal>,
     pub diagnostic: Option<String>,
     pub recovery: Option<SendEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<Box<ManagementAudit>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagementAudit {
+    pub action: String,
+    pub prior_revision: Option<u64>,
+    pub resulting_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_changed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_hash_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_hash_reason: Option<BlockedReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_state_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_state_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<Refusal>,
 }
 
 #[derive(Debug, Clone)]
@@ -227,7 +249,8 @@ impl Registry {
         );
         save_watch(&tx, &watch)?;
         revision(&tx, &watch)?;
-        audit(&tx, Some(id), "register", &json!({"revision": 1}))?;
+        let management_audit = ManagementAudit::unchanged("register", None, Some(&watch), None);
+        audit_management(&tx, id, &management_audit, json!({"revision": 1}))?;
         bump(&tx)?;
         tx.commit()?;
         Ok(Mutation {
@@ -235,13 +258,23 @@ impl Registry {
             refusal: None,
             diagnostic: None,
             recovery: None,
+            audit: Some(Box::new(management_audit)),
         })
     }
 
     pub fn change(&mut self, id: &str, change: Change, now: i64) -> Result<Mutation> {
+        let action = match &change {
+            Change::Pause => "pause",
+            Change::Resume => "resume",
+            Change::Update { .. } => "update",
+            Change::GrantReconciliation { .. } => "grant-reconciliation",
+            Change::GrantSendRetry { .. } => "grant-send-retry",
+            Change::CloseNotAccepted => "close-not-accepted",
+            Change::Remove => "remove",
+        };
         let tx = self.connection.transaction()?;
         let Some(mut watch) = get_watch(&tx, id)? else {
-            return mutation_refused(tx, None, id, "change", Refusal::NotFound);
+            return mutation_refused(tx, None, id, action, Refusal::NotFound);
         };
         let mut pending = watch
             .pending_operation_id
@@ -253,15 +286,7 @@ impl Registry {
             watch.pending_operation_id.is_none() || pending.is_some(),
             "pending operation record missing"
         );
-        let action = match &change {
-            Change::Pause => "pause",
-            Change::Resume => "resume",
-            Change::Update { .. } => "update",
-            Change::GrantReconciliation { .. } => "grant-reconciliation",
-            Change::GrantSendRetry { .. } => "grant-send-retry",
-            Change::CloseNotAccepted => "close-not-accepted",
-            Change::Remove => "remove",
-        };
+        let prior_revision = watch.registration_revision;
         let refusal = check_change(&watch, pending.as_ref(), &change);
         if let Some(reason) = refusal {
             return mutation_refused(tx, Some(watch), id, action, reason);
@@ -370,7 +395,20 @@ impl Registry {
                 "oldStateHash": previous_state_hash, "newStateHash": hash_value(&watch.state)?
             })
         };
-        audit(&tx, Some(id), action, &state_audit)?;
+        let mut management_audit =
+            ManagementAudit::unchanged(action, Some(prior_revision), Some(&watch), None);
+        if opaque_removal {
+            management_audit.state_changed = Some(false);
+            management_audit.state_hash_status = Some("not-applicable".into());
+            management_audit.state_hash_reason =
+                Some(BlockedReason::UnsupportedRegistrationVersion);
+        } else {
+            management_audit.old_state_hash = previous_state_hash;
+            management_audit.new_state_hash = Some(hash_value(&watch.state)?);
+            management_audit.state_changed =
+                Some(management_audit.old_state_hash != management_audit.new_state_hash);
+        }
+        audit_management(&tx, id, &management_audit, state_audit)?;
         bump(&tx)?;
         tx.commit()?;
         Ok(Mutation {
@@ -378,6 +416,7 @@ impl Registry {
             refusal: None,
             diagnostic: None,
             recovery: None,
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -391,29 +430,64 @@ impl Registry {
         let tx = self.connection.transaction()?;
         let watch = id.map(|id| get_watch(&tx, id)).transpose()?.flatten();
         let diagnostic: String = diagnostic.chars().take(4096).collect();
-        audit(
-            &tx,
-            id,
+        let management_audit = ManagementAudit::unchanged(
             action,
-            &json!({"refusal":reason,"diagnostic":diagnostic}),
-        )?;
+            watch.as_ref().map(|watch| watch.registration_revision),
+            watch.as_ref(),
+            Some(reason),
+        );
+        let mut data = json!({"refusal":reason,"diagnostic":diagnostic});
+        add_revisions(&mut data, &management_audit);
+        audit(&tx, id, action, &data)?;
         tx.commit()?;
         Ok(Mutation {
             watch,
             refusal: Some(reason),
             diagnostic: Some(diagnostic),
             recovery: None,
+            audit: Some(Box::new(management_audit)),
         })
     }
 
-    pub fn recovery_result(&self, id: &str) -> Result<Mutation> {
-        let watch = get_watch(&self.connection, id)?;
-        let latest = self.events(id, 1)?.into_iter().next();
+    pub fn recovery_result(&mut self, before: &Watch) -> Result<Mutation> {
+        let latest = self.events(&before.id, 1)?.into_iter().next();
+        let tx = self.connection.transaction()?;
+        let watch = get_watch(&tx, &before.id)?;
+        let mut management_audit = ManagementAudit::unchanged(
+            "reconcile-now",
+            Some(before.registration_revision),
+            watch.as_ref(),
+            None,
+        );
+        if before.schema_version == 2 {
+            management_audit.old_state_hash = Some(hash_value(&before.state)?);
+            management_audit.new_state_hash = watch
+                .as_ref()
+                .map(|watch| hash_value(&watch.state))
+                .transpose()?;
+            management_audit.state_changed =
+                Some(management_audit.old_state_hash != management_audit.new_state_hash);
+        }
+        let mut data = json!({});
+        if let Some(changed) = management_audit.state_changed {
+            data["stateChanged"] = json!(changed);
+        }
+        for (name, hash) in [
+            ("oldStateHash", &management_audit.old_state_hash),
+            ("newStateHash", &management_audit.new_state_hash),
+        ] {
+            if let Some(hash) = hash {
+                data[name] = json!(hash);
+            }
+        }
+        audit_management(&tx, &before.id, &management_audit, data)?;
+        tx.commit()?;
         Ok(Mutation {
             watch,
             refusal: None,
             diagnostic: None,
             recovery: latest.and_then(|operation| operation.last_evidence),
+            audit: Some(Box::new(management_audit)),
         })
     }
 
@@ -1350,6 +1424,43 @@ fn audit(connection: &Connection, id: Option<&str>, action: &str, data: &Value) 
     )?;
     Ok(())
 }
+
+impl ManagementAudit {
+    fn unchanged(
+        action: &str,
+        prior_revision: Option<u64>,
+        resulting: Option<&Watch>,
+        refusal: Option<Refusal>,
+    ) -> Self {
+        Self {
+            action: action.into(),
+            prior_revision,
+            resulting_revision: resulting.map(|watch| watch.registration_revision),
+            state_changed: None,
+            state_hash_status: None,
+            state_hash_reason: None,
+            old_state_hash: None,
+            new_state_hash: None,
+            refusal,
+        }
+    }
+}
+
+fn add_revisions(data: &mut Value, audit: &ManagementAudit) {
+    data["priorRevision"] = json!(audit.prior_revision);
+    data["resultingRevision"] = json!(audit.resulting_revision);
+}
+
+fn audit_management(
+    connection: &Connection,
+    id: &str,
+    management: &ManagementAudit,
+    mut data: Value,
+) -> Result<()> {
+    add_revisions(&mut data, management);
+    audit(connection, Some(id), &management.action, &data)
+}
+
 fn mutation_refused(
     tx: Transaction<'_>,
     watch: Option<Watch>,
@@ -1357,13 +1468,20 @@ fn mutation_refused(
     action: &str,
     refusal: Refusal,
 ) -> Result<Mutation> {
-    audit(&tx, Some(id), action, &json!({"refusal": refusal}))?;
+    let management_audit = ManagementAudit::unchanged(
+        action,
+        watch.as_ref().map(|watch| watch.registration_revision),
+        watch.as_ref(),
+        Some(refusal),
+    );
+    audit_management(&tx, id, &management_audit, json!({"refusal": refusal}))?;
     tx.commit()?;
     Ok(Mutation {
         watch,
         refusal: Some(refusal),
         diagnostic: None,
         recovery: None,
+        audit: Some(Box::new(management_audit)),
     })
 }
 fn read_one<T: DeserializeOwned>(

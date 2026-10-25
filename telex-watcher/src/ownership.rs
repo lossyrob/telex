@@ -36,6 +36,68 @@ fn lock(file: &File) -> std::io::Result<()> {
     fs2::FileExt::try_lock_exclusive(file)
 }
 
+/// Metadata-only endpoint identity. This neither opens SQLite nor takes an
+/// ownership lock, and path aliases and hard links identify the same file.
+pub(crate) fn physical_identity(path: &Path) -> std::io::Result<String> {
+    let canonical = std::fs::canonicalize(path)?;
+    physical_identity_canonical(&canonical)
+}
+
+#[cfg(unix)]
+fn physical_identity_canonical(path: &Path) -> std::io::Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "registry is not a regular file",
+        ));
+    }
+    Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn physical_identity_canonical(path: &Path) -> std::io::Result<String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    // Like the store identity helper, query the open handle, not path text.
+    // Read attributes suffices even while the owner holds its registry lock.
+    let file = OpenOptions::new()
+        .read(true)
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "registry is not a regular file",
+        ));
+    }
+    let mut info: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle() as isize,
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let id: String = info
+        .FileId
+        .Identifier
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!("windows:{}:{id}", info.VolumeSerialNumber))
+}
+
 #[cfg(windows)]
 fn lock(file: &File) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle;

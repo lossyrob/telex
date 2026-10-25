@@ -439,7 +439,7 @@ fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, ProtocolError> {
     serde_json::from_value(value).map_err(json_error)
 }
 
-fn parse_json(bytes: &[u8]) -> Result<Value, ProtocolError> {
+pub(crate) fn parse_json(bytes: &[u8]) -> Result<Value, ProtocolError> {
     std::str::from_utf8(bytes)
         .map_err(|error| ProtocolError::Canonicalization(error.to_string()))?;
     let value = serde_json::from_slice::<StrictValue>(bytes).map_err(json_error)?;
