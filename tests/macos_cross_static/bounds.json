@@ -1,13 +1,13 @@
 {
   "component": "arm24-intel25-static-v1",
-  "authority_comments": [6400716200, 6401198510],
+  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977],
   "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
   "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
   "prelaunch_status": {
     "launch_ready": false,
-    "decoder_pins": "decision-needed: prelaunch hashes of Apple's native decoder/tool components are missing. Host-build checks and future observed hashes do not waive the prelaunch pin requirement.",
-    "intel_family": "decision-needed preflight review: the patch's x86_64 tag does not establish the reconstructed dyld family. The exact x86_64/no-x86_64h rule below is a proposal, not a proven content identity.",
-    "required_owner_freeze_fields": ["decoder_pin_disposition", "intel_family_disposition"]
+    "decoder_pins": "6401453292 permits the declared provider-host observed-hash timing rule. This corrected implementation and its actual loaded-library/backing-cache binding remain unreviewed and unexecuted; any unavailable binding is decision-needed, not a nominal-path fallback.",
+    "intel_family": "6401508183 admits the finite x86_64-only/no-x86_64h stop rule without proof of cache existence. Candidate paths are image-root-relative, with ancestor-symlink, access-error, raw-CPU/subtype and capability checks; the corrected packet still requires issue freeze.",
+    "required_owner_freeze_fields": ["decoder_pin_disposition", "decoder_consumer_disposition", "intel_family_disposition"]
   },
   "runner": {
     "label": "macos-latest",
@@ -32,6 +32,9 @@
     "reserve_bytes": 2147483648,
     "tool_stage_bytes": 268435456,
     "functions": 64,
+    "entry_analyses": 128,
+    "cfg_states_per_analysis": 4096,
+    "cfg_states_per_pc": 16,
     "function_bytes": 32768,
     "code_bytes": 1048576,
     "helper_depth": 6,
@@ -61,16 +64,48 @@
       "binary_sha256": "8e495531e1b2b8cb169ca583493922d4ab386007756418c15b95f07f642c35fb"
     },
     "apple_system_tools": {
-      "scope": "hdiutil and xcrun-selected otool; Apple's libParallelCompression through pinned ipsw",
-      "binding": "Require decoder-host product26.6.2/build25G83/arm64. Record resolved tool path, SHA256 and version; do not substitute another disassembler or decoder.",
+      "scope": "Only declared hdiutil, xcrun-selected otool, and actual loaded libParallelCompression through pinned ipsw under6401453292.",
+      "binding": "Bind exact allowed paths, developer/SDK selection, actual Mach-O identities/hashes and actual loaded decoder image to relevant backing cache/subcache identities/hashes before transfers. Use fixed resolved paths, verify actual ipsw loader trace against bound image, and recheck components before acceptance. Missing/change/unresolved is decision-needed.",
       "binary_hashes_known_before_launch": false
     }
+  },
+  "native_binding": {
+    "hdiutil": "/usr/bin/hdiutil",
+    "xcrun": "/usr/bin/xcrun",
+    "developer_dir": "/Applications/Xcode_26.6.app/Contents/Developer",
+    "toolchain": "com.apple.dt.toolchain.XcodeDefault",
+    "otool": "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/otool",
+    "sdk_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+    "sdk_canonical_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+    "sdk_version": "26.5",
+    "developer_sdk_identity_files": [
+      "/Applications/Xcode_26.6.app/Contents/version.plist",
+      "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/SDKSettings.plist"
+    ],
+    "library": "/usr/lib/libParallelCompression.dylib",
+    "query_provider": "/usr/lib/libSystem.B.dylib",
+    "cache_primary_paths": [
+      "/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e",
+      "/System/Library/dyld/dyld_shared_cache_arm64e"
+    ],
+    "cache_roots": [
+      "/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld",
+      "/System/Library/dyld"
+    ],
+    "cache_resolution": "Only these two exact provider-host locations; aliases must resolve inside an allowed root and to one device/inode. Multiple different files, missing/access errors, UUID mismatch or undeclared subcache path are decision-needed. Never search another family.",
+    "hash_bytes_per_snapshot": 8589934592,
+    "maximum_native_snapshots": 2,
+    "final_tool_hash_bytes": 268435456,
+    "actual_load_binding": "Three obligations under6401764977: (1) concrete controller-loaded decoder/header/UUID/ABI/slide and backing-cache hashes before transfers; (2) recorded direct native ARM64 pinned ipsw launch and fixed absolute dlopen route, with effective search/insertion/translation overrides excluded, justify same-image resolution under trusted provider loader; (3) complete loader trace from the exact owned Popen child must match path/UUID, followed by full unchanged-component recheck BEFORE returning decoder output for semantic processing. Unrelated child events cannot supply the match; trace does not observe slide/cachehash/call/PAC.",
+    "acceptance_order": "before-transfer manifest -> prelaunch relation/environment -> exact child with bounded raw stdio -> exact-child UUID/path validation -> full post-decoder manifest equality -> permit semantic image processing -> final unchanged hdiutil/otool/developer/SDK and pinned ipsw/7zz hashes. No third backing-cache hash snapshot or retroactive child slide assertion.",
+    "trust": "Trust the declared provider decoder host, Python native query provider, Apple toolchain and dyld load trace. Observed hashes identify this execution, not independent pre-run authentication or adversarial integrity attestation. No exhaustive transitive OS dependency audit.",
+    "validation_at_preparation": "Only local synthetic tests; this concrete native binding has not been exercised before the proposed launch."
   },
   "roots": ["proc_listpids", "kill", "waitid", "posix_spawn", "execve", "fork", "vfork"],
   "query_wrapper_scope": {
     "additional_query_roots_proposed": [],
     "excluded_examples": ["sysctlbyname", "sysctl", "dlsym", "dladdr"],
-    "disposition": "Runtime/guard admission-query wrapper evidence remains a later owner obligation. The seven cleanup/fork/exec roots do not close query-wrapper admission."
+    "disposition": "Runtime/guard admission-query wrapper evidence remains a later owner obligation. The seven cleanup/fork/exec roots do not close query-wrapper admission. Declared provider-host decoder-binding queries under6401453292 are not static admission-query-root evidence."
   },
   "retry_policy": {
     "automatic_retries": 0,
@@ -108,7 +143,8 @@
       "manifest_variants": {"CustomerInstall": 17, "CustomerFirmwareUpdate": 17, "RecoveryBoot": 17, "macOS Customer Software Update": 48, "Customer Software Update": 48},
       "cache_family": "arm64e",
       "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_arm64e", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e"],
-      "family_rule": "Require exactly one regular nonsymlink primary among the two exact paths, matching arm64e magic and arm64e image CPU/subtype. No other family.",
+      "family_rule": "Require exactly one regular nonsymlink primary among the two exact image-relative paths, with no symlinked ancestors or inaccessible/unclassifiable locations. Require exact arm64e magic and preserve raw CPU/subtype. No other family.",
+      "cpu_policy": {"cpu_raw": 16777228, "subtype_raw_allowed": [2, -2147483646], "subtype_unsigned_allowed": [2, 2147483650], "capability_bytes_allowed": [0, 128], "normalization": "no masked equality; enumerate raw arm64e values2 and0x80000002, retain capability128 explicitly; all other raw values are decision-needed"},
       "uuid_evidence": "new offline candidates; no expected native library UUIDs"
     },
     "Intel25": {
@@ -137,7 +173,8 @@
       "cache_family": "x86_64",
       "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_x86_64", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64"],
       "ambiguity_checks": ["System/Library/dyld/dyld_shared_cache_x86_64h", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64h"],
-      "family_rule": "PROPOSED ONLY, requiring prelaunch disposition: require exactly one x86_64 regular primary among the two exact paths and no x86_64h primary at either checked path. Validate x86_64 magic and CPU subtype3. The patch's x86_64 tag does not prove this family selection. Missing, duplicate, mixed-family or different-subtype content is decision-needed, not permission to pick x86_64h.",
+      "family_rule": "6401508183-admissible finite stop rule: inside only the authenticated image root, require exactly one regular nonsymlink x86_64 primary and no x86_64h competitor at the two exact locations. Reject symlinked ancestors, alias escape, inaccessible/unclassifiable locations and duplicates even if identical. Exact x86_64 magic, raw CPU16777223 and raw subtype3 with zero capability bits are required. No masking, search expansion or post-failure substitution; the patch tag does not prove the cache exists.",
+      "cpu_policy": {"cpu_raw": 16777223, "subtype_raw_allowed": [3], "capability_bits_allowed": 0, "normalization": "none; subtype with any capability bits is rejected"},
       "uuid_evidence": "new offline candidates; no expected native library UUIDs"
     }
   }

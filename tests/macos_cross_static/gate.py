@@ -33,7 +33,7 @@ def validate(records, context, previous=None):
     matches = [r for r in records if all(r.get(k) == v for k, v in expected.items())]
     require(len(matches) == 1, "missing/ambiguous exact-SHA issue freeze; do not launch")
     frozen = matches[0]
-    for field in ("decoder_pin_disposition", "intel_family_disposition"):
+    for field in ("decoder_pin_disposition", "decoder_consumer_disposition", "intel_family_disposition"):
         require(isinstance(frozen.get(field), str) and re.fullmatch(
             r"https://github\.com/lossyrob/telex/issues/172#issuecomment-[0-9]+", frozen[field]),
             "unresolved prelaunch disposition: " + field)
@@ -42,6 +42,7 @@ def validate(records, context, previous=None):
     if context["attempt"] == 1:
         return {"freeze": frozen["comment"], "attempt": 1, "retry": False,
                 "decoder_pin_disposition": frozen["decoder_pin_disposition"],
+                "decoder_consumer_disposition": frozen["decoder_consumer_disposition"],
                 "intel_family_disposition": frozen["intel_family_disposition"]}
     require(previous is not None and previous["head_sha"] == context["sha"] and
             previous["run_attempt"] == 1, "retry original attempt/SHA mismatch")
@@ -94,7 +95,7 @@ def check(job):
     result = validate(records, context, prior)
     selected = next(r for r in records if r.get("comment") == result["freeze"])
     disposition_receipts = {}
-    for field in ("decoder_pin_disposition", "intel_family_disposition"):
+    for field in ("decoder_pin_disposition", "decoder_consumer_disposition", "intel_family_disposition"):
         identifier = selected[field].rsplit("-", 1)[1]
         comment = fetch("issues/comments/" + identifier)
         require(comment.get("user", {}).get("login") == "lossyrob" and

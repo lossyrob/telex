@@ -20,9 +20,10 @@ from macos_static_cache import EvidenceError, require, save
 from macos_static_ridiff import Run, ridiff_output_bound
 from cache import Output, choose_family, collect
 import gate
+from native import NativeBinding, bind_hash
 
 BOUNDS = json.loads((HERE / "bounds.json").read_text())
-NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "test_component.py"]
+NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "native.py", "test_component.py"]
 DEPENDENCIES = ["macos_static_cache.py", "macos_static_ridiff.py", "macos_provenance_capture.py"]
 
 
@@ -91,12 +92,49 @@ class ComponentRun(Run):
         self.bounds, self.config, self.job = BOUNDS, BOUNDS["jobs"][job], job
         self.deadline = time.monotonic() + BOUNDS["limits"]["processing_seconds"]
         self.output = Output(evidence, BOUNDS["limits"])
+        self.otool_path = None
+        self.hdiutil_path = None
+        self.native_binding = None
         self.receipt.update(component=BOUNDS["component"], job=job,
                             authority_comments=BOUNDS["authority_comments"],
                             authority="https://github.com/lossyrob/telex/issues/172#issuecomment-6400716200",
                             catalog_product=self.config["product"], input_url=self.config["url"],
                             limits=BOUNDS["limits"], new_offline_candidates_only=True,
-                            freeze_required_before_launch=True)
+                            freeze_required_before_launch=True, native_binding_verified=False)
+
+    def command(self, name, args, **kwargs):
+        require(str(args[0]) not in ("xcrun", "otool", "hdiutil"),
+                "native components must use frozen absolute resolved paths")
+        if name != "RawImagePatch":
+            return super().command(name, args, **kwargs)
+        require(self.native_binding is not None and self.native_binding.before is not None,
+                "decoder binding absent before RawImagePatch")
+        require(set(kwargs) == {"timeout", "file_limit"}, "unexpected decoder invocation options")
+        return self.native_binding.decode(args, kwargs["timeout"], kwargs["file_limit"])
+
+    def attach(self, image, label):
+        require(self.hdiutil_path is not None, "unbound hdiutil")
+        mount = self.work / label
+        mount.mkdir()
+        entry = {"image": str(image), "mount": str(mount), "detached": False,
+                 "hdiutil": self.hdiutil_path}
+        self.receipt["mounts"].append(entry)
+        result = self.command("attach-" + label, [
+            self.hdiutil_path, "attach", "-readonly", "-nobrowse", "-noautoopen", "-noverify",
+            "-mountpoint", mount, "-plist", image], timeout=180)
+        details = plistlib.loads(result["stdout"].encode())
+        mounted = [e for e in details.get("system-entities", []) if e.get("mount-point") == str(mount)]
+        require(len(mounted) == 1, "attachment lacks exact private mountpoint")
+        entry["device"] = mounted[0]["dev-entry"]
+        return mount, entry
+
+    def detach(self, entry):
+        require(self.hdiutil_path is not None and entry["hdiutil"] == self.hdiutil_path,
+                "cleanup hdiutil binding differs")
+        self.command("detach-" + Path(entry["mount"]).name,
+                     [self.hdiutil_path, "detach", entry.get("device", entry["mount"])],
+                     timeout=90, cleanup=True)
+        entry["detached"] = True
 
     def phase(self, name, cleanup=False):
         super().phase(name, cleanup)
@@ -151,11 +189,11 @@ class ComponentRun(Run):
 
 def execute(run):
     c = run.config
+    run.native_binding = NativeBinding(run)
     host = {name: run.command("host-" + name, args) for name, args in (
-        ("uname", ["uname", "-a"]), ("build", ["sw_vers", "-buildVersion"]),
-        ("product", ["sw_vers", "-productVersion"]), ("otool-path", ["xcrun", "--find", "otool"]),
-        ("otool-version", ["xcrun", "otool", "--version"]), ("sdk", ["xcrun", "--show-sdk-version"]),
-        ("source", ["git", "-C", HERE.parents[1], "rev-parse", "HEAD"]))}
+        ("uname", ["/usr/bin/uname", "-a"]), ("build", ["/usr/bin/sw_vers", "-buildVersion"]),
+        ("product", ["/usr/bin/sw_vers", "-productVersion"]),
+        ("source", ["/usr/bin/git", "-C", HERE.parents[1], "rev-parse", "HEAD"]))}
     require(host["source"]["stdout"].strip() == os.environ["GITHUB_SHA"], "checked-out source SHA mismatch")
     require(platform.machine() == BOUNDS["runner"]["architecture"] and
             host["build"]["stdout"].strip() == BOUNDS["runner"]["build"] and
@@ -163,12 +201,8 @@ def execute(run):
             "decoder-host binding mismatch; no alternate host")
     host.update(image_os=os.environ.get("ImageOS"), image_version=os.environ.get("ImageVersion"),
                 architecture=platform.machine(), role=BOUNDS["runner"]["role"])
-    for name, tool in (("hdiutil", Path("/usr/bin/hdiutil")),
-                       ("otool", Path(host["otool-path"]["stdout"].strip()))):
-        require(tool.is_absolute() and tool.is_file(), "Apple system tool not resolved")
-        host[name + "_file"] = {"path": str(tool), "sha256": hashlib.sha256(tool.read_bytes()).hexdigest(),
-                                "binding": "recorded actual host tool; no preexisting byte-hash pin"}
     run.output.json("decoder-host.json", host)
+    run.native_binding.resolve()
     run.capacity(c["dmg"]["bytes"] + c["patch"]["bytes"] + BOUNDS["limits"]["tool_stage_bytes"],
                  "before-any-transfer")
     ipsw, seven = run.pinned_tool("ipsw"), run.pinned_tool("7zz")
@@ -235,6 +269,16 @@ def execute(run):
     run.receipt["helper_incomplete_count"] = report["helper_incomplete_count"]
     run.detach(attached)
     run.delete(image)
+    run.native_binding.recheck_tools_after_semantics()
+    pinned_after = {}
+    for name in ("ipsw", "7zz"):
+        pin = BOUNDS["tools"][name]
+        observed = bind_hash(run.work / name, [pin["binary_bytes"]], run.deadline)
+        require(observed["sha256"] == pin["binary_sha256"] and observed["bytes"] == pin["binary_bytes"],
+                "pinned decoder changed before acceptance")
+        pinned_after[name] = observed
+    run.output.json("pinned-decoder-acceptance.json", pinned_after)
+    run.receipt["native_binding_verified"] = True
     run.receipt["disposition"] = ("decision-needed-incomplete-wrapper-evidence" if report["helper_incomplete_count"]
                                   else "offline-candidate-evidence-collected-pending-adjudication")
     return 1 if report["helper_incomplete_count"] else 0

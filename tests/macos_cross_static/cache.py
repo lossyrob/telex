@@ -4,8 +4,10 @@ import bisect
 import collections
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import struct
 import sys
 import uuid
@@ -39,15 +41,51 @@ class Output:
         return self.write(name, json.dumps(data, sort_keys=True, indent=2) + "\n")
 
 
+def image_location(root, relative):
+    """Only ENOENT is absence; never traverse a symlink or escape an image root."""
+    require(root.is_absolute() and root.resolve(strict=True) == root, "image root is not canonical")
+    parts = Path(relative).parts
+    require(parts and not Path(relative).is_absolute() and all(p not in (".", "..") for p in parts),
+            "invalid image-relative location")
+    current = root
+    root_device = root.lstat().st_dev
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise EvidenceError("inaccessible/unclassifiable image location: " + str(current)) from error
+        require(not stat.S_ISLNK(info.st_mode), "symlinked image location/ancestor")
+        require(info.st_dev == root_device, "image location crosses into another mounted filesystem")
+        require(current.resolve(strict=True).is_relative_to(root), "image alias escapes selected root")
+        if index < len(parts) - 1:
+            require(stat.S_ISDIR(info.st_mode), "image location ancestor is not a directory")
+        else:
+            require(stat.S_ISREG(info.st_mode), "image location is not a regular file")
+            try:
+                with current.open("rb"):
+                    pass
+            except OSError as error:
+                raise EvidenceError("unreadable image candidate: " + str(current)) from error
+    return current
+
+
 def choose_family(mount, config):
-    candidates = [mount / p for p in config["cache_primary_candidates"]]
-    ambiguous = [mount / p for p in config.get("ambiguity_checks", [])]
-    require(not any(p.exists() or p.is_symlink() for p in ambiguous),
+    candidates = [image_location(mount, p) for p in config["cache_primary_candidates"]]
+    ambiguous = [image_location(mount, p) for p in config.get("ambiguity_checks", [])]
+    require(not any(p is not None for p in ambiguous),
             "different Intel family present; decision-needed, not fallback")
-    existing = [p for p in candidates if p.exists() or p.is_symlink()]
-    require(len(existing) == 1 and existing[0].is_file() and not existing[0].is_symlink(),
-            "missing/ambiguous/symlink selected cache family")
+    existing = [p for p in candidates if p is not None]
+    require(len(existing) == 1, "missing/ambiguous selected cache family")
     return existing[0]
+
+
+def validate_cpu(family, cpu, subtype):
+    expected_cpu = 0x100000C if family == "arm64e" else 0x1000007
+    allowed = (2, -2147483646) if family == "arm64e" else (3,)
+    require(cpu == expected_cpu and subtype in allowed, "raw CPU/subtype/capabilities not in frozen policy")
 
 
 def export_entries(raw, base, node_limit=100000):
@@ -99,7 +137,7 @@ class CandidateCache(Cache):
         require(path.is_file() and not path.is_symlink(), "missing declared subcache")
         raw = self.read(path, 0, 0x240)
         magic = raw[:16].rstrip(b"\0 ").decode("ascii")
-        require(magic.split()[-1] == self.family, "cache magic family mismatch")
+        require(magic.split() == ["dyld_v1", self.family], "cache signature/full family token mismatch")
         offset, count = struct.unpack_from("<II", raw, 16)
         require(offset >= 0x200 and 0 < count <= 128, "unsupported cache header")
         cache_type = struct.unpack_from("<Q", raw, 104)[0]
@@ -128,12 +166,12 @@ class CandidateCache(Cache):
         require(len(self.parsed) < self.output.limits["image_metadata_count"], "image metadata cap")
         head = self.vmread(image["address"], 32)
         magic, cpu, subtype, _, count, size, _, _ = struct.unpack("<IiiIIIII", head)
-        expected_cpu, expected_subtype = (0x100000C, 2) if self.family == "arm64e" else (0x1000007, 3)
-        require((magic, cpu, subtype & 255) == (0xFEEDFACF, expected_cpu, expected_subtype),
-                "image CPU/subtype differs from selected family")
+        require(magic == 0xFEEDFACF, "image is not Mach-O64")
+        validate_cpu(self.family, cpu, subtype)
         require(count <= 1024 and size <= 1024 * 1024, "load command cap")
         raw = head + self.vmread(image["address"] + 32, size)
         result = {**image, "uuid": None, "cpu": cpu, "subtype": subtype,
+                  "subtype_unsigned": subtype & 0xFFFFFFFF, "capability_bits": (subtype & 0xFFFFFFFF) >> 24,
                   "segments": [], "sections": [], "starts": None, "exports": None}
         cursor = 32
         for _ in range(count):
@@ -292,39 +330,68 @@ class CandidateCache(Cache):
         return int(item["target"], 16), {"slot": hex(address), "page_evidence": stem, **item}
 
 
-def edges(decoded, arch, start, end, pointer, machine_bytes=None):
-    """Direct CFG and simple import slots only; callback registers remain explicit gaps."""
+def arm_transfer(op, arg, regs, pc, start, machine_bytes):
+    """Track only exact supported forms; any other register write loses its provenance."""
+    previous = dict(regs)
+    if op in ("nop", "cmp", "cmn", "tst"):
+        return
+    # Include w/x aliases, pair destinations, and writeback bases conservatively.
+    for register in re.findall(r"\b[wx](\d+)\b", arg):
+        regs.pop("x" + register, None)
+    if op == "adrp":
+        match = re.fullmatch(r"(x\d+),\s*(-?\d+)\s*;\s*(0x[0-9a-fA-F]+)", arg)
+        if match:
+            page = (pc & ~4095) + int(match[2]) * 4096
+            require(page == int(match[3], 16), "decimal ADRP mismatch")
+            if machine_bytes is not None:
+                opcode = struct.unpack_from("<I", machine_bytes, pc - start)[0]
+                require(adrp_page(opcode, pc) == page, "raw/text ADRP disagreement")
+            regs[match[1]] = page
+    elif op == "add":
+        match = re.fullmatch(r"(x\d+),\s*(x\d+),\s*#(0x[0-9a-fA-F]+|\d+)", arg)
+        if match and isinstance(previous.get(match[2]), int):
+            regs[match[1]] = previous[match[2]] + int(match[3], 0)
+    elif op == "ldr":
+        match = re.fullmatch(r"(x\d+),\s*\[(x\d+)(?:,\s*#(0x[0-9a-fA-F]+|\d+))?\]", arg)
+        if match and isinstance(previous.get(match[2]), int):
+            regs[match[1]] = ("slot", previous[match[2]] + int(match[3] or "0", 0))
+            # A non-writeback base remains available.
+            if match[1] != match[2]:
+                regs[match[2]] = previous[match[2]]
+    elif op in ("svc", "hvc", "smc"):
+        regs.clear()
+
+
+def unresolved_classification(branch):
+    if branch.get("identified_slot") is not None or branch.get("ambiguous_states"):
+        return "helper-incomplete"
+    return "unclassified-indirect-owner-scope-review"
+
+
+def edges(decoded, arch, start, end, pointer, machine_bytes=None, *, entry=None):
+    """Explore bounded (PC, register-state) pairs; never select a first-path indirect target."""
     rows = {r["address"]: r for r in decoded}
+    entry = start if entry is None else entry
+    require(start <= entry < end and entry in rows, "entry is not a validated instruction boundary")
     ordered = sorted(rows)
     next_pc = {a: ordered[i + 1] if i + 1 < len(ordered) else end for i, a in enumerate(ordered)}
-    queue, visited, result = [(start, {})], set(), []
+    queue, visited, states, result = [(entry, {})], set(), collections.defaultdict(set), []
     while queue:
         pc, regs = queue.pop()
-        while pc in rows and pc not in visited:
-            visited.add(pc)
+        while pc in rows:
+            state = tuple(sorted(regs.items()))
+            if (pc, state) in visited:
+                break
+            require(len(visited) < 4096 and len(states[pc]) < 16,
+                    "CFG state budget exhausted; target remains incomplete")
+            visited.add((pc, state))
+            states[pc].add(state)
             row, following = rows[pc], next_pc[pc]
             op, arg = row["mnemonic"], row["operands"]
             target, kind, conditional, slot = None, None, False, None
             if arch == "arm64":
                 if op.startswith("ret"):
                     break
-                match = re.match(r"(x\d+),\s*(-?\d+)\s*;\s*(0x[0-9a-fA-F]+)", arg)
-                if op == "adrp" and match:
-                    page = (pc & ~4095) + int(match[2]) * 4096
-                    require(page == int(match[3], 16), "decimal ADRP mismatch")
-                    if machine_bytes is not None:
-                        opcode = struct.unpack_from("<I", machine_bytes, pc - start)[0]
-                        require(adrp_page(opcode, pc) == page, "raw/text ADRP disagreement")
-                    regs[match[1]] = page
-                elif op == "add":
-                    m = re.match(r"(x\d+),\s*(x\d+),\s*#(0x[0-9a-fA-F]+|\d+)", arg)
-                    if m:
-                        regs[m[1]] = regs[m[2]] + int(m[3], 0) if regs.get(m[2]) is not None else None
-                elif op == "ldr":
-                    m = re.match(r"(x\d+),\s*\[(x\d+)(?:,\s*#(0x[0-9a-fA-F]+|\d+))?\]", arg)
-                    if m:
-                        regs[m[1]] = ("slot", regs[m[2]] + int(m[3] or "0", 0)) if isinstance(
-                            regs.get(m[2]), int) else None
                 if op in ("b", "bl") or op.startswith("b.") or op in ("cbz", "cbnz", "tbz", "tbnz"):
                     match = re.findall(r"0x[0-9a-fA-F]+", arg)
                     require(match, "unparsed direct ARM branch")
@@ -334,6 +401,8 @@ def edges(decoded, arch, start, end, pointer, machine_bytes=None):
                     value = regs.get(arg.split(",")[0].strip())
                     if isinstance(value, tuple):
                         slot = value[1]
+                else:
+                    arm_transfer(op, arg, regs, pc, start, machine_bytes)
             else:
                 if op.startswith("ret"):
                     break
@@ -357,30 +426,42 @@ def edges(decoded, arch, start, end, pointer, machine_bytes=None):
                                 after = pc + prefix + 6
                             slot = after + int(m[1], 0)
             if kind:
-                record = {**row, "kind": kind, "target": hex(target) if target is not None else None}
+                record = {**row, "kind": kind, "target": hex(target) if target is not None else None,
+                          "identified_slot": hex(slot) if slot is not None else None}
                 if slot is not None:
                     try:
                         target, evidence = pointer(slot)
                         record.update(target=hex(target), fixup=evidence)
+                        if target == 0:
+                            record["unresolved"] = "identified import slot has null target, not callable helper evidence"
                     except EvidenceError as error:
                         record["unresolved"] = str(error)
                 elif kind == "indirect":
-                    record["unresolved"] = "runtime-selected callback/register; no exhaustive callback closure"
+                    record["unresolved"] = "unclassified register-indirect semantics; owner scope review required"
                 record["internal"] = target is not None and start <= target < end
                 result.append(record)
                 is_call = op in ("bl", "blr", "blraa", "blrab", "blraaz", "blrabz", "call", "callq")
                 if record["internal"]:
+                    require(target in rows, "internal branch is not a validated instruction boundary")
                     queue.append((target, dict(regs)))
                 if not is_call and not conditional:
                     break
                 if is_call:
                     regs.clear()
-            elif arch == "arm64" and op not in ("adrp", "add", "ldr", "nop"):
-                m = re.match(r"(x\d+)\b", arg)
-                if m:
-                    regs.pop(m[1], None)
             pc = following
-    return result
+    merged = []
+    for address in sorted({record["address"] for record in result}):
+        variants = [r for r in result if r["address"] == address]
+        signatures = {(r["target"], r["identified_slot"], r.get("unresolved")) for r in variants}
+        record = dict(variants[0])
+        if len(signatures) > 1:
+            record.update(target=None, internal=False, identified_slot=None,
+                          unresolved="ambiguous incoming register/slot states; no unique target",
+                          ambiguous_states=[{"target": t, "identified_slot": s, "unresolved": u}
+                                            for t, s, u in sorted(signatures, key=repr)])
+            record.pop("fixup", None)
+        merged.append(record)
+    return merged
 
 
 def collect(primary, family, output, run):
@@ -391,7 +472,9 @@ def collect(primary, family, output, run):
         require(len(matches) == 1, "required offline library missing/duplicate")
         root_images[name] = cache.macho(matches[0])
     output.json("candidate-identities.json", {name: {"uuid": m["uuid"], "cpu": m["cpu"],
-        "subtype": m["subtype"], "header": m["header_file"], "native_observation": False}
+        "subtype": m["subtype"], "subtype_unsigned": m.get("subtype_unsigned", m["subtype"] & 0xFFFFFFFF),
+        "capability_bits": m.get("capability_bits", (m["subtype"] & 0xFFFFFFFF) >> 24),
+        "header": m["header_file"], "native_observation": False}
         for name, m in root_images.items()})
     queue, root_records = collections.deque(), {}
     for symbol in run.bounds["roots"]:
@@ -402,44 +485,52 @@ def collect(primary, family, output, run):
                 "missing/ambiguous/nonregular root export " + symbol)
         queue.append((matches[0]["address"], 0, symbol, None))
         root_records[symbol] = matches[0]
-    captures, missing, seen, total = [], [], set(), 0
+    captures, missing, seen, bodies, total, analysis_count = [], [], set(), {}, 0, 0
     while queue:
         address, depth, root, parent = queue.popleft()
-        if address in seen:
+        if (address, root) in seen:
             continue
-        seen.add(address)
-        if len(captures) >= output.limits["functions"] or depth > output.limits["helper_depth"]:
-            missing.append({"address": hex(address), "reason": "function/depth cap", "root": root})
+        seen.add((address, root))
+        if depth > output.limits["helper_depth"] or analysis_count >= 128:
+            missing.append({"address": hex(address), "reason": "entry/depth cap", "root": root})
             continue
         try:
             image, start, end, derivation, raw = cache.body(address)
-            if any(c["start"] == hex(start) for c in captures):
-                continue
-            total += len(raw)
-            require(total <= output.limits["code_bytes"], "total code byte cap")
-            stem = f"body-{len(captures):02d}-{start:x}"
-            output.write(stem + ".bin", raw)
-            output.write(stem + ".macho", macho_function(start, raw, "arm64" if family == "arm64e" else "x86_64"))
-            dis = run.command(stem + "-disassembly", ["xcrun", "otool", "-tvV", output.root / (stem + ".macho")])
-            output.write(stem + ".txt", dis["stdout"])
-            decoded = instructions(dis["stdout"], start, end)
-            require(decoded and decoded[0]["address"] == start, "unusable disassembly")
+            body_key = (image["uuid"], start, end)
+            if body_key not in bodies:
+                require(len(captures) < output.limits["functions"], "function extent cap")
+                total += len(raw)
+                require(total <= output.limits["code_bytes"], "total code byte cap")
+                stem = f"body-{len(captures):02d}-{start:x}"
+                output.write(stem + ".bin", raw)
+                output.write(stem + ".macho", macho_function(start, raw, "arm64" if family == "arm64e" else "x86_64"))
+                dis = run.command(stem + "-disassembly", [run.otool_path, "-tvV", output.root / (stem + ".macho")])
+                output.write(stem + ".txt", dis["stdout"])
+                decoded = instructions(dis["stdout"], start, end)
+                require(decoded and decoded[0]["address"] == start, "unusable disassembly")
+                record = {"root": root, "parent": parent, "entry": hex(address), "start": hex(start),
+                          "end": hex(end), "extent": derivation, "bytes": len(raw),
+                          "sha256": hashlib.sha256(raw).hexdigest(), "image": image["name"],
+                          "uuid": image["uuid"], "stem": stem, "depth": depth,
+                          "symbols": [s for s in image["symbols"] if s.get("address") == start],
+                          "analyses": []}
+                bodies[body_key] = (record, decoded)
+                captures.append(record)
+            record, decoded = bodies[body_key]
+            stem = record["stem"]
+            require(hashlib.sha256(raw).hexdigest() == record["sha256"], "extent bytes changed between entries")
+            analysis_count += 1
             branches = edges(decoded, "arm64" if family == "arm64e" else "x86_64",
-                             start, end, cache.pointer, raw)
-            record = {"root": root, "parent": parent, "entry": hex(address), "start": hex(start),
-                      "end": hex(end), "extent": derivation, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
-                      "image": image["name"], "uuid": image["uuid"], "stem": stem, "depth": depth,
-                      "symbols": [s for s in image["symbols"] if s.get("address") == start], "branches": branches}
+                             start, end, cache.pointer, raw, entry=address)
+            record["analyses"].append({"root": root, "entry": hex(address), "parent": parent,
+                                      "depth": depth, "branches": branches})
+            if len(record["analyses"]) == 1:
+                record["branches"] = branches
             output.json(stem + ".json", record)
-            captures.append(record)
             for branch in branches:
                 if branch.get("unresolved"):
-                    callback_scope = (root in ("fork", "vfork") and
-                                      image["name"] == "/usr/lib/system/libsystem_c.dylib" and
-                                      derivation != "S_SYMBOL_STUBS_reserved2_exact_entry" and
-                                      branch["kind"] == "indirect")
                     missing.append({"function": stem, "root": root,
-                        "classification": "callback-owner-scope-review" if callback_scope else "helper-incomplete",
+                        "classification": unresolved_classification(branch),
                         **branch})
                 if not branch["internal"] and branch["target"] not in (None, "0x0"):
                     queue.append((int(branch["target"], 16), depth + 1, root, stem))
@@ -449,8 +540,11 @@ def collect(primary, family, output, run):
               "callbacks_exhaustively_closed": False, "semantic_adjudication_required": True,
               "helper_incomplete_count": sum(m.get("classification") != "callback-owner-scope-review"
                                             for m in missing),
-              "code_bytes": total, "no_fallback_windows": True}
+              "entry_analyses": analysis_count, "code_bytes": total, "no_fallback_windows": True,
+              "unknown_indirects_not_automatically_callback_exempt": True,
+              "owner_may_classify_callback_scope_without_exhaustive_callback_audit": True}
     output.json("wrapper-evidence.json", report)
-    require(all(any(int(c["start"], 16) <= r["address"] < int(c["end"], 16)
-                    for c in captures) for r in root_records.values()), "root evidence incomplete")
+    require(all(any(a["entry"] == hex(r["address"]) and a["root"] == name
+                    for c in captures for a in c["analyses"])
+                for name, r in root_records.items()), "root entry evidence incomplete")
     return report
