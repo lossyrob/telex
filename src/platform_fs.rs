@@ -3290,7 +3290,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn concurrent_owner_private_directory_creation_is_idempotent() {
-        let base = temp_dir("concurrent-create");
+        let base =
+            std::fs::canonicalize(temp_dir("concurrent-create")).expect("canonical existing base");
         let dir = base.join("scope");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
         let threads = (0..8)
