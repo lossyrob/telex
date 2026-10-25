@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-25T19:34:27.823Z",
+  "updatedAt": "2026-10-25T20:00:42.696Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -391,6 +391,84 @@
         "runtime-hardening",
         "watcher-macos-containment-runtime"
       ]
+    },
+    {
+      "id": "copilot-session-state-classifier",
+      "type": "task",
+      "title": "Copilot session-state classifier",
+      "summary": "Adds the classifier subcommand with fixture tests, tail-bounded reads, and `unknown` for unrecognized patterns. Records this design in `docs/design` with a DECISIONS entry. Depends on nothing open.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 198
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "copilot-group-stall-detector",
+      "type": "task",
+      "title": "Copilot group stall detector",
+      "summary": "Adds the detector subcommand, the membership format, the stall condition, grace and deduplication in opaque state, and the event. Depends on item 1.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 199
+      },
+      "dependsOn": [
+        "copilot-session-state-classifier"
+      ]
+    },
+    {
+      "id": "stall-detection-agent-guidance",
+      "type": "task",
+      "title": "Stall detection agent guidance",
+      "summary": "Adds `telex copilot skill` instructions and a guide page for creating a group, registering the watch, member state changes, and the root's confirm-then-ring response. Depends on item 2.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 200
+      },
+      "dependsOn": [
+        "copilot-group-stall-detector"
+      ]
+    },
+    {
+      "id": "stall-detection-workstream-gate",
+      "type": "gate",
+      "title": "Stall detection validated against a workstream",
+      "summary": "Runs the detector against a real workstream. Passes when a real or staged stall produces exactly one event per episode, busy members, members waiting on the operator, and armed watches produce no stall, the root confirms and rings, and a status view can be built from the same data. Depends on item 3.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 201
+      },
+      "dependsOn": [
+        "stall-detection-agent-guidance"
+      ]
     }
   ],
   "checkpoints": [
@@ -437,6 +515,18 @@
         "runtime-hardening",
         "closure-gate",
         "watcher-macos-containment-runtime"
+      ]
+    },
+    {
+      "id": "stall-detection-validated",
+      "title": "Copilot group stall detection validated",
+      "summary": "A group's root session is woken once, with a snapshot, when every active member of the group has been idle with no wake source for longer than a grace period. The root confirms the stall, diagnoses it, and rings members. The operator can see who is watching what on a status view the root hosts.",
+      "status": "planned",
+      "nodeIds": [
+        "copilot-session-state-classifier",
+        "copilot-group-stall-detector",
+        "stall-detection-agent-guidance",
+        "stall-detection-workstream-gate"
       ]
     }
   ],
