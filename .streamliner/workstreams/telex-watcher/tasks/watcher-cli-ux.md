@@ -3,11 +3,11 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `watcher-cli-ux`
 - **Type:** implementation
-- **Status:** blocked delivery; existing owner session
+- **Status:** in progress; existing owner session
   `c90bafbb-6e49-4ced-a684-e15cfadfc69e` retained
-- **Attention:** watch
+- **Attention:** focus
 - **Depends on:** completed `watcher-runtime-core`
-- **External dependency:** pending Local
+- **External dependency:** satisfied Local
   `local-daemon/cooperative-partial-page-repair`, tracker
   [#181](https://github.com/lossyrob/telex/issues/181)
 - **PR:** [#180](https://github.com/lossyrob/telex/pull/180), retained in place
@@ -103,6 +103,41 @@ dependency neither discards it nor upgrades it to current-head acceptance.
 PR #180's own current-head review, design, required CI and live owned-PR
 proof remain required. No check waiver, third unchanged-head retry,
 hardening acceptance or immediate merge is authorized.
+
+### Accepted Local delivery and resumed focus - 2026-10-25
+
+Campaign expressly accepts #181 delivery and releases only PR #180's
+Local prerequisite after actual #185 merge
+`65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
+merged-head main CI `40217242404` with 24/24 and the full
+[field report](
+https://github.com/lossyrob/telex/issues/181#issuecomment-6401070057).
+Owning Local independently accepts the same bounded outcome after its
+complete provider CI/Docs and retained Windows/macOS checks; terminal
+qualification is 13,796 bytes, SHA-256
+`efa69b137efb54b6de605cd72165eb9d407374bdf9df3e17f99dc675813f0f2d`.
+The report's original submission language is historical, not acceptance
+inferred from posting, issue closure or merge alone.
+
+The owning Watcher coordinator separately changes #179 from blocked/watch
+to in-progress/focus. This attention decision comes from Watcher, not
+from Local's original preserve-watch snapshot. Local's later 2,185-byte
+scope supplement, SHA-256
+`dc36573c964aac911ddecdc8f27b987b8c6c025fa9ecf5ec50b66bdeb092aada`,
+qualifies only that attention instruction without rewriting the packet.
+The existing Local external-dependency edge becomes satisfied and stays
+in place with the same identity/target/label/URL. Completed runtime-core,
+owner `c90bafbb-6e49-4ced-a684-e15cfadfc69e`, tracker and PR #180 remain.
+
+This clears one upstream prerequisite. It does not make PR #180 ready,
+merged or accepted; its owner retains fresh exact-head source/design/CI,
+field-proof and Campaign obligations after integration. The transition's
+reported old head is not new-head validation. The old blocked/pending and
+watch-attention text is retained as historical. Marker candidates remain
+separate. Local real-time 200ms coverage/unknown-cause/new-item-not-retry,
+sentinel/Clippy and publication debts remain; no new implementation,
+runtime/CI/retry/observer, release, #153, hardening/closure or freeze
+authority follows. The owner does not wait for canonical publication.
 
 ## Deliverables
 

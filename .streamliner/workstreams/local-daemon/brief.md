@@ -331,6 +331,33 @@ historical. Later accepted #181 delivery/Watcher resumption is a separate
 successor; this receipt supplies no such release, readiness, debt
 clearance, product/runtime/CI action or freeze change.
 
+A later 2026-10-25 terminal receipt accepts bounded #181 delivery at
+`65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b` / `144382f5`.
+Local's immutable 13,796-byte qualification, SHA-256
+`efa69b137efb54b6de605cd72165eb9d407374bdf9df3e17f99dc675813f0f2d`,
+independently verifies actual main CI `40217242404` push attempt 1,
+24/24 successful jobs, Docs `40217242455` with 2/2, four actual main
+Windows/macOS captures and the full
+[field report](
+https://github.com/lossyrob/telex/issues/181#issuecomment-6401070057).
+Local/reconciler hashes and selected verifier/result mechanics match
+cooperative 62+10 each, station 62 each, filesystem Windows 14/macOS 13,
+zero ignored; no full-log read, CI requery or local execution is claimed.
+Lock timings 480.445/539.0605ms < 1,540ms do not measure partial-page
+completion or prove a hard 480ms return. Campaign directly accepts
+delivery; Local independently accepts it. #181 and its original
+partial-page record complete with one additive terminal qualification,
+retaining every old field/evidence and the completed #187 lineage.
+The Local real-time 200ms positive-coverage gap/unknown historical cause
+and recurrence-as-new-item rule, sentinel and optional Clippy debts stay.
+Only the existing Watcher Local prerequisite is satisfied. Owning Watcher
+separately selects #179 in-progress/focus; the immutable 2,185-byte Local
+supplement qualifies its older preserve-watch instruction. Owner, PR,
+runtime-core lineage and Watcher's own current-head gates stay intact.
+Earlier ready/merge/pending snapshots remain historical; no Watcher
+readiness, merge, delivery, debt clearance, new runtime/CI/observer or
+freeze/closure authority follows. Owners do not wait on publication.
+
 The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
 push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
 release-confidence validation are merged and recorded complete. The normative design

@@ -89,6 +89,30 @@ The richer rationale and detector protocol sketch are preserved in
 
 ## Current State
 
+On 2026-10-25 Campaign and owning Local expressly accepted bounded #181
+delivery at #185 merge
+`65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
+main CI `40217242404` 24/24, Docs `40217242455` 2/2 and the full
+[field report](
+https://github.com/lossyrob/telex/issues/181#issuecomment-6401070057).
+Local's 13,796-byte qualification, SHA-256
+`efa69b137efb54b6de605cd72165eb9d407374bdf9df3e17f99dc675813f0f2d`,
+independently verifies merged-head provider results and four retained
+Windows/macOS captures; they are not aliases of PR CI or hard real-time
+guarantees. The existing `watcher-cli-ux` Local181 external edge is
+satisfied and retained, not deleted. Owning Watcher separately directs
+#179 from blocked/watch to in-progress/focus; Local's later 2,185-byte
+supplement qualifies only its earlier preserve-watch instruction.
+Owner `c90bafbb-6e49-4ced-a684-e15cfadfc69e`, tracker, PR #180 and completed
+runtime-core lineage stay intact. PR #180 retains fresh current-head
+source/design/CI/field and Campaign gates; no readiness, merge or accepted
+Watcher delivery follows. The older pending/blocked/watch state below is
+historical. Local real-time 200ms coverage and unknown-cause debt,
+recurrence-as-new-item rule, sentinel/Clippy, marker and publication
+dispositions remain separate. No new runtime/CI/observer, product action,
+release, #153, hardening/closure or workstation-freeze authority follows.
+The owner is not waiting for this publication.
+
 On 2026-10-23 Campaign made the separately owned Local repair
 `cooperative-partial-page-repair`
 ([#181](https://github.com/lossyrob/telex/issues/181)) a pending external

@@ -3,13 +3,14 @@
 - **Workstream:** `local-daemon`
 - **Node:** `cooperative-partial-page-repair`
 - **Type:** implementation
-- **Status:** in progress; PR merged and tracker closed;
-  accepted terminal delivery is a separate later receipt
+- **Status:** completed; bounded terminal delivery accepted
+  by Local and Campaign at the actual merged #185
 - **Attention:** focus
 - **Depends on:** `macos-persistent-lock-repair`,
   [#187](https://github.com/lossyrob/telex/issues/187)
   (completed; satisfied lineage)
-- **Blocks:** `telex-watcher/watcher-cli-ux`, issue #179 / PR #180
+- **Blocks:** Local prerequisite of `telex-watcher/watcher-cli-ux` is
+  satisfied; #179 / PR #180 retain their own current-head gates
 - **Tracker:** [#181](https://github.com/lossyrob/telex/issues/181);
   closed as completed at 2026-10-25T17:35:56Z
 - **PR:** [#185](https://github.com/lossyrob/telex/pull/185), merged as
@@ -564,6 +565,73 @@ Watcher resumption have their own successor and are not negated here.
 No terminal delivery, Watcher readiness/release, debt clearance, runtime,
 CI/retry/observer, product merge, release, #153, hardening/closure or
 workstation-freeze change is authorized by this receipt.
+
+## Accepted terminal delivery - 2026-10-25
+
+Local independently accepts the bounded #181 repair at actual #185 merge
+`65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
+tree `144382f5b9bc4d5951113e3b588c4e23cab0530d`.
+The separate original terminal qualification is 13,796 bytes, SHA-256
+`efa69b137efb54b6de605cd72165eb9d407374bdf9df3e17f99dc675813f0f2d`.
+Local independently read the complete existing
+[main CI 40217242404](
+https://github.com/lossyrob/telex/actions/runs/40217242404) push attempt 1
+at that merge, all 24 completed/successful jobs, and both successful jobs
+in [Docs 40217242455](
+https://github.com/lossyrob/telex/actions/runs/40217242455).
+These are landed results, not PR-run aliases or later artifact-head CI.
+The reconciler did not repeat the provider CI inventories or run tests.
+
+Four actual Windows/macOS main captures retain public job identities,
+basenames, lengths and hashes in the ledger terminal qualification.
+Local and the reconciler matched all four captures, read selected direct
+source/result excerpts and mechanically verified the two cooperative
+jobs' actual attempts 1..10, ten single-test passing results, eleven
+named positive-case pass lines and 62/0/0 module results each.
+Station-intent jobs passed 62/0/0 each; filesystem results were Windows
+14/0/0 and macOS 13/0/0. Both station jobs explicitly verify provider
+event SHA equals actual source SHA. No full-log read, provider-log
+refetch or proof of every other job's checkout is claimed.
+
+Persistent-lock contention was 480.445ms on Windows and 539.0605ms on
+macOS, both below the unchanged 1,540ms assertion. These are not
+partial-page completion latencies or hard 480ms return guarantees.
+The positive test still checks the conditional partial-page outcome,
+truthful truncation and mandatory item, but paused Tokio completion time
+does not directly test a real first read within the real-time 200ms
+grace. Ten repetitions do not close that coverage debt or diagnose old
+Windows `Overran`, whose cause and load-rate implications remain unknown.
+
+Local and the reconciler read the full
+[field report](
+https://github.com/lossyrob/telex/issues/181#issuecomment-6401070057),
+by `lossyrob`, created=updated 2026-10-25T17:51:36Z, 5,052 bytes, SHA-256
+`7bcd7705e07e794ee349992e9a45875ec9510ecefc7a29018ffd0768b8e72957`.
+Design impact is `updated-docs`. Its submitted-for-acceptance wording is
+historical: Campaign later expressly accepted delivery and released
+only PR #180's Local prerequisite; Local separately accepts it above.
+Posting, provider closure or an owner completion send alone was not
+acceptance. Observer termination/schedule removal remains owner-reported,
+not an independently inspected Local/reconciler scheduler state.
+
+Node #181 and its existing partial-page discovery are completed; preserve
+the completed #187 dependency edge and all old evidence, including
+`mergeDebtAndFollowThrough`. This completion accepts the bounded repair,
+not the retained Local timing/cause debt. A future `Overran` opens a new
+item with exact source/failure evidence, not retry. Sentinel consolidation
+and optional Clippy remain separate; fewer repetitions reduce exposure.
+
+The existing Watcher Local-dependency edge is satisfied, not deleted.
+The owning Watcher coordinator separately directs #179 to in-progress
+with focus attention; Local's original preserve-watch instruction is
+qualified by its immutable later 2,185-byte supplement, SHA-256
+`dc36573c964aac911ddecdc8f27b987b8c6c025fa9ecf5ec50b66bdeb092aada`.
+The same #180 owner, completed runtime-core dependency and own current-head
+source/design/CI/field/Campaign gates remain. No Watcher readiness, merge
+or accepted delivery follows, and its owner need not wait for publication.
+All earlier pending/draft/ready/merge-only snapshots remain historical.
+No new CI/runtime/observer, product merge, debt clearance, release, #153,
+hardening/closure, marker change or workstation-freeze authority follows.
 
 ## Workflow
 

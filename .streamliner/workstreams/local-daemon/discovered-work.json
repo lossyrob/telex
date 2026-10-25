@@ -2442,6 +2442,185 @@
           },
           "disposition": "Record observed merge and retained Local real-time200ms coverage/unknown historicalOverran cause debt. Future recurrence opens a new item, not retry. Existing sentinel consolidation and optionalClippy remain separate; reduced repetitions are reduced exposure, not equivalent ten-run proof or cleared coverage debt.",
           "boundaries": "187 completion is already independently accepted. Keep181 in-progress with completed187 lineage for this merge-only receipt. Later181 terminal acceptance/Watcher resumption is a separate successor, not negated by this snapshot. No automatic delivery/dependencyrelease/readiness, publication debt clearance, source/runtime/CI/observer, product merge, release,153,hardening/closure or workstation-freeze change."
+        },
+        "terminalDeliveryQualification": {
+          "kind": "later-accepted-bounded-terminal-delivery",
+          "intake": {
+            "file": "issue181-terminal-delivery-qualification-20261025.json",
+            "bytes": 13796,
+            "sha256": "efa69b137efb54b6de605cd72165eb9d407374bdf9df3e17f99dc675813f0f2d"
+          },
+          "localAcceptance": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_LQRdbpVKF864RvswmuQOKnCc",
+            "decision": "Accept the bounded issue181 cooperative partial-page repair as delivered at actual PR185 merge65f5846d after independently verified merged-head CI, Docs, Windows/macOS evidence and field report. Clear only the Local181 delivery prerequisite of Watcher179/PR180; Watcher retains its own current-head gates.",
+            "meaning": "Independently supported owning acceptance after actual merged-head evidence, not provider closure or posting alone."
+          },
+          "campaignDirectAcceptance": {
+            "source": "toolu_01MSw5x5tEYZNKyECVLu9b8M",
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "verbatim": "Campaign: #181 is accepted as delivered (merge 65f5846d, main CI 40217242404 24/24, field report issuecomment-6401070057). PR #180's external dependency on #181 is released. Please record it canonically. Watcher is not waiting for your landing.",
+            "qualification": "Direct Campaign receipt separately qualifies the original Local packet owner-reported Campaign quote without rewriting it; explicitly releases only PR180 Local181 prerequisite."
+          },
+          "merge": {
+            "pullRequest": "https://github.com/lossyrob/telex/pull/185",
+            "issue": "https://github.com/lossyrob/telex/issues/181",
+            "commit": "65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b",
+            "tree": "144382f5b9bc4d5951113e3b588c4e23cab0530d",
+            "parents": [
+              "ea6230328da175d48d09435b26b81750c52b59b7",
+              "130be3b257e8208f521f9e4e91bc6795b991e023"
+            ],
+            "mergedAt": "2026-10-25T17:35:55Z",
+            "issueClosedAt": "2026-10-25T17:35:56Z",
+            "verification": "Local independently verified provider merge/closure and immutable commit/tree/parents in the separate merge-state intake.",
+            "campaignGate": "https://github.com/lossyrob/telex/pull/185#issuecomment-6400899418",
+            "gateDisposition": "Campaign merge + debt, confidence high. Its main-CI/field-report/Local-acceptance follow-through is the basis for this bounded acceptance, not a new merge authorization."
+          },
+          "mainCi": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40217242404",
+            "head": "65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b",
+            "event": "push",
+            "attempt": 1,
+            "conclusion": "success",
+            "totalJobs": 24,
+            "localVerification": "Independent bounded provider reads confirmed exact merged SHA/push/attempt1/terminal success and the complete24-job completed-success inventory. These are main-run results, not PR-run aliases.",
+            "reconcilerBoundary": "Not a repeated provider run/job inventory or claim for later artifact commits."
+          },
+          "docs": {
+            "url": "https://github.com/lossyrob/telex/actions/runs/40217242455",
+            "head": "65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b",
+            "event": "push",
+            "attempt": 1,
+            "conclusion": "success",
+            "totalJobs": 2,
+            "localVerification": "Independent provider metadata and complete two-job inventory read. Local observed the existing hosted deployment, not performed it."
+          },
+          "retainedMainLogs": {
+            "head": "65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b",
+            "logs": [
+              {
+                "file": "pr185-main-65f5846-windows-cooperative-121240933061.txt",
+                "jobId": "121240933061",
+                "platform": "Windows",
+                "kind": "cooperative",
+                "bytes": 73621,
+                "sha256": "a374c17f07128467351a1396368ec0746818a424a72e7954009d7f4f5b59fda8",
+                "verifierTimestamp": "2026-10-25T17:37:34.5931053Z",
+                "stationIntentPassed": 62,
+                "stationIntentFailed": 0,
+                "ignored": 0,
+                "filteredOut": 450,
+                "moduleDurationSeconds": 14.6,
+                "actualRepetitionAttempts": 10,
+                "singleTestPassingResults": 10,
+                "namedPartialPagePassesIncludingModule": 11
+              },
+              {
+                "file": "pr185-main-65f5846-macos-cooperative-121240933066.txt",
+                "jobId": "121240933066",
+                "platform": "macOS",
+                "kind": "cooperative",
+                "bytes": 74345,
+                "sha256": "91f4da337dd92aa9db9f6e61724c491c073822d1f285ac552b01788051995d0a",
+                "verifierTimestamp": "2026-10-25T17:36:07.1430780Z",
+                "stationIntentPassed": 62,
+                "stationIntentFailed": 0,
+                "ignored": 0,
+                "filteredOut": 436,
+                "moduleDurationSeconds": 3.21,
+                "actualRepetitionAttempts": 10,
+                "singleTestPassingResults": 10,
+                "namedPartialPagePassesIncludingModule": 11
+              },
+              {
+                "file": "pr185-main-65f5846-windows-station-121240933048.txt",
+                "jobId": "121240933048",
+                "platform": "Windows",
+                "kind": "station-intent-lock",
+                "bytes": 55749,
+                "sha256": "90dfb317bbff629b8c34a31c84ea1c50d4d059535c778dda5bfe8bf5ccb1439e",
+                "verifierTimestamp": "2026-10-25T17:36:09.4266583Z",
+                "sourceEqualsProviderEventSha": true,
+                "stationIntentPassed": 62,
+                "stationIntentFailed": 0,
+                "stationIntentIgnored": 0,
+                "stationIntentFilteredOut": 450,
+                "stationIntentDurationSeconds": 18.24,
+                "filesystemPassed": 14,
+                "filesystemFailed": 0,
+                "filesystemIgnored": 0,
+                "filesystemFilteredOut": 498,
+                "filesystemDurationSeconds": 0.31,
+                "lockContentionMilliseconds": 480.445
+              },
+              {
+                "file": "pr185-main-65f5846-macos-station-121240932961.txt",
+                "jobId": "121240932961",
+                "platform": "macOS",
+                "kind": "station-intent-lock",
+                "bytes": 58952,
+                "sha256": "3c97b7322272b3d508098d57808128155cc5b06279e8d1219b255eb61f27fdcc",
+                "verifierTimestamp": "2026-10-25T17:36:08.6396420Z",
+                "sourceEqualsProviderEventSha": true,
+                "stationIntentPassed": 62,
+                "stationIntentFailed": 0,
+                "stationIntentIgnored": 0,
+                "stationIntentFilteredOut": 436,
+                "stationIntentDurationSeconds": 4.99,
+                "filesystemPassed": 13,
+                "filesystemFailed": 0,
+                "filesystemIgnored": 0,
+                "filesystemFilteredOut": 485,
+                "filesystemDurationSeconds": 1.65,
+                "lockContentionMilliseconds": 539.0605
+              }
+            ],
+            "localVerification": "Local independently matched each byte count/hash and mechanically verified direct mergeSHA, complete module result lines, actual cooperative attempts1..10 with ten single-test pass results and eleven named partial-page pass lines, plus lock timings below the unchanged1540ms ceiling. Selected verifier/timing/result excerpts were read; no full-log-read claim, provider refetch or local runtime execution.",
+            "reconcilerVerification": "Matched all four retained bytes/hashes, read selected exact-source/provider-SHA/result/timing excerpts and mechanically verified actual cooperative attempts1..10, ten1-pass/zero-fail/zero-ignored results and eleven named positive passes each. No full-log read, provider refetch or runtime execution.",
+            "mechanics": {
+              "file": "done181-log-mechanics.json",
+              "bytes": 2449,
+              "sha256": "77495908dac0682079c90a05d16f5b12dd75ec2fae058e032e97911394a2eca2"
+            },
+            "limits": "The lock timings do not measure partial-page completion latency. These logs verify the four named checkouts, not every other job's checkout. Other jobs' success comes from the complete provider inventory."
+          },
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/181#issuecomment-6401070057",
+            "author": "lossyrob",
+            "createdAt": "2026-10-25T17:51:36Z",
+            "updatedAt": "2026-10-25T17:51:36Z",
+            "designImpact": "updated-docs",
+            "localVerification": "Read the entire provider report. Exact merge/tree, main CI/Docs, named job results and measurements match independent provider/log verification.",
+            "behavior": "Records conditional mandatory partial-page progress, one production slot, original cooperative deadline, unchanged200ms grace, shared absolute completion endpoint, cancellation and worker-held permit.",
+            "retainedDebt": "Explicitly retains real-time200ms positive-case coverage gap, unknown historical Windows Overran cause, no load-rate inference, future recurrence=>new item rather than retry, separately routed sentinel consolidation and deferred optional Clippy.",
+            "observerLifecycle": "Owner reports all waits terminal and the sole native schedule cleared/verified absent. Local did not independently inspect scheduler state.",
+            "bodyBytes": 5052,
+            "bodySha256": "7bcd7705e07e794ee349992e9a45875ec9510ecefc7a29018ffd0768b8e72957",
+            "reconcilerVerification": "Full public body read; exact author/created=updated17:51:36Z/body matches frozen source. Submission-for-acceptance wording is historical, qualified by later actual Local and direct Campaign acceptance."
+          },
+          "watcherFocusSupplement": {
+            "file": "issue181-watcher-focus-supplement-20261025.json",
+            "bytes": 2185,
+            "sha256": "dc36573c964aac911ddecdc8f27b987b8c6c025fa9ecf5ec50b66bdeb092aada",
+            "owningWatcherSource": "toolu_018K5CDiASt5K6ShoXfXDVfX",
+            "meaning": "Owning Watcher, not original Local packet, directs179attentionfocus; later Local supplement accepts that separate authority. Preserve original13796-byte packet and oldwatch snapshot."
+          },
+          "disposition": "Complete only the bounded181 repair node and original discovery record; retain completed187 lineage and all original fields/evidence including mergeDebtAndFollowThrough. This is not completion of retained real200ms coverage/unknown historicalcause debt. Existing Watcher Local181 external edge satisfies,179in-progress/focus, with owner/runtimecore/PR/currenthead gates unchanged.",
+          "retainedDebt": {
+            "realTime200msPositiveCoverageGap": "Still Local-owned; pausing Tokio completion time does not directly test a real first read inside real200ms grace. Ten successful repetitions do not remove it.",
+            "historicalWindowsOverranCause": "Still unknown; no cause or load-rate inference.",
+            "recurrence": "Open a new item with exact source/failure evidence, not retry.",
+            "sentinel": "Existing consolidation/repetition assessment remains separate; fewer repetitions are reduced exposure, not equivalent ten-run evidence.",
+            "clippyAndPublication": "Existing deferred optionalClippy and historical PR189 reviewer-origin debt remain unchanged."
+          },
+          "boundaries": [
+            "Actual mainCI success is exact65f, not PR-CI alias or proof for later unrelated artifact heads. Four named source-verified logs do not prove every other job checkout.",
+            "Lock480.445/539.0605ms<1540 is not partial-page latency, hard480msreturn, historicalcause or heavy-load proof.",
+            "Observer wait termination/schedule removal is owner-reported, not a Local/reconciler scheduler audit.",
+            "No Watcher180 readiness, merge or accepted delivery. Its existing owner retains fresh current-head source/design/CI/field/Campaign obligations and does not wait on canonical publication.",
+            "No old failed/pending/ready/merge receipt rewritten, no new record or marker/lint absorption, no new runtime/CI/retry/observer/productmerge/release153hardeningclosure/freeze authority or debt clearance."
+          ]
         }
       },
       "description": "Classify failure to observe the mandatory cooperative partial page on Windows without discarding the shared deadline or fairness contract.",
@@ -2450,7 +2629,7 @@
       "sequencing": "One separate Local repair node/issue/PR. Diagnose completion/permit/worker behavior, correct minimally, validate at an exact hosted head and return to Campaign gate. No third unchanged-head retry or Watcher-side absorption.",
       "target": "local-daemon/cooperative-partial-page-repair / issue https://github.com/lossyrob/telex/issues/181",
       "owner": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 coordinates implementation owner 9d4fee6c-63a6-4aa7-b384-a4df1cbcbb4c. V2 preparation and real kickoff are complete from main 3d517e17 in checkout lossyrob-expert-doodle with that initial branch; gpt-6.1-sol/high/default/interactive requested. No API/SDK/v1 handshake is required. Existing PR 180 owner retains original evidence and owns no root fix.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly authorized the bounded node, one gpt-6.1-sol/high/default owner, tracker closed by its repair PR, and upstream blocker of watcher-cli-ux on 2026-10-23.",
       "terminalPath": "One complete repair PR closes issue 181 after discriminating diagnosis, focused regression, exact-head hosted validation, review/design coverage and Campaign merge authorization. Preserve absolute D+grace, one permit, truthful truncation and mandatory partial-page progress. Reconcile completion and release the Watcher dependency only from actual terminal evidence; no hardening/closure acceptance inferred."
