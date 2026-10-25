@@ -351,6 +351,37 @@
           "head": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
           "issue": "https://github.com/lossyrob/telex/issues/167",
           "details": "Recurrence for #167, with no new disposition. Owning Watcher's complete public comment records the PR #202 (#198 classifier) owner's report: run 40230509989 attempt 1 at head 02d2cbbdb93af264d46763c6d86b0b8ea5691f14 failed only in credential_command_shell_exit_preserves_delayed_inherited_writer, tests/credential_command.rs:516 Elapsed(()), job 121280997219. The claims that #202 does not touch credential code and that classifier tests passed remain owner-reported, not a reconciler source or CI inspection. The comment also reports one failed-job rerun at the same head; this is a reported owner action, not a new retry authorization, repair, waiver or readiness credit, and does not erase the first failed attempt. The reconciler captured and read the complete public comment, not the raw job log, source or retry outcome. Existing Local Daemon ownership, routing and all prior observations remain unchanged; no new issue, node, owner, dependency, status, disposition or debt/HOLD clearance follows."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431",
+          "createdAt": "2026-10-25T20:47:15Z",
+          "updatedAt": "2026-10-25T20:51:48Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40230509989",
+          "job": "121284088689",
+          "pullRequest": 202,
+          "workflowAttempt": 2,
+          "prHead": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
+          "executedRef": "refs/remotes/pull/202/merge",
+          "executedMerge": "0cbecafc3b944bf920aad34e5fa8764ac683653c",
+          "details": "Watcher reports a heap-corruption observation from PR #202 (#198), ordinary Build and test (windows-latest), attempt 2. Campaign routes it to existing #166 owner d7a17cd2, not another owner or Watcher dependency. PR/event head 02d2cbbd and the artifact labels differ from the executed refs/remotes/pull/202/merge checkout at 0cbecafc, a merge of 02d2cbbd into 6c7ff068. Binaries and symbols derive from that merge. The real_process_01_concurrent_first_use child exited with 0xc0000374 (STATUS_HEAP_CORRUPTION) at tests/daemon_process_sqlite.rs:518 (via :793); the test then panicked at :800 (via :746). Stdout and stderr were empty; the target reported 48 passed, 1 failed. Keep this distinct from earlier PageHeap 0xc0000005 stages. No common cause or PR #202 fix is established. Local separately reports bounded retained job-labeled UTF-8 text, Git metadata and test-source checks, preserved in the existing #166 same-observation qualification. These are not reconciler replay or raw API/archive verification. Whether attempt 1 reached daemon_process_sqlite is unestablished. The earlier public passed-target and no-artifact assertions were corrected and remain historical. The archive entries below are Watcher-reported API metadata and timing associations, not downloaded-byte digests or inspected dump evidence. Their shared name does not identify contents. The historical failed-jobs rerun authorizes no further retry. #198 remains in progress, CI-blocked on external #166/#167 under strict CI, not ready. After a verified actual #166 product repair merge, Local must separately wake #193 owner 519693a5 and #198 owner a96926b1. Both deliveries remain pending; the original #193 obligation is preserved. The two source qualifications describe one observation, not duplicate occurrences or a new candidate/disposition. No source/native/runtime replay, diagnosis, repair, review/CI/readiness/merge/debt/HOLD acceptance or workstation-freeze exception follows.",
+          "archiveMetadataReportedByWatcher": [
+            {
+              "id": "12613228369",
+              "bytes": 73218796,
+              "createdAt": "2026-10-25T20:44:11Z",
+              "timingAssociation": "attempt2",
+              "apiDigest": "sha256:846ce5575569c883eade197bd3fea7dfa1c668776f89a291b545180bf005f87d"
+            },
+            {
+              "id": "12613716010",
+              "bytes": 73235080,
+              "createdAt": "2026-10-25T20:33:14Z",
+              "timingAssociation": "attempt1, same name",
+              "apiDigest": "sha256:75e656b3c72276edf6edd7249389b7a245a8b371807b79bdee3ff3292898f81b"
+            }
+          ],
+          "archiveLimits": "IDs/digests and timing association are Watcher-reported API metadata. Local did not download or inspect archives, verify their digests against downloaded bytes, or establish dump presence. Use immutable IDs, not same-name selection."
         }
       ]
     },

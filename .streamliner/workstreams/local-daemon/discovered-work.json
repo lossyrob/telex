@@ -1931,6 +1931,213 @@
         "futureMergeWakeQualification": "Future verified actual166 repair merge -> Local wakes existing193 owner to integrate main, obtain fresh CI and request194 gate; delivered=false refers to that future wake, not kickoff delivery. Actual merge/wake is not evidenced here. No automatic dependency/status change.",
         "laterDiagnosticReportsExcluded": true,
         "authorityBoundary": "Launch/branch metadata only. Old pending/unassigned and uninspected-archive source snapshots remain historical. Preparation/App observations remain Local-attributed. No later archive/dependency-candidate/native diagnosis, implementation, source/design/CI/integration acceptance, readiness, owner replacement, retry/waiver,193/Watcher change, debt/HOLD/release/freeze clearance."
+      },
+      "laterHeapCorruptionRoutingAndWakeQualification": {
+        "kind": "additive-campaign-heap-routing-and-same-observation-evidence-qualification",
+        "attribution": "Campaign's routing is quoted verbatim in the original Local packet. The delivery report and the retained-text, Git/source and exact test-boundary checks remain attributed to Local. The reconciler captured and read the complete Watcher public comment. No reconciler log, source, archive, native or runtime replay is claimed.",
+        "chronology": "The initial routing packet is retained unchanged as the historical unknown-head report. The later Local qualification and corrected public record distinguish the PR/event head from the executed merge for the same run and job; they do not describe another occurrence. Original launch and AV evidence and the original #193 wake obligation remain unchanged. Both #193 and #198 post-actual-repair-merge deliveries remain pending.",
+        "sourceSnapshots": [
+          {
+            "file": "heap166-local-routing.json",
+            "bytes": 4095,
+            "sha256": "c224ad7464e3a66adda6bd451ba2c83b03e45ab67bdfb12911488d1cce0330b2"
+          },
+          {
+            "file": "heap166-local-evidence.json",
+            "bytes": 6801,
+            "sha256": "4a33013e497ff7ac024f517cafa7ce2f1ff55f618668acb795ca5f1ba27ebe6f"
+          }
+        ],
+        "sourceTransports": {
+          "initialLocal": "call_uVAg4F3QPnhVjbR1scK5Z232",
+          "laterLocal": "call_ttv12HF3cQWMl3bjcD2YuDZM",
+          "watcherPublicCorrection": "toolu_01NgLBj2Nsdfdf1YzVsXjVtB"
+        },
+        "initialRoutingSnapshot": {
+          "kind": "campaign-directed-additional-native-failure-routing",
+          "sourceReceivedAt": "2026-10-25T20:46:37.500Z",
+          "authority": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "sourceMessage": "toolu_011HendiW3BJzkXVtPYrCfq6",
+            "verbatim": "Campaign: Watcher is routing a new Windows failure to you from PR #202 (#198). It's 0xc0000374 (STATUS_HEAP_CORRUPTION) in untouched daemon_process_sqlite first-use code, in the default Windows job: https://github.com/lossyrob/telex/actions/runs/40230509989/job/121284088689. It is heap-family, so give it to the #166 owner d7a17cd2 as another observation now, rather than staffing a new owner. Split it out only if #166's diagnosis shows it's distinct. It now blocks #194 and #202 under strict CI, so #166 is the campaign's top critical-path repair. When #166 merges, also ring the #198 owner a96926b1-3e4f-4578-a197-33de51d669c7 alongside 519693a5."
+          },
+          "routing": {
+            "issue": 166,
+            "nodeId": "windows-pageheap-av-repair",
+            "existingRecord": "local-daemon-windows-pageheap-access-violation",
+            "ownerSessionId": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+            "deliveredToOwner": true,
+            "delivery": "Immediate App message to the existing owner, no mode override or new session.",
+            "newOwnerOrIssue": false,
+            "classification": "Additional native heap-failure observation assigned to the same166 investigation by Campaign. Preserve STATUS_HEAP_CORRUPTION/default-Windows/first-use as distinct from prior0xc0000005/PageHeap command stages; no common fault location or cause is established.",
+            "splitCondition": "Separate only if166 diagnosis establishes a distinct defect."
+          },
+          "reportedObservation": {
+            "sourcePullRequest": 202,
+            "sourceIssue": 198,
+            "runId": "40230509989",
+            "jobId": "121284088689",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40230509989/job/121284088689",
+            "profile": "Windows default job",
+            "status": "0xc0000374",
+            "statusName": "STATUS_HEAP_CORRUPTION",
+            "reportedBoundary": "Untouched daemon_process_sqlite first-use code.",
+            "head": null,
+            "custody": "Watcher has been asked to forward retained exact-head/log bytes/hash and bounded command/stack/result evidence to the166 owner and Local, without a refetch or probe solely for the handoff.",
+            "qualification": "Campaign-reported routing context. Local has not yet independently read the raw log/source or verified the full PR202 head, exact failing command or untouched-source claim. Do not invent those details."
+          },
+          "priorityAndGates": {
+            "priority": "Campaign's top critical-path repair",
+            "blockedPullRequests": [
+              194,
+              202
+            ],
+            "rule": "Strict CI remains required. No retry, flake exception, waiver, abnormal-exit suppression or broadening of workstation runtime permissions.",
+            "geometry": "Routing an observation and extending the future wake does not authorize another owner, automatic dependency/status edits, or absorbing166 into193/198."
+          },
+          "mergeWakeSupplement": {
+            "trigger": "Verified actual166 product repair merge, not its metadata landing, diagnostic green or readiness.",
+            "coordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "recipients": [
+              {
+                "issue": 193,
+                "pullRequest": 194,
+                "sessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+                "delivered": false
+              },
+              {
+                "issue": 198,
+                "pullRequest": 202,
+                "sessionId": "a96926b1-3e4f-4578-a197-33de51d669c7",
+                "delivered": false
+              }
+            ],
+            "action": "Local rings both existing owners to integrate main, obtain fresh exact-head CI/review gates and request their respective PR gates. Record each delivery separately. The166 owner has been told to report its actual merge immediately to Local."
+          },
+          "artifactScope": "An additive routing/priority/future-wake qualification on existing166 artifacts, preserving original AV evidence, single-owner launch history, all prior cause limits and existing193/198 owners. No new occurrence count or precise source attribution until the retained evidence arrives. Keep later proof/CI results separate."
+        },
+        "laterSameObservationQualification": {
+          "kind": "bounded-native-failure-evidence-qualification",
+          "issue": 166,
+          "nodeId": "windows-pageheap-av-repair",
+          "existingRecord": "local-daemon-windows-pageheap-access-violation",
+          "operation": "Qualify the already Campaign-routed PR202 observation with exact retained-text, executed-merge and source evidence. Do not add another occurrence for the same run/job or create a candidate/owner.",
+          "routingAuthority": "toolu_011HendiW3BJzkXVtPYrCfq6",
+          "priorRoutingPacket": {
+            "file": "issue166-heap-corruption-routing-20261025.json",
+            "bytes": 4095,
+            "sha256": "c224ad7464e3a66adda6bd451ba2c83b03e45ab67bdfb12911488d1cce0330b2",
+            "qualification": "That immutable initial packet had unknown exact head/custody. This later verification fills those fields without rewriting the original report or expanding staffing."
+          },
+          "reporter": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "messages": [
+              "toolu_01NerLtv2JEdMwd2cRA33nJF",
+              "toolu_018RmuAMPbFszR1FSpVnobWk",
+              "toolu_01TJA3KUkfn8RcvVcf3Ku9LL"
+            ],
+            "publicRecord": "https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431",
+            "publicRecordRead": "Local read the complete version updated20:48:04Z. Watcher subsequently reports the executed-merge qualification posted and verified at20:51:48Z; Local's merge verification below comes from the retained text and immutable Git API, not an assumed reread of that later comment."
+          },
+          "run": {
+            "pullRequest": 202,
+            "sourceIssue": 198,
+            "head": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
+            "runId": "40230509989",
+            "workflowAttempt": 2,
+            "attemptQualification": "Watcher identifies a failed-jobs rerun. This historical attempt is not new retry permission.",
+            "jobId": "121284088689",
+            "jobName": "Build and test (windows-latest)",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40230509989/job/121284088689",
+            "commandsVerifiedInRetainedText": {
+              "build": "cargo build --workspace --verbose",
+              "prebuild": "cargo test --workspace --no-run --verbose",
+              "test": "cargo test --workspace --verbose",
+              "lines": [
+                651,
+                900,
+                1248
+              ]
+            },
+            "profileQualification": "Ordinary Windows default-workspace job, not the PageHeap diagnostics job; no all-features flag in the recorded commands."
+          },
+          "executedSource": {
+            "ref": "refs/remotes/pull/202/merge",
+            "mergeCommit": "0cbecafc3b944bf920aad34e5fa8764ac683653c",
+            "tree": "488493820fd72455807cdad8e2ddd4957da52fec",
+            "orderedParents": [
+              "6c7ff0680dd428af2cc765aa13d827bc140943f0",
+              "02d2cbbdb93af264d46763c6d86b0b8ea5691f14"
+            ],
+            "logLines": [
+              93,
+              111,
+              114
+            ],
+            "testPath": "tests/daemon_process_sqlite.rs",
+            "testBlob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+            "testBytes": 196727,
+            "verification": "Local read checkout/ref/log-HASH lines, then independently checked immutable Git commit parents/tree and contents API metadata for this exact merge. Its test blob equals the locally available PR-head blob whose lines740-805 were read.",
+            "qualification": "PR/event head and artifact labels02d2 are distinct from executed merge0cbecaf. Identical test source does not prove every production dependency or runtime input is unchanged and does not establish PR causality."
+          },
+          "retainedText": {
+            "file": "pr202-run40230509989-a2-job121284088689.log",
+            "bytes": 465915,
+            "sha256": "73a58636fce10cf603034fcdae9ce9f64670e02ab2e1d3cf0e3a4c469b4a798d",
+            "format": "gh run view --job121284088689 --log output saved as UTF8 text, with job/step labels; not raw API log bytes or an artifact archive.",
+            "localVerification": "Matched exact byte count and SHA256 and read bounded checkout, command, exception/backtrace and full target-result excerpts. No full-log-read claim, log refetch or runtime execution."
+          },
+          "failure": {
+            "test": "real_process_01_concurrent_first_use",
+            "status": "0xc0000374",
+            "statusName": "STATUS_HEAP_CORRUPTION",
+            "commandFromSource": "Eight barrier-synchronized workers each invoke --json --address <worker-address> attach --session <worker-session> --description 'herd worker', using shared per-fixture HOME/RUN_DIR/DB/CONFIG and Windows LOCALAPPDATA.",
+            "sourceBoundary": "Worker capture at793 calls the abnormal-exit guard518; that worker panics and its join propagates at800 in test746. The eight-second capture budget is configuration, not the fault duration or a timeout diagnosis.",
+            "logBoundary": "Failure details at2332-2365; exception at2335; target result at2372.",
+            "stdout": "",
+            "stderr": "",
+            "result": {
+              "passed": 48,
+              "failed": 1,
+              "ignored": 0,
+              "durationSeconds": 25.34
+            },
+            "qualification": "A command child exited with the native heap-corruption status. Rust harness frames are not a native child stack; the exact worker/child PID, corrupting operation, faulting instruction and common cause remain unestablished."
+          },
+          "archiveMetadataReportedByWatcher": [
+            {
+              "id": "12613228369",
+              "bytes": 73218796,
+              "createdAt": "2026-10-25T20:44:11Z",
+              "timingAssociation": "attempt2",
+              "apiDigest": "sha256:846ce5575569c883eade197bd3fea7dfa1c668776f89a291b545180bf005f87d"
+            },
+            {
+              "id": "12613716010",
+              "bytes": 73235080,
+              "createdAt": "2026-10-25T20:33:14Z",
+              "timingAssociation": "attempt1, same name",
+              "apiDigest": "sha256:75e656b3c72276edf6edd7249389b7a245a8b371807b79bdee3ff3292898f81b"
+            }
+          ],
+          "archiveLimits": "IDs/digests and timing association are Watcher-reported API metadata. Local did not download or inspect archives, verify their digests against downloaded bytes, or establish dump presence. Use immutable IDs, not same-name selection.",
+          "historicalCorrections": [
+            "Attempt1 at the same PR head failed earlier in the separate167 credential-command case. Whether it reached daemon_process_sqlite is not established; the earlier claim it passed was corrected.",
+            "The earlier public claim that no artifact was retained was corrected. Archive presence does not prove dump presence or native diagnosis.",
+            "Initial routing used the PR head as context without an executed-checkout claim. Retained evidence now establishes provider merge0cbecaf rather than a direct02d2 checkout."
+          ],
+          "disposition": "Existing166 ownerd7a17cd2 has the observation and executed-merge correction. Keep0xc0000374/default-Windows/first-use separate from prior0xc0000005/PageHeap cases; split only if diagnosis demonstrates a distinct defect. No new owner/issue, retry, waiver, source/CI/readiness credit or workstation permission. After verified actual166 repair merge, Local must wake both193owner519693a5 and198ownera96926b1 for fresh integration/CI/gates."
+        },
+        "publicSourceSnapshot": {
+          "id": "6403052431",
+          "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431",
+          "author": "lossyrob",
+          "createdAt": "2026-10-25T20:47:15Z",
+          "updatedAt": "2026-10-25T20:51:48Z",
+          "bodyBytes": 2390,
+          "bodySha256": "67e7340195e0e9a469cbd01b75d5dd5ee952ee119776ba20cca0b08608ef336d"
+        },
+        "boundary": "One existing #166 investigation and owner. Keep default-Windows 0xc0000374 and prior PageHeap 0xc0000005 stages distinct; no common cause is established. No new candidate, occurrence count, owner or node, automatic dependency/status edit, retry, waiver, abnormal-exit suppression, diagnosis, repair, source/review/CI/readiness/debt/HOLD acceptance or workstation-freeze exception follows. Split only if diagnosis establishes a distinct defect. Both future wakes require a verified actual #166 product repair merge, not an artifact landing, diagnostic green or readiness."
       }
     },
     {

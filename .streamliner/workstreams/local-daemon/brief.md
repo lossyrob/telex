@@ -970,3 +970,32 @@ to Local; Local verifies it and wakes the existing #193 owner to integrate
 main, obtain fresh CI and request the PR #194 gate. This is not a completed
 merge/wake, an automatic edge/status change or a CI/readiness waiver.
 #193/#194, accepted #181/#187, all Watcher state and debts remain separate.
+
+## 2026-10-25 - Campaign heap routing and two pending merge wakes
+
+Campaign `toolu_011HendiW3BJzkXVtPYrCfq6` routes the PR #202 / #198
+default-Windows `0xc0000374` observation to the existing #166 owner,
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`. Local reports delivery to that
+owner. This makes #166 the Campaign's top critical-path repair for
+#194 and #202 under strict CI; it creates no owner, node or automatic
+dependency/status change. Keep this heap-corruption/first-use observation
+distinct from the retained PageHeap `0xc0000005` stages. No common cause
+is established; split only if diagnosis establishes independent defects.
+
+The later retained-evidence qualification concerns the SAME run/job,
+not another occurrence. PR/event head `02d2cbbd` differs from the executed
+pull-merge checkout `0cbecafc`, merging that head into `6c7ff068`.
+Local's bounded retained-text/Git/source checks remain Local-attributed,
+not reconciler replay. Attempt-1 process-target execution and archive
+dump presence remain unestablished. The complete task/ledger preserve
+the original unknown-head routing packet, later qualification and limits.
+
+After the #166 product repair actually merges, Local must verify that
+merge and separately wake BOTH existing owners: #193 / #194 owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` and #198 / #202 owner
+`a96926b1-3e4f-4578-a197-33de51d669c7`. Each integrates main and obtains
+fresh exact-head CI/review/PR gates. Both deliveries remain pending.
+This supplements, rather than replaces, the original #193 obligation.
+An artifact landing, diagnostic green or readiness report is not the
+trigger. No retry, waiver, repair, source/CI/readiness/debt/HOLD acceptance
+or workstation-freeze exception follows.
