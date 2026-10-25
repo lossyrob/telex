@@ -2437,7 +2437,62 @@
           "classificationRefinement": "This is an explicit SQLite store-lock refusal, not evidence that station-intent lock ownership failed. The captured child returned ordinary exit 1, not a native exception. The test reaches the post-drain successor-spawn helper and fails before the subsequent push-restored observation.",
           "qualification": "The source's preceding wait_until_not_running assertion is not independently certified kernel-process or store-lock release proof. The log does not identify which process held the SQLite lock, establish that the lock should have been free, or justify retrying/stealing/removing it. No common cause with issue 166 or 169 is established."
         },
-        "retainedEvidenceAuthority": "Local Daemon retained-evidence supplement 2026-10-23 (SHA-256 8c17bf7cfbc297a8272acf84221c3cb3115da6b7975dacb36d665c1bc9764133), approved by Campaign for evidence-only reconciliation; supplements and does not replace the original attributed intake evidence."
+        "retainedEvidenceAuthority": "Local Daemon retained-evidence supplement 2026-10-23 (SHA-256 8c17bf7cfbc297a8272acf84221c3cb3115da6b7975dacb36d665c1bc9764133), approved by Campaign for evidence-only reconciliation; supplements and does not replace the original attributed intake evidence.",
+        "mainWatch16MultiStoreClassification": {
+          "classificationPacket": {
+            "file": "watch16-local-intake.json",
+            "bytes": 7028,
+            "sha256": "a7e97f323a124632b1522369227da59f0a8fcb4ea41434bc9489714589796d4f",
+            "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "sourceMessage": "call_T1FrJ4wTRQz96OcXfedlD0z0"
+          },
+          "attribution": "Local classified the retained sentinel evidence and read both complete custody packets across bounded ranges. Local matched both raw-log and custody byte counts and SHA-256 values, every supplied log excerpt against its retained raw-log line, and all 61/105 source excerpts against the corresponding exact-head Git blobs. Local reports that both failed-head commit deltas changed only .streamliner metadata. The reconciler read the complete Local classification packet, not the underlying raw logs, custody packets or exact-head source excerpts. The retained classification below preserves the parsed source wording. No full-log read, refetch, provider inventory, runtime or native diagnosis is claimed by this projection.",
+          "retainedClassification": {
+            "operation": "Append one distinctly labeled multi-store test occurrence to the existing SQLite store-lock refusal candidate; do not create a duplicate record.",
+            "candidateId": "local-daemon-windows-station-restart-lockfileex-33",
+            "statusChange": false,
+            "decisionChange": false,
+            "runId": "40223385797",
+            "attempt": 1,
+            "jobId": "121259578492",
+            "jobName": "Windows heap diagnostics",
+            "head": "f4644c02045447d5b83f185f142d42eec4db1a0e",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40223385797/job/121259578492",
+            "log": {
+              "file": "main-40223385797-job-121259578492.log",
+              "bytes": 62583,
+              "sha256": "1cf3f57f3100c6057b1d178a483259b43ef91cb435b114af4b2f64fa43e6816a"
+            },
+            "custody": {
+              "file": "main-40223385797-evidence-custody.json",
+              "bytes": 22540,
+              "sha256": "641d203f447191de4cbfffc5151d8afec3bc1fc3ee84fd716162647f1de8ab23",
+              "sourceExcerptLines": 105
+            },
+            "source": {
+              "path": "tests/daemon_process_sqlite.rs",
+              "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+              "test": "station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one",
+              "callerLine": 5838,
+              "helperLine": 4542,
+              "assertionLine": 24
+            },
+            "observed": "PageHeap first full iteration49passed; second48passed/1failed. Post-drain side-station attach used to spawn the successor returns ordinary exit1, timed_out=false, with Unsupported opening SQLite store/LockFileEx os33 before push-restoration assertions.",
+            "classification": "Additional same-operation/public-error-family evidence for the existing post-drain successor SQLite store-lock refusal record, now in the multi-store drain test. Preserve the earlier PR168 single-store restart observation separately; a shared defect is not established.",
+            "uncertainty": "The prior wait_until_not_running assertion is not independent proof of kernel process exit or SQLite store-lock release. The holder and timing remain unknown. The refusal does not authorize theft, removal, retry or weakening of the lock.",
+            "notAV": "An ordinary exit1 is not0xc0000005. Do not count this PageHeap-job failure as an access violation or absorb it into166.",
+            "notIntentBudget": "This is SQLite store-lock acquisition, not the separate station-intent480ms admission fixture under193/PR194.",
+            "disposition": "Retain candidate/proposed state and unassigned implementation. No new issue/node/owner, retry, runtime or readiness change."
+          },
+          "conservation": "Evidence-only successor after the priority #166 launch promotion. Preserve all original source packets, prior ledger records and metadata, #193/#194 ownership, #166 AV boundaries, all Watcher state, accepted #181/#187 delivery and retained debts. Add exactly one new ForeignDaemon candidate with its two separately retained observations, plus one additive occurrence on the existing SQLite record; do not duplicate records.",
+          "limits": [
+            "Neither observation establishes AV, Overran, common cause or PR192/180 attribution.",
+            "Both heads predate the Watcher180 integration; metadata-only commit identity is not causal diagnosis.",
+            "Do not convert configured retries or old historical retry language into current retry permission.",
+            "No scheduler, process, fixture, installed state, ACL, registry, PageHeap or WER action.",
+            "The separate timing samples in the sentinel summary were not used to infer acquisition timing, causal savings, failure rate or runtime behavior."
+          ]
+        }
       },
       "description": "Classify the distinct hosted Windows station-restart locking error without weakening owner-lock semantics.",
       "affectedOutcome": "Reliability of shared station restart/locking proof and Windows diagnostics; no Watcher source implication.",
@@ -4539,6 +4594,150 @@
         "reconcilerEvidenceBoundary": "Read and matched immutable launch/supplement bytes and source attribution only. Preparation, guide/context/kickoff equality and App identity/path/branch/busy checks are Local-reported. No reconciler target-checkout/source/runtime/CI/provider/observer inspection or new owner launch.",
         "unchangedGates": "Production 480ms/non-theft/fencing; no widening/retry/flake exception; hosted cause-discriminating/default Windows coverage, reviewer-origin public source receipt, design/CI/Campaign gates and workstation freeze remain. No Watcher edge/status change, #181/#187 reversal, implementation/delivery/admission/debt/HOLD/release clearance."
       }
+    },
+    {
+      "id": "local-daemon-windows-installed-current-crash-reattach-foreign-daemon",
+      "sourceNode": null,
+      "source": "Local evidence-only classification of main run 40222860912 / job 121258004551 at 4deaf30cc6656d4807918fa42870db742d453bc4; retained sentinel report, not a new replay.",
+      "crossReference": "local-daemon-ubuntu-installed-current-crash-reattach-timeout is a different platform/public result; cross-reference only, not recurrence or common-cause evidence.",
+      "evidence": {
+        "classificationPacket": {
+          "file": "watch16-local-intake.json",
+          "bytes": 7028,
+          "sha256": "a7e97f323a124632b1522369227da59f0a8fcb4ea41434bc9489714589796d4f",
+          "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+          "sourceMessage": "call_T1FrJ4wTRQz96OcXfedlD0z0"
+        },
+        "attribution": "Local classified the retained sentinel evidence and read both complete custody packets across bounded ranges. Local matched both raw-log and custody byte counts and SHA-256 values, every supplied log excerpt against its retained raw-log line, and all 61/105 source excerpts against the corresponding exact-head Git blobs. Local reports that both failed-head commit deltas changed only .streamliner metadata. The reconciler read the complete Local classification packet, not the underlying raw logs, custody packets or exact-head source excerpts. The retained classification below preserves the parsed source wording. No full-log read, refetch, provider inventory, runtime or native diagnosis is claimed by this projection.",
+        "retainedClassification": {
+          "operation": "Propose one new evidence-only candidate, not another occurrence of the existing Ubuntu timeout record.",
+          "candidateId": "local-daemon-windows-installed-current-crash-reattach-foreign-daemon",
+          "sourceNode": null,
+          "status": "candidate",
+          "decisionState": "proposed",
+          "runId": "40222860912",
+          "attempt": 1,
+          "jobId": "121258004551",
+          "jobName": "InstalledCurrent Postgres process proofs (Windows)",
+          "head": "4deaf30cc6656d4807918fa42870db742d453bc4",
+          "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40222860912/job/121258004551",
+          "log": {
+            "file": "main-40222860912-job-121258004551.log",
+            "bytes": 50224,
+            "sha256": "3d7c3b61371a4d48649854f74993504dae26ee6e54e9d55f35c2050cee147c34"
+          },
+          "custody": {
+            "file": "main-40222860912-evidence-custody.json",
+            "bytes": 17101,
+            "sha256": "744aafc70d90b065b2fe8c469b29d55a4b0092aba2aad35fa15ab88df33a2eeb",
+            "sourceExcerptLines": 61
+          },
+          "source": {
+            "path": "tests/installed_current_process.rs",
+            "blob": "1f66b6784e33a2836fda6329e572d79c19ac62d6",
+            "test": "installed_current_crash_restart_and_reattach_recovers_membership",
+            "panicLine": 508
+          },
+          "observed": "After deliberate crash and bounded repair, outcome.ready is false with Failed(DaemonBootstrap(ForeignDaemon)) for ic:crash:station. Target29passed/1failed/2ignored in142.00s. Later successor-PID, publication-marker and single-spawn assertions are not reached.",
+          "configuredPreconditions": "The source configures1500ms delayed capability publication and RecoveryPolicy::BoundedRepair retries4. Those are existing test configuration, not evidence that the intended window was exercised or authorization for a new retry.",
+          "classification": "New Windows crash-reattach ForeignDaemon signature in the broad recovery/admission family. Existing local-daemon-ubuntu-installed-current-crash-reattach-timeout covers Ubuntu timeout-shaped Unavailable at this scenario, not this platform/result. Preserve a cross-reference without claiming recurrence or common cause.",
+          "uncertainty": "ForeignDaemon is the observed public bootstrap error. It does not identify the process/image that caused refusal, prove a hostile or foreign process existed, establish an ownership violation, or localize an internal authentication/publication defect.",
+          "disposition": "Local evidence-only triage, implementation unassigned. No GitHub issue/node/owner, runtime investigation, retry or gate change authorized by this classification."
+        },
+        "laterPublicSignatureOccurrences": [
+          {
+            "occurrencePacket": {
+              "file": "watch19-local-occurrence.json",
+              "bytes": 4686,
+              "sha256": "f61096f0ed409f4dd52a5f1fd8e211aeadc98969d9b5964ade5f2dc2313ec5d3",
+              "localDeliverySource": "call_YBJQFKAGDaMCixKmIUngbQJi",
+              "captureReceipt": "watch19-source-capture.json"
+            },
+            "attribution": "Local reports verifying the complete custody packet, hashes, every supplied raw-log excerpt and all 61 immutable source lines. The reconciler read only the complete 4,686-byte Local classification, not those raw/custody/source artifacts or a provider refetch. The retained Local classification below preserves the parsed source wording.",
+            "retainedLocalClassification": {
+              "kind": "additional-bounded-public-signature-occurrence",
+              "candidateId": "local-daemon-windows-installed-current-crash-reattach-foreign-daemon",
+              "sourceMessage": "call_qq0ODaJSGHZUHDl2WBsVjcHq",
+              "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+              "sourceSummary": "main-watch19-evidence-summary.json",
+              "decision": "Second retained Windows crash-reattach ForeignDaemon observation for the same proposed candidate; do not create a second candidate or equate it with the older Ubuntu timeout.",
+              "priorClassification": {
+                "file": "main-watch16-local-classification-20261025.json",
+                "bytes": 7028,
+                "sha256": "a7e97f323a124632b1522369227da59f0a8fcb4ea41434bc9489714589796d4f",
+                "priorRunId": "40222860912",
+                "priorHead": "4deaf30cc6656d4807918fa42870db742d453bc4",
+                "canonicalDedupRead": "c2d5da3ee406fc90e82850f04025ef58eb60e4f9",
+                "canonicalStatus": "The candidate and new run were absent from the45-record canonical ledger; the initial candidate remains an explicitly proposed queued intake. Associate this occurrence with that single record when it lands, or append if it has landed meanwhile."
+              },
+              "observation": {
+                "head": "5da770cf1733d8e56f2eed3282c6c54f20bd624a",
+                "runId": "40225451733",
+                "attempt": 1,
+                "jobId": "121265733770",
+                "jobName": "InstalledCurrent Postgres process proofs (Windows)",
+                "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40225451733/job/121265733770",
+                "test": "installed_current_crash_restart_and_reattach_recovers_membership",
+                "sourcePath": "tests/installed_current_process.rs",
+                "sourceBlob": "1f66b6784e33a2836fda6329e572d79c19ac62d6",
+                "panicLine": 508,
+                "result": "MultiAddressOutcome.ready=false; ic:crash:station Failed(DaemonBootstrap(ForeignDaemon)); no compensation, validation_error or cancellation.",
+                "fixtureTarget": {
+                  "passed": 6,
+                  "failed": 0,
+                  "ignored": 1,
+                  "durationSeconds": 112.71
+                },
+                "installedCurrentTarget": {
+                  "passed": 29,
+                  "failed": 1,
+                  "ignored": 2,
+                  "durationSeconds": 139.63
+                },
+                "boundary": "Post-crash bounded reconciliation fails before the successor-PID, delayed-publication-marker and single-spawn assertions. The configured1500ms delay/retries4 do not prove successful exercise of that window or authorize a new retry."
+              },
+              "custody": {
+                "logFile": "main-40225451733-job-121265733770.log",
+                "logBytes": 50306,
+                "logSha256": "a04f54f705aa72676d583174df364791424a17dfc0e4ce2958387de611645dbf",
+                "custodyFile": "main-40225451733-evidence-custody.json",
+                "custodyBytes": 18930,
+                "custodySha256": "fec7ad9cba12fbed4547d09d69b00521e2c61c980dfa5b9daaaf8342d9a55b61",
+                "localVerification": "Read complete custody packet; matched both byte counts/hashes, all provided raw-log excerpt lines and61 numbered immutable source lines. Confirmed direct checkout, result sites and identical root-test blob across both observations. No full-log-read claim or provider refetch."
+              },
+              "qualifications": [
+                "Same platform, test, public result and source assertion support one signature-family occurrence, not a common underlying defect or native diagnosis.",
+                "ForeignDaemon does not prove an actual foreign/hostile process or identify a process image, authentication branch or publication-timing cause.",
+                "The5da commit delta is metadata-only, but its ancestry includes Watcher180/0d5347a6 unlike the earlier4de observation. Identical root-test source is not a controlled before/after comparison or proof that all dependencies/runtime inputs are unchanged.",
+                "Sentinel reports20/21 for this run and separate later f005/df37 runs21/21. Local did not re-query those complete inventories. Later green runs are separate observations, not retries, replacement evidence, causal fixes or closure.",
+                "This is not a166 access violation,193 seed-budget refusal, Overran, or established recurrence of the older Ubuntu timeout. No192/180/194 attribution.",
+                "Target durations are not the duration of an internal acquisition, handshake or repair stage."
+              ],
+              "disposition": {
+                "operation": "One additive occurrence on the same proposed ForeignDaemon candidate; preserve the original classification and both failures separately.",
+                "status": "candidate",
+                "decisionState": "proposed",
+                "implementationOwner": "unassigned",
+                "newIssueOrNode": false,
+                "retryOrRuntimeAuthority": false,
+                "scopeChange": false,
+                "gateChange": false,
+                "conservation": "Preserve all canonical history,166/193 ownership and scopes, Watcher state, accepted181/187 and retained debts. Do not delay active repair work or open a duplicate observer."
+              }
+            }
+          }
+        ]
+      },
+      "description": "Classify the Windows InstalledCurrent crash/reattach ForeignDaemon bootstrap refusal without assuming an internal cause.",
+      "affectedOutcome": "Reliability of hosted Windows crash/reattach admission proof; no Watcher source implication or established ownership violation.",
+      "requiredness": "Evidence-only candidate, not accepted repair scope, a hardening-gate transition or a dependency.",
+      "sequencing": "Preserve original evidence and distinguish the Ubuntu timeout. Explicit owning-role tracker/causal disposition must precede separately authorized implementation. Existing configured retries grant no new retry.",
+      "target": "Candidate intake only; GitHub tracker and implementation unassigned.",
+      "owner": "Local Daemon orchestrator owns evidence-only intake/triage. Implementation unassigned; no launch.",
+      "status": "candidate",
+      "decisionState": "proposed",
+      "dispositionAuthority": "Local's bounded evidence-only classification. Canonical reconciliation was deferred until the separate issue #166 launch prerequisite had landed. This intake authorizes no new issue, node, owner, retry or gate change.",
+      "terminalPath": "Owning-role triage, tracker disposition and causal classification before any separately authorized repair or hardening disposition; preserve fail-closed owner authority and evidence limits."
     }
   ]
 }
