@@ -92,7 +92,7 @@ class FreezeTests(unittest.TestCase):
 class StaticReaderTests(unittest.TestCase):
     def test_family_selection_has_no_alternate(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve(strict=True)
             c = run.BOUNDS["jobs"]["Intel25"]
             selected = root / c["cache_primary_candidates"][0]
             with self.assertRaises(cache.EvidenceError):
@@ -110,6 +110,24 @@ class StaticReaderTests(unittest.TestCase):
             duplicate.write_bytes(b"duplicate")
             with self.assertRaises(cache.EvidenceError):
                 cache.choose_family(root, c)
+
+    def test_family_selection_with_aliased_temporary_root(self):
+        temporary_directory = tempfile.TemporaryDirectory
+        with temporary_directory() as sandbox:
+            base = Path(sandbox).resolve(strict=True)
+            backing = base / "backing"
+            backing.mkdir()
+            alias = base / "temporary-alias"
+            alias.symlink_to(backing, target_is_directory=True)
+            with temporary_directory(dir=alias) as temp:
+                raw_root = Path(temp)
+                self.assertNotEqual(raw_root, raw_root.resolve(strict=True))
+                with self.assertRaisesRegex(cache.EvidenceError, "image root is not canonical"):
+                    cache.choose_family(raw_root, run.BOUNDS["jobs"]["Intel25"])
+            # Exercise the same positive fixture through a deliberately aliased temp directory.
+            with patch.object(tempfile, "TemporaryDirectory",
+                              side_effect=lambda: temporary_directory(dir=alias)):
+                self.test_family_selection_has_no_alternate()
 
     def test_branch_cfg_does_not_follow_neighbor_stub(self):
         decoded = [
