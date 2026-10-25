@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-25T20:00:42.696Z",
+  "updatedAt": "2026-10-25T20:19:33.358Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -396,7 +396,7 @@
       "id": "copilot-session-state-classifier",
       "type": "task",
       "title": "Copilot session-state classifier",
-      "summary": "Adds the classifier subcommand with fixture tests, tail-bounded reads, and `unknown` for unrecognized patterns. Records this design in `docs/design` with a DECISIONS entry. Depends on nothing open.",
+      "summary": "On 2026-10-25 owning Watcher reports one launched owner a96926b1-3e4f-4578-a197-33de51d669c7 on branch/checkout lossyrob-super-adventure from canonical fb22c9c0/tree1db01491. The 12,052-byte kickoff (SHA-256 741f0c6e09707bdca9b7044d964eac4800df0ddd0db690b34990d7e0730091a8) was delivered by reference according to the coordinator; the reconciler verified byte equality with the complete handoff prompt. Original launch binding (2,433 bytes/SHA-256 808a7c75fbbed11819c017be5303654f7dafddf61d2e6efaf69b298236b92065) was captured before later observations, not reinterpreted afterward. Preparation, profile and delivery checks remain coordinator-attributed, not replayed by the reconciler. Status remains planned/focus pending actual work start; launch alone gives no implementation, source, CI or readiness credit. Original #197 scope follows unchanged: Adds the classifier subcommand with fixture tests, tail-bounded reads, and `unknown` for unrecognized patterns. Records this design in `docs/design` with a DECISIONS entry. Depends on nothing open.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
