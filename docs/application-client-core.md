@@ -353,6 +353,14 @@ ingest, and then acknowledges on both backend legs.
 Additional `InstalledCurrent` process-level coverage lives in
 `tests/installed_current_process.rs`.
 
+Both harnesses use the shared builder in `tests/support/telex_isolation.rs`.
+Consumer builds reuse `target-sqlite` or `target-postgres` inside the fixture
+workspace, independently of the parent test runner's target directory.
+Every invocation still asks Cargo to check source freshness with defaults
+disabled; the per-profile directories keep the executable for one backend
+from overwriting the other. This reuses compilation, not test results: all
+probes and process assertions still execute.
+
 ### Required coverage families
 
 The suite exercises the same ten families the `client-conformance`

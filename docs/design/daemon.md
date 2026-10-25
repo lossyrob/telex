@@ -2348,6 +2348,11 @@ daemon is running **and** this producer proves it is alive, restore this exact p
   `LockFileEx` on fixed local Windows volumes). The file is never deleted, renamed, replaced, aged
   out, or stolen. An unprovable owner/privacy/local-filesystem/lock condition fails closed; a live
   hung holder yields bounded degradation. Kernel process-death cleanup releases a held lock.
+  Acquisition shares one monotonic 480ms budget (the existing 24 retries at 20ms), with at most
+  25 attempts. Filesystem-call time and sleep overshoot consume that same budget; sleeps are
+  capped by its remainder. No attempt starts, and no acquired guard is granted to a writer, once
+  the budget is spent. A synchronous filesystem call or a descheduled thread cannot be preempted:
+  after control returns, a late successful guard is released and acquisition fails closed.
 - A bounded scan reports `discovery_truncated`; an incomplete GC also degrades the enclosing pass.
   In either case `observed_count` and `over_cap` are lower bounds only, and automatic discovery and
   GC have only conditional eventual coverage. They make no stable-tail fairness, complete-GC, or

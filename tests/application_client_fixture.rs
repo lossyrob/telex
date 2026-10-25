@@ -19,59 +19,13 @@
 mod isolation;
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 use std::time::Duration;
 
 use isolation::{run_with_timeout, CliOutput, Isolation};
 #[cfg(feature = "postgres")]
 use telex::model::now_ms;
 use telex::profiles::{BackendProfile, ConfigFile};
-
-fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("application-client-consumer")
-}
-
-fn cargo() -> String {
-    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
-}
-
-/// Build the fixture with an explicit, defaults-disabled feature profile and
-/// return its executable. The fixture crate carries its own `[workspace]`, so
-/// this never contends with the parent target directory lock.
-fn build_fixture(features: &str) -> PathBuf {
-    let dir = fixture_dir();
-    let target_dir = dir.join(format!(
-        "target-{}",
-        features.replace(',', "-").replace(' ', "")
-    ));
-    let mut command = Command::new(cargo());
-    command
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(dir.join("Cargo.toml"))
-        .arg("--no-default-features")
-        .arg("--features")
-        .arg(features)
-        .env("CARGO_TARGET_DIR", &target_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let output = run_with_timeout(command, Duration::from_secs(900));
-    output.assert_success(&format!("building the consumer fixture with [{features}]"));
-    let binary = target_dir.join("debug").join(format!(
-        "telex-application-client-consumer{}",
-        std::env::consts::EXE_SUFFIX
-    ));
-    assert!(
-        binary.is_file(),
-        "fixture binary not produced at {}",
-        binary.display()
-    );
-    binary
-}
 
 fn run_probe(
     iso: &Isolation,
@@ -197,7 +151,7 @@ fn write_profile_config(iso: &Isolation, name: &str, profile: BackendProfile) {
 #[cfg(feature = "sqlite")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_consumer_fixture_probes_execute_against_installed_current() {
-    let binary = build_fixture("sqlite");
+    let binary = isolation::build_consumer_fixture("sqlite");
     let iso = Isolation::new("fixture-sqlite");
     let db = iso.root.join("fixture.db");
     let mut profile = telex::profiles::implicit_sqlite(None);
@@ -227,7 +181,7 @@ async fn postgres_consumer_fixture_probes_execute_against_installed_current() {
     let Some(url) = isolation::postgres_url_or_fail_closed("consumer-fixture-probes") else {
         return;
     };
-    let binary = build_fixture("postgres");
+    let binary = isolation::build_consumer_fixture("postgres");
     let iso = Isolation::new("fixture-postgres");
 
     let base = sanitize_ident(

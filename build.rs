@@ -77,10 +77,14 @@ fn emit_git_rerun_paths(repo: &Path) {
         paths.push(packed_refs);
     }
 
-    // A packed branch can later gain a loose ref without changing packed-refs.
-    // Register the loose-ref path even while absent so Cargo observes its creation.
     for path in paths {
-        println!("cargo:rerun-if-changed={}", path.display());
+        // Missing watches are always stale. An existing ancestor still observes
+        // creation of packed-refs or a loose ref, including nested branch names.
+        let watch = path
+            .ancestors()
+            .find(|ancestor| ancestor.exists())
+            .expect("Git metadata must have an existing ancestor");
+        println!("cargo:rerun-if-changed={}", watch.display());
     }
 }
 
