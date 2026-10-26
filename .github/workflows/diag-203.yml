@@ -14,21 +14,15 @@ concurrency:
 
 jobs:
   loop:
-    name: loop (mio ${{ matrix.mio }}, pageheap ${{ matrix.pageheap }}, attach ${{ matrix.attach }}, shard ${{ matrix.shard }})
+    name: workspace loop (mio ${{ matrix.mio }}, attach ${{ matrix.attach }}, shard ${{ matrix.shard }})
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { mio: "1.2.1", pageheap: "on", attach: "on", shard: 1 }
-          - { mio: "1.2.1", pageheap: "on", attach: "on", shard: 2 }
-          - { mio: "1.2.1", pageheap: "off", attach: "on", shard: 1 }
-          - { mio: "1.2.1", pageheap: "off", attach: "off", shard: 1 }
-          - { mio: "1.2.4", pageheap: "on", attach: "on", shard: 1 }
-          - { mio: "1.2.4", pageheap: "on", attach: "on", shard: 2 }
-          - { mio: "1.2.4", pageheap: "off", attach: "on", shard: 1 }
-          - { mio: "1.2.4", pageheap: "off", attach: "off", shard: 1 }
+        mio: ["1.2.1"]
+        attach: ["on"]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
       CARGO_PROFILE_DEV_DEBUG: "2"
       CARGO_PROFILE_TEST_DEBUG: "2"
@@ -50,7 +44,7 @@ jobs:
         run: cargo update -p mio --precise ${{ matrix.mio }}
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --verbose
 
       - name: Prebuild workspace tests
         run: cargo test --workspace --no-run
@@ -59,12 +53,12 @@ jobs:
         shell: pwsh
         run: .github/diag-203/setup-capture.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
 
-      - name: Loop the telex_watcher lib harness
+      - name: Loop the full Windows workspace test step
         shell: pwsh
         run: >-
-          .github/diag-203/run-loop.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
-          -Minutes 50 -PageHeap ${{ matrix.pageheap }} -Attach ${{ matrix.attach }}
-          -Label "mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-at-${{ matrix.attach }}-${{ matrix.shard }}"
+          .github/diag-203/run-workspace-loop.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
+          -Minutes 100 -Attach ${{ matrix.attach }}
+          -Label "ws-mio-${{ matrix.mio }}-at-${{ matrix.attach }}-${{ matrix.shard }}"
 
       - name: Analyze native dumps
         if: always()
@@ -75,7 +69,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diag203-mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-at-${{ matrix.attach }}-${{ matrix.shard }}
+          name: diag203-ws-mio-${{ matrix.mio }}-at-${{ matrix.attach }}-${{ matrix.shard }}
           path: ${{ runner.temp }}\diag203-evidence
           retention-days: 14
           if-no-files-found: warn
