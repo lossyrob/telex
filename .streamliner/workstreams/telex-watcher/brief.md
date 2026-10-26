@@ -89,6 +89,8 @@ The richer rationale and detector protocol sketch are preserved in
 
 ## Current State
 
+On 2026-10-25 the Watcher code path completed with #179 (PR #180 merged as 0d5347a6). The critical path now runs through the operator's five-minute custom-watch gate; #172 (macOS runtime, HOLD) still blocks product-level usable and closure. Earlier text below is historical.
+
 On 2026-10-25 Campaign and owning Local expressly accepted bounded #181
 delivery at #185 merge
 `65f5846d50bc4c07b3eaf9ffed0800f4cb19a17b`,
