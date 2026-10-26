@@ -1,5 +1,28 @@
 # Required Windows PageHeap access-violation repair
 
+## Current workstation run policy (2026-10-26)
+
+At 12:44 ET the operator lifted the I161-1 blanket workstation freeze.
+Local builds, tests and runtime runs are allowed within the task's authorized
+scope. Use isolated `TELEX_*` roots and a temporary `LOCALAPPDATA`, except for
+the separately authorized #201 dogfood against the real installation. That
+exception permits real-installation use, not real-directory ACL or permission
+changes. I161-1 preservation remains: no ACL restoration or reset.
+
+Exact-head hosted CI remains the gate evidence. Local results support it; they
+do not replace it or retroactively change earlier validation/debt dispositions.
+Older freeze, compile-only and hosted-only records below remain historical,
+including older sections labelled current; they do not renew a blanket local
+run prohibition. Other scope, dependency, merge, incident and retained-debt
+decisions are unchanged. This policy does not launch #201, satisfy its
+dependencies or grant unrelated runtime authority.
+
+Authority: Campaign `toolu_01JDdrjgTsK2e181xhhLdeYY`, relaying the operator:
+"Also what is the 'freeze'? If it's blocking then remove it." On this operator's
+workstation, the existing `gh-pub` profile now resolves to `lossyrob`; personal
+GitHub writes can use it directly without a token override.
+
+
 - **Workstream:** `local-daemon`
 - **Node:** `windows-pageheap-av-repair`
 - **Type:** implementation
