@@ -512,6 +512,27 @@
         "watcher-cli-ux",
         "stall-detection-agent-guidance"
       ]
+    },
+    {
+      "id": "watcher-runtime-failure-diagnostics",
+      "type": "task",
+      "title": "Report the cause of Watcher runtime-failed startup and run errors",
+      "summary": "For runtime-failed startup/run errors, write a bounded 4 KiB redacted stage-labeled cause chain to stderr, with truncation marked. Preserve the stdout envelope, runtime-failed code/exit 1 and all other specific codes. Update docs/design/watcher.md and the exit-code reference; test forced startup failure/stage labeling, redaction, byte cap and unchanged envelope on every platform where the binary builds. Do not diagnose/fix the #195 macOS cause, add a logging framework or persisted startup records.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 225
+      },
+      "dependsOn": [
+        "watcher-runtime-core",
+        "watcher-cli-ux"
+      ]
     }
   ],
   "checkpoints": [

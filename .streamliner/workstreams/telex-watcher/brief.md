@@ -1095,3 +1095,42 @@ The alternative, an external CLI root, would change the operator's chosen arrang
 Two new Watcher records retain #222 disposition and #223 outbound routing, with all 15 old rows/root/order exact. No Local ledger/node/owner is changed. #222 owns Watcher bootstrap and stall-group installation/root-mode wording, not host loading, new backend authentication, Telex binary install/upgrade or macOS containment. Owning Local `call_kUHJSXbVmnRG8PJlpwsuplKL` separately assigns #223 host-capability/first-load/fallback/recovery text; shared copilot/COPILOT.md changes require open-PR plus named-section coordination, not a dependency. #224 and the actual blocked #201/external edge remain their separate packets and receive no runtime, cause or acceptance credit here.
 
 No new task markdown file or launch packet is invented. Only graph, ledger and this append change: one new task node, exactly the declared runtime-hardening edge and two rows; Watcher17/23. All other workstreams/product/canonical design, Local debts/observations, #166 eight debts/two sent wakes and existing Watcher debt/notification state remain exact. No new observer, root re-arm, runtime/install/ACL action, wake, repair, gate waiver or debt clearance follows.
+
+
+## #225 planned Watcher runtime-failed diagnostics, external #195 consumer (2026-10-26)
+
+Watcher steward `toolu_01R872e2ciDWRcqikEuCpnZz` / [public decision 6425865009](https://github.com/lossyrob/telex/pull/221#issuecomment-6425865009) accepts existing [#225](https://github.com/lossyrob/telex/issues/225) as planned/watch task `watcher-runtime-failure-diagnostics`. Readiness is a coordinator report (`toolu_013hXzYq7X45TS3HAq1m3CcX`), not a new graph status or assigned owner. Only completed watcher-runtime-core and watcher-cli-ux are dependencies; no Watcher node gains a dependency on it. Sentinel #195 / PR #221 is external discovery/consumer provenance and stays outside Watcher geometry. Its workstream owns the external edge.
+
+For runtime-failed startup/run errors, write a bounded 4 KiB redacted stage-labeled cause chain to stderr, with truncation marked. Preserve the stdout envelope, runtime-failed code/exit 1 and all other specific codes. Update docs/design/watcher.md and the exit-code reference; test forced startup failure/stage labeling, redaction, byte cap and unchanged envelope on every platform where the binary builds. Do not diagnose/fix the #195 macOS cause, add a logging framework or persisted startup records.
+
+The cap is 4,096 bytes including the diagnostic/truncation marker. Preserve envelope shape/code/exit; the source issue allows message text to point to actual stderr. Redact environment values/DSNs/tokens/secret-like values; existing design permits local registry/endpoint paths. These are future acceptance requirements, not measurements or current implementation proof.
+
+### Full steward decision and bounded native-consumer hold
+
+Raw 2785 bytes / SHA-256 `624299d760a30baeae82ae318f5448d122416c0fcac90a648ec74cab05c98aad`; LF display 2784 bytes / SHA-256 `993044a5f588671549e2fd2e1039a17b7ded38cfe40945b3ef625357a62ccb63`.
+
+```text
+Design steward decision for #195 / PR #221 on the diagnostic receipt https://github.com/lossyrob/telex/pull/221#issuecomment-6425811617 (head 85d78160, run 40389528160/1, job 121806570895).
+
+Classification: the macOS startup cause is still unknown, but the reason it cannot be seen is a product defect. That defect is now upstream item #225. No more evidence can come from #195 until #225 lands.
+
+Source facts (read only):
+- The envelope comes from `run_host` in telex-watcher/src/main.rs (lines 119-123). It maps every error that is not `registry-already-owned` and not a top-level `TransportError` to fixed text and drops the cause chain. The runtime writes nothing to stderr, which is why the receipt has 0 stderr bytes. A test-side change cannot recover it.
+- This rules out the leads I listed in 6425476487. `endpoint()` failures in transport/unix.rs, including the home-directory requirement, the private-directory and ancestor checks, and the sun_path length check, come back as a top-level `TransportError`, so they would report a transport code, not `runtime-failed`.
+- The remaining sources are all product paths. `Runtime::open` and `Registry::open`. The listener steps after `endpoint()`, where an existing-socket check, unlink, `UnixListener::bind` or the 0600 chmod could fail. `Runtime::run` startup (unfinished containment, start_runtime, heartbeat). A management-server task failure. Which one, and whether the cause is in the fixture or the product, is not established.
+
+Decision:
+1. New Watcher item #225 (`watcher-runtime-failure-diagnostics`). For `runtime-failed`, write a bounded, redacted, stage-labeled cause chain to stderr. The stdout envelope, the code and the exit code stay as they are. Update the design and exit-code docs, and add tests on every platform the binary builds on. It depends only on completed Watcher items, so it is ready now. It does not fix the macOS cause. It is also an operator defect: the guide tells operators to inspect stderr after exit 1, and today that stderr is empty.
+2. #195 depends on #225. PR #221 stays draft. No more test-only diagnostics, reruns or new pushes for this question until #225 merges. Another fixture-state probe would at best narrow the failure to a stage, and it would use a run without fixing the gap.
+3. After #225 merges, #195 may rebase. The ordinary CI run of that rebased head is the next single diagnostic run, and the existing cli_v2 early-exit diagnostic will then show the stderr. Ownership still follows 6425476487:
+   - A fixture or test-environment cause stays in #195 as a test-only fix.
+   - A product cause, or a deliberate macOS startup limit, comes back to me.
+4. Sentinel takes no part of #225. A Watcher owner implements it.
+
+This is a boundary and shape decision, not merge approval.
+
+```
+
+The generic missing diagnostic is steward-classified product work; which stage failed on macOS and whether #195 needs fixture, product or platform work remain unresolved. Supplied source lines, run/job/head and empty-stderr receipt are attributed reports; no source, logs or runtime was replayed. #225 does not need native macOS evidence for closure. Only after #225 merges may #195 rebase for the steward-prescribed single ordinary CI diagnostic; this recording grants no retry, push, rebase, cause disposition or merge.
+
+Exactly one new row/node and this append change, with all prior rows/nodes/root/geometry/order/dependencies/checkpoints/design links/debts/wakes and other workstreams exact. No task file, observer, launch/profile, runtime/install/ACL change, #201 validation or other-family acceptance/clearance is added. Watcher receives a doorbell after verified publication and retains its own single owner launch.
