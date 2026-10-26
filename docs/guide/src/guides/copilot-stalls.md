@@ -95,7 +95,9 @@ Fallback preparation alone is not proof of root delivery.
 
 Read an explicit operator-supplied absolute record path, otherwise exactly
 `<config root>/watcher/installation.json`, where the config root is `TELEX_HOME`
-when set, otherwise `~/.telex`. Verify the record with the installation tool.
+when set, otherwise `~/.telex`. Verify with `installation.ps1` beside the record;
+bootstrap installs that owner-only, hash-recorded copy, so no checkout path is
+needed. Discovery does not require credential values in the root's shell.
 If it is missing, unreadable, invalid or unsupported, stop and point to the
 bootstrap; do not search elsewhere or guess installation values.
 
@@ -118,16 +120,22 @@ Watcher registry; another registry's watches are not observed.
 
 Choose the group directory, root address and grace for this group. Use a new
 permanent lowercase ASCII watch id (`[a-z0-9][a-z0-9._-]{0,127}`); removed ids
-cannot be reused. This **PowerShell 7** template writes registration data, not a
+cannot be reused. This **PowerShell 7.4+** template writes registration data, not a
 wrapper or detector script. Read installation values through the verified record.
 The record's cadence is shared by the watch and detector; the
 30-second timeout allows the detector's 15-second observation budget plus startup.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$installationTool = '<absolute trusted checkout>/telex-watcher/installation.ps1'
-# Uses the default record; add -RecordPath only for an explicit operator path.
-$installation = (& $installationTool -Action verify) | ConvertFrom-Json -AsHashtable
+$configRoot = if (Test-Path Env:TELEX_HOME) { $env:TELEX_HOME } else { Join-Path $HOME '.telex' }
+$recordPath = Join-Path $configRoot 'watcher/installation.json'
+# Replace recordPath only when the operator supplies an explicit absolute path.
+$installationTool = Join-Path (Split-Path -Parent $recordPath) 'installation.ps1'
+if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $installationTool -PathType Leaf)) {
+    throw 'Watcher installation is missing; follow the Watcher installation bootstrap guide.'
+}
+$installation = (& $installationTool -Action verify -RecordPath $recordPath) | ConvertFrom-Json -AsHashtable
 $groupDirectory = '<absolute group directory>'
 $rootAddress = '<root Telex address>'
 $graceSeconds = 300

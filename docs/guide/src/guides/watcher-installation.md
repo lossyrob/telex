@@ -13,9 +13,14 @@ search PATH or other directories for a substitute. If the record is missing,
 unreadable, invalid or unsupported, stop and report that bootstrap is needed.
 
 Use the [installation tool](https://github.com/lossyrob/telex/blob/main/telex-watcher/installation.ps1)
-from a trusted checkout matching the Watcher build. `create` writes a new record
-exclusively; `verify` reads it and checks its authority, paths, selected Telex
-build, Watcher hash, backend and authentication features. Neither command starts
+from a trusted checkout matching the Watcher build for initial `create`. It writes
+a new record and an owner-only `installation.ps1` copy beside it, both exclusively,
+and records the copy's SHA-256. Agents use that companion tool, not a checkout
+path supplied by the operator. Its trust basis is the same private Telex config
+root that already holds profile configuration and credential commands.
+`verify` checks authority, tool hash, paths, selected Telex build, Watcher hash,
+backend and authentication features without requiring credential-variable values.
+`preflight` additionally checks the launch environment. No action starts
 the runtime, connects to the backend, changes a profile or upgrades a binary.
 The tool prints the record path on stderr and the JSON record on stdout.
 
@@ -100,7 +105,10 @@ if ($IsWindows) { $environmentNames += 'LOCALAPPDATA' }
 By default this writes `$env:TELEX_HOME/watcher/installation.json`. To use another
 location, pass `-RecordPath '<absolute record path>'` and give that exact path to
 the root agent. Its parent must exist; the final record directory may be new.
-A pre-existing record or registry is a refusal, not permission to overwrite.
+A pre-existing record, companion tool or registry is a refusal, not permission to
+overwrite. Each record needs its own private directory. If a late record-write
+failure leaves the newly copied tool, retain it as evidence and resolve the
+reported failure explicitly; bootstrap will not overwrite that copy on retry.
 There is no `--force` path. If preparation fails, repair its reported condition;
 do not start the runtime or quietly substitute paths.
 
@@ -122,27 +130,34 @@ The record contains only these fields:
 | `environmentNames` | Required launch/detector environment **names**, never values. |
 | `telexBuildId` | Selected Telex's reported build identity. |
 | `watcherSha256` | Hash of the retained Watcher binary. |
+| `verificationToolSha256` | SHA-256 of the owner-only `installation.ps1` beside this record. |
 
 The record is configuration, not a live-process claim or credential store.
 It does not contain tokens, connection strings, password commands or environment
 values. Restore any required environment from the existing approved profile and
 credential setup; do not save secrets in a launch log. Verify refuses an altered
-Watcher or changed Telex selector instead of silently adopting it.
+Watcher, companion tool or changed Telex selector instead of silently adopting it.
 
-## Verify and start
+## Discover and verify
 
-Restore the launch environment first. In particular, set `TELEX_HOME` to the
-record's config root. If used, set `TELEX_CONFIG` and credential environment
-variables to their existing approved values. Every `environmentNames` entry
-must be available. Do not carry a temporary test `TELEX_DB` into a real install;
-the Watcher Application Client and stall detector use the explicit profile,
-not ambient database overrides.
+Use the current Telex config root and existing profile configuration. If used,
+`TELEX_HOME`, `TELEX_CONFIG` and `LOCALAPPDATA` must resolve consistently with
+that installation. Verification checks environment-name syntax and profile
+references but does not require credential values in the discovery shell.
 
 Read the installation through `verify`, never just `Get-Content` followed by
-execution of unverified record paths:
+execution of unverified record paths. The default needs no operator-supplied
+location; only replace `$recordPath` for an explicit operator path:
 
 ```powershell
-$recordPath = '<absolute operator-supplied record path, or default described above>'
+$ErrorActionPreference = 'Stop'
+$configRoot = if (Test-Path Env:TELEX_HOME) { $env:TELEX_HOME } else { Join-Path $HOME '.telex' }
+$recordPath = Join-Path $configRoot 'watcher/installation.json'
+$tool = Join-Path (Split-Path -Parent $recordPath) 'installation.ps1'
+if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+    throw 'Watcher installation is missing; follow this bootstrap guide.'
+}
 $installation = (& $tool -Action verify -RecordPath $recordPath) |
     ConvertFrom-Json -AsHashtable
 $telex = $installation.telexExecutable
@@ -154,6 +169,22 @@ $backendProfile = $installation.backendProfile
 $sender = $installation.sender
 $pollSeconds = $installation.pollIntervalSeconds
 ```
+
+## Preflight and start
+
+In the runtime's launch shell, restore all `environmentNames` from the existing
+approved profile and credential setup. Do not copy secret values into an agent
+discovery shell, the record or a log. Do not carry a temporary test `TELEX_DB`
+into a real install; Watcher and the stall detector use the explicit profile,
+not ambient database overrides. Use the same discovered tool and record:
+
+```powershell
+& $tool -Action preflight -RecordPath $recordPath | Out-Null
+```
+
+Preflight repeats verification and rejects missing launch variables. It does not
+connect to the backend or start a process; it must succeed in the environment
+actually inherited by the detached launch.
 
 Check that `status` reports `runtime-not-running` before launching. A responsive
 existing owner is not an invitation to start a replacement. A lost management
@@ -240,7 +271,8 @@ erase pending receipts, stop the user's Telex daemon or tear down root attendanc
 The root owns watch retirement; each receiving participant owns its attendance.
 
 For a failed **new** installation, stop its exact owner, retain registry,
-receipts and logs, and keep or remove only the new record once no root uses it.
+receipts and logs, and keep or remove only the new record and its companion tool
+once no root uses them.
 Do not delete history or reset detector state to obtain a green result.
 
 For an **existing or older** installation, first inventory its selected/previous
@@ -268,7 +300,8 @@ After an approved selector change, retain the old record as evidence and create
 a reviewed candidate record for the new exact executable; verification of the
 old record must fail while its selector differs. Only after explicit cutover,
 with the old owner stopped and its evidence preserved, may the operator move the
-old default record aside and create a new default. Bootstrap never overwrites it.
+old default record and companion tool aside and create a new default. Bootstrap
+never overwrites either file.
 
 ## Isolated validation
 

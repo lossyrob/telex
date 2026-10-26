@@ -1,11 +1,11 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-Create or verify a non-secret Watcher installation record. Never installs binaries or starts a runtime.
+Create, verify or preflight a non-secret Watcher installation record. Never installs binaries or starts a runtime.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('create', 'verify')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('create', 'verify', 'preflight')][string]$Action,
     [string]$RecordPath,
     [string]$TelexExecutable,
     [string]$WatcherExecutable,
@@ -135,10 +135,43 @@ function Read-JsonCommand([string]$Program, [string[]]$Arguments) {
     ($output -join "`n") | ConvertFrom-Json -AsHashtable
 }
 
-function Assert-Record($Record) {
+function Write-PrivateFileExclusive([string]$Path, [byte[]]$Bytes) {
+    $temporary = Join-Path (Split-Path -Parent $Path) "$([guid]::NewGuid()).tmp"
+    try {
+        $options = [IO.FileStreamOptions]::new()
+        $options.Mode = [IO.FileMode]::CreateNew
+        $options.Access = [IO.FileAccess]::Write
+        if (-not $IsWindows) { $options.UnixCreateMode = [IO.UnixFileMode]384 }
+        $file = [IO.FileStream]::new($temporary, $options)
+        try {
+            $file.Write($Bytes)
+            $file.Flush($true)
+        } finally { $file.Dispose() }
+        if ($IsWindows) {
+            $info = [IO.FileInfo]::new($temporary)
+            $acl = [IO.FileSystemAclExtensions]::GetAccessControl($info, [Security.AccessControl.AccessControlSections]::Access)
+            $acl.SetAccessRuleProtection($true, $true)
+            [IO.FileSystemAclExtensions]::SetAccessControl($info, $acl)
+        }
+        Assert-Private $temporary
+        [IO.File]::Move($temporary, $Path, $false)
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+    }
+}
+
+function Assert-LaunchEnvironment($Record) {
+    foreach ($name in $Record.environmentNames) {
+        if ($name -ne 'TELEX_HOME' -and [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) {
+            throw "Required launch environment is missing: $name"
+        }
+    }
+}
+
+function Assert-Record($Record, [switch]$Installed) {
     $keys = @('schemaVersion', 'configRoot', 'telexExecutable', 'watcherExecutable',
         'watcherRegistry', 'installRoot', 'backendProfile', 'sender', 'pollIntervalSeconds',
-        'environmentNames', 'telexBuildId', 'watcherSha256')
+        'environmentNames', 'telexBuildId', 'watcherSha256', 'verificationToolSha256')
     if ($Record -isnot [System.Collections.IDictionary] -or
         @($Record.Keys).Count -ne $keys.Count -or
         @($Record.Keys | Where-Object { $_ -cnotin $keys }).Count -ne 0 -or
@@ -151,6 +184,15 @@ function Assert-Record($Record) {
         $null = Assert-Absolute $Record[$key]
     }
     if ($Record.configRoot -ne $configRoot) { throw 'Record configRoot does not match the current TELEX_HOME/home.' }
+    if ($Record.verificationToolSha256 -isnot [string] -or $Record.verificationToolSha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Invalid verification tool hash in installation record.'
+    }
+    if ($Installed) {
+        Assert-Private $verificationTool
+        if ($Record.verificationToolSha256 -ne (Get-FileHash -LiteralPath $verificationTool -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw 'Verification tool changed; use the Watcher bootstrap from a trusted checkout.'
+        }
+    }
     if ($Record.backendProfile -isnot [string] -or
         [string]::IsNullOrEmpty($Record.backendProfile) -or
         $Record.backendProfile -match '[\s\p{Cc}]' -or
@@ -168,9 +210,6 @@ function Assert-Record($Record) {
     foreach ($name in $Record.environmentNames) {
         if ($name -isnot [string] -or $name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
             throw 'Record contains an invalid environment name.'
-        }
-        if ($name -ne 'TELEX_HOME' -and [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) {
-            throw "Required launch environment is missing: $name"
         }
     }
     if ('TELEX_HOME' -notin $Record.environmentNames) { throw 'environmentNames must include TELEX_HOME.' }
@@ -222,7 +261,9 @@ $configRoot = if (Test-Path Env:TELEX_HOME) {
 if (-not $RecordPath) { $RecordPath = Join-Path $configRoot 'watcher/installation.json' }
 $RecordPath = Assert-Absolute $RecordPath
 $directory = Split-Path -Parent $RecordPath
-if ($Action -eq 'verify') {
+$verificationTool = Join-Path $directory 'installation.ps1'
+if ($RecordPath -eq $verificationTool) { throw 'RecordPath must not name the companion installation.ps1 tool.' }
+if ($Action -ne 'create') {
     Assert-Private $directory
     Assert-Private $RecordPath
     if ((Get-Item -LiteralPath $RecordPath).Length -gt 65536) { throw 'Installation record exceeds 64 KiB.' }
@@ -236,13 +277,16 @@ if ($Action -eq 'verify') {
         }
     } finally { $document.Dispose() }
     $record = $text | ConvertFrom-Json -AsHashtable
-    Assert-Record $record
+    Assert-Record $record -Installed
+    if ($Action -eq 'preflight') { Assert-LaunchEnvironment $record }
 } else {
     if (Test-Path -LiteralPath $RecordPath) { throw 'Installation record already exists; verify it or choose an explicit new path.' }
+    if (Test-Path -LiteralPath $verificationTool) { throw 'Companion verification tool already exists; bootstrap never overwrites it.' }
     foreach ($path in @($TelexExecutable, $WatcherExecutable, $WatcherRegistry, $InstallRoot)) {
         $null = Assert-Absolute $path
     }
     if (Test-Path -LiteralPath $WatcherRegistry) { throw 'Initial bootstrap requires a new registry; preserve the existing registry.' }
+    $toolBytes = [IO.File]::ReadAllBytes($PSCommandPath)
     $version = (Read-JsonCommand $TelexExecutable @('--json', 'version', '--root', $InstallRoot)).version
     $record = [ordered]@{
         schemaVersion = 1
@@ -257,33 +301,14 @@ if ($Action -eq 'verify') {
         environmentNames = @($EnvironmentNames)
         telexBuildId = $version.build_id
         watcherSha256 = (Get-FileHash -LiteralPath $WatcherExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
+        verificationToolSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($toolBytes)).ToLowerInvariant()
     }
     Assert-Record $record
+    Assert-LaunchEnvironment $record
     New-PrivateDirectory $directory
-    $temporary = Join-Path $directory "$([guid]::NewGuid()).tmp"
-    try {
-        $options = [IO.FileStreamOptions]::new()
-        $options.Mode = [IO.FileMode]::CreateNew
-        $options.Access = [IO.FileAccess]::Write
-        if (-not $IsWindows) { $options.UnixCreateMode = [IO.UnixFileMode]384 }
-        $file = [IO.FileStream]::new($temporary, $options)
-        try {
-            $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($record | ConvertTo-Json -Depth 4))
-            $file.Write($bytes)
-            $file.Flush($true)
-        } finally { $file.Dispose() }
-        # Directory inheritance is private; protect the new file's ACL without touching existing files.
-        if ($IsWindows) {
-            $info = [IO.FileInfo]::new($temporary)
-            $acl = [IO.FileSystemAclExtensions]::GetAccessControl($info, [Security.AccessControl.AccessControlSections]::Access)
-            $acl.SetAccessRuleProtection($true, $true)
-            [IO.FileSystemAclExtensions]::SetAccessControl($info, $acl)
-        }
-        Assert-Private $temporary
-        [IO.File]::Move($temporary, $RecordPath, $false)
-    } finally {
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
-    }
+    Write-PrivateFileExclusive $verificationTool $toolBytes
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($record | ConvertTo-Json -Depth 4))
+    Write-PrivateFileExclusive $RecordPath $bytes
 }
 [Console]::Error.WriteLine("Installation record: $RecordPath")
 $record | ConvertTo-Json -Depth 4

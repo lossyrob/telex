@@ -633,7 +633,10 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
         "watcherRegistry = $registry",
         "graceSeconds = $graceSeconds",
         "--registry $registry --json register $registrationFile",
-        "$installation = (& $installationTool -Action verify)",
+        "$configRoot = if (Test-Path Env:TELEX_HOME)",
+        "$recordPath = Join-Path $configRoot 'watcher/installation.json'",
+        "$installationTool = Join-Path (Split-Path -Parent $recordPath) 'installation.ps1'",
+        "$installation = (& $installationTool -Action verify -RecordPath $recordPath)",
         "$telex = $installation.telexExecutable",
         "$watcher = $installation.watcherExecutable",
         "$registry = $installation.watcherRegistry",
@@ -651,6 +654,10 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
     assert_eq!(
         template.matches("backendProfile = $backendProfile").count(),
         2
+    );
+    assert!(
+        !template.contains("<absolute trusted checkout>"),
+        "default installation lookup must not require a supplied checkout path"
     );
     for text in [instructions, guide] {
         for required in [

@@ -5,7 +5,9 @@ mod isolation;
 
 use isolation::{run_with_timeout, CliOutput, Isolation};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -54,7 +56,8 @@ impl Fixture {
             .env("HOME", &self.user_home)
             .env("USERPROFILE", &self.user_home)
             .env("LOCALAPPDATA", &self.isolation.state_dir)
-            .env_remove("TELEX_WATCHER_REGISTRY");
+            .env_remove("TELEX_WATCHER_REGISTRY")
+            .env_remove("TELEX_BOOTSTRAP_TEST_CREDENTIAL");
         command
     }
 
@@ -76,6 +79,15 @@ impl Fixture {
     }
 
     fn tool_with_home(&self, parameters: Value, explicit_telex_home: bool) -> CliOutput {
+        let output = run_with_timeout(
+            self.tool_command(parameters, explicit_telex_home),
+            Duration::from_secs(30),
+        );
+        assert!(!output.timed_out, "bootstrap command timed out: {output:?}");
+        output
+    }
+
+    fn tool_command(&self, parameters: Value, explicit_telex_home: bool) -> Command {
         let mut command = self.process(Path::new("pwsh"));
         if !explicit_telex_home {
             command.env_remove("TELEX_HOME");
@@ -94,9 +106,32 @@ impl Fixture {
                  $p=$env:TELEX_TEST_INSTALLATION_ARGS | ConvertFrom-Json -AsHashtable; \
                  & $env:TELEX_TEST_INSTALLATION_TOOL @p",
             ]);
-        let output = run_with_timeout(command, Duration::from_secs(30));
-        assert!(!output.timed_out, "bootstrap command timed out: {output:?}");
-        output
+        command
+    }
+
+    fn discover(&self, explicit_telex_home: bool) -> CliOutput {
+        let instructions = include_str!("../../copilot/COPILOT.md");
+        let template = instructions
+            .split("### Register the watch")
+            .nth(1)
+            .unwrap()
+            .split("```powershell\n")
+            .nth(1)
+            .unwrap()
+            .split("$groupDirectory =")
+            .next()
+            .unwrap();
+        let mut command = self.process(Path::new("pwsh"));
+        if !explicit_telex_home {
+            command.env_remove("TELEX_HOME");
+        }
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!("{template}\n$installation | ConvertTo-Json -Depth 4"),
+        ]);
+        run_with_timeout(command, Duration::from_secs(30))
     }
 
     fn record_path(&self) -> PathBuf {
@@ -141,8 +176,8 @@ fn unset_telex_home_uses_only_the_isolated_user_home_default() {
         .join("installation.json")
         .exists());
     fixture
-        .tool_with_home(json!({"Action":"verify"}), false)
-        .assert_success("verify the same home default without searching elsewhere");
+        .discover(false)
+        .assert_success("discover the companion tool under the same home without a supplied path");
 }
 
 impl Drop for Fixture {
@@ -179,13 +214,39 @@ fn record_creation_discovery_verification_and_refusals() {
     assert!(!fixture.registry.exists(), "record preparation is offline");
     assert!(!fixture.isolation.daemon_running());
     let original = std::fs::read(fixture.record_path()).unwrap();
+    let tool_path = fixture.record_path().with_file_name("installation.ps1");
+    let tool_bytes = std::fs::read(&tool_path).unwrap();
+    assert_eq!(
+        tool_bytes,
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("installation.ps1")).unwrap()
+    );
+    let mut tool_hash = String::new();
+    for byte in Sha256::digest(&tool_bytes) {
+        write!(tool_hash, "{byte:02x}").unwrap();
+    }
+    assert_eq!(record["verificationToolSha256"], tool_hash);
     fixture
         .tool(parameters.clone())
         .assert_failure("existing record is never overwritten");
     assert_eq!(std::fs::read(fixture.record_path()).unwrap(), original);
     fixture
-        .tool(json!({"Action": "verify"}))
-        .assert_success("discover and verify default record");
+        .discover(true)
+        .assert_success("execute default discovery without a supplied tool or checkout path");
+    let parked_tool = tool_path.with_file_name("installation.ps1.parked");
+    std::fs::rename(&tool_path, &parked_tool).unwrap();
+    let missing_tool = fixture.discover(true);
+    missing_tool
+        .assert_failure("missing companion points back to bootstrap, not a checkout search");
+    assert!(missing_tool.stderr.contains("bootstrap guide"));
+    std::fs::rename(&parked_tool, &tool_path).unwrap();
+    fixture
+        .tool(json!({"Action": "preflight"}))
+        .assert_success("preflight the prepared launch environment");
+    std::fs::write(&tool_path, b"changed verification tool").unwrap();
+    fixture
+        .tool(json!({"Action":"verify"}))
+        .assert_failure("changed companion tool is refused before using recorded executables");
+    std::fs::write(&tool_path, &tool_bytes).unwrap();
     let mut missing = parameters.clone();
     missing["RecordPath"] = json!(fixture
         .isolation
@@ -200,11 +261,9 @@ fn record_creation_discovery_verification_and_refusals() {
         ("schemaVersion", json!(true)),
         ("watcherExecutable", json!("relative-watcher")),
         ("watcherSha256", json!("changed")),
+        ("verificationToolSha256", json!("changed")),
         ("pollIntervalSeconds", json!(0)),
-        (
-            "environmentNames",
-            json!(["TELEX_HOME", "ABSENT_BOOTSTRAP_CREDENTIAL"]),
-        ),
+        ("environmentNames", json!(["TELEX_HOME", "INVALID-NAME"])),
     ] {
         let mut changed = record.clone();
         changed[key] = value;
@@ -246,6 +305,30 @@ fn record_creation_discovery_verification_and_refusals() {
     fixture
         .tool(json!({"Action": "verify", "RecordPath": explicit_path}))
         .assert_success("verify only explicit record when supplied");
+    let mut explicit_command = fixture.tool_command(
+        json!({"Action": "verify", "RecordPath": explicit["RecordPath"]}),
+        true,
+    );
+    explicit_command.env(
+        "TELEX_TEST_INSTALLATION_TOOL",
+        PathBuf::from(explicit["RecordPath"].as_str().unwrap()).with_file_name("installation.ps1"),
+    );
+    run_with_timeout(explicit_command, Duration::from_secs(30))
+        .assert_success("execute the companion beside an explicit record");
+    let occupied = fixture.isolation.root.join("occupied");
+    isolation::create_owner_private_dir(&occupied);
+    let occupied_tool = occupied.join("installation.ps1");
+    std::fs::write(&occupied_tool, b"existing tool must stay").unwrap();
+    let mut collision = parameters;
+    collision["RecordPath"] = json!(occupied.join("installation.json"));
+    fixture
+        .tool(collision)
+        .assert_failure("an existing companion is never overwritten");
+    assert_eq!(
+        std::fs::read(occupied_tool).unwrap(),
+        b"existing tool must stay"
+    );
+    assert!(!occupied.join("installation.json").exists());
     std::fs::write(&fixture.registry, b"existing registry must stay").unwrap();
     explicit["RecordPath"] = json!(fixture
         .isolation
@@ -263,6 +346,57 @@ fn record_creation_discovery_verification_and_refusals() {
     fixture
         .tool(json!({"Action": "verify"}))
         .assert_failure("changed retained executable is refused");
+}
+
+#[test]
+fn discovery_does_not_require_credentials_but_launch_preflight_does() {
+    let fixture = Fixture::new();
+    let mut profile = telex::profiles::implicit_sqlite(None);
+    profile.path = Some(fixture.isolation.db_path.to_string_lossy().into_owned());
+    profile.password_env = Some("TELEX_BOOTSTRAP_TEST_CREDENTIAL".into());
+    fixture
+        .isolation
+        .write_config(&telex::profiles::ConfigFile {
+            default: None,
+            backends: BTreeMap::from([("fixture".into(), profile)]),
+        });
+    let mut parameters = fixture.parameters();
+    parameters["EnvironmentNames"] = json!([
+        "TELEX_HOME",
+        "TELEX_CONFIG",
+        "LOCALAPPDATA",
+        "TELEX_BOOTSTRAP_TEST_CREDENTIAL"
+    ]);
+    fixture
+        .tool(parameters.clone())
+        .assert_failure("create checks the operator's launch environment");
+    assert!(!fixture.record_path().exists());
+    let mut create = fixture.tool_command(parameters, true);
+    create.env(
+        "TELEX_BOOTSTRAP_TEST_CREDENTIAL",
+        "fixture-only-not-a-secret",
+    );
+    run_with_timeout(create, Duration::from_secs(30))
+        .assert_success("create in the prepared operator launch environment");
+    let original = std::fs::read(fixture.record_path()).unwrap();
+    assert!(!String::from_utf8_lossy(&original).contains("fixture-only-not-a-secret"));
+    fixture
+        .discover(true)
+        .assert_success("root discovery needs no credential value");
+    let missing = fixture.tool(json!({"Action":"preflight"}));
+    missing.assert_failure("launch preflight requires the named variable");
+    assert!(missing
+        .stderr
+        .contains("Required launch environment is missing: TELEX_BOOTSTRAP_TEST_CREDENTIAL"));
+    let mut launch = fixture.tool_command(json!({"Action":"preflight"}), true);
+    launch.env(
+        "TELEX_BOOTSTRAP_TEST_CREDENTIAL",
+        "fixture-only-not-a-secret",
+    );
+    run_with_timeout(launch, Duration::from_secs(30))
+        .assert_success("launch preflight succeeds in the correct environment");
+    assert_eq!(std::fs::read(fixture.record_path()).unwrap(), original);
+    assert!(!fixture.registry.exists());
 }
 
 #[test]
@@ -322,6 +456,9 @@ fn record_launch_registration_shutdown_and_retained_registry() {
     fixture
         .tool(fixture.parameters())
         .assert_success("prepare launch record");
+    fixture
+        .tool(json!({"Action":"preflight"}))
+        .assert_success("preflight in the environment inherited by the runtime");
     let mut command = fixture.process(&fixture.watcher);
     command
         .arg("--registry")
