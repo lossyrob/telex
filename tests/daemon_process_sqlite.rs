@@ -118,6 +118,7 @@ impl ProcessEnv {
         cmd.env("TELEX_HOME", &self.home)
             .env("TELEX_RUN_DIR", &self.run_dir)
             .env("TELEX_DB", &self.db)
+            .env("TELEX_INSTALL_ROOT", self.root.join("install"))
             .env("TELEX_CONFIG", self.home.join("config.toml"))
             .env("TELEX_SESSION_ID", session)
             .env("TELEX_RECONNECT_GRACE_MS", "3000")
@@ -478,6 +479,11 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) -> bool {
 
 fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) -> CmdOutput {
     let capture_id = NEXT_CAPTURE.fetch_add(1, Ordering::SeqCst);
+    #[cfg(windows)]
+    let mut invocation = serde_json::json!({
+        "program": cmd.get_program().to_string_lossy(),
+        "args": cmd.get_args().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),
+    });
     let capture_dir = root.join("cmd");
     std::fs::create_dir_all(&capture_dir).expect("create command capture dir");
     let stdout_path = capture_dir.join(format!("cmd-{capture_id}.out"));
@@ -510,14 +516,37 @@ fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) ->
             stderr_path.display()
         )
     });
+    #[cfg(windows)]
+    {
+        invocation["pid"] = child.id().into();
+    }
     let (code, timed_out) = wait_status_with_timeout_raw(child, timeout);
     let stdout = read_capture(&mut stdout_file, &stdout_path);
     let stderr = read_capture(&mut stderr_file, &stderr_path);
     #[cfg(windows)]
+    {
+        invocation["exit_code"] = serde_json::json!(code);
+        invocation["timed_out"] = timed_out.into();
+        if let Some(evidence) = std::env::var_os("TELEX_PROCESS_EVIDENCE") {
+            let evidence = PathBuf::from(evidence);
+            let name = format!("{}-cmd-{capture_id}", std::process::id());
+            std::fs::create_dir_all(&evidence).expect("create process evidence directory");
+            std::fs::copy(&stdout_path, evidence.join(format!("{name}.out")))
+                .expect("preserve child stdout");
+            std::fs::copy(&stderr_path, evidence.join(format!("{name}.err")))
+                .expect("preserve child stderr");
+            std::fs::write(
+                evidence.join(format!("{name}.json")),
+                serde_json::to_vec_pretty(&invocation).expect("serialize child invocation"),
+            )
+            .expect("preserve child invocation");
+        }
+    }
+    #[cfg(windows)]
     if let Some(exception) = windows_abnormal_exit_status(code) {
         panic!(
             "command exited through abnormal Windows status 0x{exception:08x}; \
-             stdout_path={} stderr_path={} stdout={} stderr={}",
+             invocation={invocation} stdout_path={} stderr_path={} stdout={} stderr={}",
             stdout_path.display(),
             stderr_path.display(),
             stdout.trim(),

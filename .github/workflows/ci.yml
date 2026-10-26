@@ -103,6 +103,17 @@ jobs:
           New-ItemProperty -Path $key -Name DumpCount -Value 10 `
             -PropertyType DWord -Force | Out-Null
 
+      - name: Verify native postmortem capture for Windows child faults
+        # WER LocalDumps alone produced no dump for an observed STATUS_HEAP_CORRUPTION
+        # child. This adds ProcDump AeDebug capture into the same dump folder without
+        # changing any child exit status; the synthetic probe verifies both.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/configure_windows_postmortem.ps1
+          -EvidenceRoot (Join-Path $env:RUNNER_TEMP "telex-crash-postmortem")
+          -DumpDirectory (Join-Path $env:RUNNER_TEMP "telex-crash-dumps")
+
       - name: Verify Windows diagnostic symbols
         if: runner.os == 'Windows'
         shell: pwsh
@@ -203,6 +214,23 @@ jobs:
         shell: pwsh
         run: tests/capture_windows_crash_evidence.ps1 -EvidenceName final
 
+      - name: Preserve native fault stacks from hosted dumps
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/analyze_windows_crash_evidence.ps1
+          -EvidenceRoot (Join-Path $env:RUNNER_TEMP "telex-crash-postmortem")
+          -DumpDirectory (Join-Path $env:RUNNER_TEMP "telex-crash-dumps")
+
+      - name: Unregister disposable postmortem debugger
+        if: always() && runner.os == 'Windows' && env.TELEX_POSTMORTEM_EXE != ''
+        shell: pwsh
+        run: |
+          & $env:TELEX_POSTMORTEM_EXE -u
+          if ($LASTEXITCODE -ne 0) {
+            throw "unregistering the hosted postmortem debugger failed"
+          }
+
       - name: Upload Windows crash evidence
         if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -211,6 +239,7 @@ jobs:
           path: |
             ${{ runner.temp }}\telex-crash-dumps
             ${{ runner.temp }}\telex-crash-symbols
+            ${{ runner.temp }}\telex-crash-postmortem
             target\debug\telex.exe
             target\debug\telex.pdb
           if-no-files-found: error
@@ -405,6 +434,69 @@ jobs:
 
       - name: Lint the external consumer fixture with warnings denied
         run: cargo clippy --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features sqlite --all-targets -- -D warnings
+
+      - name: Windows named-pipe transport resolves the fixed Mio (issue 166)
+        # Mio before 1.2.4 can lose the reference reserved for a submitted named-pipe I/O
+        # (tokio-rs/mio#2014). Verify the Mio reached through Tokio on the Windows target, in the
+        # locked repository graph and in the defaults-disabled external consumer fixture, and that
+        # no older duplicate remains.
+        run: |
+          set -euo pipefail
+          check() {
+            found=$("$@" -i mio --target x86_64-pc-windows-msvc --prefix none --depth 0 | sed -n '1s/^mio v//p')
+            echo "resolved mio $found"
+            lowest=$(printf '%s\n1.2.4\n' "$found" | sort -V | head -n 1)
+            if [ "$lowest" != "1.2.4" ]; then
+              echo "::error::resolved mio $found is older than 1.2.4"
+              exit 1
+            fi
+          }
+          check cargo tree --locked --no-default-features --features sqlite
+          check cargo tree --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features
+          duplicates=$(cargo tree --locked -d --target all --no-default-features --features sqlite | grep -c '^mio ' || true)
+          if [ "$duplicates" != "0" ]; then
+            echo "::error::more than one mio version is resolved"
+            exit 1
+          fi
+          echo "ok: the Windows named-pipe route resolves a single mio >= 1.2.4"
+
+      - name: Older Tokio named-pipe route is rejected (issue 166)
+        # Tokio 1.38.x wraps Mio 0.8, which would sit beside the Mio floor instead of being
+        # repaired by it. A consumer that pins such a Tokio must fail to resolve with telex.
+        run: |
+          set -uo pipefail
+          probe=$(mktemp -d)
+          mkdir "$probe/src" && : > "$probe/src/lib.rs"
+          cat > "$probe/Cargo.toml" <<EOF
+          [package]
+          name = "old-tokio-probe"
+          version = "0.0.0"
+          edition = "2021"
+
+          [workspace]
+
+          [dependencies]
+          telex = { path = "$GITHUB_WORKSPACE", default-features = false }
+          tokio = { version = "=1.38.2", default-features = false }
+          EOF
+          # Only the Tokio conflict between the consumer pin and telex's floor counts as the
+          # intended rejection; registry, fixture or unrelated resolver failures must fail the step.
+          if out=$(cargo generate-lockfile --manifest-path "$probe/Cargo.toml" 2>&1); then
+            echo "$out"
+            echo "::error::telex resolved beside Tokio 1.38.2, whose named pipes use Mio 0.8"
+            exit 1
+          fi
+          echo "$out"
+          for expected in \
+            'failed to select a version for `tokio`' \
+            'versions that meet the requirements `^1.39.1`' \
+            'previously selected package `tokio v1.38.2`'; do
+            if ! grep -qF -- "$expected" <<<"$out"; then
+              echo "::error::generate-lockfile failed, but not with the expected Tokio floor conflict: missing [$expected]"
+              exit 1
+            fi
+          done
+          echo "ok: Tokio 1.38.2 is rejected by the Tokio floor"
 
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
@@ -679,6 +771,11 @@ jobs:
           New-Item -ItemType Directory -Path $dumps, $logs -Force | Out-Null
           "TELEX_HEAP_EVIDENCE=$evidence" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_PROCESS_EVIDENCE=$(Join-Path $evidence 'commands')" >> $env:GITHUB_ENV
+          $root = Join-Path $env:RUNNER_TEMP "heap-runtime-${{ github.run_id }}-${{ github.run_attempt }}"
+          "TELEX_HOME=$(Join-Path $root 'home')" >> $env:GITHUB_ENV
+          "TELEX_DB=$(Join-Path $root 'store.db')" >> $env:GITHUB_ENV
+          "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')" >> $env:GITHUB_ENV
 
           $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
           New-Item -Path $wer -Force | Out-Null
@@ -695,6 +792,10 @@ jobs:
             -PropertyType DWord -Force | Out-Null
           New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
             -PropertyType DWord -Force | Out-Null
+
+      - name: Verify native postmortem capture without changing child status
+        shell: pwsh
+        run: tests/configure_windows_postmortem.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
 
       - name: Stress the full Windows process suite under PageHeap
         shell: pwsh
@@ -741,6 +842,20 @@ jobs:
           if (-not (Test-Path -LiteralPath "target\debug\telex.exe") -or
               -not (Test-Path -LiteralPath "target\debug\telex.pdb")) {
             throw "matching telex.exe and telex.pdb were not generated"
+          }
+
+      - name: Preserve native fault stacks from hosted dumps
+        if: always()
+        shell: pwsh
+        run: tests/analyze_windows_crash_evidence.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
+
+      - name: Unregister disposable postmortem debugger
+        if: always() && env.TELEX_POSTMORTEM_EXE != ''
+        shell: pwsh
+        run: |
+          & $env:TELEX_POSTMORTEM_EXE -u
+          if ($LASTEXITCODE -ne 0) {
+            throw "unregistering the hosted postmortem debugger failed"
           }
 
       - name: Upload heap diagnostic evidence
