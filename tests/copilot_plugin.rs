@@ -514,12 +514,26 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
             "copilot.group.attention-needed",
             "backgroundWork: \"unobserved\"",
             "operator-held",
-            "inbox --all --limit 1025",
+            "inbox --all",
+            "newest 50",
+            "export --address",
+            "detector-degraded",
             "ask_user",
         ] {
             assert!(
                 text.contains(required),
                 "stall guidance must preserve {required:?}"
+            );
+        }
+        for removed in [
+            "bounded-inbox",
+            "1024 retained",
+            "--limit 1025",
+            "issues/216",
+        ] {
+            assert!(
+                !text.contains(removed),
+                "stall guidance must not retain obsolete inbox-limit text {removed:?}"
             );
         }
     }
