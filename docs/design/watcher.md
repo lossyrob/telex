@@ -652,6 +652,26 @@ token/PAT/key/secret-like allowlist names are redacted from retained stderr on a
 best-effort basis. Arbitrary local code and provider error bodies can still
 expose sensitive context, so exported diagnostics require review/redaction.
 
+When the runtime host exits with `runtime-failed`, it writes a stage-labeled
+cause chain to stderr before returning exit code 1. Stages distinguish runtime
+and registry open, endpoint bind, runtime start, runtime run, heartbeat and
+management-server failures. The entire diagnostic, including its final newline,
+is capped at 4 KiB of UTF-8; truncation ends with `[truncated]`.
+
+Runtime-failure diagnostics redact nonempty values from token/PAT/key/secret/
+password/credential-like environment names at any length, using the same
+case-insensitive name matching as detector stderr. Other inherited values are
+redacted only when at least 8 UTF-8 bytes long, so common short shell/CI values
+do not corrupt OS error numbers or ordinary messages. Static host stage labels
+are never altered by value matching. Diagnostics omit unstructured causes
+containing credential-like text, assignments or connection URIs.
+SQLite and JSON failures expose error categories/codes or source locations,
+not arbitrary database messages or values; task panic payloads are omitted.
+Local registry and endpoint paths may appear. Diagnostics are transient stderr
+output, including when startup fails before a runtime record exists. No startup
+record or logging service is implied. The stdout envelope schema, specific error
+codes and exit status are unchanged; the `runtime-failed` message points to stderr.
+
 ## Scheduling and execution
 
 The runtime provides:

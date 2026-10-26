@@ -384,6 +384,27 @@ jobs:
         # credential rules, the probe transports, or the scan cursor at all.
         run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_
 
+  watcher-diagnostics-macos:
+    name: Watcher runtime diagnostics (macOS)
+    runs-on: macos-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Test bounded runtime failure diagnostics
+        run: >-
+          cargo test -p telex-watcher --no-default-features --features sqlite
+          --bin telex-watcher --test runtime_diagnostics
+
   credential-macos:
     name: Credential invocation lifecycle (macOS)
     runs-on: macos-latest
