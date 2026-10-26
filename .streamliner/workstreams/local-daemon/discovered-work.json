@@ -9369,6 +9369,127 @@
         "watcherBoundary": "Watcher owns its graph/status/ledger projection. This Local-only shape records no #201 activation/block status/edge or validation, and conserves the complete Watcher files.",
         "exclusions": "No #155 reopening, #223 product absorption or fallback-wake proof, #212 publication/approval carry, other-family completion/intake, cause, repair, runtime/profile operation, owner/observer/wake or debt clearance."
       }
+    },
+    {
+      "id": "local-daemon-copilot-app-first-time-delivery-path",
+      "sourceNode": null,
+      "source": "Existing #223 from #201 real-workstation validation, Watcher-to-Local routing and owning Local source/guidance assessment.",
+      "crossReference": "Existing push-delivery design owns the normative contract; #53 is not reopened. #222 is separate Watcher bootstrap/root-mode wording; #224 is separate backend candidate-fetch recovery.",
+      "evidence": {
+        "publicIssue": {
+          "number": 223,
+          "url": "https://github.com/lossyrob/telex/issues/223",
+          "title": "Copilot App sessions cannot load a first-time Telex bridge through extensions_reload",
+          "state": "open",
+          "body": {
+            "file": "local223-first-time-delivery-issue-body.txt",
+            "bytes": 953,
+            "sha256": "3a9f0606a4fa8ba88c91efefce4cc2056ecc08d49273dd7acf41d6793f9a56ab"
+          }
+        },
+        "publicReceipts": [
+          {
+            "id": 6425261961,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:23:33Z",
+            "updatedAt": "2026-10-26T19:23:33Z",
+            "body": {
+              "file": "watcher-bridge223-local-routing-body.txt",
+              "bytes": 881,
+              "sha256": "e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad"
+            }
+          },
+          {
+            "id": 6425315392,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425315392",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:26:15Z",
+            "updatedAt": "2026-10-26T19:26:15Z",
+            "body": {
+              "file": "local223-routing-body.txt",
+              "bytes": 2635,
+              "sha256": "32dd52e68c6f6ea26235606a07bbdfc7bd2945e512616fd0109050ac8a68f59f"
+            }
+          }
+        ],
+        "initialCandidateReport": {
+          "source": "call_VgSiZu98cIBGYiKEn7h5Lvod",
+          "receipt": {
+            "file": "local223-first-time-delivery-intake.json",
+            "bytes": 1989,
+            "sha256": "bed978e16d9b87608d5e881d5d102219810d6dbd2a85c8751e066917a6f70a5c"
+          },
+          "status": "candidate",
+          "decisionState": "proposed",
+          "sourceNode": null,
+          "owner": "Local routing; implementation unassigned",
+          "boundary": "Private initial report, not a prior canonical row. Its pending-Campaign status is superseded only by later accepted node authority, not rewritten."
+        },
+        "acceptedNode": {
+          "source": "call_kUHJSXbVmnRG8PJlpwsuplKL",
+          "receipt": {
+            "file": "local223-authorized-node-intake.json",
+            "bytes": 1993,
+            "sha256": "6c6f8f4f6708f3698428dafb8dc80acf69bf928bbe72446867e79f80d97eaa31"
+          },
+          "campaignSource": "toolu_01Y5o2oxjb7MD82B7hCRAj5r",
+          "campaignVerbatim": "Routing decision for #223: accepted as proposed. It is a separate node, copilot-app-delivery-path, owned by the Local workstream, with the scope and boundaries you posted in 6425315392. It has no dependency on #201 or #222. Have the reconciler publish the node, then launch its owner yourself; no further Campaign approval is needed. Note for the owner: the real root cannot currently arm the pull fallback, because `telex wait` times out fetching wait candidates on pg-rde-telex. The #201 owner is filing that separately. #223 fixes the docs and recovery text only; it must not claim fallback wake works and must not absorb that bug."
+        },
+        "canonicalDedup": [
+          {
+            "path": ".streamliner/workstreams/application-client/discovered-work.json",
+            "items": 5,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+            "items": 49,
+            "matches": [
+              {
+                "id": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+                "status": "planned",
+                "decisionState": "accepted"
+              }
+            ],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/discovered-work.json",
+            "items": 1,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+            "items": 15,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          }
+        ],
+        "methodBoundary": "Source/guidance mismatch and capability/fallback behavior retain Local/Watcher/#201-owner attribution. Public bodies and actual Local receipts are checked; no raw Campaign-origin or recipient/runtime/source execution is claimed. Existing generated fallback procedures do not prove real App wake, and #224 is a separate unresolved product/environment observation."
+      },
+      "description": "Align first-time Copilot delivery guidance and directly related recovery messages/tests with actual host capabilities. App without a supported live loader uses documented Telex-owned pull fallback; loader-capable or already-live push remains supported, and provisioning is not loading proof. Preserve one supported pull wait, completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics. No new host API, transport or shell polling loop; no fallback-wake proof or #224 backend repair. #222 owns Watcher bootstrap/stall-group installation/root-mode wording. No #201/#222 dependency or #53 reopening.",
+      "affectedOutcome": "An App-hosted session without a live bridge loader receives an honest supported first-time delivery path without removing working push or asserting unobserved wakeup.",
+      "requiredness": "Accepted separate Local task; creates no #201/#222 dependency and does not waive #224 or its #201 upstream condition.",
+      "sequencing": "After verified canonical planned-node publication Local launches exactly one owner; Campaign requires no further launch approval. #224 publishes first, but no dependency edge is added between them.",
+      "recommendedDisposition": "Separate Local guidance/recovery-message/test-alignment task for existing #223.",
+      "selectedDisposition": "Accept the same new family into one planned/unlaunched node/task, preserving initial candidate/private-pending snapshots as source history.",
+      "target": "copilot-app-delivery-path / existing issue #223",
+      "owner": "Local Daemon routing; implementation owner unassigned and unlaunched.",
+      "terminalPath": "A separate closing #223 PR aligns the binary-owned skill, guide, bridge design/overview and directly related recovery text/tests under independent exact-head source review, design inspection and hosted CI, then Campaign gate/accepted disposition. Source-text checks are not App wake/bridge-loading proof. No delivery or repair acceptance is recorded now.",
+      "status": "planned",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01Y5o2oxjb7MD82B7hCRAj5r, quoted in actual Local call_kUHJSXbVmnRG8PJlpwsuplKL; route/shape authority only.",
+      "routingQualification": {
+        "noPriorCanonicalRow": true,
+        "plannedAndUnlaunched": true,
+        "noImplementationOwner": true,
+        "overlapCoordination": "Require open-PR plus named-section coordination for copilot/COPILOT.md: #222 may edit stall-group installation/root-mode wording; #223 owns host capability/first-load/fallback/recovery text. Do not duplicate changes or silently overlap; this is coordination, not a new dependency.",
+        "policy": "Current isolation policy: authorized local tests use isolated TELEX_* roots and temporary LOCALAPPDATA; no real-directory ACL/permission changes or I161-1 restore/reset, and exact-head hosted gates remain. Old blanket freeze is not renewed.",
+        "exclusions": "No #224 product fix or supported-wake proof, host API/transport, #201 validation/dependency, #222 absorption/dependency, #53 reopening, launch/profile/runtime/observer/wake, other-family acceptance or debt clearance."
+      }
     }
   ]
 }

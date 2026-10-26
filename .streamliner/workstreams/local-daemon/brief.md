@@ -1605,3 +1605,68 @@ The steward has now explicitly modeled #224 upstream of #201: https://github.com
 The owning #201 hold report is https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162. Its same owner, runtime/registry/branch and validation-only checkpoint remain source reports; no PR or completion is claimed. Watcher owns the separate blocked-status/external-edge projection. The #201 criterion is not narrowed, and this Local packet does not modify its graph or credit any validation.
 
 Only this one new row, one planned node/task, a root-summary prefix retaining the full old suffix, and this brief append change. All 48 old Local rows and 29 old nodes, null discovery provenance, dependency/checkpoint/presentation/design state, #166 eight debts/two sent wakes and all other workstreams remain exact. #155 remains completed/related only. #223 and #222 stay separate. Parked promote212v2 and every receipt remain immutable historical evidence; no technical/role/final authority carries to a successor base. No extra tracker, failure experiment, observer, wake, root re-arm or debt clearance follows.
+
+
+## #223 planned capability-based delivery path, no launch or wake proof (2026-10-26)
+
+Campaign `toolu_01Y5o2oxjb7MD82B7hCRAj5r`, quoted in actual Local `call_kUHJSXbVmnRG8PJlpwsuplKL`, accepts existing [#223](https://github.com/lossyrob/telex/issues/223) and family `local-daemon-copilot-app-first-time-delivery-path` as planned/watch node `copilot-app-delivery-path`. Local verifies canonical publication before launching one owner without another Campaign approval. No implementation owner or requested/effective profile is recorded. Initial candidate intake remains historical private reporting, not a fictitious previous canonical row; sourceNode remains null. #224 published first; no dependency edge between them is inferred.
+
+### Exact Campaign decision in Local custody
+
+```text
+Routing decision for #223: accepted as proposed. It is a separate node, copilot-app-delivery-path, owned by the Local workstream, with the scope and boundaries you posted in 6425315392. It has no dependency on #201 or #222. Have the reconciler publish the node, then launch its owner yourself; no further Campaign approval is needed. Note for the owner: the real root cannot currently arm the pull fallback, because `telex wait` times out fetching wait candidates on pg-rde-telex. The #201 owner is filing that separately. #223 fixes the docs and recovery text only; it must not claim fallback wake works and must not absorb that bug.
+```
+
+The capability distinction is explicit: an App session without a supported live bridge loader gets the existing Telex-owned fallback; loader-capable and already-live push is not forced to pull. Provisioning is not loading proof. Preserve the supported one-wait procedure, completion artifacts, ack/dedup, re-arming and stop/mode-transition behavior. No custom shell polling, new transport or invented host API. Local source/guidance reads and App capability/fallback observations remain attributed; this artifact projection replayed no product source, runtime or recipient state.
+
+### Watcher routes to Local, no Watcher dependency
+
+https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961
+
+Raw 881 bytes / SHA-256 `e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad`; LF display 880 bytes / SHA-256 `5f1fdfedef777735ef422fd4de32f9a8a1a75f2cc4b6cf7343673a4d56bc81c2`.
+
+```text
+Design steward decision: this does not join the Watcher geometry. It routes to the Local Daemon workstream.
+
+Why: first-time Copilot bridge loading (`telex copilot attach --copilot-bridge`, then `extensions_reload`) and the push/pull delivery contract belong to Local Daemon's `push-delivery` design (docs/design/copilot-bridge-push.md, guides/copilot-push.md). Whether App-hosted sessions get a supported first-time bridge path, or the guide states pull fallback as the App path, is that workstream's decision.
+
+Watcher dependencies: none. #201 uses the supported pull fallback (6425143128). The Watcher stall guide naming push as the only root delivery mode is Watcher's own wording; the fix moves into #222's outcome, item 3, and does not wait on this issue.
+
+The Watcher coordinator hands this off to Local Daemon routing. The outcome text in this issue body stands as filed.
+
+```
+
+### Full original Local routing decision; last pending-Campaign paragraph is now history
+
+https://github.com/lossyrob/telex/issues/223#issuecomment-6425315392
+
+Raw 2635 bytes / SHA-256 `32dd52e68c6f6ea26235606a07bbdfc7bd2945e512616fd0109050ac8a68f59f`; LF display 2616 bytes / SHA-256 `e98550e718903aaae68671266749605557b9f6e4a7793541f192cfd58ebf2305`.
+
+```text
+Local routing decision: document the supported pull fallback as the first-time delivery path for App-hosted sessions that do not expose a supported live bridge loader.
+
+This keeps the issue's expected outcome as filed. It does not promise a new App extension-loading API or treat bridge provisioning as evidence that a bridge loaded. The decision is capability-based: a host with the supported reload capability can use bridge push; an already-loaded, live bridge is not forced into pull merely because its host is the App.
+
+The current source at 9e971fd9 shows the guidance mismatch:
+- docs/guide/src/guides/copilot-push.md opens with a CLI-and-App push promise and asks unavailable-tool users to enable /experimental and retry extensions_reload.
+- copilot/COPILOT.md:25-27 and :69-78 makes the same assumption; its supported fallback procedure already exists.
+- docs/design/copilot-bridge-push.md describes extensions_reload as available to every agent.
+- src/commands/copilot.rs:31 emits the same recovery advice, and its skill contract tests currently require that recovery sequence.
+
+The bounded repair should align the binary-owned skill, operator guide, bridge design/overview and directly related recovery text/tests with actual host capabilities. For an App session without a loader, direct it to Telex-owned `copilot fallback prepare` and exactly one supported pull-mode wait, with completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics preserved. Do not prescribe CLI-only /experimental or a nonexistent reload tool as an App requirement. Do not invent a shell polling loop or a new bridge transport.
+
+This is guidance and recovery-message alignment, not proof of App bridge push. Source checks cannot establish that the generated launcher wakes a real App session. #201 retains its separately authorized real-root pull-fallback validation and must report that mode and its actual evidence; bridge push remains untested there. A fallback wake/delivery failure is a separate product failure, not something this wording can waive.
+
+Ownership and sequencing:
+- Local Daemon owns this issue under its push-delivery contract.
+- No Watcher dependency is added. #201 continues using the steward-approved fallback.
+- #222 separately owns the Watcher stall guide's push-only prerequisite wording and installation/bootstrap outcome. Do not duplicate that change here.
+- Implementation staffing and any new workstream node are pending Campaign routing. This decision launches no worker, runtime experiment, installation change or observer, and does not close #223.
+
+```
+
+Campaign node acceptance above supersedes the original pending-staffing paragraph prospectively; the old public body is retained exactly, not edited. #201 remains governed by its own #224 upstream condition; this task creates no #201/#222 dependency or gate waiver. #224 product/environment diagnosis stays separate and this wording cannot claim fallback wake works. Existing push-delivery design is normative ownership, not discovery provenance or #53 reopening.
+
+Open-PR plus named-section overlap coordination is required with #222 for copilot/COPILOT.md: #222 owns stall-group installation/root-mode wording; #223 owns host-capability/first-load/fallback/recovery text. No duplicate repair or silent overlap. Local tests follow current isolated TELEX_* and temporary LOCALAPPDATA policy; no real ACL/permission change or I161-1 restore/reset, no reinstated blanket freeze and no replacement of exact-head hosted gates.
+
+Only this new row/node/task, root-summary prefix with full old suffix and append-only brief change. All 49 old rows/30 old nodes and every other workstream/dependency/checkpoint/design/presentation/debt/wake remain exact. No owner launch, source/runtime/recipient proof, broader family intake/repair/acceptance, observer/wake or debt clearance follows.
