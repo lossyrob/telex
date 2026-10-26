@@ -37,6 +37,11 @@ digest = github.digest
 MARKER = re.compile(r"<!-- macos-ipsw-derived-build-v1 (\{[^\r\n]*\}) -->")
 
 
+def failure_record(error, phase):
+    return {"phase": phase, "type": type(error).__name__, "message": str(error),
+            "interruption": not isinstance(error, Exception)}
+
+
 def file_hash(file, maximum, deadline):
     info = file.lstat()
     require(stat.S_ISREG(info.st_mode) and info.st_size <= maximum, "file type/size bound: " + str(file))
@@ -155,11 +160,15 @@ class Fetcher:
             require(time.monotonic() < self.deadline, "combined download deadline")
             request = urllib.request.Request(current, headers={"Accept-Encoding": "identity"})
             record = {"kind": kind, "url": current, "hop": hop, "payload_before": self.counts[kind],
-                      "payload_bytes": 0, "status": None, "error": None}
-            response = None
+                      "payload_bytes": 0, "status": None, "error": None, "finalization_errors": [],
+                      "complete": False}
+            self.ledger.append(record)
+            response, stream, primary, final_error = None, None, None, None
+            redirect = None
             h = hashlib.sha256()
             partial = destination.with_name(destination.name + f".hop-{hop}.partial")
             record["partial_path"] = str(partial)
+            phase = "request"
             try:
                 try:
                     response = self.opener.open(request, timeout=min(
@@ -178,51 +187,89 @@ class Fetcher:
                 body_cap = min(remaining, file_limit) if code == 200 and file_limit is not None else remaining
                 require(body_cap >= 0 and (declared is None or declared <= body_cap),
                         "Content-Length exceeds remaining payload budget")
-                with partial.open("xb") as stream:
-                    while True:
-                        require(time.monotonic() < self.deadline, "combined download deadline during body")
-                        maximum = min(self.limits["read_bytes"], body_cap + 1 - record["payload_bytes"])
-                        failed_read = None
-                        try:
-                            raw = response.read1(maximum)
-                        except http.client.IncompleteRead as error:
-                            raw, failed_read = error.partial, error
-                        if not raw:
-                            if failed_read is not None:
-                                raise failed_read
-                            break
-                        self.counts[kind] += len(raw)
-                        record["payload_bytes"] += len(raw)
-                        h.update(raw)
-                        stream.write(raw)
-                        require(record["payload_bytes"] <= body_cap, "fetched payload overflow; partial retained")
+                phase = "body"
+                stream = partial.open("xb")
+                while True:
+                    require(time.monotonic() < self.deadline, "combined download deadline during body")
+                    maximum = min(self.limits["read_bytes"], body_cap + 1 - record["payload_bytes"])
+                    failed_read = None
+                    try:
+                        raw = response.read1(maximum)
+                    except http.client.IncompleteRead as error:
+                        raw, failed_read = error.partial, error
+                    if not raw:
                         if failed_read is not None:
                             raise failed_read
+                        break
+                    self.counts[kind] += len(raw)
+                    record["payload_bytes"] += len(raw)
+                    h.update(raw)
+                    stream.write(raw)
+                    require(record["payload_bytes"] <= body_cap, "fetched payload overflow; partial retained")
+                    if failed_read is not None:
+                        raise failed_read
                 record["body_sha256"] = h.hexdigest()
+                phase = "response-validation"
                 require(declared is None or declared == record["payload_bytes"], "truncated HTTP body")
                 require(record["encoding"] in ("", "identity"), "encoded response refused after counted raw capture")
                 if code in (301, 302, 303, 307, 308):
                     location = response.headers.get("Location")
                     require(location and hop < self.limits["redirect_hops"], "redirect missing or hop bound")
-                    current = urllib.parse.urljoin(current, location)
-                    record["redirect"] = current
-                    continue
-                require(code == 200, "non-success fetch response")
-                partial.rename(destination)
-                return {"path": str(destination), "bytes": record["payload_bytes"],
-                        "sha256": record["body_sha256"]}
-            except Exception as error:
-                record["error"] = {"type": type(error).__name__, "message": str(error)}
-                raise
+                    redirect = urllib.parse.urljoin(current, location)
+                    record["redirect"] = redirect
+                else:
+                    require(code == 200, "non-success fetch response")
+            except BaseException as error:
+                primary = error
+                record["error"] = failure_record(error, phase)
             finally:
-                if response is not None:
-                    response.close()
                 record["received_body_sha256"] = h.hexdigest()
-                record["partial_file_bytes"] = partial.stat().st_size if partial.exists() else None
                 record["payload_after"] = self.counts[kind]
-                self.ledger.append(record)
-                require(len(encoded(self.ledger)) <= self.limits["other_artifact_file_bytes"],
-                        "fetch ledger artifact bound")
+                record["payload_counters_after"] = self.counts.copy()
+                for name, resource_to_close in (("body-file-close", stream), ("response-close", response)):
+                    if resource_to_close is not None:
+                        try:
+                            resource_to_close.close()
+                        except BaseException as error:
+                            record["finalization_errors"].append(failure_record(error, name))
+                            if final_error is None:
+                                final_error = error
+                record["retained_path"] = str(partial)
+                record["retained_disposition"] = "partial-not-accepted"
+                try:
+                    record["partial_file_bytes"] = partial.stat().st_size
+                except FileNotFoundError:
+                    record["partial_file_bytes"] = None
+                except BaseException as error:
+                    record["partial_file_bytes"] = None
+                    record["finalization_errors"].append(failure_record(error, "partial-file-stat"))
+                    if final_error is None:
+                        final_error = error
+                try:
+                    require(len(encoded(self.ledger)) <= self.limits["other_artifact_file_bytes"],
+                            "fetch ledger artifact bound")
+                except BaseException as error:
+                    record["finalization_errors"].append(failure_record(error, "ledger-bound"))
+                    if final_error is None:
+                        final_error = error
+            if primary is not None:
+                raise primary
+            if final_error is not None:
+                record["error"] = record["finalization_errors"][0]
+                raise final_error
+            if redirect is not None:
+                record["complete"] = True
+                record["retained_disposition"] = "counted-redirect-body"
+                current = redirect
+                continue
+            try:
+                partial.rename(destination)
+            except BaseException as error:
+                record["error"] = failure_record(error, "payload-rename")
+                raise
+            record.update(complete=True, retained_path=str(destination), retained_disposition="downloaded")
+            return {"path": str(destination), "bytes": record["payload_bytes"],
+                    "sha256": record["body_sha256"]}
         raise Error("redirect loop bound")
 
 
@@ -372,34 +419,72 @@ class Runner:
         requested = [str(a) for a in argv]
         require(Path(requested[0]).is_absolute() and Path(requested[0]).name != "ipsw",
                 "absolute non-ipsw tool required; never execute decoder")
-        remaining = min(self.deadline, self.phase_deadline) - time.monotonic()
+        started = time.monotonic()
+        absolute_stop = min(self.deadline, self.phase_deadline, self.cleanup_deadline)
         if budget == "cleanup":
-            remaining = min(60, self.cleanup_deadline - time.monotonic())
+            absolute_stop = min(started + 60, self.cleanup_deadline)
         if budget == "metadata":
-            remaining = min(remaining, limits["metadata_signing_seconds_combined"] - self.metadata_seconds)
-        require(remaining > 0, "command aggregate time bound")
+            absolute_stop = min(absolute_stop, started + limits["metadata_signing_seconds_combined"] -
+                                self.metadata_seconds)
+        require(absolute_stop > started, "command aggregate time bound")
         require(timeout is None or timeout > 0, "phase deadline before command")
-        stop = time.monotonic() + min(remaining, timeout if timeout is not None else 120)
+        stop = min(absolute_stop, started + (timeout if timeout is not None else 120))
         index = len(self.records)
         record = {"label": label, "argv": requested, "pid": None, "rc": None, "errors": [],
-                  "reaped": False, "group_kill_before_reap": False, "streams": {}}
+                  "reaped": False, "reap_state": "not-started", "wait_attempted": False,
+                  "group_kill_before_reap": False, "group_signal_attempted": False,
+                  "signal_authority_sealed": False, "streams": {}, "complete": False,
+                  "command_deadline": stop, "controller_deadline": self.cleanup_deadline}
         self.records.append(record)
         data, eof, process, poller = {"stdout": bytearray(), "stderr": bytearray()}, set(), None, None
-        started = time.monotonic()
+        can_signal, interrupted, phase = False, None, "spawn"
+
+        def seal(reason):
+            nonlocal can_signal
+            can_signal = False
+            if not record["signal_authority_sealed"]:
+                record["signal_authority_sealed"] = True
+                record["signal_seal_reason"] = reason
+
+        def note(error, where):
+            nonlocal interrupted
+            record["errors"].append(failure_record(error, where))
+            if not isinstance(error, Exception):
+                seal("interruption")
+                if interrupted is None:
+                    interrupted = error
+
+        def wait_owned(wait_timeout, where):
+            seal("before-" + where)
+            authorized_at = time.monotonic()
+            wait_deadline = self.cleanup_deadline if where == "cleanup-wait" else min(stop, self.cleanup_deadline)
+            wait_timeout = min(wait_timeout, wait_deadline - authorized_at)
+            require(wait_timeout > 0, "absolute deadline exhausted before wait")
+            record["wait_attempted"] = True
+            record["reap_state"] = "wait-outcome-indeterminate"
+            record.setdefault("waits", []).append({"phase": where, "timeout": wait_timeout,
+                                                  "authorized_at": authorized_at, "deadline": wait_deadline})
+            record["rc"] = process.wait(timeout=wait_timeout)
+            record["reaped"] = True
+            record["reap_state"] = "confirmed-by-wait-return"
+
         try:
             def file_bound():
                 resource.setrlimit(resource.RLIMIT_FSIZE, (limits["binary_bytes"], limits["binary_bytes"]))
             process = subprocess.Popen(requested.copy(), cwd=self.work, env=env, stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
                 preexec_fn=file_bound if label in ("compile", "ad-hoc-sign") else None)
+            can_signal = True
             record["pid"] = process.pid
+            record["reap_state"] = "owned-unwaited"
             require(process.args == requested, "tool argv changed")
+            phase = "capture"
             poller = selectors.DefaultSelector()
             for pipe, name in ((process.stdout, "stdout"), (process.stderr, "stderr")):
                 poller.register(pipe, selectors.EVENT_READ, name)
             while poller.get_map():
                 require(time.monotonic() < stop, "command/EOF deadline")
-                for key, _ in poller.select(0.1):
+                for key, _ in poller.select(min(0.1, max(0, stop - time.monotonic()))):
                     name = key.data
                     raw = os.read(key.fileobj.fileno(), min(65536, limits["per_command_stream_bytes"] + 1 - len(data[name])))
                     if not raw:
@@ -408,39 +493,74 @@ class Runner:
                     else:
                         data[name].extend(raw)
                         require(len(data[name]) <= limits["per_command_stream_bytes"], "command stream cap")
-            require(time.monotonic() < stop, "command wait deadline")
-            record["rc"] = process.wait(timeout=min(limits["command_wait_seconds"], stop - time.monotonic()))
-            record["reaped"] = True
-        except Exception as error:
-            record["errors"].append({"type": type(error).__name__, "message": str(error)})
+            phase = "command-wait"
+            remaining = min(stop, self.cleanup_deadline) - time.monotonic()
+            require(remaining > 0, "command wait deadline")
+            wait_owned(min(limits["command_wait_seconds"], remaining), phase)
+        except BaseException as error:
+            note(error, phase)
         finally:
             if process is not None and not record["reaped"]:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    record["group_kill_before_reap"] = True
-                except OSError as error:
-                    record["errors"].append({"cleanup": repr(error)})
-                try:
-                    record["rc"] = process.wait(timeout=limits["cleanup_wait_seconds"])
-                    record["reaped"] = True
-                except (OSError, subprocess.TimeoutExpired) as error:
-                    record["errors"].append({"reap": repr(error)})
-            if poller is not None:
-                poller.close()
+                if can_signal:
+                    seal("before-group-signal")
+                    record["group_signal_attempted"] = True
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        record["group_kill_before_reap"] = True
+                    except BaseException as error:
+                        note(error, "owned-group-signal")
+                if record["wait_attempted"]:
+                    record["cleanup_wait_skipped"] = "prior-wait-may-have-consumed-anchor"
+                else:
+                    remaining = self.cleanup_deadline - time.monotonic()
+                    if remaining <= 0:
+                        seal("controller-deadline")
+                        record["cleanup_wait_skipped"] = "controller-deadline-exhausted"
+                        note(Error("controller deadline exhausted; no cleanup wait authorized"), "cleanup-wait")
+                    else:
+                        try:
+                            wait_owned(min(limits["cleanup_wait_seconds"], remaining), "cleanup-wait")
+                        except BaseException as error:
+                            note(error, "cleanup-wait")
+            seal("command-finalization")
             if process is not None:
-                process.stdout.close()
-                process.stderr.close()
+                record["process_returncode_observed"] = getattr(process, "returncode", None)
+            endpoints = [("selector-close", poller)]
+            if process is not None:
+                endpoints.extend((("stdout-close", process.stdout), ("stderr-close", process.stderr)))
+            for name, endpoint in endpoints:
+                if endpoint is not None:
+                    try:
+                        endpoint.close()
+                    except BaseException as error:
+                        note(error, name)
             record["seconds"] = time.monotonic() - started
             if budget == "metadata":
                 self.metadata_seconds += record["seconds"]
             for name, raw in data.items():
                 file = self.log_root / f"cmd-{index:02d}-{name}.bin"
-                with file.open("xb") as stream:
-                    stream.write(raw)
-                self.logs.append(file)
-                record["streams"][name] = {"file": file.name, "bytes": len(raw), "sha256": digest(raw),
-                                          "eof": name in eof}
+                stream_record = {"file": file.name, "bytes": len(raw), "sha256": digest(raw),
+                                 "eof": name in eof, "persisted": False}
+                record["streams"][name] = stream_record
+                target, write_failed = None, False
+                try:
+                    target = file.open("xb")
+                    self.logs.append(file)
+                    target.write(raw)
+                except BaseException as error:
+                    write_failed = True
+                    note(error, name + "-log-write")
+                finally:
+                    if target is not None:
+                        try:
+                            target.close()
+                        except BaseException as error:
+                            write_failed = True
+                            note(error, name + "-log-close")
+                stream_record["persisted"] = not write_failed
             record["complete"] = eof == {"stdout", "stderr"} and record["reaped"] and not record["errors"]
+        if interrupted is not None:
+            raise interrupted
         require(record["complete"] and record["rc"] == 0, "command failed; no retry: " + label)
         return bytes(data["stdout"]), bytes(data["stderr"])
 
@@ -450,14 +570,19 @@ def metadata_phase(runner):
     old_deadline = runner.phase_deadline
     runner.phase_deadline = min(runner.deadline, start +
         runner.bounds["limits"]["metadata_signing_seconds_combined"] - prior)
+    primary = None
     try:
         require(start < runner.phase_deadline, "metadata/signing aggregate deadline")
         yield
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         runner.metadata_seconds = prior + time.monotonic() - start
         expired = time.monotonic() >= runner.phase_deadline
         runner.phase_deadline = old_deadline
-        require(not expired, "metadata/signing aggregate deadline")
+        if primary is None:
+            require(not expired, "metadata/signing aggregate deadline")
 
 
 def bind_tools(bounds, runner, env, provenance, suffix):
@@ -754,19 +879,23 @@ def main():
     try:
         execute(bounds, output, work, provenance, runner, ledger)
         code = 0
-    except Exception as error:
-        provenance["failure"] = {"type": type(error).__name__, "message": str(error)}
+    except BaseException as error:
+        provenance["failure"] = failure_record(error, "execute")
     finally:
+        provenance["fetch_payload_bytes"] = {
+            kind: sum(row["payload_bytes"] for row in ledger if row.get("kind") == kind)
+            for kind in ("source", "compiler", "module")}
         artifact_stop = provenance.get("artifact_deadline", min(runner.deadline,
             time.monotonic() + bounds["limits"]["artifact_preparation_seconds"]))
-        try:
-            for log in runner.logs:
+        for log in runner.logs:
+            try:
                 require(time.monotonic() < artifact_stop, "artifact log export deadline")
                 if log.parent != evidence:
                     output.write(log.name, log.read_bytes())
-        except Exception as error:
-            provenance["log_export_error"] = repr(error)
-            code = 1
+            except BaseException as error:
+                provenance.setdefault("log_export_errors", []).append({
+                    "file": str(log), **failure_record(error, "log-export")})
+                code = 1
         if provenance.get("attach_attempted"):
             try:
                 runner.work, runner.log_root = work, evidence
@@ -774,28 +903,46 @@ def main():
                 runner.command("image-detach", [bounds["tools"]["hdiutil"], "detach", provenance["mount"]],
                                control_env, "cleanup", 60)
                 provenance["detached"] = True
-            except Exception as error:
-                provenance["detach_error"] = repr(error)
+            except BaseException as error:
+                provenance["detach_error"] = failure_record(error, "detach")
                 code = 1
         if provenance.get("detached"):
             image = Path(provenance["image"])
-            provenance["backing_after"] = {"logical": image.stat().st_size, "allocated_blocks": image.stat().st_blocks,
-                "user_available_sample_only": os.statvfs(work).f_bavail * os.statvfs(work).f_frsize}
-            if code == 0:
-                image.unlink()
-                provenance["only_known_backing_image_deleted"] = True
-            else:
+            try:
+                provenance["backing_after"] = {"logical": image.stat().st_size, "allocated_blocks": image.stat().st_blocks,
+                    "user_available_sample_only": os.statvfs(work).f_bavail * os.statvfs(work).f_frsize}
+                if code == 0:
+                    image.unlink()
+                    provenance["only_known_backing_image_deleted"] = True
+            except BaseException as error:
+                provenance["backing_finalization_error"] = failure_record(error, "backing-finalization")
+                code = 1
+            if code != 0:
                 provenance["failed_backing_image_retained_on_runner"] = str(image)
                 provenance["retention_precision"] = "Partial inputs/logs remain on this detached image until runner teardown; not uploaded as a bulk artifact. Bounded failure records are uploaded."
+        if code == 0:
+            try:
+                require(time.monotonic() < artifact_stop and time.monotonic() < runner.cleanup_deadline,
+                        "artifact/controller deadline before acceptance")
+            except BaseException as error:
+                provenance["acceptance_error"] = failure_record(error, "acceptance")
+                code = 1
+        output_error = None
+        for filename, value in (("commands.json", runner.records), ("fetches.json", ledger)):
+            try:
+                output.json(filename, value)
+            except BaseException as error:
+                provenance.setdefault("required_output_errors", []).append({
+                    "file": filename, **failure_record(error, "required-output")})
+                code = 1
+                if output_error is None:
+                    output_error = error
         if code != 0:
             provenance["disposition"] = "failed-return-to-design"
         provenance["output_binary_accepted"] = code == 0
-        if code == 0:
-            require(time.monotonic() < artifact_stop and time.monotonic() < runner.cleanup_deadline,
-                    "artifact/controller deadline before acceptance")
-        output.json("commands.json", runner.records)
-        output.json("fetches.json", ledger)
         output.json("provenance.json", provenance)
+        if output_error is not None:
+            raise output_error
         output.finish()
     return code
 

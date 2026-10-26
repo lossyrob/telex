@@ -585,7 +585,7 @@ class RunnerTests(unittest.TestCase):
                     self.assertRaises(b.Error):
                 runner.command("overflow", ["/fixed/tool"], {})
             self.assertFalse(runner.records[0]["reaped"])
-            self.assertTrue(any("reap" in e for e in runner.records[0]["errors"]))
+            self.assertTrue(any(e["phase"] == "cleanup-wait" for e in runner.records[0]["errors"]))
 
 
 def synthetic_macho(identifier, flags=2, entitlements=False, cpu=0x100000C):
@@ -695,6 +695,383 @@ class SignatureOutputTests(unittest.TestCase):
             report = json.loads((evidence / "provenance.json").read_bytes())
             self.assertFalse(report["output_binary_accepted"])
             self.assertIn("detach_error", report)
+
+
+class FailureBoundaryTests(unittest.TestCase):
+    def test_wait_reaps_then_interrupts_seals_signal_authority_and_preserves_uncertainty(self):
+        with RunnerTests().fake(b"captured-output") as (runner, process, _, kill, root):
+            events = []
+            interruption = KeyboardInterrupt("synthetic wait reaped then interrupted")
+            def wait(timeout):
+                self.assertTrue(runner.records[0]["signal_authority_sealed"])
+                self.assertTrue(runner.records[0]["wait_attempted"])
+                process.waited, process.returncode = True, 0
+                events.append("leader-reaped-before-KeyboardInterrupt")
+                raise interruption
+            with patch.object(process, "wait", side_effect=wait) as waiter, self.assertRaises(KeyboardInterrupt) as raised:
+                runner.command("static", ["/fixed/tool"], {})
+            self.assertIs(raised.exception, interruption)
+            self.assertEqual(events, ["leader-reaped-before-KeyboardInterrupt"])
+            self.assertEqual(waiter.call_count, 1)
+            kill.assert_not_called()
+            record = runner.records[0]
+            self.assertFalse(record["group_kill_before_reap"])
+            self.assertFalse(record["group_signal_attempted"])
+            self.assertFalse(record["complete"])
+            self.assertFalse(record["reaped"])
+            self.assertEqual(record["process_returncode_observed"], 0)
+            self.assertEqual(record["reap_state"], "wait-outcome-indeterminate")
+            self.assertEqual(record["cleanup_wait_skipped"], "prior-wait-may-have-consumed-anchor")
+            self.assertEqual(record["errors"][0]["type"], "KeyboardInterrupt")
+            self.assertTrue(record["errors"][0]["interruption"])
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"captured-output")
+            self.assertTrue(record["streams"]["stdout"]["persisted"])
+
+    def test_any_potentially_consuming_wait_failure_cannot_rearm_signal_or_wait(self):
+        for failure in (subprocess.TimeoutExpired("owned", 5), OSError("wait failed"),
+                        SystemExit("wait exited")):
+            with self.subTest(failure=type(failure).__name__), RunnerTests().fake() as (
+                    runner, process, _, kill, _):
+                expected = b.Error if isinstance(failure, Exception) else type(failure)
+                with patch.object(process, "wait", side_effect=failure) as waiter, self.assertRaises(expected):
+                    runner.command("static", ["/fixed/tool"], {})
+                self.assertEqual(waiter.call_count, 1)
+                kill.assert_not_called()
+                self.assertTrue(runner.records[0]["signal_authority_sealed"])
+                self.assertEqual(runner.records[0]["reap_state"], "wait-outcome-indeterminate")
+                self.assertFalse(runner.records[0]["complete"])
+
+    def test_prewait_interruption_disables_signals_but_may_finish_exact_owned_wait(self):
+        with RunnerTests().fake() as (runner, process, _, kill, root), \
+                patch.object(b.os, "read", side_effect=KeyboardInterrupt("capture interrupted")):
+            with self.assertRaises(KeyboardInterrupt):
+                runner.command("interrupted", ["/fixed/tool"], {})
+            kill.assert_not_called()
+            record = runner.records[0]
+            self.assertTrue(record["reaped"])
+            self.assertFalse(record["complete"])
+            self.assertEqual(record["signal_seal_reason"], "interruption")
+            self.assertEqual(record["waits"][0]["phase"], "cleanup-wait")
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"")
+
+    def test_cleanup_wait_interruption_preserves_one_prewait_signal_without_second_signal(self):
+        with RunnerTests().fake(b"overflow", cap=4) as (runner, process, _, kill, root):
+            def wait(timeout):
+                process.waited, process.returncode = True, -9
+                raise KeyboardInterrupt("cleanup reaped then interrupted")
+            with patch.object(process, "wait", side_effect=wait) as waiter, self.assertRaises(KeyboardInterrupt):
+                runner.command("overflow", ["/fixed/tool"], {})
+            self.assertEqual(waiter.call_count, 1)
+            kill.assert_called_once_with(1234, b.signal.SIGKILL)
+            record = runner.records[0]
+            self.assertTrue(record["group_kill_before_reap"])
+            self.assertFalse(record["reaped"])
+            self.assertFalse(record["complete"])
+            self.assertEqual([e["phase"] for e in record["errors"]], ["capture", "cleanup-wait"])
+            self.assertEqual(record["process_returncode_observed"], -9)
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"overf")
+
+    def test_each_selector_or_pipe_close_failure_retains_raw_evidence_for_normal_and_overflow(self):
+        for endpoint in ("selector", "stdout", "stderr"):
+            for overflow in (False, True):
+                with self.subTest(endpoint=endpoint, overflow=overflow), RunnerTests().fake(
+                        b"captured-output", cap=4 if overflow else 100) as (runner, process, _, kill, root):
+                    closed = []
+                    def close(name):
+                        closed.append(name)
+                        if name == endpoint:
+                            raise OSError("synthetic " + name + " close")
+                    with patch.object(Poller, "close", side_effect=lambda: close("selector")), \
+                            patch.object(process.stdout, "close", side_effect=lambda: close("stdout")), \
+                            patch.object(process.stderr, "close", side_effect=lambda: close("stderr")), \
+                            self.assertRaises(b.Error):
+                        runner.command("overflow" if overflow else "static", ["/fixed/tool"], {})
+                    self.assertEqual(closed, ["selector", "stdout", "stderr"])
+                    record = runner.records[0]
+                    self.assertFalse(record["complete"])
+                    self.assertTrue(record["reaped"])
+                    self.assertTrue(any(e["phase"] == endpoint + "-close" for e in record["errors"]))
+                    if overflow:
+                        self.assertEqual(record["errors"][0]["message"], "command stream cap")
+                    self.assertEqual(kill.call_count, int(overflow))
+                    self.assertEqual(len(runner.logs), 2)
+                    raw = b"captu" if overflow else b"captured-output"
+                    self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), raw)
+                    self.assertEqual((root / "cmd-00-stderr.bin").read_bytes(), b"")
+                    self.assertEqual(record["streams"]["stdout"]["sha256"], b.digest(raw))
+                    self.assertTrue(record["streams"]["stdout"]["persisted"])
+                    self.assertIn("seconds", record)
+
+    def test_multiple_closes_and_close_interruption_attempt_all_finalizers(self):
+        with RunnerTests().fake() as (runner, process, _, kill, root):
+            with patch.object(Poller, "close", side_effect=KeyboardInterrupt("selector interrupt")) as poller, \
+                    patch.object(process.stdout, "close", side_effect=OSError("stdout close")) as stdout, \
+                    patch.object(process.stderr, "close", side_effect=OSError("stderr close")) as stderr, \
+                    self.assertRaises(KeyboardInterrupt):
+                runner.command("static", ["/fixed/tool"], {})
+            for close in (poller, stdout, stderr):
+                close.assert_called_once()
+            kill.assert_not_called()
+            self.assertEqual([e["phase"] for e in runner.records[0]["errors"]],
+                             ["selector-close", "stdout-close", "stderr-close"])
+            self.assertFalse(runner.records[0]["complete"])
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"static")
+            self.assertEqual(len(runner.logs), 2)
+
+    def test_stdout_log_failure_still_attempts_stderr_and_keeps_captured_hash(self):
+        with RunnerTests().fake() as (runner, _, _, kill, root):
+            original_open = Path.open
+            def opened(file, *args, **kwargs):
+                if file.name == "cmd-00-stdout.bin":
+                    raise OSError("synthetic stdout log write failure")
+                return original_open(file, *args, **kwargs)
+            with patch.object(Path, "open", opened), self.assertRaises(b.Error):
+                runner.command("static", ["/fixed/tool"], {})
+            kill.assert_not_called()
+            record = runner.records[0]
+            self.assertFalse(record["streams"]["stdout"]["persisted"])
+            self.assertEqual(record["streams"]["stdout"]["sha256"], b.digest(b"static"))
+            self.assertTrue(record["streams"]["stderr"]["persisted"])
+            self.assertEqual((root / "cmd-00-stderr.bin").read_bytes(), b"")
+            self.assertFalse(record["complete"])
+
+    def test_raw_log_close_failure_does_not_mask_other_stream_or_primary_error(self):
+        with RunnerTests().fake(b"overflow", cap=4) as (runner, _, _, _, root):
+            original = Path.open
+            class BrokenClose:
+                def __init__(self, stream):
+                    self.stream = stream
+                def write(self, raw):
+                    return self.stream.write(raw)
+                def close(self):
+                    self.stream.close()
+                    raise OSError("synthetic raw stdout log close")
+            def opened(file, *args, **kwargs):
+                stream = original(file, *args, **kwargs)
+                return BrokenClose(stream) if file.name == "cmd-00-stdout.bin" and args == ("xb",) else stream
+            with patch.object(Path, "open", opened), self.assertRaises(b.Error):
+                runner.command("overflow", ["/fixed/tool"], {})
+            record = runner.records[0]
+            self.assertEqual(record["errors"][0]["message"], "command stream cap")
+            self.assertEqual(record["errors"][-1]["phase"], "stdout-log-close")
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"overf")
+            self.assertEqual((root / "cmd-00-stderr.bin").read_bytes(), b"")
+            self.assertFalse(record["streams"]["stdout"]["persisted"])
+            self.assertTrue(record["streams"]["stderr"]["persisted"])
+            self.assertFalse(record["complete"])
+
+    def test_cleanup_at_absolute_deadline_authorizes_no_wait_and_records_unreaped_failure(self):
+        with RunnerTests().fake() as (runner, process, _, kill, root):
+            now = [990.0]
+            original_read = b.os.read
+            def read(fd, maximum):
+                raw = original_read(fd, maximum)
+                now[0] = 1000.0
+                return raw
+            with patch.object(b.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(b.os, "read", side_effect=read), \
+                    patch.object(process, "wait") as waiter, self.assertRaises(b.Error):
+                runner.command("image-detach", ["/fixed/tool"], {}, "cleanup", 60)
+            self.assertEqual(now[0], runner.cleanup_deadline)
+            waiter.assert_not_called()
+            kill.assert_called_once()
+            record = runner.records[0]
+            self.assertFalse(record["complete"])
+            self.assertFalse(record["reaped"])
+            self.assertFalse(record["wait_attempted"])
+            self.assertEqual(record["cleanup_wait_skipped"], "controller-deadline-exhausted")
+            self.assertTrue(record["signal_authority_sealed"])
+            self.assertEqual((root / "cmd-00-stdout.bin").read_bytes(), b"static")
+
+    def test_cleanup_wait_uses_only_remaining_controller_time(self):
+        for remaining in (0.25, 2.0, 9.0, 20.0):
+            with self.subTest(remaining=remaining), RunnerTests().fake(b"overflow", cap=1) as (
+                    runner, process, _, kill, _):
+                now = [1000.0 - remaining]
+                def wait(timeout):
+                    self.assertLessEqual(timeout, runner.cleanup_deadline - now[0])
+                    now[0] += timeout
+                    process.waited = True
+                    return 0
+                with patch.object(b.time, "monotonic", side_effect=lambda: now[0]), \
+                        patch.object(process, "wait", side_effect=wait) as waiter, self.assertRaises(b.Error):
+                    runner.command("image-detach", ["/fixed/tool"], {}, "cleanup", 60)
+                self.assertEqual(waiter.call_args.kwargs["timeout"], min(10, remaining))
+                self.assertLessEqual(now[0], runner.cleanup_deadline)
+                self.assertTrue(runner.records[0]["reaped"])
+                self.assertFalse(runner.records[0]["complete"])
+                self.assertEqual(kill.call_count, 1)
+                wait_record = runner.records[0]["waits"][0]
+                self.assertLessEqual(wait_record["authorized_at"] + wait_record["timeout"], wait_record["deadline"])
+
+    def test_metadata_finalizer_does_not_replace_primary_interruption(self):
+        with RunnerTests().fake() as (runner, _, _, _, _):
+            interruption = KeyboardInterrupt("primary")
+            with patch.object(b.time, "monotonic", side_effect=[0, 181, 181]), \
+                    self.assertRaises(KeyboardInterrupt) as raised:
+                with b.metadata_phase(runner):
+                    raise interruption
+            self.assertIs(raised.exception, interruption)
+
+
+class FetchFinalizationTests(unittest.TestCase):
+    @staticmethod
+    def close_error_response(url, raw=b"abc", status=200, headers=None):
+        class CloseError(Response):
+            def close(self):
+                if not self.closed:
+                    super().close()
+                    raise OSError("synthetic response close error")
+        return CloseError(url, raw, status, headers)
+
+    def test_response_close_failure_keeps_all_four_request_ledgers_and_primary_errors(self):
+        url = "https://proxy.golang.org/synthetic"
+        for mode, status in (("success", 200), ("http-error", 404), ("redirect", 302), ("incomplete", 200)):
+            response = self.close_error_response(url, headers={"Location": url} if status == 302 else {}, status=status)
+            primary = http.client.IncompleteRead(b"ab", 3)
+            if mode == "incomplete":
+                response.read1 = lambda maximum: (_ for _ in ()).throw(primary)
+            with self.subTest(mode=mode), FetchTests().scenario([response]) as (fetcher, root, calls, ledger):
+                expected = http.client.IncompleteRead if mode == "incomplete" else b.Error if mode == "http-error" else OSError
+                with self.assertRaises(expected) as raised:
+                    fetcher.fetch(url, root / "data", "module", ["proxy.golang.org"])
+                if mode == "incomplete":
+                    self.assertIs(raised.exception, primary)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(ledger), 1)
+                record = ledger[0]
+                raw = b"ab" if mode == "incomplete" else b"abc"
+                self.assertEqual(record["payload_bytes"], len(raw))
+                self.assertEqual(record["payload_after"], len(raw))
+                self.assertEqual(record["payload_counters_after"]["module"], len(raw))
+                self.assertEqual(record["received_body_sha256"], b.digest(raw))
+                self.assertEqual(record["partial_file_bytes"], len(raw))
+                self.assertEqual((root / "data.hop-0.partial").read_bytes(), raw)
+                self.assertFalse((root / "data").exists())
+                self.assertFalse(record["complete"])
+                self.assertEqual(record["retained_disposition"], "partial-not-accepted")
+                self.assertEqual(record["finalization_errors"][0]["phase"], "response-close")
+                self.assertEqual(record["error"]["type"], expected.__name__)
+                if mode == "http-error":
+                    self.assertEqual(record["error"]["message"], "non-success fetch response")
+                self.assertTrue(response.closed)
+
+    def test_body_file_close_and_response_close_errors_are_independent(self):
+        url = "https://proxy.golang.org/synthetic"
+        response = self.close_error_response(url)
+        original = Path.open
+        class BrokenClose:
+            def __init__(self, stream):
+                self.stream = stream
+            def write(self, raw):
+                return self.stream.write(raw)
+            def close(self):
+                self.stream.close()
+                raise OSError("synthetic body file close error")
+        def opened(file, *args, **kwargs):
+            stream = original(file, *args, **kwargs)
+            return BrokenClose(stream) if file.name.endswith(".partial") and args == ("xb",) else stream
+        with FetchTests().scenario([response]) as (fetcher, root, calls, ledger), patch.object(Path, "open", opened):
+            with self.assertRaisesRegex(OSError, "body file close error"):
+                fetcher.fetch(url, root / "data", "module", ["proxy.golang.org"])
+            self.assertEqual([e["phase"] for e in ledger[0]["finalization_errors"]],
+                             ["body-file-close", "response-close"])
+            self.assertEqual(ledger[0]["received_body_sha256"], b.digest(b"abc"))
+            self.assertEqual(ledger[0]["partial_file_bytes"], 3)
+            self.assertTrue(response.closed)
+            self.assertEqual(len(calls), 1)
+
+    def test_primary_interruption_is_not_masked_by_response_close_error(self):
+        url = "https://proxy.golang.org/synthetic"
+        response = self.close_error_response(url)
+        interruption = KeyboardInterrupt("body interrupted")
+        response.read1 = lambda maximum: (_ for _ in ()).throw(interruption)
+        with FetchTests().scenario([response]) as (fetcher, root, _, ledger), self.assertRaises(KeyboardInterrupt) as raised:
+            fetcher.fetch(url, root / "data", "module", ["proxy.golang.org"])
+        self.assertIs(raised.exception, interruption)
+        self.assertEqual(ledger[0]["error"]["type"], "KeyboardInterrupt")
+        self.assertEqual(ledger[0]["finalization_errors"][0]["type"], "OSError")
+        self.assertTrue(ledger[0]["error"]["interruption"])
+        self.assertEqual(ledger[0]["payload_after"], 0)
+
+    def test_partial_stat_failure_does_not_erase_counter_or_response_close_error(self):
+        url = "https://proxy.golang.org/synthetic"
+        response = self.close_error_response(url)
+        with FetchTests().scenario([response]) as (fetcher, root, _, ledger):
+            original = Path.stat
+            def stat_file(file, *args, **kwargs):
+                if file.name.endswith(".partial"):
+                    raise PermissionError("partial stat denied")
+                return original(file, *args, **kwargs)
+            with patch.object(Path, "stat", stat_file), self.assertRaisesRegex(OSError, "response close"):
+                fetcher.fetch(url, root / "data", "module", ["proxy.golang.org"])
+            self.assertEqual(ledger[0]["payload_after"], 3)
+            self.assertEqual(ledger[0]["received_body_sha256"], b.digest(b"abc"))
+            self.assertIsNone(ledger[0]["partial_file_bytes"])
+            self.assertEqual([e["phase"] for e in ledger[0]["finalization_errors"]],
+                             ["response-close", "partial-file-stat"])
+
+    def test_response_close_error_and_payload_totals_reach_main_failure_artifacts(self):
+        url = "https://proxy.golang.org/synthetic"
+        for status in (200, 404):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                work, evidence = Path(directory) / "work", Path(directory) / "evidence"
+                response = self.close_error_response(url, status=status)
+                def fetch_only(bounds, output, root, provenance, runner, ledger):
+                    fetcher = b.Fetcher(bounds["limits"], float("inf"), ledger)
+                    fetcher.fetch(url, root / "data", "module", ["proxy.golang.org"])
+                with patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                        patch.object(b, "execute", side_effect=fetch_only), \
+                        patch.object(b.urllib.request, "build_opener",
+                                     return_value=SimpleNamespace(open=lambda *args, **kwargs: response)):
+                    self.assertEqual(b.main(), 1)
+                provenance = json.loads((evidence / "provenance.json").read_bytes())
+                ledger = json.loads((evidence / "fetches.json").read_bytes())
+                self.assertEqual(provenance["fetch_payload_bytes"]["module"], 3)
+                self.assertFalse(provenance["output_binary_accepted"])
+                self.assertEqual(len(ledger), 1)
+                self.assertEqual(ledger[0]["received_body_sha256"], b.digest(b"abc"))
+                self.assertEqual(ledger[0]["finalization_errors"][0]["phase"], "response-close")
+                self.assertEqual(provenance["failure"]["type"], "OSError" if status == 200 else "DiagnosticError")
+                manifest = json.loads((evidence / "sha256.json").read_bytes())
+                self.assertTrue(all(b.digest((evidence / f).read_bytes()) == h for f, h in manifest.items()))
+
+
+class MainFinalizationTests(unittest.TestCase):
+    def test_interrupted_wait_reaches_failed_provenance_without_success_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work, evidence = Path(directory) / "work", Path(directory) / "evidence"
+            interruption = KeyboardInterrupt("retained interruption")
+            def interrupted(bounds, output, root, provenance, runner, ledger):
+                runner.records.append({"complete": False, "errors": [b.failure_record(interruption, "command-wait")]})
+                raise interruption
+            with patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(b, "execute", side_effect=interrupted):
+                self.assertEqual(b.main(), 1)
+            provenance = json.loads((evidence / "provenance.json").read_bytes())
+            self.assertFalse(provenance["output_binary_accepted"])
+            self.assertEqual(provenance["failure"]["type"], "KeyboardInterrupt")
+            self.assertTrue(provenance["failure"]["interruption"])
+            self.assertTrue((evidence / "commands.json").is_file())
+
+    def test_failure_writing_one_required_artifact_still_attempts_the_others(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work, evidence = Path(directory) / "work", Path(directory) / "evidence"
+            original = b.Evidence.json
+            def output(target, name, value):
+                if name == "commands.json":
+                    raise OSError("synthetic command receipt sink failure")
+                return original(target, name, value)
+            with patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(b, "execute", side_effect=b.Error("primary build failure")), \
+                    patch.object(b.Evidence, "json", output), self.assertRaises(OSError):
+                b.main()
+            self.assertTrue((evidence / "fetches.json").is_file())
+            provenance = json.loads((evidence / "provenance.json").read_bytes())
+            self.assertFalse(provenance["output_binary_accepted"])
+            self.assertEqual(provenance["failure"]["message"], "primary build failure")
+            self.assertEqual(provenance["required_output_errors"][0]["file"], "commands.json")
+            self.assertFalse((evidence / "sha256.json").exists())
 
 
 if __name__ == "__main__":
