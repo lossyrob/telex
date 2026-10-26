@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory = $true)][string]$EvidenceRoot,
     [Parameter(Mandatory = $true)][int]$Minutes,
     [Parameter(Mandatory = $true)][ValidateSet("on", "off")][string]$PageHeap,
-    [Parameter(Mandatory = $true)][string]$Label
+    [Parameter(Mandatory = $true)][string]$Label,
+    [Parameter(Mandatory = $true)][ValidateSet("on", "off")][string]$Attach
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -25,11 +26,12 @@ if ($exe.Count -ne 1) { throw "expected exactly one telex_watcher lib harness, f
 $exe = $exe[0]
 $exeName = Split-Path -Leaf $exe
 $logs = Join-Path $EvidenceRoot "iterations"
+$dumps = Join-Path $EvidenceRoot "dumps"
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 "harness=$exe" | Tee-Object -FilePath (Join-Path $EvidenceRoot "harness.txt")
 (Get-Content Cargo.lock -Raw) -match '(?m)^name = "mio"\r?\nversion = "([^"]+)"' | Out-Null
 $mio = $Matches[1]
-"mio=$mio pageheap=$PageHeap label=$Label" | Tee-Object -FilePath (Join-Path $EvidenceRoot "config.txt")
+"mio=$mio pageheap=$PageHeap attach=$Attach label=$Label" | Tee-Object -FilePath (Join-Path $EvidenceRoot "config.txt")
 
 $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\$exeName"
 if ($PageHeap -eq "on") {
@@ -56,11 +58,20 @@ try {
         $child = Start-Process -FilePath $exe -WorkingDirectory $workdir -PassThru -NoNewWindow `
             -RedirectStandardOutput $out -RedirectStandardError $err
         $handle = $child.Handle
+        $debugger = $null
+        if ($Attach -eq "on") {
+            $debugger = Start-Process -FilePath $env:DIAG203_PROCDUMP -PassThru -NoNewWindow `
+                -ArgumentList "-accepteula -ma -e $($child.Id) `"$dumps`"" `
+                -RedirectStandardOutput (Join-Path $logs "iter-$iteration.procdump.txt")
+        }
         if (-not $child.WaitForExit(1200000)) {
             Stop-Process -Id $child.Id -Force
             $child.WaitForExit()
         }
         $child.Refresh()
+        if ($null -ne $debugger -and -not $debugger.WaitForExit(180000)) {
+            Stop-Process -Id $debugger.Id -Force
+        }
         $status = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$child.ExitCode), 0)
         $seconds = [int]((Get-Date) - $started).TotalSeconds
         $text = Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue
@@ -78,13 +89,14 @@ try {
             $testFailures += 1
         } else {
             Remove-Item -LiteralPath $out, $err -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $logs "iter-$iteration.procdump.txt") -ErrorAction SilentlyContinue
         }
     }
 } finally {
     if ($PageHeap -eq "on") { Remove-Item -Path $ifeo -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-$line = "label=$Label mio=$mio pageheap=$PageHeap iterations=$iteration crashes=$crashes testFailures=$testFailures"
+$line = "label=$Label mio=$mio pageheap=$PageHeap attach=$Attach iterations=$iteration crashes=$crashes testFailures=$testFailures"
 $line | Tee-Object -FilePath (Join-Path $EvidenceRoot "result.txt")
 "### $line" >> $env:GITHUB_STEP_SUMMARY
 "DIAG203_HARNESS=$exe" >> $env:GITHUB_ENV
@@ -93,3 +105,4 @@ if ($crashes -gt 0) {
     $pdb = [IO.Path]::ChangeExtension($exe, ".pdb")
     if (Test-Path -LiteralPath $pdb) { Copy-Item -LiteralPath $pdb -Destination $EvidenceRoot }
 }
+

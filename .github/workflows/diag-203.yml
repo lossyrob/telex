@@ -14,19 +14,21 @@ concurrency:
 
 jobs:
   loop:
-    name: loop (mio ${{ matrix.mio }}, pageheap ${{ matrix.pageheap }}, shard ${{ matrix.shard }})
+    name: loop (mio ${{ matrix.mio }}, pageheap ${{ matrix.pageheap }}, attach ${{ matrix.attach }}, shard ${{ matrix.shard }})
     runs-on: windows-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { mio: "1.2.1", pageheap: "on", shard: 1 }
-          - { mio: "1.2.1", pageheap: "on", shard: 2 }
-          - { mio: "1.2.1", pageheap: "off", shard: 1 }
-          - { mio: "1.2.4", pageheap: "on", shard: 1 }
-          - { mio: "1.2.4", pageheap: "on", shard: 2 }
-          - { mio: "1.2.4", pageheap: "off", shard: 1 }
+          - { mio: "1.2.1", pageheap: "on", attach: "on", shard: 1 }
+          - { mio: "1.2.1", pageheap: "on", attach: "on", shard: 2 }
+          - { mio: "1.2.1", pageheap: "off", attach: "on", shard: 1 }
+          - { mio: "1.2.1", pageheap: "off", attach: "off", shard: 1 }
+          - { mio: "1.2.4", pageheap: "on", attach: "on", shard: 1 }
+          - { mio: "1.2.4", pageheap: "on", attach: "on", shard: 2 }
+          - { mio: "1.2.4", pageheap: "off", attach: "on", shard: 1 }
+          - { mio: "1.2.4", pageheap: "off", attach: "off", shard: 1 }
     env:
       CARGO_PROFILE_DEV_DEBUG: "2"
       CARGO_PROFILE_TEST_DEBUG: "2"
@@ -61,8 +63,8 @@ jobs:
         shell: pwsh
         run: >-
           .github/diag-203/run-loop.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
-          -Minutes 50 -PageHeap ${{ matrix.pageheap }}
-          -Label "mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-${{ matrix.shard }}"
+          -Minutes 50 -PageHeap ${{ matrix.pageheap }} -Attach ${{ matrix.attach }}
+          -Label "mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-at-${{ matrix.attach }}-${{ matrix.shard }}"
 
       - name: Analyze native dumps
         if: always()
@@ -73,8 +75,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diag203-mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-${{ matrix.shard }}
+          name: diag203-mio-${{ matrix.mio }}-ph-${{ matrix.pageheap }}-at-${{ matrix.attach }}-${{ matrix.shard }}
           path: ${{ runner.temp }}\diag203-evidence
           retention-days: 14
           if-no-files-found: warn
+
+
 

@@ -36,19 +36,26 @@ New-ItemProperty -Path $wer -Name DumpCount -Value 20 -PropertyType DWord -Force
 & $procdump -accepteula -ma -i $dumps
 if ($LASTEXITCODE -ne 0) { throw "installing postmortem capture failed" }
 
-# Preflight: a fail-fast probe must exit 0xc0000409 and leave a dump.
+# Preflight: WER and AeDebug alone are recorded but not required (observed:
+# neither captures __fastfail on hosted runners). An attached ProcDump -e must.
 $probe = Join-Path $probeDir "diag203-fastfail-probe.exe"
 rustc .github\diag-203\fastfail_probe.rs -g -o $probe
 if ($LASTEXITCODE -ne 0) { throw "probe did not compile" }
 $child = Start-Process -FilePath $probe -PassThru -NoNewWindow
+$attach = Start-Process -FilePath $procdump -PassThru -NoNewWindow `
+    -ArgumentList "-accepteula -ma -e $($child.Id) `"$probeDir`"" `
+    -RedirectStandardOutput (Join-Path $probeDir "procdump.out.txt")
 if (-not $child.WaitForExit(60000)) { Stop-Process -Id $child.Id -Force; throw "probe timed out" }
 $child.Refresh()
+if (-not $attach.WaitForExit(120000)) { Stop-Process -Id $attach.Id -Force; throw "procdump did not finish" }
 $status = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$child.ExitCode), 0)
 Start-Sleep -Seconds 10
-$probeDumps = @(Get-ChildItem -LiteralPath $dumps -Filter "diag203-fastfail-probe*.dmp" -File)
-$result = "probe exit=0x{0:x8} dumps=$($probeDumps.Count)" -f $status
+$attached = @(Get-ChildItem -LiteralPath $probeDir -Filter "*.dmp" -File)
+$unattended = @(Get-ChildItem -LiteralPath $dumps -Filter "*.dmp" -File)
+$result = "probe exit=0x{0:x8} attachedDumps=$($attached.Count) werOrAeDebugDumps=$($unattended.Count)" -f $status
 $result | Tee-Object -FilePath (Join-Path $probeDir "result.txt")
+Get-Content (Join-Path $probeDir "procdump.out.txt") -ErrorAction SilentlyContinue
 if ($status -ne [Convert]::ToUInt32("c0000409", 16)) { throw "probe exit status changed: $result" }
-if ($probeDumps.Count -eq 0) { throw "fail-fast capture produced no dump: $result" }
-$probeDumps | Move-Item -Destination $probeDir
+if ($attached.Count -eq 0) { throw "attached fail-fast capture produced no dump: $result" }
+$unattended | Move-Item -Destination $probeDir
 "DIAG203_PROCDUMP=$procdump" >> $env:GITHUB_ENV
