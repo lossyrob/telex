@@ -70,8 +70,8 @@ jobs:
             cat "${files[@]}" | jq -se --arg p "$phase" 'all(.[]; any(.events[]; .phase == $p))' > /dev/null \
               || { echo "missing phase $phase"; exit 1; }
           done
-          cat "${files[@]}" | jq -c '{state_index, commits: [.events[] | select(.phase | startswith("sql:COMMIT")) | {elapsed_us, sqlite_us}], unpaired_sql: ([.events[] | select((.phase | startswith("sql:")) and .elapsed_us == null)] | length)}'
-          cat "${files[@]}" | jq -se 'all(.[]; any(.events[]; (.phase | startswith("sql:COMMIT")) and .elapsed_us != null))'
+          cat "${files[@]}" | jq -c '{state_index, commits_sqlite_us: [.events[] | select(.phase == "sql:COMMIT") | .sqlite_us], open_row_commit_us: [.events[] | select(.phase == "open:isolate-v1-row-commit") | .elapsed_us]}'
+          cat "${files[@]}" | jq -se 'all(.[]; any(.events[]; .phase == "sql:COMMIT" and .sqlite_us != null) and any(.events[]; .phase == "open:isolate-v1-row-commit" and .elapsed_us != null))'
 
   windows:
     name: windows ${{ matrix.arm }} shard ${{ matrix.shard }}

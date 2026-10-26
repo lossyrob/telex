@@ -3,10 +3,9 @@
 //! Non-merging diagnostic branch. Compiled only under `cfg(test)` and active
 //! only on a thread where the opaque management test called [`begin`] because
 //! `PILOT209_OUT` is set. All clocks are monotonic `Instant`s relative to the
-//! per-state epoch. SQLite statement events come from the legacy
-//! `sqlite3_trace`/`sqlite3_profile` hooks: `elapsed_us` is the monotonic
-//! delta from statement start to profile callback (absent when the start could
-//! not be paired), `sqlite_us` is SQLite's own reported duration. A `COMMIT`
+//! per-state epoch. SQLite statement events (`sql:*`) come from the legacy
+//! `sqlite3_profile` hook only: `elapsed_us` is null and `sqlite_us` is
+//! SQLite's own coarse reported duration. A `COMMIT`
 //! or autocommit write duration is a flush proxy (journal I/O plus
 //! FlushFileBuffers plus journal delete), not a raw fsync measurement.
 //! Callbacks run inside C frames, so nothing here may panic.
@@ -24,7 +23,6 @@ struct Event {
 struct Recorder {
     epoch: Instant,
     events: Vec<Event>,
-    sql_starts: Vec<(String, Instant)>,
 }
 
 thread_local! {
@@ -56,7 +54,6 @@ pub(crate) fn begin() {
             *slot = Some(Recorder {
                 epoch: Instant::now(),
                 events: Vec::new(),
-                sql_starts: Vec::new(),
             });
         }
     });
@@ -116,9 +113,13 @@ pub(crate) fn command_kind(command: &crate::management::Command) -> &'static str
 }
 
 /// Hooks statement timing onto a connection opened on a recording thread.
+///
+/// Profile only: SQLite's `sqlite3_profile` clears the legacy trace flag, so
+/// the two legacy hooks cannot be combined. The event's end is the monotonic
+/// callback time; its duration is SQLite's own reported value (wall-clock,
+/// coarse, first step to reset/finalize), so `start_us` is an estimate.
 pub(crate) fn attach(connection: &mut rusqlite::Connection) {
     if active() {
-        connection.trace(Some(sql_started));
         connection.profile(Some(sql_finished));
     }
 }
@@ -128,43 +129,17 @@ fn label(sql: &str) -> String {
     collapsed.chars().take(40).collect()
 }
 
-fn sql_started(sql: &str) {
-    if sql.trim_start().starts_with("--") {
-        return;
-    }
-    let now = Instant::now();
-    let label = label(sql);
-    with_recorder(|recorder| {
-        // Bounded: starts whose profile never arrives are dropped oldest-first.
-        if recorder.sql_starts.len() >= 64 {
-            recorder.sql_starts.remove(0);
-        }
-        recorder.sql_starts.push((label, now));
-    });
-}
-
 fn sql_finished(sql: &str, reported: Duration) {
     let now = Instant::now();
     let label = label(sql);
     with_recorder(|recorder| {
-        // Profile ends can arrive late (reset/finalize), after other statements
-        // started, so match the most recent pending start with the same label.
-        let started = recorder
-            .sql_starts
-            .iter()
-            .rposition(|(started_label, _)| *started_label == label)
-            .map(|index| recorder.sql_starts.remove(index).1);
-        let start_us = match started {
-            Some(started) => micros(started.saturating_duration_since(recorder.epoch)),
-            None => micros(
+        recorder.events.push(Event {
+            phase: format!("sql:{label}"),
+            start_us: micros(
                 now.saturating_duration_since(recorder.epoch)
                     .saturating_sub(reported),
             ),
-        };
-        recorder.events.push(Event {
-            phase: format!("sql:{label}"),
-            start_us,
-            elapsed_us: started.map(|started| micros(now.saturating_duration_since(started))),
+            elapsed_us: None,
             sqlite_us: Some(micros(reported)),
         });
     });

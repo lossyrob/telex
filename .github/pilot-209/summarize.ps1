@@ -51,11 +51,11 @@ foreach ($r in $records) {
 }
 
 $byPhase = @{}
-$unpairedSql = 0
+$sqlProfileEvents = 0
 foreach ($r in $records) {
     foreach ($e in @($r.events)) {
         $key = [string]$e.phase
-        if ($key.StartsWith('sql:') -and $null -eq $e.elapsed_us) { $unpairedSql++ }
+        if ($key.StartsWith('sql:') -and $null -eq $e.elapsed_us) { $sqlProfileEvents++ }
         if (-not $byPhase.ContainsKey($key)) { $byPhase[$key] = @{ mono = [Collections.Generic.List[double]]::new(); sqlite = [Collections.Generic.List[double]]::new(); cold = [Collections.Generic.List[double]]::new() } }
         if ($null -ne $e.elapsed_us) {
             $ms = [double]$e.elapsed_us / 1000.0
@@ -111,7 +111,7 @@ $summary = [ordered]@{
         wall_s = @($ends | ForEach-Object { [ordered]@{ iteration = $_.iteration; cold = $_.cold; exit = $_.exit; wall_s = $_.wall_s } })
         loop_end = if ($loopEnd.Count) { $loopEnd[0] } else { $null }
     }
-    phase_records = $records.Count; unpaired_sql_events = $unpairedSql
+    phase_records = $records.Count; sql_profile_events = $sqlProfileEvents
     phases = $phases
     sampler = [ordered]@{ samples = $samples.Count; errors = $samplerErrors; end = if ($samplerEnd.Count) { $samplerEnd[0] } else { $null }; counters = $counterStats; msmpeng_cpu_delta_s = $msmDelta }
     defender = [ordered]@{
@@ -126,7 +126,7 @@ $summary = [ordered]@{
 
 $md = [Text.StringBuilder]::new()
 [void]$md.AppendLine("## pilot-209 shard $Shard ($Arm)")
-[void]$md.AppendLine("head ``$env:GITHUB_SHA``; iterations started/ended/passed: $($starts.Count)/$($ends.Count)/$($okEnds.Count); phase records: $($records.Count); unpaired SQL events: $unpairedSql; sampler samples: $($samples.Count); MsMpEng CPU delta: $msmDelta s")
+[void]$md.AppendLine("head ``$env:GITHUB_SHA``; iterations started/ended/passed: $($starts.Count)/$($ends.Count)/$($okEnds.Count); phase records: $($records.Count); SQL profile events: $sqlProfileEvents; sampler samples: $($samples.Count); MsMpEng CPU delta: $msmDelta s")
 [void]$md.AppendLine('')
 [void]$md.AppendLine('| phase | n | median ms | max ms | cold max ms | sqlite-reported max ms |')
 [void]$md.AppendLine('|---|---|---|---|---|---|')

@@ -37,7 +37,7 @@ entra = ["telex/entra"]
 tokio = { version = "1", features = ["test-util"] }
 toml = "0.8"
 tokio-postgres = "0.7"
-# Issue #209 pilot (non-merging): statement trace/profile hooks for test builds.
+# Issue #209 pilot (non-merging): statement profile hook (rusqlite `trace` feature) for test builds.
 rusqlite = { version = "0.32", features = ["trace"] }
 
 [target.'cfg(unix)'.dependencies]
