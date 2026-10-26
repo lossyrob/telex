@@ -114,21 +114,41 @@ fn startup_io_failure_reports_stage_and_cause_without_changing_envelope() {
 fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text() {
     let fixture = Fixture::new();
     let registry = fixture.root.join("registry.sqlite");
-    let connection = rusqlite::Connection::open(registry).unwrap();
+    let connection = rusqlite::Connection::open(&registry).unwrap();
     let secret = "opaque-environment-value";
     let dsn = "postgres://reader:private-password@localhost/private";
-    let private_text = "unclassified private database content";
+    let private_text = "unclassified_private_database_content";
     connection
-        .execute_batch(&format!(
+        .execute_batch(
             "CREATE TABLE watcher_v2_meta (
                 singleton INTEGER PRIMARY KEY, version INTEGER, revision INTEGER,
                 responsibility TEXT);
-             INSERT INTO watcher_v2_meta VALUES(1,2,0,'fixture');
-             CREATE TRIGGER fail_startup BEFORE INSERT ON watcher_v2_meta BEGIN
-                SELECT RAISE(ABORT, '{secret} {dsn} token=hidden {private_text}');
-             END;"
-        ))
+             PRAGMA writable_schema=ON;",
+        )
         .unwrap();
+    // Fail while reading the schema, before startup needs a successful write.
+    connection
+        .execute(
+            "UPDATE sqlite_master SET sql=?1 WHERE name='watcher_v2_meta'",
+            [format!(
+                "CREATE TABLE watcher_v2_meta {private_text} {secret} {dsn} token=hidden"
+            )],
+        )
+        .unwrap();
+    drop(connection);
+    let connection = rusqlite::Connection::open(&registry).unwrap();
+    let error = connection
+        .query_row(
+            "SELECT version FROM watcher_v2_meta WHERE singleton=1",
+            [],
+            |row| row.get::<_, u32>(0),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.sqlite_error().unwrap().extended_code,
+        rusqlite::ffi::SQLITE_CORRUPT
+    );
+    assert!(error.to_string().contains(private_text), "{error}");
     drop(connection);
     let output = fixture
         .command()
@@ -141,7 +161,7 @@ fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text(
     assert_runtime_failure(&output, &envelope);
     let diagnostic = String::from_utf8(output.stderr).unwrap();
     assert!(diagnostic.contains("SQLite"), "{diagnostic}");
-    assert!(diagnostic.contains("Error code 1811:"), "{diagnostic}");
+    assert!(diagnostic.contains("Error code 11:"), "{diagnostic}");
     for value in [secret, dsn, "hidden", private_text] {
         assert!(!diagnostic.contains(value), "{diagnostic}");
         assert!(!String::from_utf8_lossy(&output.stdout).contains(value));
