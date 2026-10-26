@@ -939,3 +939,130 @@ jobs:
           name: windows-named-pipe-race-mio-${{ matrix.mio }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}\telex-pipe-race
           if-no-files-found: error
+
+  # Finite diagnostic for #166: the four tests that exposed the native child faults, repeated
+  # under full PageHeap with the user-mode stack trace database and postmortem capture. The
+  # ceiling is 40 iterations or 25 minutes of loop time, stopping at the first non-zero exit.
+  # A clean run is not evidence of absence and is not extended.
+  windows-heap-targeted-stress:
+    name: Windows heap targeted stress
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+      CARGO_PROFILE_TEST_DEBUG: "2"
+      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout the exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure PageHeap with stack traces and crash dumps
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-targeted-stress"
+          New-Item -ItemType Directory -Path (Join-Path $evidence "dumps"), `
+            (Join-Path $evidence "logs") -Force | Out-Null
+          "TELEX_HEAP_EVIDENCE=$evidence" >> $env:GITHUB_ENV
+          "TELEX_PROCESS_EVIDENCE=$(Join-Path $evidence 'commands')" >> $env:GITHUB_ENV
+          $root = Join-Path $env:RUNNER_TEMP "stress-runtime-${{ github.run_id }}-${{ github.run_attempt }}"
+          "TELEX_HOME=$(Join-Path $root 'home')" >> $env:GITHUB_ENV
+          "TELEX_DB=$(Join-Path $root 'store.db')" >> $env:GITHUB_ENV
+          "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')" >> $env:GITHUB_ENV
+
+          $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\telex.exe"
+          New-Item -Path $ifeo -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name GlobalFlag -Value 0x02001000 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
+            -PropertyType DWord -Force | Out-Null
+
+      - name: Verify native postmortem capture without changing child status
+        shell: pwsh
+        run: tests/configure_windows_postmortem.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
+
+      - name: Repeat the four observed tests
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo test --no-default-features --features sqlite `
+            --test daemon_process_sqlite --no-run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName "targeted-stress" `
+            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols") `
+            -SnapshotSymbols
+          $targets = @(
+            "real_process_status_hints_when_address_active_on_other_store",
+            "real_process_01_concurrent_first_use",
+            "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token",
+            "station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone")
+          $ceiling = 40
+          $clock = [System.Diagnostics.Stopwatch]::StartNew()
+          $burners = @()
+          $exit = 0
+          $completed = 0
+          try {
+            for ($iteration = 1; $iteration -le $ceiling; $iteration++) {
+              if ($clock.Elapsed.TotalMinutes -ge 25) { break }
+              if ($iteration -eq 21) {
+                $burners = 1..4 | ForEach-Object { Start-Job -ScriptBlock { while ($true) { } } }
+              }
+              $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\iteration-$iteration.txt"
+              cargo test --no-default-features --features sqlite `
+                --test daemon_process_sqlite -- --exact --test-threads=4 --nocapture `
+                @targets 2>&1 | Tee-Object -FilePath $log
+              $exit = $LASTEXITCODE
+              $completed = $iteration
+              if ($exit -ne 0) { break }
+            }
+          } finally {
+            $burners | ForEach-Object { Stop-Job $_; Remove-Job $_ -Force }
+          }
+          "iterations completed=$completed ceiling=$ceiling minutes={0:N1} exit=0x{1:x8}" -f `
+            $clock.Elapsed.TotalMinutes, ([uint32]$exit) |
+            Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\summary.txt")
+          exit $exit
+
+      - name: Settle and check final dumps
+        if: always()
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 10
+          tests/capture_windows_crash_evidence.ps1 `
+            -EvidenceName "targeted-stress-final" `
+            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
+            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols")
+
+      - name: Preserve native fault stacks from hosted dumps
+        if: always()
+        shell: pwsh
+        run: tests/analyze_windows_crash_evidence.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
+
+      - name: Unregister disposable postmortem debugger
+        if: always() && env.TELEX_POSTMORTEM_EXE != ''
+        shell: pwsh
+        run: |
+          & $env:TELEX_POSTMORTEM_EXE -u
+          if ($LASTEXITCODE -ne 0) {
+            throw "unregistering the hosted postmortem debugger failed"
+          }
+
+      - name: Upload targeted stress evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-heap-targeted-stress-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}\telex-targeted-stress
+            target\debug\telex.exe
+            target\debug\telex.pdb
+          if-no-files-found: error

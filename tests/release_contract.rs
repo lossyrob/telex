@@ -323,6 +323,21 @@ fn hosted_named_pipe_race_and_ordinary_job_capture_are_wired() {
             && setup.contains("[string]$DumpDirectory"),
         "the named-pipe race must stay ignored, hosted-only and bounded"
     );
+    assert!(
+        ci.contains("windows-heap-targeted-stress:")
+            && ci.contains("windows-heap-targeted-stress-")
+            && ci.contains("$ceiling = 40")
+            && ci.contains("-Value 0x02001000")
+            && ci.contains("real_process_status_hints_when_address_active_on_other_store")
+            && ci.contains("real_process_01_concurrent_first_use")
+            && ci.contains(
+                "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token"
+            )
+            && ci.contains(
+                "station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone"
+            ),
+        "the finite targeted heap stress must stay bounded and cover the four observed tests"
+    );
 }
 
 #[test]
