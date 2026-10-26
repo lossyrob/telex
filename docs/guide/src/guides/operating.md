@@ -15,7 +15,7 @@ The daemon runs per user. Inspect and control it with the `telex daemon` family
 ```sh
 telex daemon status            # daemon internals
 telex daemon version           # running daemon version
-telex daemon stop --drain      # stop after draining in-flight work
+telex daemon stop --drain      # drain in-flight work; returns once the daemon process has exited
 ```
 
 Runtime state (the IPC socket and lease state) lives in a per-user runtime

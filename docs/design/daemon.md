@@ -1967,7 +1967,15 @@ below):
   non-deleting release; **SQLite** always uses **non-deleting release + next-call respawn** (no
   live two-daemon overlap — the store-lock forbids it), in order
   ([§11.4](#114-ordered-handoff--owner-directed-atomic-transfer-sf3)), then exit — freeing
-  the binary lock.
+  the binary lock. The daemon drops its endpoint before its process exits, so an endpoint that
+  no longer answers is not evidence that the predecessor is gone. Before draining, the command
+  opens an exit watch on the exact instance named by the capability record whose admin
+  capability authenticates the drain (pid plus process start time; on Windows a retained,
+  creation-time-checked process handle). It reports completion (`"exited": true`) only when
+  that process has exited — on Windows, only on that process object's `WAIT_OBJECT_0` — and
+  fails visibly otherwise. `--drain-timeout-ms` (default 10,000) is one end-to-end deadline
+  across connect, `Ack`, and exit. `exited` proves predecessor exit, not that every store lock
+  is already free or that a successor is ready: successor store admission stays fail-closed.
 - **Next-call respawn.** The next client connect-or-spawn starts the new version (**SQLite**: the
   release + next-call stale-claim floor; **Postgres** may use the live transfer; both reuse
   stale-claim + crash-recovery). Presence across the respawn for a

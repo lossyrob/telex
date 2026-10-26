@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, Result};
 
 use crate::cli::{
@@ -25,7 +27,7 @@ pub async fn run(ctx: &Ctx, cmd: DaemonCmd) -> Result<i32> {
             if !args.drain {
                 return Err(anyhow!("only `telex daemon stop --drain` is supported"));
             }
-            stop_drain(ctx).await
+            stop_drain(ctx, args.drain_timeout_ms).await
         }
     }
 }
@@ -358,18 +360,52 @@ async fn reconcile_attempt(
     }
 }
 
-async fn stop_drain(ctx: &Ctx) -> Result<i32> {
+/// `daemon stop --drain`: drain the running daemon and return only once that exact process exited.
+///
+/// The daemon drops its endpoint before its process exits, so an endpoint that no longer answers
+/// does not mean the predecessor -- or any store lock it holds -- is gone (issue #212). The exit
+/// watch is opened and identity-checked *before* the drain, from the same capability record whose
+/// admin capability authenticates the drain, so the exit observed is the drained instance's own.
+/// `timeout_ms` is one end-to-end deadline across connect, `Ack`, and exit.
+async fn stop_drain(ctx: &Ctx, timeout_ms: u64) -> Result<i32> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
+    let (Some(pid), Some(start_time)) = (cap.server_pid, cap.server_start_time) else {
+        return Err(anyhow!(
+            "the daemon capability record carries no reuse-safe pid/start time, so its exit \
+             could not be confirmed; nothing was drained"
+        ));
+    };
+    let watch = crate::session_watch::ProcessExitWatch::open(pid, start_time).map_err(|e| {
+        anyhow!("cannot watch daemon process {pid} named by the capability record ({e}); nothing was drained")
+    })?;
     let store_key = ctx.store_key()?;
-    let mut client = crate::daemon::connect_existing(&store_key).await?;
-    let response = client
-        .request(&Request::Drain {
-            proof: Some(cap.admin_cap),
-        })
-        .await?;
+    let response = tokio::time::timeout_at(deadline.into(), async {
+        let mut client = crate::daemon::connect_existing(&store_key).await?;
+        client
+            .request(&Request::Drain {
+                proof: Some(cap.admin_cap),
+            })
+            .await
+    })
+    .await
+    .map_err(|_| anyhow!("daemon drain was not acknowledged within {timeout_ms}ms"))??;
     match response {
         Response::Ack { drain_intents, .. } => {
+            let exited = tokio::task::spawn_blocking(move || watch.wait_until(deadline))
+                .await
+                .map_err(|e| anyhow!("daemon exit watch failed: {e}"))?
+                .map_err(|e| {
+                    anyhow!(
+                        "daemon drain acknowledged but exit of process {pid} is unverified: {e}"
+                    )
+                })?;
+            if !exited {
+                return Err(anyhow!(
+                    "daemon drain acknowledged but process {pid} did not exit within {timeout_ms}ms"
+                ));
+            }
             // The pre-drain station-intent signal (issue #106). Computed by the daemon from
             // in-memory state before it released any lease, so it describes what a successor will
             // find rather than what is true after the fact. An older daemon omits it entirely,
@@ -377,10 +413,12 @@ async fn stop_drain(ctx: &Ctx) -> Result<i32> {
             let report = drain_intents.clone();
             let payload = serde_json::json!({
                 "draining": true,
+                "exited": true,
+                "server_pid": pid,
                 "station_intents": report,
             });
             emit(ctx.fmt, &payload, || {
-                println!("daemon drain requested");
+                println!("daemon drained; process {pid} exited");
                 match &report {
                     Some(report) => {
                         println!(

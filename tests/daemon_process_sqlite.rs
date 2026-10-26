@@ -4638,6 +4638,77 @@ fn wait_until_push_restored(
     None
 }
 
+/// Issue #212: `daemon stop --drain` must not report completion while the drained process -- which
+/// may still own its store lock -- is alive, even though its endpoint is already gone. Exit is not
+/// itself treated as lock-release proof: the successor's real store open is asserted separately,
+/// and live-holder refusal stays covered by `real_process_02_second_instance_and_store_lock`.
+///
+/// A debug-only fault hook drops the predecessor's endpoint on drain and then keeps the process
+/// alive for a bounded window. The test separates the three boundaries: the hook's marker proves
+/// the endpoint-gone/process-alive window was exercised; the reuse-safe pid/start-time probe proves
+/// the drained process had exited (its process object was signaled) when `stop --drain` returned;
+/// and an immediate successor spawn proves actual store admission rather than inferring it.
+#[test]
+fn daemon_stop_drain_returns_only_after_the_drained_process_exits() {
+    let env = ProcessEnv::new("stop-drain-exit");
+    let session = "stop-drain-exit-session";
+    let address = "addr:stop-drain-exit";
+    let marker = env.root.join("post-drain-exit-delayed");
+
+    let mut attach = env.command_with_session(session);
+    attach
+        .env("TELEX_TEST_POST_DRAIN_EXIT_DELAY_MS", "3000")
+        .env("TELEX_TEST_POST_DRAIN_EXIT_DELAY_MARKER", &marker)
+        .args([
+            "--json",
+            "--address",
+            address,
+            "attach",
+            "--session",
+            session,
+            "--description",
+            "stop drain exit",
+        ]);
+    run_command_with_capture(attach, &env.root, Duration::from_secs(10))
+        .assert_success("attach spawns the predecessor and opens its store");
+    let (pid, start_time) = env
+        .daemon_identity()
+        .expect("the predecessor publishes a reuse-safe identity");
+
+    let stop = env.run_with_session(
+        session,
+        ["--json", "daemon", "stop", "--drain"],
+        Duration::from_secs(20),
+    );
+    stop.assert_success("daemon stop --drain");
+    let drained = stop.json("daemon stop --drain");
+    assert_eq!(
+        std::fs::read_to_string(&marker).ok().as_deref(),
+        Some(pid.to_string().as_str()),
+        "the drained predecessor must have exercised the endpoint-gone/process-alive window"
+    );
+    assert!(
+        !telex::session_watch::process_alive_with_start_time(pid, Some(start_time)),
+        "stop --drain returned while the drained process {pid} was still alive: {drained}"
+    );
+    assert_eq!(drained.get("exited").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        drained.get("server_pid").and_then(Value::as_u64),
+        Some(u64::from(pid))
+    );
+
+    // No wait of any kind here: the completed drain is the successor's precondition.
+    spawn_daemon_via_side_station(&env, "stop-drain-exit");
+    let (successor, _) = env
+        .daemon_identity()
+        .expect("the successor publishes a reuse-safe identity");
+    assert_ne!(successor, pid, "a fresh successor must own the store");
+    eprintln!(
+        "[#212] predecessor pid={pid} start_time={start_time} endpoint_dropped_marker=present \
+         stop={drained} successor_pid={successor} successor_store_open=ok"
+    );
+}
+
 #[test]
 fn station_intent_daemon_restart_restores_push_without_manual_resume() {
     let env = ProcessEnv::new("station-intent-restart");

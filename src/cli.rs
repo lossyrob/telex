@@ -465,6 +465,9 @@ pub struct DaemonStopArgs {
     /// Drain in-flight work before exiting.
     #[arg(long)]
     pub drain: bool,
+    /// One end-to-end bound covering connect, drain acknowledgement, and the drained process's exit.
+    #[arg(long, default_value_t = 10_000)]
+    pub drain_timeout_ms: u64,
 }
 
 #[derive(Args)]
@@ -1009,7 +1012,26 @@ mod tests {
             Cli::try_parse_from(["telex", "daemon", "stop", "--drain"])
                 .unwrap()
                 .command,
-            Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+            Command::Daemon(DaemonCmd::Stop(DaemonStopArgs {
+                drain: true,
+                drain_timeout_ms: 10_000
+            }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "daemon",
+                "stop",
+                "--drain",
+                "--drain-timeout-ms",
+                "2500"
+            ])
+            .unwrap()
+            .command,
+            Command::Daemon(DaemonCmd::Stop(DaemonStopArgs {
+                drain: true,
+                drain_timeout_ms: 2_500
+            }))
         ));
         assert!(matches!(
             Cli::try_parse_from(["telex", "daemon", "recover-intents", "--gc"])
