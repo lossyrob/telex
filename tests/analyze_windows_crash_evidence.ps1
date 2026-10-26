@@ -42,10 +42,12 @@ if (-not (Test-Path -LiteralPath $cdb)) {
 $analysis = Join-Path $EvidenceRoot "native-stacks"
 $cache = Join-Path $env:RUNNER_TEMP "telex-native-symbol-cache"
 $symbols = (Resolve-Path -LiteralPath "target\debug").Path
+# Test executables and their PDBs are built under deps.
+$testSymbols = Join-Path $symbols "deps"
 New-Item -ItemType Directory -Path $analysis, $cache -Force | Out-Null
 foreach ($dump in $dumps) {
     $log = Join-Path $analysis "$($dump.BaseName).txt"
-    & $cdb -z $dump.FullName -y "$symbols;srv*$cache*https://msdl.microsoft.com/download/symbols" `
+    & $cdb -z $dump.FullName -y "$symbols;$testSymbols;srv*$cache*https://msdl.microsoft.com/download/symbols" `
         -i $symbols -logo $log -c "!analyze -v; .exr -1; .ecxr; kv; ~*kp; q"
     if ($LASTEXITCODE -ne 0) {
         throw "native dump analysis failed for $($dump.Name)"
