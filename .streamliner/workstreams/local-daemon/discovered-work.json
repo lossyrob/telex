@@ -3122,7 +3122,233 @@
             "No scheduler, process, fixture, installed state, ACL, registry, PageHeap or WER action.",
             "The separate timing samples in the sentinel summary were not used to infer acquisition timing, causal savings, failure rate or runtime behavior."
           ]
-        }
+        },
+        "successorOccurrences": [
+          {
+            "kind": "ordinary-windows-workspace-post-drain-side-station-sqlite-lockfileex-33",
+            "pullRequest": 206,
+            "eventHead": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+            "executedMerge": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+            "executedTree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+            "orderedParents": [
+              "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+              "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+            ],
+            "run": "40266913484",
+            "attempt": 1,
+            "job": "121391199008",
+            "test": "station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+            "deduplicationKey": "run40266913484-attempt1-job121391199008-station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+            "sourcePacket": {
+              "file": "pr206pair-local-intake.json",
+              "bytes": 7487,
+              "sha256": "4ce422e0d7e1fb188f89398502973df0d538c3e5e8471b84d0edd1ddb6bb3b4c",
+              "originalFile": "pr206-40266913484-daemon-failures-20261026.json",
+              "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "localDirection": "call_AdLkUZ5MnQgNNXjooPQAjdsm",
+              "captureReceipt": "pr206pair-source-capture.json"
+            },
+            "observation": {
+              "candidateId": "local-daemon-windows-station-restart-lockfileex-33",
+              "tracker": null,
+              "deduplicationKey": "run40266913484-attempt1-job121391199008-station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+              "classification": "Additional post-drain side-station SQLite store-lock refusal, matching the existing operation/error-family record without proving a shared cause.",
+              "test": "station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+              "callerLine": 5442,
+              "sideStationHelperLine": 4542,
+              "successAssertionLine": 24,
+              "configuredOuterBudgetSeconds": 10,
+              "logFailureLine": 2337,
+              "observed": {
+                "code": 1,
+                "timedOut": false,
+                "stdout": "",
+                "stderr": "Unsupported: opening SQLite store: cannot acquire store lock ... LockFileEx ... (os error 33)"
+              },
+              "operation": "The side-station attach intended to spawn the successor after graceful daemon stop/drain and a wait_until_not_running assertion.",
+              "earlierControlFlow": "Intent seeding and observation, successful stop/drain and recoverable=1 checks precede the failed helper.",
+              "unreached": "Push-restoration assertion at 5443-5445, later producer hard_kill at 5453, second spawn and subsequent message/delivery assertions.",
+              "limits": "Not #193's station-intent acquisition budget: failure is opening a SQLite store after the earlier intent seed. The preceding not-running check does not independently prove kernel handle rundown or store-lock release. The holder, release timing and cause remain unknown. Ordinary exit 1 is not a native exception. This does not justify retrying, stealing, deleting or weakening the lock."
+            },
+            "retainedLocalAdjudication": {
+              "kind": "separate-existing-record-daemon-failure-intake",
+              "reporter": {
+                "session": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+                "message": "toolu_01PYC8Bg4zKgPHG6wZRk11xz",
+                "scope": "The #167 owner reported two failures outside the credential-writer scenario; Local independently retrieved public evidence to classify them."
+              },
+              "publicIdentity": {
+                "pullRequest": 206,
+                "eventHead": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "run": 40266913484,
+                "attempt": 1,
+                "job": 121391199008,
+                "jobName": "Build and test (windows-latest)",
+                "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40266913484/job/121391199008",
+                "jobConclusion": "failure",
+                "jobStartedAt": "2026-10-26T04:12:37Z",
+                "jobCompletedAt": "2026-10-26T04:19:29Z",
+                "runStatusAtInitialLocalRead": "in_progress",
+                "executedMerge": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "executedTree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+                "orderedParents": [
+                  "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+                  "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+                ],
+                "geometry": "Public job log lines 111 and 114 identify the executed PR merge; the GitHub commit API independently confirms full SHA, tree and ordered parents. Event head and executed commit remain distinct."
+              },
+              "localCapture": {
+                "file": "run40266913484-job121391199008-public.log",
+                "bytes": 342085,
+                "sha256": "95f7b8b46dec60c389713175e0f7a58e7d8d12744532c40d30b9788846ab8465",
+                "nulBytes": 0,
+                "source": "Completed-job public API response fetched independently by Local using --allow-escape-sequences.",
+                "scope": "Selected checkout, phase/result, failure/backtrace and target-result lines inspected, not a claimed full-log read. No artifact or executable was downloaded or inspected.",
+                "failureLines": [
+                  2311,
+                  2365
+                ],
+                "daemonTargetAggregate": "47 passed; 2 failed; 0 ignored",
+                "daemonTargetDurationSeconds": 44.26,
+                "durationLimit": "Target aggregate duration is not either command's latency."
+              },
+              "immutableSource": {
+                "path": "tests/daemon_process_sqlite.rs",
+                "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+                "ref": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "rangesRead": [
+                  [
+                    1,
+                    32
+                  ],
+                  [
+                    148,
+                    180
+                  ],
+                  [
+                    3885,
+                    3922
+                  ],
+                  [
+                    4515,
+                    4548
+                  ],
+                  [
+                    5415,
+                    5482
+                  ]
+                ],
+                "source": "GitHub contents API at the exact executed merge, decoded to inspect these ranges. No local execution or source mutation."
+              },
+              "observations": [
+                {
+                  "candidateId": "local-daemon-windows-pageheap-deadline-failures",
+                  "tracker": "https://github.com/lossyrob/telex/issues/175",
+                  "deduplicationKey": "run40266913484-attempt1-job121391199008-real_process_status_reports_foreign_members_without_session_env",
+                  "classification": "Additional outer-initial-attach timeout boundary. This ordinary Windows workspace job is not a PageHeap observation despite the existing candidate's historical name.",
+                  "test": "real_process_status_reports_foreign_members_without_session_env",
+                  "callerLine": 3899,
+                  "attachHelperLine": 174,
+                  "successAssertionLine": 24,
+                  "configuredOuterBudgetSeconds": 8,
+                  "logFailureLine": 2314,
+                  "observed": {
+                    "code": 1,
+                    "timedOut": true,
+                    "stdout": "",
+                    "stderr": ""
+                  },
+                  "operation": "Initial ProcessEnv::attach before construction or execution of the session-less status command.",
+                  "unreached": "The status-without-session command at 3901-3907 and foreign_members assertion at 3910-3916.",
+                  "limits": "No internal HelloAck deadline, ForeignDaemon rejection, foreign-member semantic failure, native crash, diagnosed deadlock, command liveness or common cause is established. The test title does not classify the error. Code and timed_out are harness output, not independent cause evidence."
+                },
+                {
+                  "candidateId": "local-daemon-windows-station-restart-lockfileex-33",
+                  "tracker": null,
+                  "deduplicationKey": "run40266913484-attempt1-job121391199008-station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+                  "classification": "Additional post-drain side-station SQLite store-lock refusal, matching the existing operation/error-family record without proving a shared cause.",
+                  "test": "station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+                  "callerLine": 5442,
+                  "sideStationHelperLine": 4542,
+                  "successAssertionLine": 24,
+                  "configuredOuterBudgetSeconds": 10,
+                  "logFailureLine": 2337,
+                  "observed": {
+                    "code": 1,
+                    "timedOut": false,
+                    "stdout": "",
+                    "stderr": "Unsupported: opening SQLite store: cannot acquire store lock ... LockFileEx ... (os error 33)"
+                  },
+                  "operation": "The side-station attach intended to spawn the successor after graceful daemon stop/drain and a wait_until_not_running assertion.",
+                  "earlierControlFlow": "Intent seeding and observation, successful stop/drain and recoverable=1 checks precede the failed helper.",
+                  "unreached": "Push-restoration assertion at 5443-5445, later producer hard_kill at 5453, second spawn and subsequent message/delivery assertions.",
+                  "limits": "Not #193's station-intent acquisition budget: failure is opening a SQLite store after the earlier intent seed. The preceding not-running check does not independently prove kernel handle rundown or store-lock release. The holder, release timing and cause remain unknown. Ordinary exit 1 is not a native exception. This does not justify retrying, stealing, deleting or weakening the lock."
+                }
+              ],
+              "credential167Context": {
+                "phaseLine": 2184,
+                "phaseOutput": "outcome=ok total_ms=715.1 writer_pid=4552 handle_retained=true writer_exited=false invoked_to_writer_created_ms=7.6 writer_created_to_script_ms=151.5 script_to_written_ms=541.1 written_to_writer_exit_ms=unobserved writer_exit_to_outcome_ms=unobserved",
+                "targetAggregateLine": 2192,
+                "targetAggregate": "11 passed; 0 failed; 2 ignored; finished in 6.31s",
+                "serializedStep": "Public job metadata reports Credential invocation lifecycle skipped after the workspace Test step failed.",
+                "limits": "Local verified what the diagnostic line prints, not the measurement implementation or clock assumptions. This is one passing sample, not failure-side cause discrimination or a justified repair. The 541.1ms minus configured 150ms residual includes unknown sleep overshoot and other work/scheduling; writer_exited=false alone establishes neither benign teardown nor a lifecycle defect."
+              },
+              "disposition": "Append one distinctly keyed occurrence per test to its existing candidate after deduplication. Preserve both candidate/proposed states, unassigned implementation, prior evidence and tracker uncertainty. Do not route the store-lock case into #193 or the outer attach case into #204. No new issue/node/owner, inferred graph edge, #167 scope expansion, retry/waiver, observer, readiness or wake authority. Existing historical retry statements authorize none now. The two failures may block this head's required CI, but do not prove every later PR206 head will fail.",
+              "independentExperimentAuthority": "Campaign toolu_01UdDTXV3DqrXipjPyXdsFXy separately authorized bounded #167 phase collection. These unrelated failures do not enlarge that authorization or count as the #167 reproduction."
+            },
+            "publicMetadata": {
+              "run": {
+                "id": 40266913484,
+                "head_sha": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "event": "pull_request",
+                "run_attempt": 1,
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40266913484"
+              },
+              "job": {
+                "id": 121391199008,
+                "run_id": 40266913484,
+                "head_sha": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "run_attempt": 1,
+                "name": "Build and test (windows-latest)",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-10-26T04:12:37Z",
+                "completed_at": "2026-10-26T04:19:29Z",
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40266913484/job/121391199008"
+              },
+              "executedCommit": {
+                "sha": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "tree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+                "parents": [
+                  "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+                  "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+                ]
+              }
+            },
+            "recordingAuthority": {
+              "reportedCampaignSource": "toolu_01DZoCSTtEBeyzQogpZV3M3K",
+              "actualLocalSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "actualLocalSource": "call_AdLkUZ5MnQgNNXjooPQAjdsm",
+              "retainedLocalDirection": "Retain two separately keyed PR206 failures in their EXISTING candidate records. Campaign toolu_01DZoCSTtEBeyzQogpZV3M3K explicitly agrees and holds staffing/promotion of #175 and the LockFileEx-33 family pending an operator policy decision. No new tracker, node, owner or gate change.",
+              "receipt": "pr206pair-campaign-hold-attribution.json",
+              "attribution": "Actual Local direction reports Campaign agreement and the staffing/promotion hold. No direct Campaign confirmation receipt has been received by this reconciler. Read-only App inspection shows Campaign awaiting an operator policy answer; no answer, policy choice or new staffing/retry authority is inferred. Evidence-only retention proceeds under the actual Local direction and standing artifact-reconciliation scope, with the hold preserved. Fresh owning Local approval remains a separate publication gate.",
+              "hold": "Staffing and promotion of #175 and the LockFileEx-33 family remain held pending operator policy. This append is evidence retention only, not staffing/promotion or a new implementation prerequisite."
+            },
+            "classificationAndLimits": "Ordinary Windows workspace post-drain side-station attach caller5442/helper4542/assertion24 returns ordinary exit1/timed_out=false/empty stdout and SQLite store-lock LockFileEx os33, with configured outer10s budget. Earlier intent seed/stop/drain/recoverable1/not-running check precede this; push-restoration5443-5445, producer hard_kill5453, second spawn and later loss/delivery assertions are unreached. Not #193 intent admission and not a native exception. Preceding not-running assertion does not independently prove kernel rundown/store-lock release; holder, timing and cause unknown. No retry, theft, deletion or weakening of the lock.",
+            "sharedLimits": "Two distinct tests in the same failed job, not duplicate observations or one shared defect. Target47passed/2failed/0ignored in44.26s is not either command latency or an attach-time measurement. Event head5cdfc2b is distinct from executed synthetic mergec277700a (parents6c8fafc0 then5cdfc2b); metadata does not validate controlled binaries/runtime or attribute causes to a source/artifact delta. Full packet references to both tests are provenance/context, not additional occurrence counts. No downloaded archive/dump/executable or holder/common-cause/lock-release finding.",
+            "credentialContextBoundary": "The retained packet contains one passing #167 phase-output line and target11passed/0failed/2ignored in6.31s, plus skipped serialized-step metadata. These are Local-verified printed context only, not an additional failure, measurement/clock implementation validation, failure-side causal discrimination, a justified repair or effective teardown proof. Residual configured-versus-printed timing has unknown scheduling/work components. Separate #16710+10 phase-collection authority does not grant staffing, retry or runtime authority for either candidate.",
+            "disposition": {
+              "sourceNode": null,
+              "status": "candidate",
+              "decisionState": "proposed",
+              "owner": "Local Daemon orchestrator owns intake/triage. Existing PR 168 owner retains evidence/rerun ownership. Implementation unassigned; no launch.",
+              "target": "hardening-gate (candidate scope); exact GitHub tracker pending retained-evidence mapping",
+              "retained": "Every prior current field and evidence value remains exact. Historical retry statements remain history, not new permission. #175 existing tracker remains; LockFileEx exact-tracker uncertainty remains unresolved. No new tracker, graph/node/owner/gate/status/attention/dependency/design-link change, candidate promotion, #167 scope expansion or wake.",
+              "limits": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
+            },
+            "conservation": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
+          }
+        ]
       },
       "description": "Classify the distinct hosted Windows station-restart locking error without weakening owner-lock semantics.",
       "affectedOutcome": "Reliability of shared station restart/locking proof and Windows diagnostics; no Watcher source implication.",
@@ -3178,7 +3404,232 @@
           "attribution": "Failure/output/iteration from provider comment and Watcher; helper/control-flow bound by Local immutable source read. Raw log/artifact not independently downloaded or hashed."
         },
         "classification": "Three separately named deadline observations under one existing investigation tracker. No common cause established, and the new outer attach timeout is not an internal readiness recurrence, a native exception or a turn-guard semantic failure.",
-        "scope": "PR 178 modifies only docs/design/watcher.md; no root daemon/test/workflow source implication."
+        "scope": "PR 178 modifies only docs/design/watcher.md; no root daemon/test/workflow source implication.",
+        "successorOccurrences": [
+          {
+            "kind": "ordinary-windows-workspace-outer-initial-attach-timeout",
+            "pullRequest": 206,
+            "eventHead": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+            "executedMerge": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+            "executedTree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+            "orderedParents": [
+              "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+              "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+            ],
+            "run": "40266913484",
+            "attempt": 1,
+            "job": "121391199008",
+            "test": "real_process_status_reports_foreign_members_without_session_env",
+            "deduplicationKey": "run40266913484-attempt1-job121391199008-real_process_status_reports_foreign_members_without_session_env",
+            "sourcePacket": {
+              "file": "pr206pair-local-intake.json",
+              "bytes": 7487,
+              "sha256": "4ce422e0d7e1fb188f89398502973df0d538c3e5e8471b84d0edd1ddb6bb3b4c",
+              "originalFile": "pr206-40266913484-daemon-failures-20261026.json",
+              "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "localDirection": "call_AdLkUZ5MnQgNNXjooPQAjdsm",
+              "captureReceipt": "pr206pair-source-capture.json"
+            },
+            "observation": {
+              "candidateId": "local-daemon-windows-pageheap-deadline-failures",
+              "tracker": "https://github.com/lossyrob/telex/issues/175",
+              "deduplicationKey": "run40266913484-attempt1-job121391199008-real_process_status_reports_foreign_members_without_session_env",
+              "classification": "Additional outer-initial-attach timeout boundary. This ordinary Windows workspace job is not a PageHeap observation despite the existing candidate's historical name.",
+              "test": "real_process_status_reports_foreign_members_without_session_env",
+              "callerLine": 3899,
+              "attachHelperLine": 174,
+              "successAssertionLine": 24,
+              "configuredOuterBudgetSeconds": 8,
+              "logFailureLine": 2314,
+              "observed": {
+                "code": 1,
+                "timedOut": true,
+                "stdout": "",
+                "stderr": ""
+              },
+              "operation": "Initial ProcessEnv::attach before construction or execution of the session-less status command.",
+              "unreached": "The status-without-session command at 3901-3907 and foreign_members assertion at 3910-3916.",
+              "limits": "No internal HelloAck deadline, ForeignDaemon rejection, foreign-member semantic failure, native crash, diagnosed deadlock, command liveness or common cause is established. The test title does not classify the error. Code and timed_out are harness output, not independent cause evidence."
+            },
+            "retainedLocalAdjudication": {
+              "kind": "separate-existing-record-daemon-failure-intake",
+              "reporter": {
+                "session": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+                "message": "toolu_01PYC8Bg4zKgPHG6wZRk11xz",
+                "scope": "The #167 owner reported two failures outside the credential-writer scenario; Local independently retrieved public evidence to classify them."
+              },
+              "publicIdentity": {
+                "pullRequest": 206,
+                "eventHead": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "run": 40266913484,
+                "attempt": 1,
+                "job": 121391199008,
+                "jobName": "Build and test (windows-latest)",
+                "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40266913484/job/121391199008",
+                "jobConclusion": "failure",
+                "jobStartedAt": "2026-10-26T04:12:37Z",
+                "jobCompletedAt": "2026-10-26T04:19:29Z",
+                "runStatusAtInitialLocalRead": "in_progress",
+                "executedMerge": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "executedTree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+                "orderedParents": [
+                  "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+                  "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+                ],
+                "geometry": "Public job log lines 111 and 114 identify the executed PR merge; the GitHub commit API independently confirms full SHA, tree and ordered parents. Event head and executed commit remain distinct."
+              },
+              "localCapture": {
+                "file": "run40266913484-job121391199008-public.log",
+                "bytes": 342085,
+                "sha256": "95f7b8b46dec60c389713175e0f7a58e7d8d12744532c40d30b9788846ab8465",
+                "nulBytes": 0,
+                "source": "Completed-job public API response fetched independently by Local using --allow-escape-sequences.",
+                "scope": "Selected checkout, phase/result, failure/backtrace and target-result lines inspected, not a claimed full-log read. No artifact or executable was downloaded or inspected.",
+                "failureLines": [
+                  2311,
+                  2365
+                ],
+                "daemonTargetAggregate": "47 passed; 2 failed; 0 ignored",
+                "daemonTargetDurationSeconds": 44.26,
+                "durationLimit": "Target aggregate duration is not either command's latency."
+              },
+              "immutableSource": {
+                "path": "tests/daemon_process_sqlite.rs",
+                "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+                "ref": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "rangesRead": [
+                  [
+                    1,
+                    32
+                  ],
+                  [
+                    148,
+                    180
+                  ],
+                  [
+                    3885,
+                    3922
+                  ],
+                  [
+                    4515,
+                    4548
+                  ],
+                  [
+                    5415,
+                    5482
+                  ]
+                ],
+                "source": "GitHub contents API at the exact executed merge, decoded to inspect these ranges. No local execution or source mutation."
+              },
+              "observations": [
+                {
+                  "candidateId": "local-daemon-windows-pageheap-deadline-failures",
+                  "tracker": "https://github.com/lossyrob/telex/issues/175",
+                  "deduplicationKey": "run40266913484-attempt1-job121391199008-real_process_status_reports_foreign_members_without_session_env",
+                  "classification": "Additional outer-initial-attach timeout boundary. This ordinary Windows workspace job is not a PageHeap observation despite the existing candidate's historical name.",
+                  "test": "real_process_status_reports_foreign_members_without_session_env",
+                  "callerLine": 3899,
+                  "attachHelperLine": 174,
+                  "successAssertionLine": 24,
+                  "configuredOuterBudgetSeconds": 8,
+                  "logFailureLine": 2314,
+                  "observed": {
+                    "code": 1,
+                    "timedOut": true,
+                    "stdout": "",
+                    "stderr": ""
+                  },
+                  "operation": "Initial ProcessEnv::attach before construction or execution of the session-less status command.",
+                  "unreached": "The status-without-session command at 3901-3907 and foreign_members assertion at 3910-3916.",
+                  "limits": "No internal HelloAck deadline, ForeignDaemon rejection, foreign-member semantic failure, native crash, diagnosed deadlock, command liveness or common cause is established. The test title does not classify the error. Code and timed_out are harness output, not independent cause evidence."
+                },
+                {
+                  "candidateId": "local-daemon-windows-station-restart-lockfileex-33",
+                  "tracker": null,
+                  "deduplicationKey": "run40266913484-attempt1-job121391199008-station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+                  "classification": "Additional post-drain side-station SQLite store-lock refusal, matching the existing operation/error-family record without proving a shared cause.",
+                  "test": "station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery",
+                  "callerLine": 5442,
+                  "sideStationHelperLine": 4542,
+                  "successAssertionLine": 24,
+                  "configuredOuterBudgetSeconds": 10,
+                  "logFailureLine": 2337,
+                  "observed": {
+                    "code": 1,
+                    "timedOut": false,
+                    "stdout": "",
+                    "stderr": "Unsupported: opening SQLite store: cannot acquire store lock ... LockFileEx ... (os error 33)"
+                  },
+                  "operation": "The side-station attach intended to spawn the successor after graceful daemon stop/drain and a wait_until_not_running assertion.",
+                  "earlierControlFlow": "Intent seeding and observation, successful stop/drain and recoverable=1 checks precede the failed helper.",
+                  "unreached": "Push-restoration assertion at 5443-5445, later producer hard_kill at 5453, second spawn and subsequent message/delivery assertions.",
+                  "limits": "Not #193's station-intent acquisition budget: failure is opening a SQLite store after the earlier intent seed. The preceding not-running check does not independently prove kernel handle rundown or store-lock release. The holder, release timing and cause remain unknown. Ordinary exit 1 is not a native exception. This does not justify retrying, stealing, deleting or weakening the lock."
+                }
+              ],
+              "credential167Context": {
+                "phaseLine": 2184,
+                "phaseOutput": "outcome=ok total_ms=715.1 writer_pid=4552 handle_retained=true writer_exited=false invoked_to_writer_created_ms=7.6 writer_created_to_script_ms=151.5 script_to_written_ms=541.1 written_to_writer_exit_ms=unobserved writer_exit_to_outcome_ms=unobserved",
+                "targetAggregateLine": 2192,
+                "targetAggregate": "11 passed; 0 failed; 2 ignored; finished in 6.31s",
+                "serializedStep": "Public job metadata reports Credential invocation lifecycle skipped after the workspace Test step failed.",
+                "limits": "Local verified what the diagnostic line prints, not the measurement implementation or clock assumptions. This is one passing sample, not failure-side cause discrimination or a justified repair. The 541.1ms minus configured 150ms residual includes unknown sleep overshoot and other work/scheduling; writer_exited=false alone establishes neither benign teardown nor a lifecycle defect."
+              },
+              "disposition": "Append one distinctly keyed occurrence per test to its existing candidate after deduplication. Preserve both candidate/proposed states, unassigned implementation, prior evidence and tracker uncertainty. Do not route the store-lock case into #193 or the outer attach case into #204. No new issue/node/owner, inferred graph edge, #167 scope expansion, retry/waiver, observer, readiness or wake authority. Existing historical retry statements authorize none now. The two failures may block this head's required CI, but do not prove every later PR206 head will fail.",
+              "independentExperimentAuthority": "Campaign toolu_01UdDTXV3DqrXipjPyXdsFXy separately authorized bounded #167 phase collection. These unrelated failures do not enlarge that authorization or count as the #167 reproduction."
+            },
+            "publicMetadata": {
+              "run": {
+                "id": 40266913484,
+                "head_sha": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "event": "pull_request",
+                "run_attempt": 1,
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40266913484"
+              },
+              "job": {
+                "id": 121391199008,
+                "run_id": 40266913484,
+                "head_sha": "5cdfc2b63e914e747b81a4dcb36c364699bf48aa",
+                "run_attempt": 1,
+                "name": "Build and test (windows-latest)",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-10-26T04:12:37Z",
+                "completed_at": "2026-10-26T04:19:29Z",
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40266913484/job/121391199008"
+              },
+              "executedCommit": {
+                "sha": "c277700a26d5c67c133ab0626ce3a71fe0113f72",
+                "tree": "aae6fbfe924334275370f9b08a2347d62a152aa3",
+                "parents": [
+                  "6c8fafc0f9c8a3eef923c3ec27322a80c9e312d2",
+                  "5cdfc2b63e914e747b81a4dcb36c364699bf48aa"
+                ]
+              }
+            },
+            "recordingAuthority": {
+              "reportedCampaignSource": "toolu_01DZoCSTtEBeyzQogpZV3M3K",
+              "actualLocalSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "actualLocalSource": "call_AdLkUZ5MnQgNNXjooPQAjdsm",
+              "retainedLocalDirection": "Retain two separately keyed PR206 failures in their EXISTING candidate records. Campaign toolu_01DZoCSTtEBeyzQogpZV3M3K explicitly agrees and holds staffing/promotion of #175 and the LockFileEx-33 family pending an operator policy decision. No new tracker, node, owner or gate change.",
+              "receipt": "pr206pair-campaign-hold-attribution.json",
+              "attribution": "Actual Local direction reports Campaign agreement and the staffing/promotion hold. No direct Campaign confirmation receipt has been received by this reconciler. Read-only App inspection shows Campaign awaiting an operator policy answer; no answer, policy choice or new staffing/retry authority is inferred. Evidence-only retention proceeds under the actual Local direction and standing artifact-reconciliation scope, with the hold preserved. Fresh owning Local approval remains a separate publication gate.",
+              "hold": "Staffing and promotion of #175 and the LockFileEx-33 family remain held pending operator policy. This append is evidence retention only, not staffing/promotion or a new implementation prerequisite."
+            },
+            "classificationAndLimits": "Ordinary Windows workspace observation despite the existing PageHeap-named candidate. Local maps caller3899/helper174/assertion24 to initial ProcessEnv::attach with configured outer eight-second budget, before session-less status construction3901-3907/foreign_members assertions3910-3916. Harness code1/timed_out=true/empty streams is not an internal HelloAck timeout, ForeignDaemon rejection, foreign-member semantic failure, native exception, diagnosed deadlock or independent command-liveness/common-cause proof. The observed outer command boundary does not identify the blocked stage.",
+            "sharedLimits": "Two distinct tests in the same failed job, not duplicate observations or one shared defect. Target47passed/2failed/0ignored in44.26s is not either command latency or an attach-time measurement. Event head5cdfc2b is distinct from executed synthetic mergec277700a (parents6c8fafc0 then5cdfc2b); metadata does not validate controlled binaries/runtime or attribute causes to a source/artifact delta. Full packet references to both tests are provenance/context, not additional occurrence counts. No downloaded archive/dump/executable or holder/common-cause/lock-release finding.",
+            "credentialContextBoundary": "The retained packet contains one passing #167 phase-output line and target11passed/0failed/2ignored in6.31s, plus skipped serialized-step metadata. These are Local-verified printed context only, not an additional failure, measurement/clock implementation validation, failure-side causal discrimination, a justified repair or effective teardown proof. Residual configured-versus-printed timing has unknown scheduling/work components. Separate #16710+10 phase-collection authority does not grant staffing, retry or runtime authority for either candidate.",
+            "disposition": {
+              "sourceNode": null,
+              "status": "candidate",
+              "decisionState": "proposed",
+              "owner": "Local Daemon orchestrator owns intake/routing. Existing PR owners retain evidence/retry ownership. Implementation remains unassigned; no launch.",
+              "target": "hardening-gate (candidate scope); existing issue https://github.com/lossyrob/telex/issues/175",
+              "retained": "Every prior current field and evidence value remains exact. Historical retry statements remain history, not new permission. #175 existing tracker remains; LockFileEx exact-tracker uncertainty remains unresolved. No new tracker, graph/node/owner/gate/status/attention/dependency/design-link change, candidate promotion, #167 scope expansion or wake.",
+              "limits": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
+            },
+            "conservation": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
+          }
+        ]
       },
       "description": "Investigate distinct Windows PageHeap process-suite deadline failures without collapsing outer command, store-lock and internal readiness boundaries.",
       "affectedOutcome": "Shared Local Daemon process-test reliability and required Windows checks. Watcher docs are an observing consumer, not an attributed source cause.",
