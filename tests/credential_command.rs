@@ -500,8 +500,8 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
 ///
 /// The writer stamps its own process creation time, script start and write
 /// completion into atomic marker files. The test reads them only after the
-/// operation has completed or has been dropped (cancelled), so no file or
-/// process query precedes cancellation. Cross-process phases use the UTC
+/// operation has completed or has been dropped (cancellation requested), so
+/// no file or process query precedes cancellation. Cross-process phases use the UTC
 /// FILETIME wall clock and are not a monotonic ordering: writer stamps come
 /// from .NET `DateTime.UtcNow`, whose resolution is not verified here, and
 /// marker I/O inside the writer is an observer effect. Only the total is
@@ -619,8 +619,9 @@ mod delayed_writer_phases {
             }
         }
 
-        /// `cancellation` carries the in-memory snapshot and drop times,
-        /// measured from the outcome, for a timed-out operation.
+        /// `cancellation` carries the drop (cancel request) and post-cancel
+        /// obligation-snapshot times, measured from the outcome, for a
+        /// timed-out operation.
         pub fn report(
             &self,
             markers: &Markers,
@@ -647,12 +648,12 @@ mod delayed_writer_phases {
                 span(script, written),
                 span(written, outcome),
             );
-            if let Some((snapshot, dropped)) = cancellation {
+            if let Some((dropped, snapshot)) = cancellation {
                 write!(
                     line,
-                    " pre_cancel_obligations_ms={} cancel_requested_ms={} markers=post_cancel_racy",
-                    ms(snapshot),
+                    " cancel_requested_ms={} post_cancel_obligations_ms={} obligations=post_cancel_racy markers=post_cancel_racy",
                     ms(dropped),
+                    ms(snapshot),
                 )
                 .unwrap();
             }
@@ -691,8 +692,9 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     #[cfg(unix)]
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
     let profile = profile(&command);
-    // Boxed so a timed-out operation is dropped (cancelled) immediately after
-    // an in-memory obligation snapshot, before any observer file I/O.
+    // Boxed so a timed-out operation is dropped first. Dropping only requests
+    // cancellation in memory; the obligation query (which may join a finished
+    // owner and publish) and observer file I/O both follow it.
     let mut operation = Box::pin(pg_connect_config(&profile));
     #[cfg(windows)]
     let clock = delayed_writer_phases::Clock::start();
@@ -700,17 +702,17 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     #[cfg(windows)]
     let finished = clock.finish();
     let Ok(result) = outcome else {
-        let obligations = telex::profiles::credential_command_obligations();
-        #[cfg(windows)]
-        let snapshot = finished.since();
         drop(operation);
         #[cfg(windows)]
-        let report = clock.report(&markers, &finished, Some((snapshot, finished.since())));
+        let dropped = finished.since();
+        let obligations = telex::profiles::credential_command_obligations();
+        #[cfg(windows)]
+        let report = clock.report(&markers, &finished, Some((dropped, finished.since())));
         #[cfg(unix)]
         let report = String::new();
         panic!(
             "delayed inherited writer was not collected within the 5s budget; \
-             pre_cancel_obligations={obligations:?} {report}"
+             post_cancel_obligations={obligations:?} {report}"
         );
     };
     #[cfg(windows)]
