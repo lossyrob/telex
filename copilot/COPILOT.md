@@ -282,6 +282,187 @@ Then run `extensions_reload`. To end fallback without returning to push, run
 `station stop` and do not prepare another run. Never wrap fallback launchers or
 `telex wait` in an infinite shell loop.
 
+## Watch a local session group for stalls
+
+Use one ordinary Watcher v2 watch to wake a group's root when its active members
+have stopped progressing. This is opt-in, same-machine and same-user only.
+`telex copilot stall-detect` is the detector: Watcher supplies its v2 request on
+stdin and receives one v2 result. Do not write a log parser, detector script or
+session-owned polling loop.
+
+### Create and maintain membership
+
+The root creates an absolute, private group directory and one
+`<local-session-id>.json` file per member:
+
+```json
+{
+  "schemaVersion": 1,
+  "sessionId": "local-session-id",
+  "address": "project:example/worker:one",
+  "state": "active",
+  "reason": "Working on the assigned item"
+}
+```
+
+Use the **local Copilot CLI id**, available to that member as
+`COPILOT_AGENT_SESSION_ID`, not the App session/project id. The filename must match
+`sessionId`. Keep the local-id-to-App-id mapping in the root's coordination
+context, outside these strict records. The root owns file creation/removal,
+session identity and distinct Telex addresses; members change only their own
+`state` and optional `reason`, preserving the other fields.
+
+| Member state | When to use it |
+| --- | --- |
+| `active` | The member is expected to make progress; only active members count. |
+| `parked` | A planned wait has a known wakeup, including a Watcher watch, App automation, or background shell/agent. Record what will wake it. |
+| `operator-held` | Progress requires an operator decision or gate. Record the question/gate. |
+| `done` | The member's assigned work is complete; the root can remove its file when it leaves. |
+
+Before ending a turn to wait on a background shell or agent, set your own state
+to `parked` with a reason. Return to `active` when woken to resume work. If rung
+while legitimately waiting, reply with what you are waiting for and stay parked.
+Background work is **unobserved** by this detector; both event kinds explicitly
+carry `backgroundWork: "unobserved"`. The App can also show idle while background
+work runs, so confirmation alone does not replace the member's parked state.
+
+Write a temporary non-`.json` file in the same directory, then atomically replace
+the member file. Never truncate it in place. Records are strict JSON: no extra or
+duplicate fields. Limits are 32 members, 4096 bytes per record, 64 total directory
+entries (including temporary files), and 256 UTF-8 bytes each for address/reason.
+Addresses must be distinct and contain no whitespace/control characters.
+Membership ids are 1-128 ASCII letters, digits, hyphens or underscores.
+
+### Register the watch
+
+Start from the root's **existing running Watcher installation**. Obtain the
+trusted absolute `telex` and `telex-watcher` executable paths from its installation
+record, and the absolute registry path, configured backend profile and send-only
+sender from its launch/registration policy. Use the backend that holds the
+members' Telex addresses, with absolute paths in profile configuration.
+If any value is unknown, ask the operator through `ask_user`; do not guess a path
+or default profile. The root's address must already receive Telex turns.
+
+The per-group choices are group directory, root address and grace period. The
+template below copies the installation values into the exact shipped v2 fields;
+backend, registry and cadence each have one source. Choose a new permanent
+lowercase watch id; removed ids cannot be reused. This example uses a 30-second
+cadence and 30-second timeout, allowing the detector's 15-second observation
+budget plus startup. Set `pollIntervalSeconds` to the registration's interval
+(the detector default is 30); grace is required and ranges from 1 to 86400 seconds.
+
+Run this inline template in **PowerShell 7**, replacing the angle-bracket values:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$groupDirectory = '<absolute group directory>'
+$rootAddress = '<root Telex address>'
+$graceSeconds = 300
+$telex = '<absolute installed telex executable>'
+$watcher = '<absolute installed telex-watcher executable>'
+$registry = '<absolute running Watcher registry>'
+$backendProfile = '<existing configured backend profile>'
+$sender = '<existing Watcher send-only address>'
+$watchId = '<new permanent watch id>'
+$pollSeconds = 30
+$registrationFile = Join-Path $groupDirectory 'stall-watch-registration.txt'
+$registration = @{
+    schemaVersion = 2
+    id = $watchId
+    command = @($telex, 'copilot', 'stall-detect')
+    intervalSeconds = $pollSeconds
+    timeoutSeconds = 30
+    backendProfile = $backendProfile
+    sender = $sender
+    target = $rootAddress
+    environmentAllowlist = @('TELEX_HOME')
+    parameters = @{
+        groupDirectory = $groupDirectory
+        backendProfile = $backendProfile
+        watcherExecutable = $watcher
+        watcherRegistry = $registry
+        graceSeconds = $graceSeconds
+        pollIntervalSeconds = $pollSeconds
+    }
+}
+$registration | ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath $registrationFile -Encoding utf8NoBOM
+& $watcher --registry $registry --json register $registrationFile
+if ($LASTEXITCODE -ne 0) { throw 'Watch registration failed; inspect the error before retrying.' }
+& $watcher --registry $registry --json show $watchId
+```
+
+This writes registration data, not a detector/wrapper script. Its `.txt` suffix
+keeps it out of the membership scan. `workingDirectory` is captured from the
+registration command's current directory. Allowlist `TELEX_CONFIG` and credential
+environment names too if that installation uses them; values come from the
+runtime's launch environment, not this registration shell. Do not put secrets in
+parameters. The detector uses its explicit backend profile, ignoring `TELEX_DB`
+and global database overrides.
+
+Inspect `status $watchId` and `attempts $watchId` through the same Watcher binary
+and registry to confirm that attempts are running. Registration alone does not
+prove monitoring is healthy. The detector excludes exactly its own watch from
+wake sources; every other active watch targeting a member counts, even if it
+depends on another idle member. An empty/no-active-member group is not stalled.
+
+### On a stall or attention advisory
+
+1. Ack the delivered Telex message and dedupe by message id before handling it.
+   Verify its registered sender/store and watch id; read the snapshot's membership,
+   classifier reasons, activity timestamps, message counts, watch ids and background
+   uncertainty. Events are once per unchanged episode, not repeated reminders.
+2. **Before acting, call the App's `get_sessions_status`.** Map the snapshot's
+   local ids to the App ids in the root's context. Recheck busy members, open
+   questions, planned waits and already-completed work. Never assume these two
+   kinds of session id are interchangeable.
+3. For `copilot.group.stalled`, diagnose the confirmed lack of progress, then ring
+   the affected members with a concrete next action or a request for their wait
+   reason. Use the App's `send_session_message` for a not-loaded session that needs
+   resuming; an unattended Telex address can retain a message without waking it.
+   For an attended member, Telex `send` is also suitable: include a meaningful
+   `--subject` and the root's explicit `--session`.
+4. For `copilot.group.attention-needed`, the snapshot is **degraded, not a stall**.
+   After App confirmation, inspect the named unknown members and their reasons;
+   ask them what stopped progress or what they are waiting for. Do not declare
+   them idle or restart their work based on this advisory. Quiet unknown evidence
+   older than grace can trigger it; missing evidence may remain degraded silently.
+5. A legitimately waiting member replies with its wait reason and stays parked;
+   a member resuming work returns itself to active. The root changes membership
+   identity/removal only. Record the diagnosis and terminally disposition the
+   event with `handle`, `reject` or `close` as appropriate.
+
+Known idle/not-loaded members with no observed wake source must remain unchanged
+for strictly longer than grace before a stall event. Busy and operator-waiting
+members prevent a stall; unknown is never idle. Membership changes or new activity
+(other than usage accounting) start a new episode. Duplicate transport delivery
+still needs message-id deduplication.
+
+### Degraded does not mean healthy silence
+
+A failed observation emits no stall event and does not advance detector state.
+Use the same Watcher registry's `health $watchId` and `attempts $watchId`:
+`diagnosticCategory: "detector-degraded"` needs inspection, not an assumption that
+someone is busy. Default management output hides detector diagnostic text.
+
+In the current bounded-inbox implementation, **more than 1024 retained inbox
+entries** for an active member, with no known unacknowledged/recent deferred
+message, prevents proving that no older deferred work exists. This can keep the
+watch degraded with no root-facing event or dedicated member hint. This limit
+applies until a release includes
+[issue #216](https://github.com/lossyrob/telex/issues/216). Acking/handling recent
+messages does not shrink retained history. Inspect that member's inbox using the
+same backend, including consumed history (`inbox --all --limit 1025`); use
+`export --address <addr>` to review older disposition history.
+
+While the limit prevents observation, show monitoring coverage as incomplete and
+use App inspection. Keep the existing routing identity and message history; the
+product repair belongs to #216. Do not mark active work parked/done merely to
+suppress degradation.
+
+The [group stall guide](https://github.com/lossyrob/telex/blob/main/docs/guide/src/guides/copilot-stalls.md)
+has a member-update example and the root's status-view checklist.
+
 ## Version and compatibility
 
 The header printed above this document reports the installed `telex` version and
@@ -325,6 +506,8 @@ telex copilot detach --help
 telex copilot fallback --help
 telex copilot fallback prepare --help
 telex copilot gc --help
+telex copilot session-state --help
+telex copilot stall-detect --help
 telex ack --help
 telex handle --help
 ```
