@@ -822,3 +822,88 @@ The rest of the outcome stands: identical semantics on both backends, the #197 a
 Not decided here: a wake-state projection or index. If evidence later shows polling cost matters, propose it as a separate store item through the steward. It is not discovered work for #216.
 
 I have updated the issue body to match.
+
+
+## #215 completion, exact gate-debt resolution and accepted constraints (2026-10-26)
+
+Campaign `toolu_01Vh1JWYa1NJHL4KHh22PfnL` accepts existing out-of-graph #215 complete after PR #218 merge `a4b3b21fffb947e220c65267289fd758bd962cde` at `ec8875272b6220770486dd8c60e10744a0c29a6a`. Owning Watcher expressly resolves #211 gate debts 2/3. Same owner `bd6ddeda-7950-4756-8b92-494c1030581e`; initial branch `lossyrob-scaling-guide`, public PR branch `lossyrob-stall-fixture-hygiene`, kickoff 17867 bytes / SHA-256 `654e536652e1644f37e0547679b64cff17b47eebe4b7483ddf29a4549ee9386a`, actual controller creation receipt at `2026-10-26T16:10:27.560Z`. This records existing staffing, not a new launch or runtime-ID mapping. Original hosted-only/old-freeze kickoff remains exact history under the later current policy.
+
+The earlier readiness and merge snapshots left main CI/field pending. Later owner `call_CIHZM9WWjJ7E103DlVu9glQh` and Campaign accept terminal follow-through: main run 40364215376 at the exact merge passed 21/21 on attempt 1; independently captured full run/job/ordered-step metadata match. Observer and named-test/runtime merits remain attributed, with no raw logs or local replay. All three delivery debts have final accepted dispositions; no per-debt item/node, #201 widening or #172 authorization. #210 external debt 3 maps only to the resolved #199 gate debt 2; original #198/#203 and other owned debts are not retired.
+
+Full public merge gate, field and final debt decision follow as CRLF-to-LF displays; private raw bytes remain exact.
+
+https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810
+
+## Campaign merge gate - PR #218 at ec887527 (Closes #215)
+
+Verdict: **merge**, with debt.
+
+Gated head: ec8875272b6220770486dd8c60e10744a0c29a6a. Merge base 3c9ac7ca.
+
+### Floor
+- Exact-head CI: run 40361125894 (pull_request), attempt 1, 21/21 success. It was created at 16:38:56Z, after #206 merged (a0a9c064, 16:29Z), so the merge ref included #206.
+- Receipts at this head:
+  - Design steward: issuecomment-6421588334, which follows 6421190414, the teardown finding addressed at 5ab1c8aa, and the 6421240060 re-inspection.
+  - Independent delta review: issuecomment-6421608765. R1 from the full source review 6421493834 is resolved, with no new findings.
+- closingIssuesReferences: [215]. Unresolved threads: 0. MERGEABLE/CLEAN.
+- Main drift: a0a9c064 (#206, tests/credential_command.rs only) was already in the CI merge ref, and 170f83b3 is .streamliner only. Both are disjoint, so no merge is required.
+
+### Merits (Campaign review)
+- Drop on the stall_detect_tests Directory and the copilot_stall_detect Fixture now attempts removal on unwind and fails only when not panicking. Three tests each cover unwind and normal cleanup, preservation of the original panic, and failure on normal return. This resolves #211 debt 2.
+- The binary_owned_stall_detector test no longer writes under the real HOME, which resolves #211 debt 3. On Unix it requires TELEX_TEST_HOME_ROOT, validated without repair: absolute, not a symlink (including trailing separator or dot spellings), user-owned, mode 0700, ancestors root- or user-owned and not group- or world-writable, outside the canonical real home, and a complete socket path that fits. On Windows it uses a home inside the fixture root.
+- Linux CI creates a short private root with sudo used only for setup, and an always() step fails if any test home leaks. The variable persists through GITHUB_ENV to the later sqlite test steps in the same job. macOS jobs do not run these tests.
+- The teardown-bypass subprocess test proves that an abrupt exit leaves a fixture only outside the real home.
+
+### Debt (carried, non-blocking)
+1. On Linux and macOS, `cargo test --workspace` now fails without TELEX_TEST_HOME_ROOT. This is documented in CONTRIBUTING, but it is new friction for Unix contributors. The operator workstation is Windows and is unaffected.
+2. macOS never runs the isolated-home fixture or the binary-owned detector integration test. This is a pre-existing coverage gap.
+3. The Linux CI setup depends on passwordless sudo on hosted runners.
+
+### Follow-through (owner bd6ddeda)
+Report main CI for the merge commit and post the #215 field report.
+
+https://github.com/lossyrob/telex/issues/215#issuecomment-6422826516
+
+## Field report
+
+#215 is delivered by [PR #218](https://github.com/lossyrob/telex/pull/218), merged as `a4b3b21fffb947e220c65267289fd758bd962cde`. Exact-merge main CI passed on its first attempt; the issue remains closed.
+
+**What held.** Both named test destructors attempt cleanup while unwinding without replacing the original panic with a second cleanup panic. Cleanup failure on a normal return still fails the test. The binary-owned stall-detector fixture no longer creates a standalone directory in the real user home. Product socket validation, pathname limits, and runtime behavior are unchanged.
+
+**What changed.** Unix fixtures use unique children of a validated, private, short `TELEX_TEST_HOME_ROOT` outside the real home. An unset or invalid root fails the test with setup guidance rather than falling back or repairing the directory. Windows keeps its fixture-local root. Linux CI provisions the Unix root with setup-only sudo for `mktemp` and `chown`; tests, `chmod`, and the post-test emptiness assertion run unprivileged. The empty setup root is left for disposable-runner teardown. CONTRIBUTING documents the prerequisite and a possible no-sudo local setup.
+
+**Evidence.**
+
+| Gate | Exact commit | Result |
+| --- | --- | --- |
+| Final PR-head hosted CI | `ec8875272b6220770486dd8c60e10744a0c29a6a` | [Run 40361125894](https://github.com/lossyrob/telex/actions/runs/40361125894): 21/21 jobs successful, attempt 1 |
+| Post-merge main hosted CI | `a4b3b21fffb947e220c65267289fd758bd962cde` | [Run 40364215376](https://github.com/lossyrob/telex/actions/runs/40364215376): 21/21 jobs successful, attempt 1 |
+
+The [main-CI receipt](https://github.com/lossyrob/telex/pull/218#issuecomment-6422816713) links Linux and Windows logs showing the named cleanup and live-management regressions passing, plus Linux root-validation, teardown-bypass, and emptiness checks. One managed observer followed the merge SHA. No reruns were requested or performed by this owner, and no local runtime validation was used.
+
+The [independent source review](https://github.com/lossyrob/telex/pull/218#issuecomment-6421493834) and [final-head delta review](https://github.com/lossyrob/telex/pull/218#issuecomment-6421608765) cover the final implementation; R1 is resolved with no remaining findings. The [design inspection passed at the same head](https://github.com/lossyrob/telex/pull/218#issuecomment-6421588334). [Campaign's merge gate](https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810) records the merge and carried debts.
+
+**Carried debts and dispositions.**
+
+1. Unix workspace tests now require `TELEX_TEST_HOME_ROOT`. The contributor setup friction is accepted as a documented setup constraint, with no new item.
+2. macOS does not run the isolated-home or detector integration tests. This pre-existing coverage gap is accepted debt, with no new item and no change to #201. Watcher detector execution currently fails closed on macOS pending containment. When containment is authorized and lands under #172 or its successor, macOS hosted detector coverage becomes an item through the design steward. CLI-direct and unit coverage could run today but is also accepted without an item. No macOS fixture runtime proof is claimed. Future setup must meet the #215 conditions or stop, without relaxing a check.
+3. Linux CI setup depends on hosted passwordless sudo for the two approved provisioning commands. This is accepted as a documented setup constraint, with no new item.
+
+The [steward's final debt disposition](https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702) records the macOS trigger and the coordinator's accepted setup constraints. Linux's root-level provisioning pattern is not assumed portable to macOS.
+
+**Design impact: none.** This is test-harness and contributor/CI setup work; it introduces no product or workstream geometry change.
+
+https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702
+
+Design steward: disposition of #218 merge-gate debt 2 (macOS stall-test coverage)
+
+Decision: accepted debt with a recorded trigger. No new item, and #201 is not widened. This answers the routing in https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810.
+
+The gap is really two parts with different causes:
+
+1. The Watcher-hosted test, binary_owned_stall_detector_reads_live_management_and_readonly_store in telex-watcher/tests/cli_v2.rs, with its isolated-home fixture. It starts `telex-watcher run`, which executes the detector. On macOS, Watcher v2 detector execution fails closed by design: process.rs on main returns UnsupportedPlatform, "verified containment requires Windows jobs or a Linux subreaper" (the platform module under cfg(all(not(target_os = "linux"), not(windows)))). The test cannot pass on macOS until macOS detector containment exists, which is #172's subject and on HOLD. An item created now could not be closed by a PR. Option (a) would also tie #201 to #172.
+2. The CLI-direct tests in tests/copilot_stall_detect.rs and the unit tests in src/commands/copilot/stall_detect_tests.rs. They set their own HOME, use an absent watcher executable and need no TELEX_TEST_HOME_ROOT. They could run on hosted macOS today, but they exercise platform-neutral logic for a configuration the Watcher cannot host on macOS. That coverage is not worth an item now.
+
+Trigger: when macOS detector containment is authorized and lands under #172 or its successor, macOS hosted coverage of the Watcher v2 detector tests, including both parts above, becomes an item through the design steward. Hazard for that future item: the #218 Linux root pattern is not expected to transfer. On macOS, / is a read-only sealed system volume. sun_path is 104 bytes, which leaves about 14 bytes for the root after the 89-byte suffix. $TMPDIR under /var/folders is too long, and /var is a symlink. The item must meet the #215 conditions (https://github.com/lossyrob/telex/issues/215#issuecomment-6421010376) on macOS, or stop and record why. It must not relax a check.
+
+Debts 1 and 3 are the coordinator's accepted setup constraints; I have no design objection.

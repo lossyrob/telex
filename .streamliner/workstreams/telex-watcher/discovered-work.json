@@ -1731,6 +1731,26 @@
           7
         ],
         "boundary": "The earlier #199 completion qualification and node summary retain their original acceptance snapshot; they do not renew a current #199-owner hold for debt 4. This later disposition changes only debt 4. Other debt routes, including the separate #215 work, are unchanged. No owner launch, runtime acceptance, #198 debt clearance or #201 validation is claimed."
+      },
+      "later215TestHygieneDisposition": {
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "resolvedDebtNumbers": [
+          2,
+          3
+        ],
+        "deliveryIssue": "https://github.com/lossyrob/telex/issues/215",
+        "deliveryPr": "https://github.com/lossyrob/telex/pull/218",
+        "merge": "a4b3b21fffb947e220c65267289fd758bd962cde",
+        "head": "ec8875272b6220770486dd8c60e10744a0c29a6a",
+        "authority": {
+          "campaign": "toolu_01Vh1JWYa1NJHL4KHh22PfnL",
+          "owningWatcher": "toolu_01DgGFuBx6pwQ2LGXuhA4GiT",
+          "gate": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810"
+        },
+        "originalCompletionSnapshotPreserved": true,
+        "other199DebtsUnchanged": true,
+        "original198And203LinkedDebtsNotCleared": true,
+        "boundary": "Only #199/#211 gate debts 2 and 3 are resolved by #215. Earlier retention snapshots remain history and do not renew those two owner obligations. Debt 4 remains assigned #216 work; debts 5/6/7 and other issue/process obligations are unchanged."
       }
     },
     {
@@ -1804,6 +1824,26 @@
           7
         ],
         "boundary": "The earlier #199 completion qualification and node summary retain their original acceptance snapshot; they do not renew a current #199-owner hold for debt 4. This later disposition changes only debt 4. Other debt routes, including the separate #215 work, are unchanged. No owner launch, runtime acceptance, #198 debt clearance or #201 validation is claimed."
+      },
+      "later215TestHygieneDisposition": {
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "resolvedDebtNumbers": [
+          2,
+          3
+        ],
+        "deliveryIssue": "https://github.com/lossyrob/telex/issues/215",
+        "deliveryPr": "https://github.com/lossyrob/telex/pull/218",
+        "merge": "a4b3b21fffb947e220c65267289fd758bd962cde",
+        "head": "ec8875272b6220770486dd8c60e10744a0c29a6a",
+        "authority": {
+          "campaign": "toolu_01Vh1JWYa1NJHL4KHh22PfnL",
+          "owningWatcher": "toolu_01DgGFuBx6pwQ2LGXuhA4GiT",
+          "gate": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810"
+        },
+        "originalCompletionSnapshotPreserved": true,
+        "other199DebtsUnchanged": true,
+        "original198And203LinkedDebtsNotCleared": true,
+        "boundary": "Only #199/#211 gate debts 2 and 3 are resolved by #215. Earlier retention snapshots remain history and do not renew those two owner obligations. Debt 4 remains assigned #216 work; debts 5/6/7 and other issue/process obligations are unchanged."
       }
     },
     {
@@ -2024,6 +2064,196 @@
           "ownerSessionId": "65da0181-23ea-4b66-8a43-d0ddf4a4f495",
           "boundary": "The previously unavailable #199 gate now exists. Its debt 2 retains both detector-test Drop unwrap sites from #213 debt 3. Its resolved debt 1 covers cli_v2 only, not these sites and not retirement of #203/#198 debt."
         }
+      },
+      "later215CounterpartDisposition": {
+        "corresponding199GateDebtNumber": 2,
+        "state": "counterpart-resolved-by-215",
+        "deliveryIssue": "https://github.com/lossyrob/telex/issues/215",
+        "merge": "a4b3b21fffb947e220c65267289fd758bd962cde",
+        "gate": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810",
+        "previousHomingSnapshotPreserved": true,
+        "boundary": "The #210 debt-3 external reference points to #199 gate debt 2, now resolved by #215. #210 owned debts 1/2 and the original #198/#203 linked debts remain unchanged; this is not blanket debt clearance."
+      }
+    },
+    {
+      "id": "watcher-stall-test-fixture-hygiene",
+      "sourceNodeId": "copilot-group-stall-detector",
+      "description": "Existing out-of-graph #215 test-fixture hygiene delivers #211 gate debts 2 and 3; no product runtime scope or new geometry.",
+      "requiredness": "Already staffed required gate-debt follow-through, now Campaign-accepted complete; no new gate or per-debt item.",
+      "disposition": "external",
+      "target": {
+        "tracker": "https://github.com/lossyrob/telex/issues/215",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/218",
+        "owners": [
+          "Watcher #215 owner session bd6ddeda-7950-4756-8b92-494c1030581e"
+        ],
+        "routing": "Previously authorized Watcher-owned out-of-graph task; no graph node."
+      },
+      "status": "completed",
+      "decisionState": "accepted",
+      "rationale": "Record accepted delivery, original launch/readiness/merge chronology and later terminal follow-through while retaining all three delivered setup/coverage debts with their final dispositions.",
+      "dispositionAuthority": "Campaign toolu_01Vh1JWYa1NJHL4KHh22PfnL accepts completion after merge and field; Campaign merge toolu_01Py1pPyAdaVJHuQGzVigpw9 and owning Watcher toolu_01DgGFuBx6pwQ2LGXuhA4GiT resolve exactly #211 gate debts 2/3.",
+      "linkedDebts": [
+        {
+          "issue": 199,
+          "gate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+          "numbers": [
+            2,
+            3
+          ],
+          "state": "resolved-by-215"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "controller-launch-and-public-readiness-history",
+          "ownerSessionId": "bd6ddeda-7950-4756-8b92-494c1030581e",
+          "initialBranch": "lossyrob-scaling-guide",
+          "kickoffBytes": 17867,
+          "kickoffSha256": "654e536652e1644f37e0547679b64cff17b47eebe4b7483ddf29a4549ee9386a",
+          "creationAt": "2026-10-26T16:10:27.560Z",
+          "profile": {
+            "model": "gpt-6.1-sol",
+            "reasoningEffort": "high",
+            "contextTier": "default",
+            "mode": "interactive"
+          },
+          "publicPrBranch": "lossyrob-stall-fixture-hygiene",
+          "readySource": "call_rKQ0BPRGHtGEoALBqYl62IZ8",
+          "readyGate": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422065801",
+          "limits": "Actual controller creation receipt/kickoff are byte-bound. Initial hosted-only/freeze wording is historical under the later operator policy. No runtime7f12 mapping, recipient inspection, new owner or relaunch is asserted."
+        }
+      ],
+      "terminalPath": "Campaign accepted complete; the same owner reports main CI/field obligations complete. Three delivery debts retain final accepted dispositions; no new node/item or #201 widening.",
+      "completionQualification": {
+        "publicIdentity": {
+          "owner": "bd6ddeda-7950-4756-8b92-494c1030581e",
+          "initialBranch": "lossyrob-scaling-guide",
+          "publicPrBranch": "lossyrob-stall-fixture-hygiene",
+          "merge": "a4b3b21fffb947e220c65267289fd758bd962cde",
+          "head": "ec8875272b6220770486dd8c60e10744a0c29a6a",
+          "issue": {
+            "url": "https://github.com/lossyrob/telex/issues/215",
+            "state": "closed",
+            "reason": "completed",
+            "closedAt": "2026-10-26T16:58:14Z"
+          },
+          "pr": {
+            "url": "https://github.com/lossyrob/telex/pull/218",
+            "mergedAt": "2026-10-26T16:58:13Z"
+          },
+          "kickoffBytes": 17867,
+          "kickoffSha256": "654e536652e1644f37e0547679b64cff17b47eebe4b7483ddf29a4549ee9386a",
+          "creationAt": "2026-10-26T16:10:27.560Z",
+          "profile": {
+            "model": "gpt-6.1-sol",
+            "reasoningEffort": "high",
+            "contextTier": "default",
+            "mode": "interactive"
+          },
+          "sources": [
+            {
+              "kind": "gate",
+              "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810",
+              "file": "workstation-lift-gate218-body.txt",
+              "bytes": 2601,
+              "sha256": "7d729388981a255c3ea8d5520abaf16d864e36f8ac9aa439b818480c15db94f0"
+            },
+            {
+              "kind": "ready",
+              "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422065801",
+              "file": "watcher215-ready-gate-body.txt",
+              "bytes": 1291,
+              "sha256": "e60ca0ffb5c5a70de6aef9c0c4a4ff94509e6f3ea64c85308f375c0e5a6f5cd1"
+            },
+            {
+              "kind": "macos",
+              "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702",
+              "file": "watcher215-macos-debt-disposition-body.txt",
+              "bytes": 2159,
+              "sha256": "db1c40ef02fae1fbd5d31deb16a988797bca39265e67352417f7e542a5ef2826"
+            },
+            {
+              "kind": "field",
+              "url": "https://github.com/lossyrob/telex/issues/215#issuecomment-6422826516",
+              "file": "watcher215-terminal-field-body.txt",
+              "bytes": 3904,
+              "sha256": "e517f08bb428daf8b8b84fe1da5adfeed6a08a64120caee84d574634ac42fc53"
+            },
+            {
+              "kind": "mainReceipt",
+              "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422816713",
+              "file": "watcher215-terminal-main-receipt-body.txt",
+              "bytes": 1199,
+              "sha256": "fa2bd50b3fd434706507878ee01266615abd418f65905354a748fc19b93ffaa9"
+            }
+          ],
+          "mainRun": 40364215376,
+          "mainAttempt": 1,
+          "successes": 21,
+          "completionAuthority": "toolu_01Vh1JWYa1NJHL4KHh22PfnL",
+          "ownerTerminalSource": "call_CIHZM9WWjJ7E103DlVu9glQh"
+        },
+        "gate": {
+          "kind": "gate",
+          "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810",
+          "file": "workstation-lift-gate218-body.txt",
+          "bytes": 2601,
+          "sha256": "7d729388981a255c3ea8d5520abaf16d864e36f8ac9aa439b818480c15db94f0",
+          "body": "## Campaign merge gate - PR #218 at ec887527 (Closes #215)\n\nVerdict: **merge**, with debt.\n\nGated head: ec8875272b6220770486dd8c60e10744a0c29a6a. Merge base 3c9ac7ca.\n\n### Floor\n- Exact-head CI: run 40361125894 (pull_request), attempt 1, 21/21 success. It was created at 16:38:56Z, after #206 merged (a0a9c064, 16:29Z), so the merge ref included #206.\n- Receipts at this head:\n  - Design steward: issuecomment-6421588334, which follows 6421190414, the teardown finding addressed at 5ab1c8aa, and the 6421240060 re-inspection.\n  - Independent delta review: issuecomment-6421608765. R1 from the full source review 6421493834 is resolved, with no new findings.\n- closingIssuesReferences: [215]. Unresolved threads: 0. MERGEABLE/CLEAN.\n- Main drift: a0a9c064 (#206, tests/credential_command.rs only) was already in the CI merge ref, and 170f83b3 is .streamliner only. Both are disjoint, so no merge is required.\n\n### Merits (Campaign review)\n- Drop on the stall_detect_tests Directory and the copilot_stall_detect Fixture now attempts removal on unwind and fails only when not panicking. Three tests each cover unwind and normal cleanup, preservation of the original panic, and failure on normal return. This resolves #211 debt 2.\n- The binary_owned_stall_detector test no longer writes under the real HOME, which resolves #211 debt 3. On Unix it requires TELEX_TEST_HOME_ROOT, validated without repair: absolute, not a symlink (including trailing separator or dot spellings), user-owned, mode 0700, ancestors root- or user-owned and not group- or world-writable, outside the canonical real home, and a complete socket path that fits. On Windows it uses a home inside the fixture root.\n- Linux CI creates a short private root with sudo used only for setup, and an always() step fails if any test home leaks. The variable persists through GITHUB_ENV to the later sqlite test steps in the same job. macOS jobs do not run these tests.\n- The teardown-bypass subprocess test proves that an abrupt exit leaves a fixture only outside the real home.\n\n### Debt (carried, non-blocking)\n1. On Linux and macOS, `cargo test --workspace` now fails without TELEX_TEST_HOME_ROOT. This is documented in CONTRIBUTING, but it is new friction for Unix contributors. The operator workstation is Windows and is unaffected.\n2. macOS never runs the isolated-home fixture or the binary-owned detector integration test. This is a pre-existing coverage gap.\n3. The Linux CI setup depends on passwordless sudo on hosted runners.\n\n### Follow-through (owner bd6ddeda)\nReport main CI for the merge commit and post the #215 field report."
+        },
+        "field": {
+          "kind": "field",
+          "url": "https://github.com/lossyrob/telex/issues/215#issuecomment-6422826516",
+          "file": "watcher215-terminal-field-body.txt",
+          "bytes": 3904,
+          "sha256": "e517f08bb428daf8b8b84fe1da5adfeed6a08a64120caee84d574634ac42fc53",
+          "body": "## Field report\r\n\r\n#215 is delivered by [PR #218](https://github.com/lossyrob/telex/pull/218), merged as `a4b3b21fffb947e220c65267289fd758bd962cde`. Exact-merge main CI passed on its first attempt; the issue remains closed.\r\n\r\n**What held.** Both named test destructors attempt cleanup while unwinding without replacing the original panic with a second cleanup panic. Cleanup failure on a normal return still fails the test. The binary-owned stall-detector fixture no longer creates a standalone directory in the real user home. Product socket validation, pathname limits, and runtime behavior are unchanged.\r\n\r\n**What changed.** Unix fixtures use unique children of a validated, private, short `TELEX_TEST_HOME_ROOT` outside the real home. An unset or invalid root fails the test with setup guidance rather than falling back or repairing the directory. Windows keeps its fixture-local root. Linux CI provisions the Unix root with setup-only sudo for `mktemp` and `chown`; tests, `chmod`, and the post-test emptiness assertion run unprivileged. The empty setup root is left for disposable-runner teardown. CONTRIBUTING documents the prerequisite and a possible no-sudo local setup.\r\n\r\n**Evidence.**\r\n\r\n| Gate | Exact commit | Result |\r\n| --- | --- | --- |\r\n| Final PR-head hosted CI | `ec8875272b6220770486dd8c60e10744a0c29a6a` | [Run 40361125894](https://github.com/lossyrob/telex/actions/runs/40361125894): 21/21 jobs successful, attempt 1 |\r\n| Post-merge main hosted CI | `a4b3b21fffb947e220c65267289fd758bd962cde` | [Run 40364215376](https://github.com/lossyrob/telex/actions/runs/40364215376): 21/21 jobs successful, attempt 1 |\r\n\r\nThe [main-CI receipt](https://github.com/lossyrob/telex/pull/218#issuecomment-6422816713) links Linux and Windows logs showing the named cleanup and live-management regressions passing, plus Linux root-validation, teardown-bypass, and emptiness checks. One managed observer followed the merge SHA. No reruns were requested or performed by this owner, and no local runtime validation was used.\r\n\r\nThe [independent source review](https://github.com/lossyrob/telex/pull/218#issuecomment-6421493834) and [final-head delta review](https://github.com/lossyrob/telex/pull/218#issuecomment-6421608765) cover the final implementation; R1 is resolved with no remaining findings. The [design inspection passed at the same head](https://github.com/lossyrob/telex/pull/218#issuecomment-6421588334). [Campaign's merge gate](https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810) records the merge and carried debts.\r\n\r\n**Carried debts and dispositions.**\r\n\r\n1. Unix workspace tests now require `TELEX_TEST_HOME_ROOT`. The contributor setup friction is accepted as a documented setup constraint, with no new item.\r\n2. macOS does not run the isolated-home or detector integration tests. This pre-existing coverage gap is accepted debt, with no new item and no change to #201. Watcher detector execution currently fails closed on macOS pending containment. When containment is authorized and lands under #172 or its successor, macOS hosted detector coverage becomes an item through the design steward. CLI-direct and unit coverage could run today but is also accepted without an item. No macOS fixture runtime proof is claimed. Future setup must meet the #215 conditions or stop, without relaxing a check.\r\n3. Linux CI setup depends on hosted passwordless sudo for the two approved provisioning commands. This is accepted as a documented setup constraint, with no new item.\r\n\r\nThe [steward's final debt disposition](https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702) records the macOS trigger and the coordinator's accepted setup constraints. Linux's root-level provisioning pattern is not assumed portable to macOS.\r\n\r\n**Design impact: none.** This is test-harness and contributor/CI setup work; it introduces no product or workstream geometry change.\r\n"
+        },
+        "debts": [
+          {
+            "number": 1,
+            "description": "Unix workspace cargo test requires TELEX_TEST_HOME_ROOT.",
+            "state": "accepted-documented-setup-constraint",
+            "noNewItem": true
+          },
+          {
+            "number": 2,
+            "description": "macOS does not execute isolated-home/Watcher detector integration coverage.",
+            "state": "accepted-debt",
+            "noNewItem": true,
+            "noNewNode": true,
+            "no201Widening": true,
+            "authority": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702",
+            "trigger": "When macOS detector containment is authorized and lands under #172 or its successor, both Watcher-hosted and CLI-direct/unit macOS detector coverage become an item through the design steward. Meet #215 conditions or stop, never relax a check; Linux root provisioning is not presumed portable."
+          },
+          {
+            "number": 3,
+            "description": "Linux hosted setup depends on passwordless sudo for provisioning.",
+            "state": "accepted-documented-setup-constraint",
+            "noNewItem": true
+          }
+        ],
+        "finalDebtDisposition": {
+          "kind": "macos",
+          "url": "https://github.com/lossyrob/telex/pull/218#issuecomment-6422370702",
+          "file": "watcher215-macos-debt-disposition-body.txt",
+          "bytes": 2159,
+          "sha256": "db1c40ef02fae1fbd5d31deb16a988797bca39265e67352417f7e542a5ef2826",
+          "body": "Design steward: disposition of #218 merge-gate debt 2 (macOS stall-test coverage)\n\nDecision: accepted debt with a recorded trigger. No new item, and #201 is not widened. This answers the routing in https://github.com/lossyrob/telex/pull/218#issuecomment-6422110810.\n\nThe gap is really two parts with different causes:\n\n1. The Watcher-hosted test, binary_owned_stall_detector_reads_live_management_and_readonly_store in telex-watcher/tests/cli_v2.rs, with its isolated-home fixture. It starts `telex-watcher run`, which executes the detector. On macOS, Watcher v2 detector execution fails closed by design: process.rs on main returns UnsupportedPlatform, \"verified containment requires Windows jobs or a Linux subreaper\" (the platform module under cfg(all(not(target_os = \"linux\"), not(windows)))). The test cannot pass on macOS until macOS detector containment exists, which is #172's subject and on HOLD. An item created now could not be closed by a PR. Option (a) would also tie #201 to #172.\n2. The CLI-direct tests in tests/copilot_stall_detect.rs and the unit tests in src/commands/copilot/stall_detect_tests.rs. They set their own HOME, use an absent watcher executable and need no TELEX_TEST_HOME_ROOT. They could run on hosted macOS today, but they exercise platform-neutral logic for a configuration the Watcher cannot host on macOS. That coverage is not worth an item now.\n\nTrigger: when macOS detector containment is authorized and lands under #172 or its successor, macOS hosted coverage of the Watcher v2 detector tests, including both parts above, becomes an item through the design steward. Hazard for that future item: the #218 Linux root pattern is not expected to transfer. On macOS, / is a read-only sealed system volume. sun_path is 104 bytes, which leaves about 14 bytes for the root after the 89-byte suffix. $TMPDIR under /var/folders is too long, and /var is a symlink. The item must meet the #215 conditions (https://github.com/lossyrob/telex/issues/215#issuecomment-6421010376) on macOS, or stop and record why. It must not relax a check.\n\nDebts 1 and 3 are the coordinator's accepted setup constraints; I have no design objection.\r\n"
+        },
+        "followThrough": {
+          "state": "reported-complete-and-metadata-verified",
+          "ownerSessionId": "bd6ddeda-7950-4756-8b92-494c1030581e",
+          "source": "call_CIHZM9WWjJ7E103DlVu9glQh",
+          "run": 40364215376,
+          "head": "a4b3b21fffb947e220c65267289fd758bd962cde",
+          "attempt": 1,
+          "aggregateSuccesses": 21,
+          "field": "https://github.com/lossyrob/telex/issues/215#issuecomment-6422826516",
+          "limits": "Full run/job/timestamp/ordered-step metadata independently checked. One observer, named per-test, cleanup, isolation and runtime merits remain owner/Campaign-attributed; no logs, runtime or per-test replay."
+        },
+        "boundary": "No #198/#203 linked debt clearance, no #210 debts 1 and 2 clearance, no other #199 debt clearance, #208 repair, #216 completion, #201 validation, #172 authorization or new staffing."
       }
     }
   ]
