@@ -1180,3 +1180,66 @@ status or design links. All other records, Watcher and both pending
 triggers those wakes. Staffing/recording supplies no cause, source/runtime,
 CI/readiness, repair/accepted-delivery, debt/HOLD or freeze credit and does
 not delay the already-authorized implementation.
+
+## 2026-10-26 - Accepted #166 completion with debt and both wakes sent
+
+Campaign accepts the bounded #166 repair as completed with retained debt,
+following [PR #196](https://github.com/lossyrob/telex/pull/196)'s actual
+product merge `8d7815a8d0fb8c6f465d441904044bd20f7dcc7b`, issue closure,
+the [merge + debt gate](https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413)
+and the owner's [field report](https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991).
+Direct Campaign confirmation `toolu_01LZnnNNdNrKTw4NLAmyyBgg` expressly
+requires the existing repair node to be completed with retained debt,
+following the #204 precedent. The same owner d7 remains recorded. This
+is not a new owner, node or causal finding.
+
+The reviewed head is `9b538e4fc2047bf7b2e4940a334cfff673643cc9`;
+the product merge's ordered parents are prior artifact main `a0bf2cf0`
+then that reviewed head. The merge tree is
+`30aac58eb2f76fab2800308fa68a1c22658a2a05`. Its `.streamliner` tree is
+unchanged from the first parent. This artifact successor is separate
+from the product merge; it does not count that merge as artifact work.
+All original observations, owner/launch/authority history and prior
+pending-wake snapshots remain intact.
+
+The accepted repair is the operator-authorized Mio 1.2.4 upgrade and
+Windows dependency floor for the reached Mio defect. Neither the gate
+nor this recording maps it causally to the six retained native
+observations. A recurring native crash reopens #166; preserve exact
+run/job/artifact and any dump, without retrying past the failure.
+
+All eight gate debts remain **retained and open**: ProcDump availability
+and signature-only verification; conditional SDK/symbol downloads;
+live-index/resolver-wording dependence in the fail-closed negative test;
+text-only capture coverage and the exact-1.2.4 assertion; Windows-only
+floor scope; unproved capture for `0xc0000409`/`0xc0000374`; stale
+#203/#204 gate wording and omitted isolation-env description; and the
+Windows Tokio 1.39.1+ next-release-note requirement. The full gate and
+field report are retained; these summaries clear none of the debts.
+The gate expressly makes #203 separate, superseding the earlier
+precondition without rewriting its history. #204's prior completion
+remains unchanged.
+
+After Local independently verified the actual product merge, Campaign
+`toolu_01VsA55QAZu6tR6v4erTrbHu` directed both waiting wakes immediately.
+Local reports exactly one immediate, no-mode-override send to each
+existing recipient: #193 / PR #194 owner `519693a5-0607-4aba-a968-345f3b1cd1b5`
+and #198 / PR #202 owner `a96926b1-3e4f-4578-a197-33de51d669c7`.
+The App accepted both. These are sent/admitted dispositions only, not
+owner execution, main integration, CI success, readiness or merge
+authority. Earlier `delivered:false` snapshots remain history; no wake
+is resent by recording.
+
+Each awakened owner integrates main and obtains fresh exact-head hosted
+CI/review and its own gate through the existing sole wait coordinator.
+Watcher's intervening delay proposal was not adopted; its later report
+that Campaign upheld the original wake remains attributed. No duplicate,
+revocation, PR #202 failure or conditional later wake is inferred.
+
+Main CI `40328433964` and Docs `40328433981` at `8d7815a8` are registered
+follow-through for Local and the sole coordinator; no terminal result or
+debt clearance is accepted here. Campaign's later confirmation reports
+#207 passed its merits gate but still awaits main integration and fresh
+CI; this records no #203/#207 or #167 acceptance. Counts stay 48 Local
+records and 29 nodes, with no edge, other status, owner, runtime or
+workstation-freeze change. Recording does not delay either awakened owner.
