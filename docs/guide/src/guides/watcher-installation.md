@@ -37,12 +37,18 @@ Choose and record the exact trusted binaries before running bootstrap:
   outside `target` so subsequent builds cannot replace a running binary. Watcher
   is not included in the single-binary Telex release install. Record the source
   commit and build command with your operational evidence.
+- On **Linux**, also retain the executable `watcher_process_guard` from that
+  same build in the **same directory** as the retained Watcher. This existing
+  containment helper is required to execute detectors. Bootstrap refuses a
+  missing/non-executable helper and pins its hash. Do not copy only `telex-watcher`.
 - Choose an **existing named backend profile** holding the members' addresses.
   Use absolute paths in profile configuration. Bootstrap does not invent a
   default profile or initialize/migrate a backend.
 - Choose a new, distinct **sender address** for Watcher's send-only responsibility,
   never a member's receive address. Watcher attaches it as send-only when a watch
   is registered; an empty runtime does not establish sender/backend readiness.
+
+A standalone copy of Watcher starts and attaches but cannot run detectors on Linux.
 
 For the existing Entra authentication path, **both packages need `entra`**:
 
@@ -131,12 +137,14 @@ The record contains only these fields:
 | `telexBuildId` | Selected Telex's reported build identity. |
 | `watcherSha256` | Hash of the retained Watcher binary. |
 | `verificationToolSha256` | SHA-256 of the owner-only `installation.ps1` beside this record. |
+| `processGuardSha256` | Linux: SHA-256 of the adjacent `watcher_process_guard` executable; Windows: `null` (uses native Job Objects). |
 
 The record is configuration, not a live-process claim or credential store.
 It does not contain tokens, connection strings, password commands or environment
 values. Restore any required environment from the existing approved profile and
 credential setup; do not save secrets in a launch log. Verify refuses an altered
-Watcher, companion tool or changed Telex selector instead of silently adopting it.
+Watcher, companion tool, Linux process guard or changed Telex selector instead of
+silently adopting it.
 
 ## Discover and verify
 
@@ -282,11 +290,15 @@ inputs; do not adopt the installation by guessing. Preserve its records and
 registry. Initial bootstrap deliberately refuses an existing registry.
 
 Create a candidate with an explicit new record path, a retained candidate
-Watcher and a new registry. Stop the old owner only with explicit operator
-approval. Decide how permanent watch IDs and opaque state move before registering
-on the candidate; never copy a live registry or discard unresolved sends. This
+Watcher (and its same-build Linux guard) and a new registry. Stop the old owner
+only with explicit operator approval. Decide how permanent watch IDs and opaque
+state move before registering on the candidate; never copy a live registry or discard unresolved sends. This
 procedure does not automate registry/state migration. A new empty registry does
 not preserve an old watch's recurrence history.
+
+At upgrade or rollback, retain, copy, verify and swap Watcher and its Linux guard
+as one same-build pair in a separate directory. Preserve the previous pair for
+reversal; never leave a new Watcher beside an old guard or replace a running pair.
 
 Telex upgrade/rollback stays on the existing binary surface, with approval and
 backend backup where required. An older CLI may be the required invoker for a

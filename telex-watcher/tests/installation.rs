@@ -32,6 +32,12 @@ impl Fixture {
             .root
             .join(format!("telex-watcher{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(env!("CARGO_BIN_EXE_telex-watcher"), &watcher).unwrap();
+        #[cfg(target_os = "linux")]
+        std::fs::copy(
+            env!("CARGO_BIN_EXE_watcher_process_guard"),
+            isolation.root.join("watcher_process_guard"),
+        )
+        .unwrap();
         #[cfg(windows)]
         let user_home = isolation.root.join("user");
         #[cfg(unix)]
@@ -104,7 +110,8 @@ impl Fixture {
                 "-Command",
                 "$ErrorActionPreference='Stop'; \
                  $p=$env:TELEX_TEST_INSTALLATION_ARGS | ConvertFrom-Json -AsHashtable; \
-                 & $env:TELEX_TEST_INSTALLATION_TOOL @p",
+                 try { & $env:TELEX_TEST_INSTALLATION_TOOL @p } \
+                 catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
             ]);
         command
     }
@@ -211,6 +218,8 @@ fn record_creation_discovery_verification_and_refusals() {
     assert_eq!(record["schemaVersion"], 1);
     assert_eq!(record["configRoot"], json!(fixture.isolation.home));
     assert_eq!(record["watcherRegistry"], json!(fixture.registry));
+    #[cfg(windows)]
+    assert_eq!(record["processGuardSha256"], Value::Null);
     assert!(!fixture.registry.exists(), "record preparation is offline");
     assert!(!fixture.isolation.daemon_running());
     let original = std::fs::read(fixture.record_path()).unwrap();
@@ -262,6 +271,7 @@ fn record_creation_discovery_verification_and_refusals() {
         ("watcherExecutable", json!("relative-watcher")),
         ("watcherSha256", json!("changed")),
         ("verificationToolSha256", json!("changed")),
+        ("processGuardSha256", json!("changed")),
         ("pollIntervalSeconds", json!(0)),
         ("environmentNames", json!(["TELEX_HOME", "INVALID-NAME"])),
     ] {
@@ -346,6 +356,69 @@ fn record_creation_discovery_verification_and_refusals() {
     fixture
         .tool(json!({"Action": "verify"}))
         .assert_failure("changed retained executable is refused");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_process_guard_is_required_and_pinned_beside_the_retained_watcher() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let guard = fixture.watcher.with_file_name("watcher_process_guard");
+    let saved = guard.with_file_name("watcher_process_guard.saved");
+    std::fs::rename(&guard, &saved).unwrap();
+    let missing = fixture.tool(fixture.parameters());
+    missing.assert_failure("create refuses a missing adjacent guard");
+    assert!(missing.stderr.contains("requires watcher_process_guard"));
+    assert!(!fixture.record_path().exists());
+    std::fs::create_dir(&guard).unwrap();
+    fixture
+        .tool(fixture.parameters())
+        .assert_failure("create refuses a directory in place of the guard");
+    std::fs::remove_dir(&guard).unwrap();
+    std::fs::rename(&saved, &guard).unwrap();
+    let permissions = std::fs::metadata(&guard).unwrap().permissions();
+    std::fs::set_permissions(&guard, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fixture
+        .tool(fixture.parameters())
+        .assert_failure("create refuses a non-executable guard");
+    std::fs::set_permissions(&guard, permissions.clone()).unwrap();
+    fixture
+        .tool(fixture.parameters())
+        .assert_success("create with the same-build retained pair");
+    let original = std::fs::read(&guard).unwrap();
+    let record: Value =
+        serde_json::from_slice(&std::fs::read(fixture.record_path()).unwrap()).unwrap();
+    let mut hash = String::new();
+    for byte in Sha256::digest(&original) {
+        write!(hash, "{byte:02x}").unwrap();
+    }
+    assert_eq!(record["processGuardSha256"], hash);
+    for action in ["verify", "preflight"] {
+        std::fs::rename(&guard, &saved).unwrap();
+        fixture
+            .tool(json!({"Action":action}))
+            .assert_failure("missing guard is never silently adopted");
+        std::fs::create_dir(&guard).unwrap();
+        fixture
+            .tool(json!({"Action":action}))
+            .assert_failure("a directory is not an executable guard");
+        std::fs::remove_dir(&guard).unwrap();
+        std::fs::rename(&saved, &guard).unwrap();
+        std::fs::write(&guard, b"changed guard").unwrap();
+        fixture
+            .tool(json!({"Action":action}))
+            .assert_failure("changed guard hash is refused");
+        std::fs::write(&guard, &original).unwrap();
+        std::fs::set_permissions(&guard, std::fs::Permissions::from_mode(0o600)).unwrap();
+        fixture
+            .tool(json!({"Action":action}))
+            .assert_failure("verification refuses a non-executable guard");
+        std::fs::set_permissions(&guard, permissions.clone()).unwrap();
+    }
+    fixture
+        .tool(json!({"Action":"verify"}))
+        .assert_success("restoring the exact pair restores verification");
 }
 
 #[test]
@@ -444,9 +517,12 @@ fn unsafe_record_authority_and_missing_auth_features_are_refused() {
     if !cfg!(feature = "entra") {
         let output = fixture.tool(parameters);
         output.assert_failure("missing Watcher Entra support is refused before launch");
-        assert!(output
-            .stderr
-            .contains("lacks the configured backend/authentication feature"));
+        assert!(
+            output
+                .stderr
+                .contains("lacks the configured backend/authentication feature"),
+            "{output:?}"
+        );
     }
 }
 
@@ -522,7 +598,11 @@ fn record_launch_registration_shutdown_and_retained_registry() {
         {
             break;
         }
-        assert!(Instant::now() < deadline, "{status}\n{watch}");
+        assert!(
+            Instant::now() < deadline,
+            "{status}\n{watch}\n{}",
+            fixture.management(&["attempts", "bootstrap-proof"])
+        );
         std::thread::sleep(Duration::from_millis(25));
     }
     fixture

@@ -168,10 +168,22 @@ function Assert-LaunchEnvironment($Record) {
     }
 }
 
+function Get-ProcessGuardHash([string]$Watcher) {
+    if (-not $IsLinux) { return $null }
+    $guard = Join-Path (Split-Path -Parent $Watcher) 'watcher_process_guard'
+    if (-not (Test-Path -LiteralPath $guard -PathType Leaf)) {
+        throw 'Linux Watcher requires watcher_process_guard beside its retained executable.'
+    }
+    if (([int][IO.File]::GetUnixFileMode($guard) -band 64) -eq 0) {
+        throw 'Linux watcher_process_guard must be executable by its owner.'
+    }
+    (Get-FileHash -LiteralPath $guard -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 function Assert-Record($Record, [switch]$Installed) {
     $keys = @('schemaVersion', 'configRoot', 'telexExecutable', 'watcherExecutable',
         'watcherRegistry', 'installRoot', 'backendProfile', 'sender', 'pollIntervalSeconds',
-        'environmentNames', 'telexBuildId', 'watcherSha256', 'verificationToolSha256')
+        'environmentNames', 'telexBuildId', 'watcherSha256', 'verificationToolSha256', 'processGuardSha256')
     if ($Record -isnot [System.Collections.IDictionary] -or
         @($Record.Keys).Count -ne $keys.Count -or
         @($Record.Keys | Where-Object { $_ -cnotin $keys }).Count -ne 0 -or
@@ -225,6 +237,16 @@ function Assert-Record($Record, [switch]$Installed) {
     }
     if ($Record.watcherSha256 -ne (Get-FileHash -LiteralPath $Record.watcherExecutable -Algorithm SHA256).Hash.ToLowerInvariant()) {
         throw 'Watcher executable changed; create a new reviewed installation record.'
+    }
+    if ($IsLinux) {
+        if ($Record.processGuardSha256 -isnot [string] -or $Record.processGuardSha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Invalid Linux process guard hash in installation record.'
+        }
+        if ($Record.processGuardSha256 -cne (Get-ProcessGuardHash $Record.watcherExecutable)) {
+            throw 'Watcher process guard changed; create a new reviewed installation record.'
+        }
+    } elseif ($null -ne $Record.processGuardSha256) {
+        throw 'Windows installation records must have a null processGuardSha256.'
     }
     $version = (Read-JsonCommand $Record.telexExecutable @('--json', 'version', '--root', $Record.installRoot)).version
     if (-not $version.install.layout_detected -or
@@ -302,6 +324,7 @@ if ($Action -ne 'create') {
         telexBuildId = $version.build_id
         watcherSha256 = (Get-FileHash -LiteralPath $WatcherExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
         verificationToolSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($toolBytes)).ToLowerInvariant()
+        processGuardSha256 = Get-ProcessGuardHash $WatcherExecutable
     }
     Assert-Record $record
     Assert-LaunchEnvironment $record
