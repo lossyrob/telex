@@ -72,6 +72,10 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# Floor for the Mio reached through Tokio's Windows named-pipe client and server. Mio < 1.2.4 can
+# report an error after a named-pipe read/write was already submitted, which leaves the completion
+# without its reserved reference (upstream tokio-rs/mio#2014; issue #166). Features stay Tokio's.
+mio = { version = "1.2.4", default-features = false }
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [features]

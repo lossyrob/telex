@@ -435,6 +435,31 @@ jobs:
       - name: Lint the external consumer fixture with warnings denied
         run: cargo clippy --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features sqlite --all-targets -- -D warnings
 
+      - name: Windows named-pipe transport resolves the fixed Mio (issue 166)
+        # Mio before 1.2.4 can lose the reference reserved for a submitted named-pipe I/O
+        # (tokio-rs/mio#2014). Verify the Mio reached through Tokio on the Windows target, in the
+        # locked repository graph and in the defaults-disabled external consumer fixture, and that
+        # no older duplicate remains.
+        run: |
+          set -euo pipefail
+          check() {
+            found=$("$@" -i mio --target x86_64-pc-windows-msvc --prefix none --depth 0 | sed -n '1s/^mio v//p')
+            echo "resolved mio $found"
+            lowest=$(printf '%s\n1.2.4\n' "$found" | sort -V | head -n 1)
+            if [ "$lowest" != "1.2.4" ]; then
+              echo "::error::resolved mio $found is older than 1.2.4"
+              exit 1
+            fi
+          }
+          check cargo tree --locked --no-default-features --features sqlite
+          check cargo tree --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features
+          duplicates=$(cargo tree --locked -d --target all --no-default-features --features sqlite | grep -c '^mio ' || true)
+          if [ "$duplicates" != "0" ]; then
+            echo "::error::more than one mio version is resolved"
+            exit 1
+          fi
+          echo "ok: the Windows named-pipe route resolves a single mio >= 1.2.4"
+
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
         # actionable error AND a non-zero exit. Assert both, so a regression where the stub
@@ -802,267 +827,6 @@ jobs:
           name: windows-heap-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}\telex-heap-diagnostics
-            target\debug\telex.exe
-            target\debug\telex.pdb
-          if-no-files-found: error
-
-  # Bounded, randomized (not deterministic) differential for the Mio named-pipe I/O lifetime
-  # defect fixed upstream in Mio 1.2.4. It runs the same workload against the locked Mio and
-  # against 1.2.4 under PageHeap with native postmortem capture. A clean run does not prove
-  # absence of the defect; a fault stack is evidence for it.
-  windows-named-pipe-race:
-    name: Windows named-pipe race (mio ${{ matrix.mio }})
-    runs-on: windows-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        mio:
-          - locked
-          - "1.2.4"
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "2"
-      CARGO_PROFILE_TEST_DEBUG: "2"
-      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
-    steps:
-      - name: Checkout the exact candidate head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install Rust stable
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Select the Mio under test
-        shell: pwsh
-        run: |
-          $evidence = Join-Path $env:RUNNER_TEMP "telex-pipe-race"
-          New-Item -ItemType Directory -Path (Join-Path $evidence "dumps"), `
-            (Join-Path $evidence "logs") -Force | Out-Null
-          "TELEX_HEAP_EVIDENCE=$evidence" >> $env:GITHUB_ENV
-          if ("${{ matrix.mio }}" -ne "locked") {
-            cargo update -p mio --precise "${{ matrix.mio }}" 2>&1 |
-              Tee-Object -FilePath (Join-Path $evidence "logs\cargo-update.txt")
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          cargo tree --no-default-features --features sqlite --target x86_64-pc-windows-msvc -i mio 2>&1 |
-            Tee-Object -FilePath (Join-Path $evidence "logs\mio-tree.txt")
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Build the race executable under a fixed image name
-        shell: pwsh
-        run: |
-          $messages = cargo test --no-default-features --features sqlite `
-            --test windows_named_pipe_race --no-run --message-format=json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $exe = $messages | ForEach-Object { $_ | ConvertFrom-Json -ErrorAction SilentlyContinue } |
-            Where-Object { $_.reason -eq "compiler-artifact" -and $_.executable -and
-              $_.target.name -eq "windows_named_pipe_race" } |
-            Select-Object -Last 1 -ExpandProperty executable
-          if (-not $exe) { throw "the race test executable was not reported" }
-          $bin = Join-Path $env:TELEX_HEAP_EVIDENCE "bin"
-          New-Item -ItemType Directory -Path $bin -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $bin "pipe_race.exe")
-          Copy-Item -LiteralPath ([IO.Path]::ChangeExtension($exe, ".pdb")) `
-            -Destination (Join-Path $bin "pipe_race.pdb")
-          "TELEX_PIPE_RACE_EXE=$(Join-Path $bin 'pipe_race.exe')" >> $env:GITHUB_ENV
-
-      - name: Configure full PageHeap and verify postmortem capture
-        shell: pwsh
-        run: |
-          $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\pipe_race.exe"
-          New-Item -Path $ifeo -Force | Out-Null
-          New-ItemProperty -Path $ifeo -Name GlobalFlag -Value 0x02000000 `
-            -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
-            -PropertyType DWord -Force | Out-Null
-          tests/configure_windows_postmortem.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
-
-      - name: Run the bounded named-pipe race
-        shell: pwsh
-        env:
-          RUST_BACKTRACE: "1"
-          TELEX_PIPE_RACE_ROUNDS: "400000"
-          TELEX_PIPE_RACE_MAX_SECONDS: "300"
-        run: |
-          $worst = 0
-          foreach ($config in @(
-              @{ Workers = 2; Concurrency = 64; Seed = 0x1660000001 },
-              @{ Workers = 4; Concurrency = 32; Seed = 0x1660000002 },
-              @{ Workers = 8; Concurrency = 128; Seed = 0x1660000003 })) {
-            $name = "w$($config.Workers)-c$($config.Concurrency)"
-            $env:TELEX_PIPE_RACE_WORKERS = "$($config.Workers)"
-            $env:TELEX_PIPE_RACE_CONCURRENCY = "$($config.Concurrency)"
-            $env:TELEX_PIPE_RACE_SEED = "$($config.Seed)"
-            & $env:TELEX_PIPE_RACE_EXE --ignored --exact `
-              abrupt_close_races_pipe_reads_and_writes --nocapture 2>&1 |
-              Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race-$name.txt")
-            $exit = $LASTEXITCODE
-            "pipe_race $name exit=0x{0:x8}" -f ([uint32]$exit) |
-              Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race-exit-$name.txt")
-            if ($exit -ne 0 -and $worst -eq 0) { $worst = $exit }
-            Start-Sleep -Seconds 5
-          }
-          exit $worst
-
-      - name: Settle and check postmortem dumps
-        if: always()
-        shell: pwsh
-        run: |
-          Start-Sleep -Seconds 10
-          tests/capture_windows_crash_evidence.ps1 `
-            -EvidenceName "pipe-race" `
-            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
-            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols") `
-            -SnapshotSymbols
-
-      - name: Preserve native fault stacks from hosted dumps
-        if: always()
-        shell: pwsh
-        run: tests/analyze_windows_crash_evidence.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
-
-      - name: Unregister disposable postmortem debugger
-        if: always() && env.TELEX_POSTMORTEM_EXE != ''
-        shell: pwsh
-        run: |
-          & $env:TELEX_POSTMORTEM_EXE -u
-          if ($LASTEXITCODE -ne 0) {
-            throw "unregistering the hosted postmortem debugger failed"
-          }
-
-      - name: Upload named-pipe race evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-named-pipe-race-mio-${{ matrix.mio }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}\telex-pipe-race
-          if-no-files-found: error
-
-  # Finite diagnostic for #166: the four tests that exposed the native child faults, repeated
-  # under full PageHeap with the user-mode stack trace database and postmortem capture. The
-  # ceiling is 40 iterations or 25 minutes of loop time, stopping at the first non-zero exit.
-  # A clean run is not evidence of absence and is not extended.
-  windows-heap-targeted-stress:
-    name: Windows heap targeted stress
-    runs-on: windows-latest
-    timeout-minutes: 50
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "2"
-      CARGO_PROFILE_TEST_DEBUG: "2"
-      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
-    steps:
-      - name: Checkout the exact candidate head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install Rust stable
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Configure PageHeap with stack traces and crash dumps
-        shell: pwsh
-        run: |
-          $evidence = Join-Path $env:RUNNER_TEMP "telex-targeted-stress"
-          New-Item -ItemType Directory -Path (Join-Path $evidence "dumps"), `
-            (Join-Path $evidence "logs") -Force | Out-Null
-          "TELEX_HEAP_EVIDENCE=$evidence" >> $env:GITHUB_ENV
-          "TELEX_PROCESS_EVIDENCE=$(Join-Path $evidence 'commands')" >> $env:GITHUB_ENV
-          $root = Join-Path $env:RUNNER_TEMP "stress-runtime-${{ github.run_id }}-${{ github.run_attempt }}"
-          "TELEX_HOME=$(Join-Path $root 'home')" >> $env:GITHUB_ENV
-          "TELEX_DB=$(Join-Path $root 'store.db')" >> $env:GITHUB_ENV
-          "TELEX_INSTALL_ROOT=$(Join-Path $root 'install')" >> $env:GITHUB_ENV
-
-          $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\telex.exe"
-          New-Item -Path $ifeo -Force | Out-Null
-          New-ItemProperty -Path $ifeo -Name GlobalFlag -Value 0x02001000 `
-            -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
-            -PropertyType DWord -Force | Out-Null
-
-      - name: Verify native postmortem capture without changing child status
-        shell: pwsh
-        run: tests/configure_windows_postmortem.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
-
-      - name: Repeat the four observed tests
-        shell: pwsh
-        env:
-          RUST_BACKTRACE: "1"
-        run: |
-          cargo test --no-default-features --features sqlite `
-            --test daemon_process_sqlite --no-run
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          tests/capture_windows_crash_evidence.ps1 `
-            -EvidenceName "targeted-stress" `
-            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
-            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols") `
-            -SnapshotSymbols
-          $targets = @(
-            "real_process_status_hints_when_address_active_on_other_store",
-            "real_process_01_concurrent_first_use",
-            "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token",
-            "station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone")
-          $ceiling = 40
-          $clock = [System.Diagnostics.Stopwatch]::StartNew()
-          $burners = @()
-          $exit = 0
-          $completed = 0
-          try {
-            for ($iteration = 1; $iteration -le $ceiling; $iteration++) {
-              if ($clock.Elapsed.TotalMinutes -ge 25) { break }
-              if ($iteration -eq 21) {
-                $burners = 1..4 | ForEach-Object { Start-Job -ScriptBlock { while ($true) { } } }
-              }
-              $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\iteration-$iteration.txt"
-              cargo test --no-default-features --features sqlite `
-                --test daemon_process_sqlite -- --exact --test-threads=4 --nocapture `
-                @targets 2>&1 | Tee-Object -FilePath $log
-              $exit = $LASTEXITCODE
-              $completed = $iteration
-              if ($exit -ne 0) { break }
-            }
-          } finally {
-            $burners | ForEach-Object { Stop-Job $_; Remove-Job $_ -Force }
-          }
-          "iterations completed=$completed ceiling=$ceiling minutes={0:N1} exit=0x{1:x8}" -f `
-            $clock.Elapsed.TotalMinutes, ([uint32]$exit) |
-            Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\summary.txt")
-          exit $exit
-
-      - name: Settle and check final dumps
-        if: always()
-        shell: pwsh
-        run: |
-          Start-Sleep -Seconds 10
-          tests/capture_windows_crash_evidence.ps1 `
-            -EvidenceName "targeted-stress-final" `
-            -DumpDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "dumps") `
-            -SymbolDirectory (Join-Path $env:TELEX_HEAP_EVIDENCE "symbols")
-
-      - name: Preserve native fault stacks from hosted dumps
-        if: always()
-        shell: pwsh
-        run: tests/analyze_windows_crash_evidence.ps1 -EvidenceRoot $env:TELEX_HEAP_EVIDENCE
-
-      - name: Unregister disposable postmortem debugger
-        if: always() && env.TELEX_POSTMORTEM_EXE != ''
-        shell: pwsh
-        run: |
-          & $env:TELEX_POSTMORTEM_EXE -u
-          if ($LASTEXITCODE -ne 0) {
-            throw "unregistering the hosted postmortem debugger failed"
-          }
-
-      - name: Upload targeted stress evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-heap-targeted-stress-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            ${{ runner.temp }}\telex-targeted-stress
             target\debug\telex.exe
             target\debug\telex.pdb
           if-no-files-found: error

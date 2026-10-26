@@ -301,42 +301,65 @@ fn hosted_native_capture_preserves_abnormal_child_status_and_invocation() {
 }
 
 #[test]
-fn hosted_named_pipe_race_and_ordinary_job_capture_are_wired() {
+fn ordinary_windows_job_keeps_postmortem_dump_capture_wired() {
     let ci = read(".github/workflows/ci.yml");
-    let race = read("tests/windows_named_pipe_race.rs");
     let setup = read("tests/configure_windows_postmortem.ps1");
     assert!(
-        ci.contains("windows-named-pipe-race:")
-            && ci.contains("cargo update -p mio --precise")
-            && ci.contains("windows-named-pipe-race-mio-")
-            && ci.contains("abrupt_close_races_pipe_reads_and_writes")
-            && ci.contains("pipe_race.exe")
-            && ci.contains("telex-crash-postmortem")
-            && ci.contains("-DumpDirectory (Join-Path $env:RUNNER_TEMP \"telex-crash-dumps\")"),
-        "the Mio differential and ordinary-job postmortem capture must stay wired"
-    );
-    assert!(
-        race.contains("#![cfg(windows)]")
-            && race.contains("#[ignore")
-            && race.contains("RUNNER_ENVIRONMENT")
-            && race.contains("TELEX_PIPE_RACE_MAX_SECONDS")
+        ci.contains("telex-crash-postmortem")
+            && ci.contains("-DumpDirectory (Join-Path $env:RUNNER_TEMP \"telex-crash-dumps\")")
             && setup.contains("[string]$DumpDirectory"),
-        "the named-pipe race must stay ignored, hosted-only and bounded"
+        "the ordinary Windows job must keep its native postmortem dump capture"
+    );
+}
+
+fn version_triple(version: &str) -> (u64, u64, u64) {
+    let mut parts = version
+        .split(['.', '-', '+'])
+        .map(|part| part.parse::<u64>().expect("numeric version component"));
+    let mut next = || parts.next().unwrap_or(0);
+    (next(), next(), next())
+}
+
+/// Mio < 1.2.4 can report an error after a named-pipe read or write was submitted, which leaves
+/// the completion without its reserved reference (tokio-rs/mio#2014, issue #166). The lock pins
+/// this repository's build graph; the Windows normal-dependency floor protects consumers that
+/// resolve telex with their own lock file.
+#[test]
+fn windows_named_pipe_transport_requires_fixed_mio() {
+    const FIXED: (u64, u64, u64) = (1, 2, 4);
+    let manifest: toml::Value = toml::from_str(&read("Cargo.toml")).unwrap();
+    let mio = &manifest["target"]["cfg(windows)"]["dependencies"]["mio"];
+    let requirement = mio["version"].as_str().expect("mio floor version");
+    assert!(
+        requirement
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && version_triple(requirement) == FIXED,
+        "the Windows mio floor must be the caret requirement 1.2.4, found {requirement}"
+    );
+    assert_eq!(
+        mio["default-features"].as_bool(),
+        Some(false),
+        "the floor must not enable Mio default features"
+    );
+    let lock: toml::Value = toml::from_str(&read("Cargo.lock")).unwrap();
+    let versions: Vec<&str> = lock["package"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|package| package["name"].as_str() == Some("mio"))
+        .map(|package| package["version"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        versions.len(),
+        1,
+        "exactly one Mio must be locked: {versions:?}"
     );
     assert!(
-        ci.contains("windows-heap-targeted-stress:")
-            && ci.contains("windows-heap-targeted-stress-")
-            && ci.contains("$ceiling = 40")
-            && ci.contains("-Value 0x02001000")
-            && ci.contains("real_process_status_hints_when_address_active_on_other_store")
-            && ci.contains("real_process_01_concurrent_first_use")
-            && ci.contains(
-                "ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token"
-            )
-            && ci.contains(
-                "station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone"
-            ),
-        "the finite targeted heap stress must stay bounded and cover the four observed tests"
+        version_triple(versions[0]) >= FIXED && version_triple(versions[0]).0 == 1,
+        "the locked Mio must be 1.2.4 or a later 1.x release, found {}",
+        versions[0]
     );
 }
 
