@@ -496,6 +496,8 @@ pub enum CopilotCmd {
     TurnGuard(CopilotTurnGuardArgs),
     /// Print version-matched Copilot CLI instructions (the binary is the source of truth).
     Skill(CopilotSkillArgs),
+    /// Classify one same-user local Copilot CLI session from a bounded event-log tail.
+    SessionState(CopilotSessionStateArgs),
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),
@@ -585,6 +587,13 @@ pub struct GcArgs {
     /// previous, or the active process version.
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotSessionStateArgs {
+    /// Local Copilot CLI session id (not an App session id, path, or remote reference).
+    #[arg(long, value_parser = crate::commands::copilot::session_state::parse_session_id)]
+    pub session: String,
 }
 
 #[derive(Args)]
@@ -1112,6 +1121,30 @@ mod tests {
                 CopilotFallbackRunArgs { .. }
             )))
         ));
+    }
+
+    #[test]
+    fn copilot_session_state_requires_a_plain_explicit_session_id() {
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "session-state", "--session", "local-123"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::SessionState(CopilotSessionStateArgs { session }))
+                if session == "local-123"
+        ));
+        for args in [
+            vec!["telex", "copilot", "session-state"],
+            vec!["telex", "copilot", "session-state", "--session", "../other"],
+            vec![
+                "telex",
+                "copilot",
+                "session-state",
+                "--session",
+                r"C:\other",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]

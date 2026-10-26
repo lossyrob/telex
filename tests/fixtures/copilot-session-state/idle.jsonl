@@ -1,0 +1,4 @@
+{"type":"assistant.turn_end","id":"turn-end-1","timestamp":"2026-10-25T20:00:00Z","data":{"turnId":"turn-1"}}
+{"type":"hook.start","id":"stop-start-1","timestamp":"2026-10-25T20:00:01Z","data":{"hookType":"agentStop","hookInvocationId":"stop-1"}}
+{"type":"hook.end","id":"stop-end-1","timestamp":"2026-10-25T20:00:02Z","data":{"hookType":"agentStop","hookInvocationId":"stop-1","success":true,"output":{"decision":"allow"}}}
+{"type":"session.usage_checkpoint","id":"usage-1","timestamp":"2026-10-25T20:00:03Z","data":{}}
