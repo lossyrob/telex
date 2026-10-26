@@ -503,7 +503,10 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
             "registration template must preserve {required:?}"
         );
     }
-    assert_eq!(template.matches("backendProfile = $backendProfile").count(), 2);
+    assert_eq!(
+        template.matches("backendProfile = $backendProfile").count(),
+        2
+    );
     for text in [instructions, guide] {
         for required in [
             "get_sessions_status",
