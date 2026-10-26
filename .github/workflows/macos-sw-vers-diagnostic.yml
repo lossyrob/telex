@@ -1,0 +1,53 @@
+name: Standalone sw_vers decoder-environment diagnostic
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-containment-proof
+    paths:
+      - diagnostics/macos_sw_vers/**
+      - .github/workflows/macos-sw-vers-diagnostic.yml
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  diagnostic:
+    name: ${{ matrix.context }}
+    if: github.run_attempt == 1
+    runs-on: macos-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        context: [Diagnostic-ARM24-context, Diagnostic-Intel25-context]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Synthetic-only diagnostic tests
+        run: python3 -I -B diagnostics/macos_sw_vers/test_diagnostic.py
+      - name: Separately frozen diagnostic only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAGNOSTIC_CONTEXT: ${{ matrix.context }}
+        run: |
+          python3 -I -B diagnostics/macos_sw_vers/diagnostic.py "$DIAGNOSTIC_CONTEXT" \
+            "$RUNNER_TEMP/swvers-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${DIAGNOSTIC_CONTEXT}-work" \
+            "$RUNNER_TEMP/swvers-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${DIAGNOSTIC_CONTEXT}-evidence"
+      - name: Bound diagnostic evidence
+        id: bound
+        if: always()
+        env:
+          DIAGNOSTIC_CONTEXT: ${{ matrix.context }}
+        run: |
+          python3 -I -B diagnostics/macos_sw_vers/diagnostic.py --verify-output \
+            "$RUNNER_TEMP/swvers-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${DIAGNOSTIC_CONTEXT}-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.bound.outcome == 'success'
+        with:
+          name: swvers-${{ matrix.context }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swvers-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.context }}-evidence
+          if-no-files-found: error
+          retention-days: 30

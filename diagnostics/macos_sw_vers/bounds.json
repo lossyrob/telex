@@ -1,0 +1,81 @@
+{
+  "component": "macos-sw-vers-diagnostic-v1",
+  "accepted_component_parent": "328e724690de7abefc9ae951d5be60d17425d747",
+  "purpose": "Standalone sw_vers raw stdout/stderr under the unchanged decoder environment construction, not ipsw internal CombinedOutput or a native-cause proof.",
+  "repository": "lossyrob/telex",
+  "issue": 172,
+  "freeze_author": "lossyrob",
+  "branch": "lossyrob-macos-containment-proof",
+  "workflow": ".github/workflows/macos-sw-vers-diagnostic.yml",
+  "jobs": ["Diagnostic-ARM24-context", "Diagnostic-Intel25-context"],
+  "host": {
+    "runner": "macos-latest",
+    "system": "darwin",
+    "architecture": "arm64",
+    "product_version": "26.6.2",
+    "build": "25G83",
+    "scope": "Both jobs are ARM64 provider-host diagnostics. Context labels are not selected target-class or Intel hardware proof; runner images may differ."
+  },
+  "environment": {
+    "DEVELOPER_DIR": "/Applications/Xcode_26.6.app/Contents/Developer",
+    "TOOLCHAINS": "com.apple.dt.toolchain.XcodeDefault",
+    "SDKROOT": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+  },
+  "decoder_environment_additions": {"DYLD_PRINT_LIBRARIES": "1", "NO_COLOR": "1"},
+  "reject_environment_keys": ["LD_LIBRARY_PATH", "LD_PRELOAD", "SIMULATOR_ROOT", "IPHONE_SIMULATOR_ROOT"],
+  "reject_environment_key_substring": "DYLD",
+  "environment_relation": "Match exact328e NativeBinding.check_environment defaults/checks; inherit that checked environment, then set DYLD_PRINT_LIBRARIES=1 and NO_COLOR=1, as decoder_launch does. Do not serialize other inherited values or secrets.",
+  "baseline_commands": {
+    "uname": ["/usr/bin/uname", "-a"],
+    "architecture": ["/usr/bin/uname", "-m"],
+    "product": ["/usr/bin/sw_vers", "-productVersion"],
+    "build": ["/usr/bin/sw_vers", "-buildVersion"],
+    "source": ["/usr/bin/git", "-C", "{checkout}", "rev-parse", "HEAD"]
+  },
+  "diagnostic_command": ["/usr/bin/sw_vers", "-productVersion"],
+  "source_files": [
+    "diagnostics/macos_sw_vers/bounds.json",
+    "diagnostics/macos_sw_vers/diagnostic.py",
+    "diagnostics/macos_sw_vers/test_diagnostic.py",
+    ".github/workflows/macos-sw-vers-diagnostic.yml"
+  ],
+  "import_boundary": "Python standard library only; no imports from the full component, FFI, installed Telex, ipsw or selected-image code. The hosted Python interpreter/stdlib and provider OS remain trusted, not independently attested.",
+  "limits": {
+    "workflow_minutes": 10,
+    "total_seconds": 300,
+    "gate_seconds": 120,
+    "github_request_seconds": 15,
+    "github_response_bytes": 4194304,
+    "github_comment_pages": 10,
+    "command_seconds": 15,
+    "wait_seconds": 3,
+    "kill_wait_seconds": 3,
+    "select_seconds": 0.1,
+    "read_chunk_bytes": 4096,
+    "per_stream_bytes": 262144,
+    "overflow_evidence_bytes": 1,
+    "per_file_bytes": 1048576,
+    "artifact_bytes": 4194304,
+    "artifact_files": 64,
+    "maximum_commands": 6,
+    "maximum_live_owned_children": 1
+  },
+  "gate": {
+    "event": "push",
+    "attempt": 1,
+    "unique_exact_component_and_sha_marker": true,
+    "required_fields": ["component", "sha", "bounds_sha256", "source_manifest_sha256", "jobs", "attempt", "allow_launch", "source_review", "source_review_body_sha256"],
+    "provider_queries_only_after_gate": true,
+    "read_timing": "Deadline checked between bounded HTTP read1 chunks; an in-flight socket operation has at most the configured request timeout. Timeout is not an automatic retry.",
+    "retry": "No automatic/manual retry authority. Attempt1 only; full-component freezes and retry allowances are invalid here."
+  },
+  "output": {
+    "raw_streams": "Separate exact stdout/stderr .bin files with length, SHA256, observed-byte count, EOF and retention completeness. On cap failure retain up to cap+1 bytes, mark incomplete and stop.",
+    "command_records": "Requested argv, actual Popen.args as recorded argv, exact owned PID, rc, elapsed time, errors, teardown/reap state and raw stream references. These do not attest to executed-image identity.",
+    "diagnostic_classification": "Clean/noisy/arbitrary bytes may be successfully collected if exact argv, rc0 and both EOFs satisfy bounds. Collection success is NOT version acceptance. No stripping, semver conversion, stream concatenation or claim of Go CombinedOutput.",
+    "failure": "Persist useful partial raw bytes and explicit command errors before rejection; sink failures block success and may prevent an uploadable manifest.",
+    "artifacts": "Flat bounded files only; complete source closure, gate/baseline/environment/command/result receipts and sha256 manifest. No binaries, caches or selected inputs."
+  },
+  "prohibited": ["input or tool-release downloads", "ipsw or 7zz execution", "reconstruction", "selected-image processing", "FFI/library/cache snapshot", "native binding", "new decoder or trace policy", "global process scans", "privilege or machine tuning"],
+  "final_HOLD_unchanged": true
+}
