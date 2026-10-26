@@ -114,12 +114,19 @@ def validate_freeze(comments, expected, bounds):
     return comment, record
 
 
+class RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
+        raise DiagnosticError("diagnostic HTTP redirect refused before forwarding: " + str(code))
+
+
 def fetch_json(endpoint, token, limits, deadline):
     remaining = deadline - time.monotonic()
     require(remaining > 0, "diagnostic gate deadline")
     request = urllib.request.Request("https://api.github.com/repos/lossyrob/telex/" + endpoint,
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(request, timeout=min(remaining, limits["github_request_seconds"])) as response:
+    opener = urllib.request.build_opener(RefuseRedirects())
+    with opener.open(request, timeout=min(remaining, limits["github_request_seconds"])) as response:
         require(response.geturl() == request.full_url, "unexpected diagnostic gate redirect")
         raw = bytearray()
         while True:

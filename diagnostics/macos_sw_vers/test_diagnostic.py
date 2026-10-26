@@ -2,12 +2,16 @@
 
 from contextlib import contextmanager
 import copy
+from email.message import Message
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
+import urllib.response
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -128,11 +132,12 @@ class GateTests(unittest.TestCase):
                 @contextmanager
                 def opened(*args, **kwargs):
                     yield response
-                with patch.object(diag.urllib.request, "urlopen", side_effect=opened) as fetch, \
+                with patch.object(diag.urllib.request, "build_opener",
+                                  return_value=SimpleNamespace(open=opened)) as opener, \
                         patch.object(diag.time, "monotonic", side_effect=times), \
                         self.assertRaises(diag.DiagnosticError):
                     diag.fetch_json("issues/172", "synthetic", limits, 10)
-                self.assertEqual(fetch.call_count, 1)
+                self.assertEqual(opener.call_count, 1)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -499,6 +504,108 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(r["file"].startswith("diagnostics/macos_sw_vers/") or
                             r["file"] == ".github/workflows/macos-sw-vers-diagnostic.yml" for r in records))
         self.assertFalse(any("macos_cross_static" in r["file"] for r in records))
+
+
+class RedirectTests(unittest.TestCase):
+    @contextmanager
+    def mocked_transport(self, code, location=None, raw=b"{}"):
+        calls, responses, openers = [], [], []
+        original_build = diag.urllib.request.build_opener
+        global_opener = diag.urllib.request._opener
+
+        class Transport(diag.urllib.request.BaseHandler):
+            handler_order = 0
+
+            def https_open(self, request):
+                calls.append({"url": request.full_url, "authorization": request.get_header("Authorization"),
+                              "timeout": request.timeout})
+                headers = Message()
+                if location is not None:
+                    headers["Location"] = location
+                response = urllib.response.addinfourl(io.BytesIO(raw), headers, request.full_url, code)
+                response.msg = "synthetic transport"
+                responses.append(response)
+                return response
+
+            http_open = https_open
+
+        def build(*handlers):
+            opener = original_build(*handlers, Transport())
+            openers.append(opener)
+            return opener
+
+        with patch.object(diag.urllib.request, "build_opener", side_effect=build), \
+                patch.object(diag.urllib.request, "install_opener") as install, \
+                patch("socket.socket", side_effect=AssertionError("no sockets permitted")), \
+                patch.object(diag.subprocess, "Popen") as provider:
+            yield calls, responses, openers, provider
+        install.assert_not_called()
+        self.assertIs(diag.urllib.request._opener, global_opener)
+
+    def test_all_standard_redirects_refused_before_second_request_for_every_origin_form(self):
+        endpoint = "issues/172/comments?per_page=100&page=1"
+        canonical = "https://api.github.com/repos/lossyrob/telex/" + endpoint
+        for status in (301, 302, 303, 307, 308):
+            for location in ("https://example.invalid/redirect", "http://example.invalid/redirect",
+                             "https://api.github.com/repos/lossyrob/telex/redirect",
+                             "/repos/lossyrob/telex/redirect"):
+                with self.subTest(status=status, location=location), self.mocked_transport(
+                        status, location) as (calls, responses, openers, provider):
+                    with self.assertRaisesRegex(diag.DiagnosticError, "redirect refused before forwarding"):
+                        diag.fetch_json(endpoint, "synthetic-bearer-only", BOUNDS["limits"], time.monotonic() + 120)
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual(calls[0]["url"], canonical)
+                    self.assertEqual(calls[0]["authorization"], "Bearer synthetic-bearer-only")
+                    self.assertLessEqual(calls[0]["timeout"], BOUNDS["limits"]["github_request_seconds"])
+                    self.assertEqual(len(openers), 1)
+                    self.assertTrue(responses[0].closed)
+                    provider.assert_not_called()
+
+    def test_redirect_gate_failure_persists_result_before_any_provider_command(self):
+        canonical = "https://api.github.com/repos/lossyrob/telex/issues/172/comments?per_page=100&page=1"
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temp, \
+                    self.mocked_transport(status, "https://example.invalid/off-origin") as (
+                        calls, responses, _, provider):
+                work, evidence = Path(temp) / "work", Path(temp) / "evidence"
+                with patch.object(diag.sys, "argv", ["diagnostic.py", JOB, str(work), str(evidence)]), \
+                        patch.dict(diag.os.environ, context_environment(), clear=True), \
+                        patch.object(diag.Capture, "command") as command, patch.object(diag.os, "getuid") as uid:
+                    self.assertEqual(diag.main(), 1)
+                self.assertEqual([call["url"] for call in calls], [canonical])
+                provider.assert_not_called()
+                command.assert_not_called()
+                uid.assert_not_called()
+                self.assertTrue(responses[0].closed)
+                result = json.loads((evidence / "result.json").read_bytes())
+                self.assertEqual(result["disposition"], "diagnostic-failed-no-version-acceptance")
+                self.assertEqual(result["error"]["type"], "DiagnosticError")
+                self.assertIn("redirect refused before forwarding: " + str(status), result["error"]["message"])
+                self.assertFalse((evidence / "gate-evidence.json").exists())
+                diag.verify_output(evidence, BOUNDS)
+
+    def test_local_opener_keeps_successful_canonical_response_and_no_global_configuration(self):
+        with self.mocked_transport(200, raw=b'{"canonical":true}') as (calls, responses, openers, provider):
+            for _ in range(2):
+                self.assertEqual(diag.fetch_json("issues/172", "synthetic", BOUNDS["limits"],
+                                                time.monotonic() + 120), {"canonical": True})
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(call["url"] == "https://api.github.com/repos/lossyrob/telex/issues/172" for call in calls))
+            self.assertIsNot(openers[0], openers[1])
+            self.assertTrue(all(response.closed for response in responses))
+            provider.assert_not_called()
+
+    def test_source_review_fetch_refuses_redirect_instead_of_forwarding_or_falling_back(self):
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status), self.mocked_transport(
+                    status, "https://api.github.com/repos/lossyrob/telex/other-review") as (
+                        calls, responses, _, provider):
+                with self.assertRaisesRegex(diag.DiagnosticError, "redirect refused before forwarding"):
+                    diag.fetch_json("issues/comments/123", "synthetic", BOUNDS["limits"], time.monotonic() + 120)
+                self.assertEqual([c["url"] for c in calls],
+                                 ["https://api.github.com/repos/lossyrob/telex/issues/comments/123"])
+                self.assertTrue(responses[0].closed)
+                provider.assert_not_called()
 
 
 if __name__ == "__main__":
