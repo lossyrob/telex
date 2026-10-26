@@ -3133,6 +3133,20 @@ pub async fn serve() -> Result<()> {
         }
     }
     heartbeat_task.abort();
+    // Fault hook (issue #212): drop the endpoint, then keep this process -- and with it every
+    // store lock `state` still owns -- alive for a bounded window. This widens the natural
+    // endpoint-gone/process-alive ordering gap so a regression can prove that `stop --drain`
+    // reports completion only after the drained process has exited.
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_POST_DRAIN_EXIT_DELAY_MS") {
+        drop(listener);
+        if let Ok(marker) = std::env::var("TELEX_TEST_POST_DRAIN_EXIT_DELAY_MARKER") {
+            let _ = std::fs::write(marker, std::process::id().to_string());
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(5_000))).await;
+        }
+    }
     Ok(())
 }
 

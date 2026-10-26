@@ -118,6 +118,69 @@ pub fn process_alive_with_start_time(pid: u32, expected_start_time: Option<u64>)
     }
 }
 
+/// Returns `true` only when the exact `pid`/`start_time` instance has definitely exited: the pid
+/// is gone, now names a different instance, or (on Unix) is that instance as a fully exited zombie
+/// its parent has not reaped yet. Unknown or ambiguous probes count as not exited.
+pub fn process_exited_with_start_time(pid: u32, start_time: u64) -> bool {
+    !process_alive_with_start_time(pid, Some(start_time))
+        || platform::is_exited_zombie(pid, start_time)
+}
+
+/// Why an exact-process exit watch could not be established or completed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExitWatchError {
+    /// No process with that pid exists.
+    Gone,
+    /// A process with that pid exists but its start time disproves the expected identity.
+    IdentityMismatch,
+    /// Identity or exit could not be determined; never treated as exit.
+    Unverifiable(String),
+}
+
+impl std::fmt::Display for ExitWatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Gone => f.write_str("no process with that pid exists"),
+            Self::IdentityMismatch => f.write_str("the pid belongs to a different process"),
+            Self::Unverifiable(message) => {
+                write!(f, "process identity or exit unverifiable: {message}")
+            }
+        }
+    }
+}
+
+/// Exit watch on one exact process, established *before* the caller asks that process to exit.
+///
+/// On Windows it retains a process handle whose creation time was matched against the expected
+/// identity, and completes only on that object's signal (`WAIT_OBJECT_0`). On Unix it re-probes
+/// the pid/start-time identity. Either way, `exited` reports process exit only; it is not by
+/// itself a proof that every resource the process held has been released.
+pub struct ProcessExitWatch {
+    pid: u32,
+    handle: platform::ExitHandle,
+}
+
+impl ProcessExitWatch {
+    pub fn open(pid: u32, expected_start_time: u64) -> Result<Self, ExitWatchError> {
+        if pid == 0 {
+            return Err(ExitWatchError::Gone);
+        }
+        Ok(Self {
+            pid,
+            handle: platform::open_exit_handle(pid, expected_start_time)?,
+        })
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Block until the watched process exits (`Ok(true)`) or `deadline` passes (`Ok(false)`).
+    pub fn wait_until(&self, deadline: std::time::Instant) -> Result<bool, ExitWatchError> {
+        platform::wait_exit(&self.handle, deadline)
+    }
+}
+
 #[cfg(unix)]
 mod platform {
     use super::ProcessProbe;
@@ -190,6 +253,103 @@ mod platform {
     fn process_start_time(_pid: u32) -> Option<u64> {
         None
     }
+
+    /// Start time of `pid` if, in one read, it is a fully exited but unreaped (zombie) process;
+    /// `None` if it is not, or that cannot be determined.
+    ///
+    /// Linux reports the thread-group leader as `Z` as soon as the *main thread* exits, while
+    /// sibling threads -- which share the open file table, and with it any store lock -- may still
+    /// be exiting. Only `num_threads == 1` (the zombie leader alone) proves every thread has
+    /// exited and the shared descriptors are released.
+    #[cfg(target_os = "linux")]
+    fn zombie_start_time(pid: u32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_name = stat.rsplit_once(") ")?;
+        let fields: Vec<&str> = after_name.1.split_whitespace().collect();
+        // Index 0 is stat field 3 (state); 17 is field 20 (num_threads); 19 is field 22.
+        if *fields.first()? != "Z" || *fields.get(17)? != "1" {
+            return None;
+        }
+        fields.get(19)?.parse::<u64>().ok()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn zombie_start_time(pid: u32) -> Option<u64> {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: `info` is a correctly sized, writable `proc_bsdinfo`.
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                &mut info as *mut _ as *mut libc::c_void,
+                info_size,
+            )
+        };
+        if bytes != info_size || info.pbi_status != libc::SZOMB {
+            return None;
+        }
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn zombie_start_time(_pid: u32) -> Option<u64> {
+        None
+    }
+
+    /// Whether `pid` is that exact start-time instance, fully exited but not yet reaped.
+    pub fn is_exited_zombie(pid: u32, start_time: u64) -> bool {
+        zombie_start_time(pid) == Some(start_time)
+    }
+
+    /// Unix has no retained process handle here, so the watch re-probes the exact pid/start-time
+    /// identity: the process has exited once the pid no longer exists, carries a different start
+    /// time, or is that same instance as a fully exited, unreaped zombie. Such a zombie has
+    /// already terminated and released its descriptors; only its parent's reap is outstanding,
+    /// which a supervisor may legitimately do only after `stop --drain` returns.
+    pub struct ExitHandle {
+        pid: u32,
+        start_time: u64,
+    }
+
+    pub fn open_exit_handle(
+        pid: u32,
+        expected_start_time: u64,
+    ) -> Result<ExitHandle, super::ExitWatchError> {
+        let probe = process_probe(pid);
+        if !probe.alive {
+            return Err(super::ExitWatchError::Gone);
+        }
+        match probe.start_time {
+            Some(actual) if actual == expected_start_time => Ok(ExitHandle {
+                pid,
+                start_time: expected_start_time,
+            }),
+            Some(_) => Err(super::ExitWatchError::IdentityMismatch),
+            None => Err(super::ExitWatchError::Unverifiable(
+                "process start time could not be read".to_string(),
+            )),
+        }
+    }
+
+    pub fn wait_exit(
+        handle: &ExitHandle,
+        deadline: std::time::Instant,
+    ) -> Result<bool, super::ExitWatchError> {
+        loop {
+            if super::process_exited_with_start_time(handle.pid, handle.start_time) {
+                return Ok(true);
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep((deadline - now).min(std::time::Duration::from_millis(25)));
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -260,10 +420,118 @@ mod platform {
             Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
         }
     }
+
+    /// Windows has no zombie state: the process object is signaled at exit regardless of who
+    /// still holds a handle to it, so the liveness probe alone decides.
+    pub fn is_exited_zombie(_pid: u32, _start_time: u64) -> bool {
+        false
+    }
+
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+
+    /// A process handle opened and identity-checked before the caller triggers the exit, and
+    /// retained through the wait, so the signal observed is that exact process object's and a
+    /// reused pid can never satisfy it.
+    pub struct ExitHandle(isize);
+
+    // SAFETY: a Win32 process handle is a kernel object reference usable from any thread.
+    unsafe impl Send for ExitHandle {}
+
+    impl Drop for ExitHandle {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` is a valid handle owned exclusively by this value.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    pub fn open_exit_handle(
+        pid: u32,
+        expected_start_time: u64,
+    ) -> Result<ExitHandle, super::ExitWatchError> {
+        // SAFETY: FFI to Win32; the returned handle is owned by `ExitHandle` and closed on drop.
+        unsafe {
+            let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle == 0 {
+                let error = GetLastError();
+                return Err(if error == ERROR_INVALID_PARAMETER {
+                    super::ExitWatchError::Gone
+                } else {
+                    super::ExitWatchError::Unverifiable(format!("OpenProcess failed: {error}"))
+                });
+            }
+            let handle = ExitHandle(handle);
+            match process_start_time(handle.0) {
+                Some(actual) if actual == expected_start_time => Ok(handle),
+                Some(_) => Err(super::ExitWatchError::IdentityMismatch),
+                None => Err(super::ExitWatchError::Unverifiable(format!(
+                    "GetProcessTimes failed: {}",
+                    GetLastError()
+                ))),
+            }
+        }
+    }
+
+    /// Block on the retained process object until it is signaled or `deadline` passes.
+    /// `Ok(true)` is only ever `WAIT_OBJECT_0`; any wait failure is an error, never success.
+    pub fn wait_exit(
+        handle: &ExitHandle,
+        deadline: std::time::Instant,
+    ) -> Result<bool, super::ExitWatchError> {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        // Below INFINITE (u32::MAX) so a long bound never turns into an unbounded wait.
+        let millis = u32::try_from(remaining.as_millis())
+            .unwrap_or(u32::MAX - 1)
+            .min(u32::MAX - 1);
+        // SAFETY: `handle.0` is a valid process handle opened with SYNCHRONIZE.
+        match unsafe { WaitForSingleObject(handle.0, millis) } {
+            WAIT_OBJECT_0 => Ok(true),
+            WAIT_TIMEOUT => Ok(false),
+            other => Err(super::ExitWatchError::Unverifiable(format!(
+                "WaitForSingleObject returned {other:#x} (last error {})",
+                unsafe { GetLastError() }
+            ))),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    /// An exited child its parent has not yet reaped (a zombie) is still the same pid/start-time
+    /// instance; the exit watch must report it exited instead of waiting out its deadline, since a
+    /// supervisor that spawned the daemon may only reap it after `stop --drain` returns.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn exit_watch_reports_an_unreaped_exited_child_as_exited() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read _"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id();
+        let start = capture_process_start_time(pid).expect("child start time");
+        let watch = super::ProcessExitWatch::open(pid, start).expect("watch live child");
+        assert_eq!(
+            watch.wait_until(Instant::now() + Duration::from_millis(50)),
+            Ok(false),
+            "a live child must not be reported exited"
+        );
+
+        let mut stdin = child.stdin.take().expect("child stdin");
+        let _ = stdin.write_all(b"\n");
+        drop(stdin);
+        let began = Instant::now();
+        let exited = watch.wait_until(Instant::now() + Duration::from_secs(10));
+        let waited = began.elapsed();
+        child.wait().expect("reap child");
+        assert_eq!(exited, Ok(true));
+        assert!(
+            waited < Duration::from_secs(5),
+            "the unreaped child was not recognized as exited ({waited:?})"
+        );
+    }
     use super::{
         capture_process_start_time, process_alive, process_alive_with_start_time,
         resolve_session_pid, SessionBinding, UnboundReason,
