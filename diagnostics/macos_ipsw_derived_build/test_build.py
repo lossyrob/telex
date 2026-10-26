@@ -1237,5 +1237,234 @@ class LateRetentionTests(unittest.TestCase):
                 self.assertNotEqual(case["code"], 0)
 
 
+class PrimaryOutputErrorTests(unittest.TestCase):
+    image_bytes = LateRetentionTests.image_bytes
+    manifest_valid = LateRetentionTests.manifest_valid
+
+    @contextmanager
+    def compound_case(self, failures=None, finish_after_write=False, acceptance_failure=False,
+                      partial_provenance=False):
+        failures = {} if failures is None else failures
+        with tempfile.TemporaryDirectory() as directory:
+            work, evidence = Path(directory) / "work", Path(directory) / "evidence"
+            image = work / "build.dmg"
+            clock, events, observed = [0.0], [], {}
+            original_json, original_finish, original_unlink = b.Evidence.json, b.Evidence.finish, Path.unlink
+
+            def prepared(bounds, output, root, provenance, runner, ledger):
+                image.write_bytes(self.image_bytes)
+                provenance.update(image=str(image), mount=str(root / "volume"), attach_attempted=True,
+                    disposition="built-and-signed-not-executed-pending-independent-review", artifact_deadline=100.0)
+                events.append("prepared-success")
+
+            def detach(*args, **kwargs):
+                self.assertEqual(args[0], "image-detach")
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                events.append("fake-detach")
+                return b"", b""
+
+            def volume_stat(file):
+                if acceptance_failure:
+                    clock[0] = 100.0
+                return SimpleNamespace(f_bavail=20, f_frsize=1024)
+
+            def output(target, name, value):
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                events.append(name)
+                if name in ("provenance.json", "finalization-error.json"):
+                    observed["attempted_" + name] = copy.deepcopy(value)
+                if name in failures:
+                    if partial_provenance and name == "provenance.json":
+                        (target.root / name).write_bytes(b'{"partial":')
+                    raise failures[name]
+                return original_json(target, name, value)
+
+            def finish(target):
+                events.append("finish-enter")
+                self.assertFalse(json.loads((evidence / "provenance.json").read_bytes())["output_binary_accepted"])
+                if "finish" in failures and not finish_after_write:
+                    raise failures["finish"]
+                result = original_finish(target)
+                events.append("manifest-written")
+                if "finish" in failures:
+                    raise failures["finish"]
+                events.append("finish-return")
+                return result
+
+            def unlink(file, *args, **kwargs):
+                if file == image:
+                    self.fail("No output-error path may unlink retained backing")
+                return original_unlink(file, *args, **kwargs)
+
+            with patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(b, "execute", side_effect=prepared), \
+                    patch.object(b.Runner, "command", side_effect=detach) as detached, \
+                    patch.object(b.os, "statvfs", side_effect=volume_stat), \
+                    patch.object(b.time, "monotonic", side_effect=lambda: clock[0]), \
+                    patch.object(Path, "unlink", unlink), patch.object(b.Evidence, "json", output), \
+                    patch.object(b.Evidence, "finish", finish):
+                code, caught = None, None
+                try:
+                    code = b.main()
+                    events.append("main-return")
+                except BaseException as error:
+                    caught = error
+                    events.append("main-raise")
+            self.assertEqual(image.read_bytes(), self.image_bytes)
+            self.assertEqual(detached.call_count, 1)
+            yield {"image": image, "evidence": evidence, "events": events, "code": code,
+                   "caught": caught, "failures": failures, **observed}
+
+    def assert_error_record(self, record, error, filename, phase):
+        self.assertEqual(record, {"file": filename, "phase": phase, "type": type(error).__name__,
+                                  "message": str(error), "interruption": not isinstance(error, Exception)})
+
+    def test_exact_command_interruption_and_provenance_error_preserves_first_in_both_outcomes(self):
+        first = KeyboardInterrupt("owner synthetic primary command-write interruption")
+        second = OSError("owner synthetic secondary provenance-write failure")
+        with self.compound_case({"commands.json": first, "provenance.json": second}) as case:
+            self.assertIs(case["caught"], first)
+            self.assertIsNone(case["code"])
+            root = case["evidence"]
+            self.assertEqual({p.name for p in root.iterdir()}, {"fetches.json", "finalization-error.json"})
+            receipt = json.loads((root / "finalization-error.json").read_bytes())
+            self.assert_error_record(receipt["error"], first, "commands.json", "required-output")
+            self.assert_error_record(receipt["secondary_errors"][0], second, "provenance.json", "provenance-write")
+            self.assertEqual(len(receipt["secondary_errors"]), 1)
+            self.assertEqual(receipt["required_output_states"], {
+                "commands.json": "write-failed-persistence-unconfirmed", "fetches.json": "write-returned",
+                "provenance.json": "write-failed-persistence-unconfirmed", "sha256.json": "not-attempted"})
+            self.assertFalse(receipt["output_binary_accepted"])
+            self.assertTrue(receipt["detached"])
+            self.assertFalse(receipt["controller_unlinks_backing"])
+            self.assertFalse(self.manifest_valid(root))
+            self.assertNotIn("finish-enter", case["events"])
+            notes = "\n".join(first.__notes__)
+            self.assertIn("provenance.json", notes)
+            self.assertIn("provenance-write", notes)
+            self.assertIn(str(second), notes)
+            self.assertTrue(case["attempted_provenance.json"]["required_output_errors"][0]["interruption"])
+
+    def test_commands_or_fetches_first_and_provenance_later_keep_exception_precedence(self):
+        for filename in ("commands.json", "fetches.json"):
+            for first_type in (OSError, KeyboardInterrupt):
+                for later_type in (OSError, KeyboardInterrupt):
+                    first, later = first_type("first " + filename), later_type("later provenance")
+                    with self.subTest(file=filename, first=first_type.__name__, later=later_type.__name__), \
+                            self.compound_case({filename: first, "provenance.json": later}) as case:
+                        self.assertIs(case["caught"], first)
+                        self.assertIsNone(case["code"])
+                        receipt = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+                        self.assert_error_record(receipt["error"], first, filename, "required-output")
+                        self.assertEqual(len(receipt["secondary_errors"]), 1)
+                        self.assert_error_record(receipt["secondary_errors"][0], later,
+                                                 "provenance.json", "provenance-write")
+                        self.assertEqual(case["events"][2:5],
+                                         ["commands.json", "fetches.json", "provenance.json"])
+                        self.assertFalse((case["evidence"] / "provenance.json").exists())
+                        self.assertFalse((case["evidence"] / "sha256.json").exists())
+                        self.assertFalse(receipt["output_binary_accepted"])
+
+    def test_multiple_required_output_failures_are_ordered_once_without_duplicate_primary(self):
+        for provenance_failure in (False, True):
+            errors = {"commands.json": OSError("first commands"),
+                      "fetches.json": KeyboardInterrupt("second fetches")}
+            if provenance_failure:
+                errors["provenance.json"] = OSError("third provenance")
+            with self.subTest(provenance_failure=provenance_failure), self.compound_case(errors) as case:
+                self.assertIs(case["caught"], errors["commands.json"])
+                receipt = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+                records = [receipt["error"], *receipt["secondary_errors"]]
+                self.assertEqual([r["file"] for r in records], list(errors))
+                for record, (filename, error) in zip(records, errors.items()):
+                    self.assert_error_record(record, error, filename,
+                        "provenance-write" if filename == "provenance.json" else "required-output")
+                if not provenance_failure:
+                    provenance = json.loads((case["evidence"] / "provenance.json").read_bytes())
+                    self.assertFalse(provenance["output_binary_accepted"])
+                    self.assertFalse(provenance["finalization_candidate"])
+                    self.assertEqual([r["file"] for r in provenance["required_output_errors"]],
+                                     ["commands.json", "fetches.json"])
+                self.assertNotIn("finish-enter", case["events"])
+
+    def test_fallback_receipt_failure_keeps_first_and_structured_secondary_exception_notes(self):
+        for first_name in ("commands.json", "fetches.json"):
+            for first_type in (OSError, KeyboardInterrupt):
+                first = first_type("first output")
+                later = OSError("provenance write failed")
+                fallback = KeyboardInterrupt("fallback interrupted")
+                with self.subTest(file=first_name, kind=first_type.__name__), self.compound_case({
+                        first_name: first, "provenance.json": later, "finalization-error.json": fallback}) as case:
+                    self.assertIs(case["caught"], first)
+                    self.assertFalse((case["evidence"] / "finalization-error.json").exists())
+                    self.assertFalse((case["evidence"] / "provenance.json").exists())
+                    self.assertFalse(self.manifest_valid(case["evidence"]))
+                    attempted = case["attempted_finalization-error.json"]
+                    self.assert_error_record(attempted["error"], first, first_name, "required-output")
+                    self.assert_error_record(attempted["secondary_errors"][0], later,
+                                             "provenance.json", "provenance-write")
+                    notes = [json.loads(note.split(": ", 1)[1]) for note in first.__notes__]
+                    self.assertEqual(len(notes), 2)
+                    self.assert_error_record(next(r for r in notes if r["file"] == "provenance.json"),
+                                             later, "provenance.json", "provenance-write")
+                    self.assert_error_record(next(r for r in notes if r["file"] == "finalization-error.json"),
+                                             fallback, "finalization-error.json", "failure-receipt-write")
+
+    def test_single_errors_keep_file_phase_and_no_fabricated_provenance_completion(self):
+        for filename, expected_file, phase in (("commands.json", "commands.json", "required-output"),
+                ("fetches.json", "fetches.json", "required-output"),
+                ("provenance.json", "provenance.json", "provenance-write"),
+                ("finish", "sha256.json", "manifest-finish")):
+            first = OSError("single " + filename)
+            with self.subTest(filename=filename), self.compound_case({filename: first}) as case:
+                self.assertIs(case["caught"], first)
+                record = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+                self.assert_error_record(record["error"], first, expected_file, phase)
+                self.assertEqual(record["secondary_errors"], [])
+                expected = "write-failed-persistence-unconfirmed" if filename == "provenance.json" else "write-returned"
+                self.assertEqual(record["required_output_states"]["provenance.json"], expected)
+                self.assertFalse(record["output_binary_accepted"])
+
+    def test_valid_manifest_alone_is_not_collection_when_finish_and_fallback_fail(self):
+        first, fallback = OSError("after manifest"), OSError("failure receipt unavailable")
+        with self.compound_case({"finish": first, "finalization-error.json": fallback},
+                                finish_after_write=True) as case:
+            self.assertIs(case["caught"], first)
+            self.assertIsNone(case["code"])
+            self.assertTrue(self.manifest_valid(case["evidence"]))
+            self.assertFalse((case["evidence"] / "finalization-error.json").exists())
+            provenance = json.loads((case["evidence"] / "provenance.json").read_bytes())
+            self.assertTrue(provenance["finalization_candidate"])
+            self.assertFalse(provenance["output_binary_accepted"])
+            self.assertNotIn("finish-return", case["events"])
+            self.assertTrue(any("receipt also failed" in note for note in first.__notes__))
+
+    def test_success_and_acceptance_failure_behavior_are_unchanged(self):
+        for failure in (False, True):
+            with self.subTest(acceptance_failure=failure), self.compound_case(acceptance_failure=failure) as case:
+                self.assertEqual(case["code"], int(failure))
+                self.assertIsNone(case["caught"])
+                self.assertTrue(self.manifest_valid(case["evidence"]))
+                self.assertFalse((case["evidence"] / "finalization-error.json").exists())
+                record = json.loads((case["evidence"] / "provenance.json").read_bytes())
+                self.assertFalse(record["output_binary_accepted"])
+                self.assertEqual(record["finalization_candidate"], not failure)
+                self.assertLess(case["events"].index("finish-return"), case["events"].index("main-return"))
+
+    def test_partial_provenance_bytes_do_not_become_confirmed_primary_evidence(self):
+        first, later = KeyboardInterrupt("first required interruption"), OSError("partial provenance write")
+        with self.compound_case({"commands.json": first, "provenance.json": later},
+                                partial_provenance=True) as case:
+            self.assertIs(case["caught"], first)
+            self.assertEqual((case["evidence"] / "provenance.json").read_bytes(), b'{"partial":')
+            receipt = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+            self.assert_error_record(receipt["error"], first, "commands.json", "required-output")
+            self.assert_error_record(receipt["secondary_errors"][0], later, "provenance.json", "provenance-write")
+            self.assertEqual(receipt["required_output_states"]["provenance.json"],
+                             "write-failed-persistence-unconfirmed")
+            self.assertFalse(self.manifest_valid(case["evidence"]))
+            self.assertFalse(receipt["output_binary_accepted"])
+
+
 if __name__ == "__main__":
     unittest.main()

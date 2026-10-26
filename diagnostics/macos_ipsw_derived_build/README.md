@@ -17,6 +17,9 @@ It detaches but never unlinks the backing image, on success or failure; runner
 teardown is its lifetime limit. Persisted provenance is provisional: collection
 requires a zero return after manifest finalization and a verified artifact set.
 The binary remains subject to independent review, not pre-finish acceptance.
+The first required-output failure remains the raised error and the primary
+failure-receipt error; later sink failures are recorded separately. A failed
+provenance write is never described as persisted evidence.
 
 Synthetic tests use mocked processes, HTTP transports and filesystem metadata.
 Do not run `build.py` locally. Review `bounds.json` and the exact source packet

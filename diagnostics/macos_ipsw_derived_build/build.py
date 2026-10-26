@@ -928,16 +928,27 @@ def main():
             except BaseException as error:
                 provenance["acceptance_error"] = failure_record(error, "acceptance")
                 code = 1
-        output_error = None
+        output_error, output_errors = None, []
+        output_states = {name: "not-attempted" for name in
+                         ("commands.json", "fetches.json", "provenance.json", "sha256.json")}
+
+        def note_output_error(error, filename, phase):
+            nonlocal output_error, code
+            record = {"file": filename, **failure_record(error, phase)}
+            output_errors.append(record)
+            output_states[filename] = "write-failed-persistence-unconfirmed"
+            code = 1
+            if output_error is None:
+                output_error = error
+            return record
+
         for filename, value in (("commands.json", runner.records), ("fetches.json", ledger)):
             try:
                 output.json(filename, value)
+                output_states[filename] = "write-returned"
             except BaseException as error:
-                provenance.setdefault("required_output_errors", []).append({
-                    "file": filename, **failure_record(error, "required-output")})
-                code = 1
-                if output_error is None:
-                    output_error = error
+                provenance.setdefault("required_output_errors", []).append(
+                    note_output_error(error, filename, "required-output"))
         if code != 0:
             provenance["disposition"] = "failed-return-to-design"
         provenance["output_binary_accepted"] = False
@@ -946,18 +957,27 @@ def main():
             "This immutable provenance precedes manifest finalization and does not certify success. "
             "Collection succeeds only if main returns 0 after finish and the exact artifact manifest verifies; "
             "the output binary still requires independent review.")
-        finalization_phase = "provenance-write"
         try:
             output.json("provenance.json", provenance)
-            finalization_phase = "required-records"
-            if output_error is not None:
-                raise output_error
-            finalization_phase = "manifest-finish"
-            output.finish()
+            output_states["provenance.json"] = "write-returned"
         except BaseException as error:
+            note_output_error(error, "provenance.json", "provenance-write")
+        if output_error is None:
+            try:
+                output.finish()
+                output_states["sha256.json"] = "write-returned"
+            except BaseException as error:
+                note_output_error(error, "sha256.json", "manifest-finish")
+        if output_error is not None:
             failure = {"disposition": "failed-return-to-design",
                        "output_binary_accepted": False,
-                       "error": failure_record(error, finalization_phase),
+                       "error": output_errors[0],
+                       "secondary_errors": output_errors[1:],
+                       "required_output_states": output_states,
+                       "write_state_precision": (
+                           "write-returned records a successful call, not fsync durability; "
+                           "a failed write may have partial bytes and its persistence is unconfirmed. "
+                           "An attempted provenance write is not persisted evidence."),
                        "backing_image_retained_on_runner": provenance.get("backing_image_retained_on_runner"),
                        "detached": provenance.get("detached", False),
                        "controller_unlinks_backing": False,
@@ -965,8 +985,12 @@ def main():
             try:
                 output.json("finalization-error.json", failure)
             except BaseException as receipt_error:
-                error.add_note("Finalization failure receipt also failed: " + repr(receipt_error))
-            raise
+                output_error.add_note("Finalization failure receipt also failed: " + json.dumps({
+                    "file": "finalization-error.json", **failure_record(receipt_error, "failure-receipt-write")},
+                    sort_keys=True))
+            for secondary in output_errors[1:]:
+                output_error.add_note("Secondary required-output error: " + json.dumps(secondary, sort_keys=True))
+            raise output_error
     return code
 
 
