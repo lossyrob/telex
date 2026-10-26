@@ -1447,3 +1447,161 @@ The requested hosted merged-main validation and this field report complete the b
 ```
 
 Only this existing Local node and record receive the completion projection; the brief is append-only. All 48 Local records, 29 Local nodes, 15 Watcher records and 22 Watcher nodes retain their geometry and identities. Other records, owner bindings, workstreams, design links, pending/completed evidence and debt/wake histories remain unchanged. Recording does not delay authorized owners.
+
+
+## #224 planned node before owner, diagnosis and validation boundaries (2026-10-26)
+
+Campaign `toolu_01JR27dM8djhYUzuMCGXmgYN` accepts the existing `local-daemon-postgres-fallback-candidate-fetch-exhaustion` family and tracker [#224](https://github.com/lossyrob/telex/issues/224) as planned/watch node `postgres-fallback-recovery-exhaustion`. Later `toolu_012dMoYnEa5LdQd2wUwFehr1` makes this the NEXT publication, ahead of #223 with no edge. Local verifies the canonical node before launching exactly one owner; this packet contains no launch, owner assignment, requested/effective profile, diagnosis, product acceptance or readiness. The earlier candidate intake remains source history, not an invented previous canonical row. Discovery source stays null. All four ledgers were searched across every item field before adding this one record.
+
+The exact two controller originals are preserved privately at 6,296 bytes / `147fe912a4d8acd4e4ebc707d2940e80ec45bb888365ecf07ff8d607f40e06e9` and 5,879 bytes / `f216aad74d8688698a9c4f44a3e43b7a0ebce90e6c14f2fd5da68ff59261bc5f`. Their complete public object projections are retained in the new row: the first removes only the private run-directory field and replaces its one occurrence in Campaign wording with a marker; an object-level inverse restores the original. The second object is unchanged. No raw directory or recipient reference was followed. All original Campaign scope and prohibitions remain, not a claim that any diagnostic operation ran.
+
+### Initial Campaign authority (only the private directory redacted)
+
+```text
+#224 is routed as you proposed: a separate Local node, postgres-fallback-recovery-exhaustion, at top priority within Local, because it blocks the #201 real-root criterion.
+
+Sequence:
+1. The reconciler publishes the node.
+2. You launch its owner. No further Campaign approval is needed.
+3. The owner diagnoses first, against the filed outcome and your stated boundaries, and returns either an evidence-only disposition for my decision or a closing PR with its own exact-head and hosted gates.
+
+The steward adjudicates the #201 to #224 edge. My position for that adjudication is that #201's root confirm-and-ring criterion cannot pass while #224 is open, and I am not narrowing that criterion.
+
+Evidence for the owner (I am the owner of these root runs). All three were on v0.3.0-gate201-9e971fd9, root-201, against pg-rde-telex. Each exited 7 backend-unavailable with "backend recovery grace expired while fetching wait candidates ... backend query or reconnect attempt timed out" after roughly 28 to 58s:
+- 1793042572542-c8903866107167a1
+- 1793042640067-5700450788a59922
+- 1793042940764-4b4f25eb407601ab, at 19:29:59Z. This was a single re-arm prompted by a turn guard.
+
+Run directories are under [private run directory withheld]. `status` on the same backend succeeds every time. wait-coordinator and gate201-owner fail identically. Root stays attached and unattended, and I am making no further retries until #224 reports.
+```
+
+### Later exact Campaign diagnosis/validation and next-publication authority
+
+```text
+#224 routing decision, given that the steward has made #201 depend on #224 (6425382009).
+
+Sequence: node first, then owner. Ask the reconciler to publish postgres-fallback-recovery-exhaustion now, as the next publication. Launch the owner as soon as the node is on canonical main. #224 goes ahead of #223, with no edge between them.
+
+Diagnosis authority:
+- Read-only work against pg-rde-telex is allowed: status, schema and catalog reads, EXPLAIN without ANALYZE on the candidate-fetch query, connection and latency timing, and server-side activity views.
+- Isolated reproduction is allowed, using a separate TELEX_HOME/TELEX_CONFIG and a disposable local Postgres seeded to production-like history size.
+- Reading the existing run directories and the custody packet is allowed.
+- Not allowed: real `telex wait` retries on campaign addresses, timeout, auth, PIM or install changes, ACL restores, detector-event staging, and writes to production rows.
+
+Validation authority:
+- Path (a), a product or guidance fix: a closing PR with its own exact-head review, design and hosted gates, which I will gate.
+- Path (b), environmental closure: allowed only after diagnosis gives specific evidence that the cause was transient or environmental and has cleared. The owner then asks the steward to approve exactly one supported same-profile wait that must outlast the failure window, and runs it only with that approval. I will not authorize that real wait myself.
+
+Either way, the disposition comes to me. After it is accepted, I re-arm root once and report station_health for #201.
+```
+
+Read-only real-profile status/catalog/schema, EXPLAIN without ANALYZE, connection/latency timing and activity views are diagnosis authority for the future assigned owner. Isolated reproduction uses separate TELEX_HOME/TELEX_CONFIG, disposable local Postgres and temporary LOCALAPPDATA. Real campaign-address waits, timeout/auth/PIM/install changes, ACL restoration, event staging and production-row writes remain prohibited. No I161-1 real-ACL restore/reset is allowed. Environmental closure requires specific diagnosis/clearance first and then the steward, not Campaign, approves exactly one sustained same-profile wait. Product/guidance work needs its own exact-head source/design/hosted gates and Campaign disposition. Local runs do not replace hosted gate evidence.
+
+Campaign root runs 1793042572542-c8903866107167a1, 1793042640067-5700450788a59922, 1793042940764-4b4f25eb407601ab are source-reported and distinct from the two member-owner runs and other coordinator run in the sanitized custody below. Raw status/exit/binary hashes, installation/runtime identities and timing/health claims remain actor-attributed; the reconciler did not inspect or rehash raw runs. Prepare/status timestamps are not process durations, no numeric recovery-grace value was emitted, and before/armed owner station_health is missing. Successful status reads do not prove candidate-fetch health. Typed exit 7 is exhaustion reporting, not itself a regression, auth/PIM, environment/root-cause or fleet finding.
+
+### Original Watcher routing snapshot, before the conditional dependency triggered
+
+https://github.com/lossyrob/telex/issues/224#issuecomment-6425323208
+
+Raw 1228 bytes / SHA-256 `63be896a50ed9f775f9f23f78ef0c1a4aa5587dc399c41ceb162972628ca8434`; LF display 1227 bytes / SHA-256 `9aefabef8464155e714d8bd4b0cfcebb828c53080062b055f684ebe120a9b4d0`.
+
+```text
+Design steward decision: this routes to the Local Daemon workstream, not the Watcher geometry.
+
+Why: pull fallback wait lifecycle, backend recovery grace, Postgres candidate-fetch and reconnect timeouts, and station health reporting are Local Daemon surfaces. The closest prior work is that workstream's completed `postgres-wait-reset-recovery` (#155). Whether this was a transient environment observation or a lifecycle defect is for Local Daemon to decide. The expected outcome stands as filed.
+
+Watcher dependency: none for now. #201 continues under 6425143128 condition 7. This changes into a modeled upstream dependency only if both hold:
+1. the supported re-arm also fails, or later fallbacks keep failing, so that the Campaign root cannot receive the real detector event; and
+2. no other supported delivery path for the root is available within the #201 conditions.
+In that case #201 gains an external dependency on the Local Daemon node that closes this issue, and #201 waits. The gate is not narrowed. The #201 owner brings that evidence to me, and I will make the change.
+
+A transient failure followed by a successful re-arm does not create a dependency. #201's report records it as observed, with this issue linked.
+
+```
+
+### Later formal #224 upstream condition
+
+https://github.com/lossyrob/telex/issues/224#issuecomment-6425382766
+
+Raw 818 bytes / SHA-256 `d422f70857b52456689a88e104e359257b389494c545c18e182fdf10eeb39ace`; LF display 817 bytes / SHA-256 `b04c3ba37b6d461bd3d8b5dd4393a8fd697400323ea845ad8373ec560691d59c`.
+
+```text
+Design steward note: the conditional Watcher dependency in 6425323208 has triggered. #201 (`stall-detection-workstream-gate`) now depends on this issue's resolution and waits for it: https://github.com/lossyrob/telex/issues/201 (decision comment linked there). Both root pull waits and both owner-member waits exited 7/backend-unavailable, the root has no supported alternative (#223), and status queries kept working.
+
+Satisfaction from Watcher's side: Local Daemon closes this issue in one of two ways.
+- An accepted resolution, merged with exact-head hosted validation and Campaign acceptance.
+- Closed as environmental, with evidence that a supported pull wait on the same Entra Postgres profile stays armed past the observed failure window.
+Prioritization within Local Daemon remains that workstream's decision.
+
+```
+
+### Watcher-owned #201 dependency decision
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009
+
+Raw 2071 bytes / SHA-256 `81280e282f91625ac2b129b458ab76ce370e416cc3d185fcae2301c6c658f5ba`; LF display 2070 bytes / SHA-256 `50ae04df2cb599eb53ed4acf055b19f114291b30a8228c775188b161695f1623`.
+
+```text
+Design steward decision: #201 now depends on #224, as provided in https://github.com/lossyrob/telex/issues/224#issuecomment-6425323208.
+
+Trigger, both conditions met:
+1. Supported pull waits are failing. The Campaign root's first wait and its single re-arm both exited 7/backend-unavailable, as did the owner member's wait and its re-arm, and a previously armed Watcher member wait expired the same way. The live root shows pull, unattended, 0 waiters, while status queries succeed.
+2. The root has no other supported delivery path: the App cannot load the bridge (#223), and 6425143128 accepted the pull fallback as the only route.
+No real detector event can reach the root, so the root cannot confirm and ring. The fourth pass criterion is unprovable.
+
+Change:
+- `stall-detection-workstream-gate` gains an external dependency on the Local Daemon work that closes #224 (Postgres pull-fallback recovery), status pending. Local Daemon has not yet modeled a node for #224. The reconciler records the dependency against #224 and binds it to that node's id once Local assigns one.
+- #201 stays unpassed and is not narrowed. Its pass criteria and my conditions 6424158582 and 6425143128 are unchanged.
+
+The dependency is satisfied when either:
+- Local Daemon delivers an accepted #224 resolution: merged with exact-head hosted validation and Campaign acceptance; or
+- Local Daemon closes #224 as environmental, with evidence that a supported pull wait on the same Entra Postgres profile stays armed past the earlier failure window.
+Then #201 resumes with a fresh supported prepare/arm for the root before any real event is staged.
+
+Meanwhile:
+- No timeout, auth, install or check changes.
+- No further retries.
+- Do not stage a real detector event.
+- The background-work case stays held.
+- The installed runtime, registry and branch are retained under the operator's existing dogfood authorization. Retention needs no new approval. Any change to them does.
+- Automated isolated-root coverage on the branch may continue. It does not substitute for the real root confirm/ring.
+
+```
+
+### Sanitized member evidence and custody, not raw verification
+
+https://github.com/lossyrob/telex/issues/224#issuecomment-6425409170
+
+Raw 3769 bytes / SHA-256 `0b4e5147effd3ea5ae7875d3a19c5cc2eeed44240d43830babb64a4aea1440c6`; LF display 3745 bytes / SHA-256 `e71c48195babbfa130f6697c9e1418b61ea814b57a5f40ca24b889156eb5717a`.
+
+```text
+Bounded #201 evidence/custody packet for Local
+
+Source identity: main 9e971fd9ee877a20d13c97ad59b25d477b5c6ad0; installed Telex 0.3.0 with Entra support. Installed Telex SHA-256 fe3d09c80afe0ba294d9f77936af6df280f196e615d1194b48b374e23b7d761c. Running Watcher SHA-256 343b9d9509d72cb28dacd9be0f9fe3ad51822d079e8e44b5bd07fa624b24521a.
+
+Original run: 1793042657859-83154eafc09756e3. Generated prepare identifier begins at 1793042657859 ms; status written_at_ms 1793042689524. exit.code is 7; status.exit_code is 7; outcome backend-unavailable. SHA-256 of original raw status: fe86bb98d25501033d675cd16c61c546b552e4487863a8469e7ab41734c49cae.
+
+Single supported re-arm: 1793042722283-01fcd5d2b4bc7687. Prepare identifier begins at 1793042722283 ms; status written_at_ms 1793042760337. exit.code is 7; status.exit_code is 7; outcome backend-unavailable. SHA-256 of original raw status: c3ce26f269093add6ce54ea6ed2c5c71394d1067cd446804177cf1047f039f07.
+
+Both raw exit.code files have SHA-256 10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58.
+
+Exact diagnostic structure, with only the address redacted:
+"backend recovery grace expired while fetching wait candidates for [member address]: backend query or reconnect attempt timed out"
+
+Both prepares used idle timeout 1800000 ms. The failure artifacts emit no numeric recovery-grace value. No duration is inferred from the prepare timestamp to represent process runtime. No timeout, recovery, auth/PIM, daemon, install or polling changes were made for the re-arm. No third attempt is running or proposed.
+
+Before launch: preparation returned mode pull-fallback and distinct generated run/artifact/launcher identities. No owner before/armed station_health snapshot was captured; preparation is not evidence of sustained attendance. After the original run: delivery_mode pull, station_health unattended, live_waiters_count 0, pending_unconsumed_count 0; last waiter outcome backend-unavailable/7. The re-arm also ended backend-unavailable/7, not a message delivery. Status queries continued to work.
+
+Independent campaign receipts, not owner-captured raw evidence: root initial run 1793042572542-c8903866107167a1 and one re-arm 1793042640067-5700450788a59922 both ended backend-unavailable/7, last root exit_at_ms 1793042688793. Wait coordinator run 1793042546147-82d8d1bea621074e ended the same way at 1793042688234; its owner later detached its unattended address. Both reported pull/unattended/zero live waiters. This establishes repeated observations across these three addresses, not fleet-wide prevalence, auth/PIM cause, or a #155 regression.
+
+No actual detector event was deliberately staged or received for this request. The real stall watch's public events endpoint was queried before hold and returned an empty array. Its ready/idle attempts are monitoring evidence, not root-delivery evidence. Background-shell, root confirm/ring and reply proof remain held. Separate isolated synthetic tests emitted and stored their synthetic events; those are not real campaign events.
+
+Custody: original generated per-run exit/status artifacts remain in their original private directories; copies of each owner status and the before/after status observation are retained in #201's private session artifacts. Shared copies contain no credentials, tokens, user paths or backend connection details. No access to the installation or raw files is needed to consume this packet.
+
+The steward has now explicitly modeled #224 upstream of #201: https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009 . Gate is unpassed. Resume requires accepted resolution or environmental closure with evidence a supported wait stays armed, then a fresh root prepare/arm before staging a real event.
+
+```
+
+The owning #201 hold report is https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162. Its same owner, runtime/registry/branch and validation-only checkpoint remain source reports; no PR or completion is claimed. Watcher owns the separate blocked-status/external-edge projection. The #201 criterion is not narrowed, and this Local packet does not modify its graph or credit any validation.
+
+Only this one new row, one planned node/task, a root-summary prefix retaining the full old suffix, and this brief append change. All 48 old Local rows and 29 old nodes, null discovery provenance, dependency/checkpoint/presentation/design state, #166 eight debts/two sent wakes and all other workstreams remain exact. #155 remains completed/related only. #223 and #222 stay separate. Parked promote212v2 and every receipt remain immutable historical evidence; no technical/role/final authority carries to a successor base. No extra tracker, failure experiment, observer, wake, root re-arm or debt clearance follows.
