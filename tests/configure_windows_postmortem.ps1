@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$EvidenceRoot
+    [string]$EvidenceRoot,
+
+    [string]$DumpDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -17,7 +19,10 @@ if (-not [System.IO.Path]::IsPathFullyQualified($EvidenceRoot)) {
 $tools = Join-Path $env:RUNNER_TEMP "telex-postmortem-tools"
 $provenance = Join-Path $EvidenceRoot "tool-provenance"
 $probe = Join-Path $EvidenceRoot "capture-probe"
-$dumps = Join-Path $EvidenceRoot "dumps"
+$dumps = if ($DumpDirectory) { $DumpDirectory } else { Join-Path $EvidenceRoot "dumps" }
+if (-not [System.IO.Path]::IsPathFullyQualified($dumps)) {
+    throw "DumpDirectory must be absolute"
+}
 New-Item -ItemType Directory -Path $tools, $provenance, $probe, $dumps -Force | Out-Null
 $archive = Join-Path $tools "Procdump.zip"
 Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Procdump.zip" `

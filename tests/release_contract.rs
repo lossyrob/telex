@@ -301,6 +301,31 @@ fn hosted_native_capture_preserves_abnormal_child_status_and_invocation() {
 }
 
 #[test]
+fn hosted_named_pipe_race_and_ordinary_job_capture_are_wired() {
+    let ci = read(".github/workflows/ci.yml");
+    let race = read("tests/windows_named_pipe_race.rs");
+    let setup = read("tests/configure_windows_postmortem.ps1");
+    assert!(
+        ci.contains("windows-named-pipe-race:")
+            && ci.contains("cargo update -p mio --precise")
+            && ci.contains("windows-named-pipe-race-mio-")
+            && ci.contains("abrupt_close_races_pipe_reads_and_writes")
+            && ci.contains("pipe_race.exe")
+            && ci.contains("telex-crash-postmortem")
+            && ci.contains("-DumpDirectory (Join-Path $env:RUNNER_TEMP \"telex-crash-dumps\")"),
+        "the Mio differential and ordinary-job postmortem capture must stay wired"
+    );
+    assert!(
+        race.contains("#![cfg(windows)]")
+            && race.contains("#[ignore")
+            && race.contains("RUNNER_ENVIRONMENT")
+            && race.contains("TELEX_PIPE_RACE_MAX_SECONDS")
+            && setup.contains("[string]$DumpDirectory"),
+        "the named-pipe race must stay ignored, hosted-only and bounded"
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version

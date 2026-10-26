@@ -103,6 +103,17 @@ jobs:
           New-ItemProperty -Path $key -Name DumpCount -Value 10 `
             -PropertyType DWord -Force | Out-Null
 
+      - name: Verify native postmortem capture for Windows child faults
+        # WER LocalDumps alone produced no dump for an observed STATUS_HEAP_CORRUPTION
+        # child. This adds ProcDump AeDebug capture into the same dump folder without
+        # changing any child exit status; the synthetic probe verifies both.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/configure_windows_postmortem.ps1
+          -EvidenceRoot (Join-Path $env:RUNNER_TEMP "telex-crash-postmortem")
+          -DumpDirectory (Join-Path $env:RUNNER_TEMP "telex-crash-dumps")
+
       - name: Verify Windows diagnostic symbols
         if: runner.os == 'Windows'
         shell: pwsh
@@ -203,6 +214,23 @@ jobs:
         shell: pwsh
         run: tests/capture_windows_crash_evidence.ps1 -EvidenceName final
 
+      - name: Preserve native fault stacks from hosted dumps
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          tests/analyze_windows_crash_evidence.ps1
+          -EvidenceRoot (Join-Path $env:RUNNER_TEMP "telex-crash-postmortem")
+          -DumpDirectory (Join-Path $env:RUNNER_TEMP "telex-crash-dumps")
+
+      - name: Unregister disposable postmortem debugger
+        if: always() && runner.os == 'Windows' && env.TELEX_POSTMORTEM_EXE != ''
+        shell: pwsh
+        run: |
+          & $env:TELEX_POSTMORTEM_EXE -u
+          if ($LASTEXITCODE -ne 0) {
+            throw "unregistering the hosted postmortem debugger failed"
+          }
+
       - name: Upload Windows crash evidence
         if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -211,6 +239,7 @@ jobs:
           path: |
             ${{ runner.temp }}\telex-crash-dumps
             ${{ runner.temp }}\telex-crash-symbols
+            ${{ runner.temp }}\telex-crash-postmortem
             target\debug\telex.exe
             target\debug\telex.pdb
           if-no-files-found: error
@@ -855,18 +884,28 @@ jobs:
         shell: pwsh
         env:
           RUST_BACKTRACE: "1"
-          TELEX_PIPE_RACE_ROUNDS: "20000"
-          TELEX_PIPE_RACE_CONCURRENCY: "32"
+          TELEX_PIPE_RACE_ROUNDS: "400000"
+          TELEX_PIPE_RACE_MAX_SECONDS: "300"
         run: |
-          $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race.txt"
-          & $env:TELEX_PIPE_RACE_EXE --ignored --exact `
-            abrupt_client_close_races_server_reads_and_writes --nocapture 2>&1 |
-            Tee-Object -FilePath $log
-          $exit = $LASTEXITCODE
-          "pipe_race exit=0x{0:x8}" -f ([uint32]$exit) |
-            Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race-exit.txt")
-          Start-Sleep -Seconds 10
-          exit $exit
+          $worst = 0
+          foreach ($config in @(
+              @{ Workers = 2; Concurrency = 64; Seed = 0x1660000001 },
+              @{ Workers = 4; Concurrency = 32; Seed = 0x1660000002 },
+              @{ Workers = 8; Concurrency = 128; Seed = 0x1660000003 })) {
+            $name = "w$($config.Workers)-c$($config.Concurrency)"
+            $env:TELEX_PIPE_RACE_WORKERS = "$($config.Workers)"
+            $env:TELEX_PIPE_RACE_CONCURRENCY = "$($config.Concurrency)"
+            $env:TELEX_PIPE_RACE_SEED = "$($config.Seed)"
+            & $env:TELEX_PIPE_RACE_EXE --ignored --exact `
+              abrupt_close_races_pipe_reads_and_writes --nocapture 2>&1 |
+              Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race-$name.txt")
+            $exit = $LASTEXITCODE
+            "pipe_race $name exit=0x{0:x8}" -f ([uint32]$exit) |
+              Tee-Object -FilePath (Join-Path $env:TELEX_HEAP_EVIDENCE "logs\race-exit-$name.txt")
+            if ($exit -ne 0 -and $worst -eq 0) { $worst = $exit }
+            Start-Sleep -Seconds 5
+          }
+          exit $worst
 
       - name: Settle and check postmortem dumps
         if: always()

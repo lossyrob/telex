@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$EvidenceRoot
+    [string]$EvidenceRoot,
+
+    [string]$DumpDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -10,7 +12,10 @@ $ErrorActionPreference = "Stop"
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
     throw "Native dump analysis is restricted to disposable GitHub-hosted runners"
 }
-$dumps = @(Get-ChildItem -LiteralPath (Join-Path $EvidenceRoot "dumps") `
+if (-not $DumpDirectory) {
+    $DumpDirectory = Join-Path $EvidenceRoot "dumps"
+}
+$dumps = @(Get-ChildItem -LiteralPath $DumpDirectory `
     -Filter "*.dmp" -File -ErrorAction Stop)
 if ($dumps.Count -eq 0) {
     Write-Output "No native Telex dump to analyze"
