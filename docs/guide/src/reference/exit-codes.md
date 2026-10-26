@@ -47,7 +47,9 @@ newline; `[truncated]` marks an omitted tail. It distinguishes registry open,
 endpoint bind, runtime start/run, heartbeat and management-server failures.
 
 Capture stderr alongside stdout when running the host under a supervisor.
-Diagnostics omit environment values, connection strings and credential-like
-text; review them before sharing. They are not persisted startup records.
+Diagnostics redact secret-named environment values at any length and other
+environment values of at least 8 UTF-8 bytes. Static stage labels are preserved.
+Connection strings and credential-like text are omitted; review diagnostics
+before sharing. They are not persisted startup records.
 Specific errors such as `registry-already-owned`, transport errors and input
 errors retain their existing codes and do not gain a `runtime-failed` diagnostic.

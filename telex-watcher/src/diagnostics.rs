@@ -1,15 +1,43 @@
 use std::error::Error;
 
 const MAX_BYTES: usize = 4096;
+const MIN_ENV_VALUE_BYTES: usize = 8;
 const REDACTED: &str = "[REDACTED]";
 const TRUNCATED: &str = "\n[truncated]\n";
+const STAGES: &[&str] = &[
+    "runtime open",
+    "registry open",
+    "endpoint bind",
+    "runtime run",
+    "management server",
+    "shutdown signal",
+    "runtime shutdown",
+    "runtime start: unfinished containment",
+    "runtime start: registry record",
+    "runtime heartbeat",
+    "runtime shutdown: attempt task",
+];
 
 pub(super) fn runtime_failure(error: &anyhow::Error) -> String {
-    let values: Vec<_> = std::env::vars_os()
-        .map(|(_, value)| value.to_string_lossy().into_owned())
-        .filter(|value| !value.is_empty())
-        .collect();
+    let values = environment_values(std::env::vars_os().map(|(name, value)| {
+        (
+            name.to_string_lossy().into_owned(),
+            value.to_string_lossy().into_owned(),
+        )
+    }));
     render(error, &values)
+}
+
+fn environment_values(variables: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+    variables
+        .into_iter()
+        .filter(|(name, value)| {
+            !value.is_empty()
+                && (telex_watcher::process::sensitive_environment_name(name)
+                    || value.len() >= MIN_ENV_VALUE_BYTES)
+        })
+        .map(|(_, value)| value)
+        .collect()
 }
 
 fn render(error: &anyhow::Error, values: &[String]) -> String {
@@ -17,6 +45,11 @@ fn render(error: &anyhow::Error, values: &[String]) -> String {
     for cause in error.chain() {
         output.push_str("\n  caused by: ");
         let text = safe_cause(cause);
+        // Fixed host labels are not environment-derived data.
+        if STAGES.contains(&text.as_str()) {
+            output.push_str(&text);
+            continue;
+        }
         let lower = text.to_ascii_lowercase();
         // Unstructured credentials and DSNs have no reliable value boundary.
         // Omit that cause rather than risk printing part of a quoted secret.
@@ -127,6 +160,51 @@ mod tests {
         assert!(output.contains("failed at [REDACTED]"));
         assert!(!output.contains("sensitive-value"));
         assert!(!output.contains("[truncated]"));
+    }
+
+    #[test]
+    fn ordinary_short_environment_values_preserve_os_codes_and_static_stages() {
+        let values = environment_values(
+            [
+                ("SHLVL", "1"),
+                ("LANG", "C"),
+                ("CI", "true"),
+                ("NUMBER_OF_PROCESSORS", "2"),
+                ("DIAGNOSTIC_LABEL", "registry open"),
+                ("PRIVATE_KEY", "runtime open"),
+            ]
+            .map(|(name, value)| (name.into(), value.into())),
+        );
+        let cause = std::io::Error::from_raw_os_error(13).to_string();
+        let error = anyhow::anyhow!("{cause}")
+            .context("registry open")
+            .context("runtime open");
+        let output = render(&error, &values);
+        assert!(output.contains(&cause), "{output}");
+        assert!(output.contains("os error 13"), "{output}");
+        for stage in STAGES {
+            let output = render(&anyhow::anyhow!("{stage}"), &[stage.to_string()]);
+            assert!(output.contains(stage), "{output}");
+        }
+    }
+
+    #[test]
+    fn secret_named_values_have_no_minimum_and_ordinary_values_start_at_eight_bytes() {
+        for name in ["TOKEN", "pat", "ApiKey", "SECRET", "PASSWORD", "CREDENTIAL"] {
+            let values = environment_values([(name.into(), "!".into())]);
+            assert_eq!(
+                render(&anyhow::anyhow!("value !"), &values),
+                "runtime-failed\n  caused by: value [REDACTED]\n"
+            );
+        }
+        let values = environment_values([
+            ("SHORT".into(), "1234567".into()),
+            ("LONG".into(), "12345678".into()),
+            ("EMPTY_TOKEN".into(), String::new()),
+        ]);
+        assert_eq!(values, ["12345678"]);
+        let output = render(&anyhow::anyhow!("1234567 / 12345678"), &values);
+        assert!(output.contains("1234567 / [REDACTED]"));
     }
 
     #[test]

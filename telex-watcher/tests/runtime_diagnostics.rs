@@ -30,6 +30,10 @@ impl Fixture {
             .env("LOCALAPPDATA", self.root.join("local"))
             .env("HOME", self.root.join("user-home"))
             .env("USERPROFILE", self.root.join("user-home"))
+            .env("SHLVL", "1")
+            .env("LANG", "C")
+            .env("CI", "true")
+            .env("DIAGNOSTIC_STAGE_LABEL", "registry open")
             .current_dir(&self.root);
         command
     }
@@ -80,10 +84,20 @@ fn startup_io_failure_reports_stage_and_cause_without_changing_envelope() {
     let fixture = Fixture::new();
     let registry = fixture.root.join("registry.sqlite");
     std::fs::create_dir(&registry).unwrap();
+    let expected_code = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&registry)
+        .unwrap_err()
+        .raw_os_error()
+        .unwrap();
     let (output, envelope) = fixture.failed_run();
     assert_runtime_failure(&output, &envelope);
     let diagnostic = String::from_utf8(output.stderr).unwrap();
-    assert!(diagnostic.contains("os error"), "{diagnostic}");
+    assert!(
+        diagnostic.contains(&format!("os error {expected_code})")),
+        "{diagnostic}"
+    );
     // The implicit host command and human presentation retain the same diagnostic.
     let output = fixture.command().output().unwrap();
     assert_eq!(output.status.code(), Some(1));

@@ -269,11 +269,7 @@ fn launch_environment(allowlist: &[String]) -> Result<(Environment, Vec<String>)
             ));
         }
         if let Some(value) = std::env::var_os(name) {
-            let lower = name.to_ascii_lowercase();
-            if ["token", "pat", "key", "secret", "password", "credential"]
-                .iter()
-                .any(|part| lower.contains(part))
-            {
+            if sensitive_environment_name(name) {
                 if let Some(value) = value.to_str().filter(|value| !value.is_empty()) {
                     sensitive.push(value.to_owned());
                 }
@@ -283,6 +279,13 @@ fn launch_environment(allowlist: &[String]) -> Result<(Environment, Vec<String>)
     }
     sensitive.sort_by_key(|value| std::cmp::Reverse(value.len()));
     Ok((environment, sensitive))
+}
+
+pub fn sensitive_environment_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ["token", "pat", "key", "secret", "password", "credential"]
+        .iter()
+        .any(|part| lower.contains(part))
 }
 
 fn environment_key(name: &str) -> OsString {

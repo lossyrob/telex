@@ -32,8 +32,10 @@ stage and cause chain. This works even when startup fails before a runtime
 record exists. Capture both streams when supervising the host: stdout retains
 the ordinary human or JSON response; stderr carries the redacted diagnostic.
 Its 4096-byte UTF-8 limit includes the final newline, and `[truncated]` marks an
-omitted tail. Environment values, credential-like text and connection strings
-are omitted; review diagnostics before exporting them. See the
+omitted tail. Secret-named environment values are redacted at any length; other
+environment values are redacted from 8 UTF-8 bytes onward. Fixed stage labels
+are preserved. Credential-like text and connection strings are omitted; review
+diagnostics before exporting them. See the
 [exit-code reference](guide/src/reference/exit-codes.md#watcher-runtime-host).
 
 ## Detached user process
