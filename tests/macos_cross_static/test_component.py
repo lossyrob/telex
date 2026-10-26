@@ -1623,5 +1623,102 @@ class OtoolOutputTests(unittest.TestCase):
                 cache.otool_instructions(text, container, 0x1000, 0x1004)
 
 
+class OtoolEncodingColumnTests(unittest.TestCase):
+    container = Path("/synthetic/body.macho")
+    prefix = "/synthetic/body.macho:\n(__TEXT,__text) section\n"
+
+    def assert_rejected_before_decoding(self, body, end=0x1006):
+        with patch.object(cache, "instructions") as decode, patch.object(cache, "edges") as cfg:
+            with self.assertRaises(cache.EvidenceError):
+                cache.otool_instructions(self.prefix + body, self.container, 0x1000, end)
+            decode.assert_not_called()
+            cfg.assert_not_called()
+
+    def test_exact_owner_ff25_indirect_branch_columns_fail_before_instructions(self):
+        self.assert_rejected_before_decoding(
+            "0000000000001000\tff\t25 00 00 00 00\tjmpq *(%rip)\n")
+
+    def test_exact_reviewer_ARM_word_br_columns_fail_before_instructions(self):
+        self.assert_rejected_before_decoding("0000000000001000\td61f0000\tbr\tx0\n", 0x1004)
+
+    def test_standalone_c3_ret_is_rejected_without_footer(self):
+        self.assert_rejected_before_decoding("0000000000001000\tc3\tret\n", 0x1001)
+
+    def test_byte_and_word_columns_cannot_hide_direct_or_indirect_control_flow(self):
+        for instruction in (
+                "ff 25 00 00 00 00\tjmpq *(%rip)",
+                "ff\t25\t00\t00\t00\t00\tjmpq\t*(%rip)",
+                "ff2500000000\tjmpq *(%rip)",
+                "ff\tjmpq *(%rip)",
+                "e9\t00 00 00 00\tjmp 0x1005",
+                "e900000000\tjmp 0x1005",
+                "eb\tjmp 0x1002",
+                "c3 ret",
+                "d61f0000\tbr x0",
+                "d61f0000 br x0",
+                "14000000\tb 0x1000",
+                "00000014\tb\t0x1000",
+                "deadbeef\tb 0x2000"):
+            with self.subTest(instruction=instruction):
+                self.assert_rejected_before_decoding("0000000000001000\t" + instruction + "\n")
+
+    def test_extra_operand_tab_is_not_swallowed_after_a_valid_mnemonic(self):
+        self.assert_rejected_before_decoding("0000000000001000\tadd\tx0, x1,\tx2\n")
+
+    def test_encoding_words_spelled_like_real_mnemonics_cannot_hide_a_branch_operand(self):
+        for instruction in ("dc\tbr x0", "fadd\tjmpq *(%rip)", "fabd\tb 0x2000",
+                            "addb\tcallq 0x2000", "adcb\tret", "decb\tjmpq\t0x2000"):
+            with self.subTest(instruction=instruction):
+                self.assert_rejected_before_decoding("0000000000001000\t" + instruction + "\n")
+
+    def test_a_later_encoding_row_invalidates_body_before_any_instruction_is_used(self):
+        self.assert_rejected_before_decoding(
+            "0000000000001000\tjmpq\t0x2000\n0000000000001005\tc3\tret\n")
+
+    def test_legitimate_hex_looking_mnemonics_keep_canonical_operands(self):
+        examples = {
+            "b": "0x2000", "dc": "cvau, x0", "add": "x0, x1, x2", "adc": "%eax, %ebx",
+            "adcb": "$0x1, %al", "addb": "$0x1, %al", "dec": "%eax", "decb": "%al",
+            "fadd": "d0, d1, d2", "fabd": "s0, s1, s2", "fadda": "d0, p0, d1, z2.d",
+            "fcadd": "v0.4s, v1.4s, v2.4s, #90", "cadd": "z0.s, z0.s, z1.s, #90",
+            "bfc": "x0, #0, #8", "bfadd": "z0.h, z1.h, z2.h",
+            "aaa": "", "aad": "$0xa", "daa": "",
+        }
+        for mnemonic, operands in examples.items():
+            for separator in ("\t", " "):
+                with self.subTest(mnemonic=mnemonic, separator=separator):
+                    body = "0000000000001000\t" + mnemonic + (separator + operands if operands else "") + "\n"
+                    decoded = cache.otool_instructions(self.prefix + body, self.container, 0x1000, 0x1004)
+                    self.assertEqual((decoded[0]["mnemonic"], decoded[0]["operands"]), (mnemonic, operands))
+
+        for mnemonic, operands in (("add", "sp, sp, #0x10"), ("adc", "xzr, x0, x1"),
+                                   ("addb", "%al, 0x10(%rax)"), ("decb", "(%rax)"),
+                                   ("fadd", "%st(1), %st"), ("dc", "zva, xzr")):
+            with self.subTest(mnemonic=mnemonic, operands=operands):
+                text = self.prefix + f"0000000000001000\t{mnemonic}\t{operands}\n"
+                decoded = cache.otool_instructions(text, self.container, 0x1000, 0x1004)
+                self.assertEqual(decoded[0]["operands"], operands)
+
+    def test_canonical_control_flow_still_reaches_CFG_and_retains_edges(self):
+        cases = [
+            ("jmpq\t*(%rip)", "x86_64", bytes.fromhex("ff2500000000"), None),
+            ("jmpq\t*0x0(%rip)", "x86_64", bytes.fromhex("ff2500000000"), "0x2000"),
+            ("jmpq\t0x2000", "x86_64", bytes.fromhex("e9fb0f0000"), "0x2000"),
+            ("br\tx0", "arm64", bytes.fromhex("00001fd6"), None),
+            ("b\t0x2000", "arm64", bytes.fromhex("00040014"), "0x2000"),
+        ]
+        for instruction, arch, raw, target in cases:
+            with self.subTest(instruction=instruction):
+                end = 0x1000 + len(raw)
+                decoded = cache.otool_instructions(self.prefix + "0000000000001000\t" + instruction + "\n",
+                                                   self.container, 0x1000, end)
+                branches = cache.edges(decoded, arch, 0x1000, end,
+                                       lambda slot: (0x2000, {"synthetic": True}), machine_bytes=raw)
+                self.assertEqual(len(branches), 1)
+                self.assertEqual(branches[0]["target"], target)
+                if target is None:
+                    self.assertIn("unresolved", branches[0])
+
+
 if __name__ == "__main__":
     unittest.main()

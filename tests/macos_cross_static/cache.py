@@ -475,8 +475,22 @@ def otool_instructions(text, container, start, end):
     lines = text.splitlines()
     require(len(lines) > 2 and lines[:2] == [str(container) + ":", "(__TEXT,__text) section"],
             "unexpected otool disassembly header")
-    require(all(re.fullmatch(r"\s*[0-9a-fA-F]{8,16}\t[a-zA-Z][a-zA-Z0-9_.]*(?:\s+.*)?", line)
-                for line in lines[2:]), "unexpected otool disassembly row")
+    # These real ARM/x86 mnemonics must not be mistaken for hexadecimal encodings.
+    hex_mnemonics = {"aaa", "aad", "adc", "adcb", "add", "addb", "b", "bfc", "bfadd",
+                     "cadd", "daa", "dc", "dec", "decb", "fabd", "fadd", "fadda", "fcadd"}
+    for line in lines[2:]:
+        row = re.fullmatch(r"\s*[0-9a-fA-F]{8,16}\t([a-zA-Z][a-zA-Z0-9_.]*)(?:(?: +|\t)([^\t]*))?",
+                           line)
+        require(row is not None, "unexpected otool disassembly row")
+        mnemonic = row[1].lower()
+        if re.fullmatch(r"[0-9a-f]+", mnemonic):
+            operands = (row[2] or "").strip()
+            require(mnemonic in hex_mnemonics, "unexpected otool encoding column")
+            # A legal hex-looking mnemonic cannot hide a following mnemonic as its operands.
+            operand_start = re.match(r"(?:[%$#(+\-\d]|(?:[bhsdqvwxzp]\d+(?:\.\w+)?|[wx]?sp|[wx]zr)\b)",
+                                     operands)
+            dc_operands = mnemonic == "dc" and re.fullmatch(r"\w+, *x(?:\d+|zr)", operands)
+            require(not operands or operand_start or dc_operands, "unexpected otool encoding operands")
     decoded = instructions(text, start, end)
     require(len(decoded) == len(lines) - 2 and decoded[0]["address"] == start and
             all(left["address"] < right["address"] for left, right in zip(decoded, decoded[1:])),
