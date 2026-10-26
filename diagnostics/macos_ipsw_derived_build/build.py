@@ -37,6 +37,61 @@ digest = github.digest
 MARKER = re.compile(r"<!-- macos-ipsw-derived-build-v1 (\{[^\r\n]*\}) -->")
 
 
+def controller_inputs(environment):
+    rejected = [name for name in ("OPENSSL_CONF", "OPENSSL_CONF_INCLUDE", "OPENSSL_MODULES",
+                                  "SSLKEYLOGFILE", "SSL_CERT_FILE", "SSL_CERT_DIR") if name in environment]
+    require(not rejected, "controller inputs rejected before any controller action (names only): " +
+            json.dumps(rejected))
+    inventory = {"proxy": [], "go_compiler_sdk_search": [], "loader": [], "native_reference": [],
+                 "declared_control_plane": []}
+    size = len(encoded(inventory))
+    for name in environment:
+        categories = []
+        if name.lower().endswith("_proxy"):
+            categories.append("proxy")
+        if name.startswith(("GO", "CGO_", "CC", "CXX", "SDKROOT", "DEVELOPER_DIR", "TOOLCHAINS",
+                            "CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "LIBRARY_PATH", "CPATH",
+                            "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH")):
+            categories.append("go_compiler_sdk_search")
+        if name.startswith(("DYLD", "LD_")):
+            categories.append("loader")
+        if name.upper().startswith(("OPENSSL", "SSL_", "OSSL_")) or name.upper() in (
+                "SSLKEYLOGFILE", "TSGET", "RANDFILE", "CTLOG_FILE", "QLOGDIR"):
+            categories.append("native_reference")
+        if name in ("GH_TOKEN", "GITHUB_EVENT_NAME", "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY",
+                    "GITHUB_REF", "GITHUB_WORKFLOW_REF", "GITHUB_SHA", "ImageVersion"):
+            categories.append("declared_control_plane")
+        for category in categories:
+            size += len(json.dumps(name, ensure_ascii=True).encode()) + 8
+            require(size <= 4194304, "inherited input-name inventory exceeds existing per-file cap")
+            inventory[category].append(name)
+    for names in inventory.values():
+        names.sort()
+    require(len(encoded(inventory)) <= 4194304, "inherited input-name inventory exceeds existing per-file cap")
+    return inventory
+
+
+def fetch_github_json(endpoint, token, limits, deadline):
+    remaining = deadline - time.monotonic()
+    require(remaining > 0, "diagnostic gate deadline")
+    request = urllib.request.Request("https://api.github.com/repos/lossyrob/telex/" + endpoint,
+        headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"})
+    opener = urllib.request.build_opener(github.RefuseRedirects(), urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=min(remaining, limits["github_request_seconds"])) as response:
+        require(response.geturl() == request.full_url, "unexpected diagnostic gate redirect")
+        raw = bytearray()
+        while True:
+            require(time.monotonic() < deadline, "diagnostic gate deadline during read")
+            chunk = response.read1(min(65536, limits["github_response_bytes"] + 1 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+            require(len(raw) <= limits["github_response_bytes"], "diagnostic GitHub response bound")
+    require(len(raw) <= limits["github_response_bytes"], "diagnostic GitHub response bound")
+    require(time.monotonic() < deadline, "diagnostic gate deadline after read")
+    return json.loads(raw)
+
+
 def failure_record(error, phase):
     return {"phase": phase, "type": type(error).__name__, "message": str(error),
             "interruption": not isinstance(error, Exception)}
@@ -105,7 +160,7 @@ def check_gate(bounds, bounds_hash, source_hash, output, deadline):
     limits = {"github_request_seconds": 15, "github_response_bytes": 4194304}
     records = []
     for page in range(1, 11):
-        batch = github.fetch_json(f"issues/172/comments?per_page=100&page={page}", env["GH_TOKEN"], limits, deadline)
+        batch = fetch_github_json(f"issues/172/comments?per_page=100&page={page}", env["GH_TOKEN"], limits, deadline)
         require(isinstance(batch, list), "invalid BUILD comment page")
         for comment in batch:
             if comment.get("user", {}).get("login") == "lossyrob":
@@ -125,7 +180,7 @@ def check_gate(bounds, bounds_hash, source_hash, output, deadline):
     url = record.get("source_review", "")
     require(re.fullmatch(r"https://github\.com/lossyrob/telex/issues/172#issuecomment-\d+", url),
             "missing BUILD source review")
-    review = github.fetch_json("issues/comments/" + url.rsplit("-", 1)[1], env["GH_TOKEN"], limits, deadline)
+    review = fetch_github_json("issues/comments/" + url.rsplit("-", 1)[1], env["GH_TOKEN"], limits, deadline)
     require(review.get("user", {}).get("login") == "lossyrob" and review.get("html_url") == url and
             review.get("issue_url") == "https://api.github.com/repos/lossyrob/telex/issues/172" and
             digest(review.get("body", "").encode()) == record.get("source_review_body_sha256"),
@@ -384,16 +439,10 @@ def volume_accounting(backing_info, mount_fs, backing_fs, limits):
     return record
 
 
-def build_environment(inherited, bounds, volume):
+def build_environment(bounds, volume):
     fixed = bounds["environment"]
-    forbidden = ("GO", "CGO_", "DYLD", "LD_", "CC", "CXX", "SDKROOT", "DEVELOPER_DIR", "TOOLCHAINS",
-                 "CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH",
-                 "CPLUS_INCLUDE_PATH", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy")
     expected = {**fixed, "SDKROOT": bounds["compiler_identity"]["SDKROOT"], "CC": bounds["tools"]["clang"],
                 "CXX": bounds["tools"]["clangxx_nominal"]}
-    for key, value in inherited.items():
-        if any(key.startswith(prefix) for prefix in forbidden):
-            require(key in expected and value == expected[key], "inherited build override: " + key)
     env = {**expected, "PATH": str(volume / "go" / "bin") + ":" +
            str(Path(bounds["tools"]["clang"]).parent) + ":/usr/bin:/bin"}
     for key, name in (("HOME", "home"), ("TMPDIR", "tmp"), ("GOTMPDIR", "tmp"), ("GOCACHE", "gocache"),
@@ -414,6 +463,7 @@ class Runner:
         self.log_root = evidence.root
 
     def command(self, label, argv, env, budget="metadata", timeout=None):
+        require(isinstance(env, dict), "explicit child environment dictionary required")
         limits = self.bounds["limits"]
         require(len(self.records) < limits["maximum_commands"], "command count bound")
         requested = [str(a) for a in argv]
@@ -718,6 +768,7 @@ def archive_bytes(files, maximum, deadline):
 
 
 def execute(bounds, output, work, provenance, runner, ledger):
+    provenance["inherited_input_names"] = controller_inputs(os.environ)
     limits = bounds["limits"]
     manifest, source_hash = closure(bounds)
     provenance.update(source_manifest=manifest, source_manifest_sha256=source_hash, bounds=bounds,
@@ -729,7 +780,7 @@ def execute(bounds, output, work, provenance, runner, ledger):
     require(sys.platform == "darwin" and os.getuid() != 0, "ordinary-user macOS build required")
     mount, image = work / bounds["volume"]["mount_name"], work / bounds["volume"]["image_name"]
     provenance.update(image=str(image), mount=str(mount), attached=False, attach_attempted=False, detached=False)
-    env = build_environment(os.environ, bounds, mount)
+    env = build_environment(bounds, mount)
     control_env = {**env, "HOME": str(work), "TMPDIR": str(work)}
     for label, argv, expected in (
         ("host-uname", ["/usr/bin/uname", "-a"], None),
@@ -866,6 +917,7 @@ def execute(bounds, output, work, provenance, runner, ledger):
 
 
 def main():
+    input_names = controller_inputs(os.environ)
     bounds = json.loads((HERE / "bounds.json").read_bytes())
     require(len(sys.argv) == 3, "usage: build.py ABS_WORK ABS_EVIDENCE")
     work, evidence = Path(sys.argv[1]), Path(sys.argv[2])
@@ -875,7 +927,8 @@ def main():
     evidence.mkdir(parents=True, exist_ok=False)
     output = Evidence(evidence, bounds["limits"])
     runner = Runner(bounds, work, output, time.monotonic() + bounds["limits"]["controller_seconds"])
-    provenance, ledger, code = {"disposition": "failed-return-to-design", "ipsw_executed": False}, [], 1
+    provenance, ledger, code = {"disposition": "failed-return-to-design", "ipsw_executed": False,
+                               "inherited_input_names": input_names}, [], 1
     try:
         execute(bounds, output, work, provenance, runner, ledger)
         code = 0

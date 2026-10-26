@@ -1,6 +1,8 @@
 """Synthetic source/controller checks; no real tools, provider or network."""
 
 from contextlib import contextmanager
+from contextlib import ExitStack
+import ast
 from email.message import Message
 import copy
 import hashlib
@@ -175,8 +177,10 @@ class FetchTests(unittest.TestCase):
     def test_standard_opener_returns_redirect_body_for_explicit_metering(self):
         original = b.urllib.request.build_opener
         calls = []
-        class Transport(b.urllib.request.BaseHandler):
+        class Transport(b.urllib.request.HTTPSHandler):
             handler_order = 0
+            def __init__(self):
+                pass
             def https_open(self, request):
                 calls.append(request.full_url)
                 headers = Message()
@@ -304,7 +308,7 @@ class CapacityEnvironmentTests(unittest.TestCase):
                     SimpleNamespace(f_bavail=100, f_frsize=1), limits)
 
     def test_file_only_offline_environment_and_all_build_paths_inside_volume(self):
-        env = b.build_environment({}, BOUNDS, Path("/private/volume"))
+        env = b.build_environment(BOUNDS, Path("/private/volume"))
         self.assertEqual(env["GOPROXY"], "file:///private/volume/proxy")
         for key in ("HOME", "TMPDIR", "GOTMPDIR", "GOMODCACHE", "GOCACHE", "GOPATH"):
             self.assertTrue(Path(env[key]).is_relative_to("/private/volume"))
@@ -315,11 +319,13 @@ class CapacityEnvironmentTests(unittest.TestCase):
         self.assertFalse(any("direct" in env[key] for key in ("GOPROXY", "GONOPROXY")))
         self.assertNotIn("GH_TOKEN", env)
 
-    def test_conflicting_build_search_injection_or_network_overrides_fail(self):
+    def test_ambient_build_search_loader_and_proxy_names_are_not_child_inputs(self):
+        expected = b.build_environment(BOUNDS, Path("/private/volume"))
         for key in ("GOFLAGS", "GOEXPERIMENT", "GOTOOLCHAIN", "CGO_CFLAGS", "CC", "CXX",
-                    "DYLD_INSERT_LIBRARIES", "LD_LIBRARY_PATH", "CPATH", "SDKROOT", "HTTPS_PROXY"):
-            with self.subTest(key=key), self.assertRaises(b.Error):
-                b.build_environment({key: "wrong"}, BOUNDS, Path("/private/volume"))
+                    "DYLD_INSERT_LIBRARIES", "LD_LIBRARY_PATH", "CPATH", "SDKROOT", "HTTPS_PROXY",
+                    "GOROOT_1_24_ARM64", "nO_PrOxY"):
+            with self.subTest(key=key), patch.dict(os.environ, {key: "synthetic-ambient-value"}):
+                self.assertEqual(b.build_environment(BOUNDS, Path("/private/volume")), expected)
 
     def test_fixed_nonsparse_image_and_no_privileged_fallback(self):
         args = BOUNDS["volume"]["create"]
@@ -391,7 +397,7 @@ class GateTests(unittest.TestCase):
         review = {"user": {"login": "lossyrob"}, "html_url": "https://github.com/lossyrob/telex/issues/172#issuecomment-123",
                   "issue_url": "https://api.github.com/repos/lossyrob/telex/issues/172", "body": "synthetic approved body"}
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.environment(), clear=True), \
-                patch.object(b.github, "fetch_json", side_effect=[[self.comments()], review]), \
+                patch.object(b, "fetch_github_json", side_effect=[[self.comments()], review]), \
                 patch.object(b.subprocess, "Popen") as provider:
             out = b.Evidence(Path(temp), BOUNDS["limits"])
             self.assertEqual(b.check_gate(BOUNDS, "b" * 64, "c" * 64, out, 100), "a" * 40)
@@ -404,7 +410,7 @@ class GateTests(unittest.TestCase):
         for rows in ([], [wrong], [self.comments(), self.comments(allow_launch=False)],
                      [self.comments(allow_launch=False)], [self.comments(source_manifest_sha256="wrong")]):
             with self.subTest(rows=rows), patch.dict(os.environ, self.environment(), clear=True), \
-                    patch.object(b.github, "fetch_json", return_value=rows), self.assertRaises(b.Error):
+                    patch.object(b, "fetch_github_json", return_value=rows), self.assertRaises(b.Error):
                 b.check_gate(BOUNDS, "b" * 64, "c" * 64, None, 100)
 
     def test_attempt2_dispatch_wrong_branch_fail_without_API_or_provider(self):
@@ -413,7 +419,7 @@ class GateTests(unittest.TestCase):
             env = self.environment()
             env[key] = value
             with self.subTest(key=key), patch.dict(os.environ, env, clear=True), \
-                    patch.object(b.github, "fetch_json") as fetch, self.assertRaises(b.Error):
+                    patch.object(b, "fetch_github_json") as fetch, self.assertRaises(b.Error):
                 b.check_gate(BOUNDS, "b" * 64, "c" * 64, None, 100)
             fetch.assert_not_called()
 
@@ -1464,6 +1470,590 @@ class PrimaryOutputErrorTests(unittest.TestCase):
                              "write-failed-persistence-unconfirmed")
             self.assertFalse(self.manifest_valid(case["evidence"]))
             self.assertFalse(receipt["output_binary_accepted"])
+
+
+class ControllerInputTests(unittest.TestCase):
+    rejected = ("OPENSSL_CONF", "OPENSSL_CONF_INCLUDE", "OPENSSL_MODULES",
+                "SSLKEYLOGFILE", "SSL_CERT_FILE", "SSL_CERT_DIR")
+
+    def test_exact_six_presence_rejections_precede_every_main_and_execute_action(self):
+        for name in self.rejected:
+            for value in ("", "secret-not-to-be-read"):
+                for entry in ("main", "execute"):
+                    with self.subTest(name=name, empty=not value, entry=entry), tempfile.TemporaryDirectory() as temp:
+                        work, evidence = Path(temp) / "work", Path(temp) / "evidence"
+                        provenance = {}
+                        with ExitStack() as patches:
+                            patches.enter_context(patch.dict(os.environ, {name: value}, clear=True))
+                            patches.enter_context(patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]))
+                            blocked = []
+                            for target, attribute in ((Path, "read_bytes"), (Path, "mkdir"), (b, "closure"),
+                                    (b, "check_gate"), (b, "fetch_github_json"), (b, "encoded"),
+                                    (b, "bind_tools"), (b.os, "getuid"), (b.os, "uname"), (b, "digest"),
+                                    (b.Runner, "command"), (b.Fetcher, "fetch"),
+                                    (b.urllib.request, "build_opener")):
+                                blocked.append(patches.enter_context(patch.object(
+                                    target, attribute, side_effect=AssertionError("controller action before check"))))
+                            with self.assertRaises(b.Error) as raised:
+                                b.main() if entry == "main" else b.execute(None, None, work, provenance, None, None)
+                            self.assertIn(name, str(raised.exception))
+                            self.assertNotIn("secret-not-to-be-read", str(raised.exception))
+                            self.assertIn("rejected before any controller action", str(raised.exception))
+                            for action in blocked:
+                                action.assert_not_called()
+                        self.assertFalse(work.exists())
+                        self.assertFalse(evidence.exists())
+                        self.assertEqual(provenance, {})
+
+    def test_inventory_reads_only_names_sorted_with_categories_and_no_values(self):
+        class NamesOnly(dict):
+            def __getitem__(self, key):
+                raise AssertionError("values forbidden")
+            def items(self):
+                raise AssertionError("values forbidden")
+            def values(self):
+                raise AssertionError("values forbidden")
+        names = ("GOROOT_1_24_ARM64", "GOFLAGS", "CGO_CFLAGS", "CC", "SDKROOT", "DYLD_INSERT_LIBRARIES",
+                 "LD_LIBRARY_PATH", "HtTpS_PrOxY", "no_proxy", "OPENSSL_ENGINES", "OPENSSL_armcap",
+                 "QLOGDIR", "SSL_cert_file", "GH_TOKEN", "GITHUB_SHA", "irrelevant")
+        inventory = b.controller_inputs(NamesOnly.fromkeys(reversed(names), "value-is-not-observable"))
+        self.assertEqual(inventory["proxy"], ["HtTpS_PrOxY", "no_proxy"])
+        self.assertEqual(inventory["go_compiler_sdk_search"],
+                         ["CC", "CGO_CFLAGS", "GOFLAGS", "GOROOT_1_24_ARM64", "SDKROOT"])
+        self.assertEqual(inventory["loader"], ["DYLD_INSERT_LIBRARIES", "LD_LIBRARY_PATH"])
+        self.assertEqual(inventory["native_reference"],
+                         ["OPENSSL_ENGINES", "OPENSSL_armcap", "QLOGDIR", "SSL_cert_file"])
+        self.assertEqual(inventory["declared_control_plane"], ["GH_TOKEN", "GITHUB_SHA"])
+        self.assertNotIn("value-is-not-observable", json.dumps(inventory))
+        self.assertNotIn("irrelevant", json.dumps(inventory))
+
+    def test_presence_is_case_sensitive_but_proxy_category_is_case_insensitive(self):
+        names = [n.lower() for n in self.rejected]
+        names += ["HTTP_PROXY", "https_proxy", "aLl_PrOxY", "NO_PROXY", "CuStOm_PrOxY"]
+        result = b.controller_inputs(dict.fromkeys(names, "synthetic"))
+        self.assertEqual(result["proxy"], sorted(names[6:]))
+        self.assertEqual(result["native_reference"], sorted(names[:6]))
+
+    def test_names_only_inventory_escapes_keys_and_fails_on_existing_cap(self):
+        inventory = b.controller_inputs({'GO"\nFIELD': "never-retain"})
+        self.assertIn('GO"\nFIELD', inventory["go_compiler_sdk_search"])
+        self.assertNotIn("never-retain", b.encoded(inventory).decode())
+        with self.assertRaisesRegex(b.Error, "existing per-file cap") as raised:
+            b.controller_inputs({"GO" + "x" * 4194304: "secret"})
+        self.assertLess(len(str(raised.exception)), 100)
+        self.assertNotIn("secret", str(raised.exception))
+
+    def test_pre_gate_provenance_inventory_and_failure_contain_names_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            work, evidence = Path(temp) / "work", Path(temp) / "evidence"
+            environment = {"GOROOT_1_24_ARM64": "SENTINEL", "HTTPS_PROXY": "https://secret.invalid/",
+                           "GH_TOKEN": "TOKEN_SENTINEL", "OPENSSL_TRACE": "TRACE_SENTINEL"}
+            observed = {}
+            original_execute = b.execute
+            def execute(*args):
+                observed["provenance"] = args[3]
+                return original_execute(*args)
+            def gate(*args):
+                self.assertEqual(observed["provenance"]["inherited_input_names"],
+                                 b.controller_inputs(environment))
+                raise b.Error("synthetic missing freeze")
+            with patch.dict(os.environ, environment, clear=True), \
+                    patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(b, "execute", side_effect=execute), patch.object(b, "check_gate", side_effect=gate), \
+                    patch.object(b.Runner, "command") as command:
+                self.assertEqual(b.main(), 1)
+            command.assert_not_called()
+            receipt = (evidence / "provenance.json").read_text()
+            for value in environment.values():
+                self.assertNotIn(value, receipt)
+            self.assertIn("HTTPS_PROXY", receipt)
+            self.assertFalse(json.loads(receipt)["output_binary_accepted"])
+
+    def test_none_environment_never_reaches_child_launcher(self):
+        with RunnerTests().fake() as (runner, _, spawn, _, _), self.assertRaisesRegex(b.Error, "explicit child"):
+            runner.command("static", ["/fixed/tool"], None)
+        spawn.assert_not_called()
+
+    def test_inventory_overflow_is_early_and_creates_no_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            work, evidence = Path(temp) / "work", Path(temp) / "evidence"
+            # A synthetic mapping avoids putting an oversized name in the real process environment.
+            with patch.object(b.os, "environ", {"GO" + "x" * 4194304: "not-read"}), \
+                    patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(Path, "read_bytes") as bounds_read, patch.object(b, "check_gate") as gate, \
+                    self.assertRaisesRegex(b.Error, "existing per-file cap"):
+                b.main()
+            bounds_read.assert_not_called()
+            gate.assert_not_called()
+            self.assertFalse(work.exists())
+            self.assertFalse(evidence.exists())
+
+
+class DirectTransportTests(unittest.TestCase):
+    @contextmanager
+    def transport(self, responses):
+        calls, opener_handlers, discoveries = [], [], []
+        original_build = b.urllib.request.build_opener
+        original_global = b.urllib.request._opener
+        class Transport(b.urllib.request.HTTPSHandler, b.urllib.request.HTTPHandler):
+            def __init__(self):
+                pass
+            def https_open(self, request):
+                calls.append({"url": request.full_url, "headers": dict(request.header_items()),
+                              "timeout": request.timeout})
+                status, headers, raw = responses.pop(0)
+                msg = Message()
+                for key, value in headers.items():
+                    msg[key] = str(value)
+                response = urllib.response.addinfourl(io.BytesIO(raw), msg, request.full_url, status)
+                response.msg = "synthetic"
+                return response
+            http_open = https_open
+        def build(*handlers):
+            self.assertEqual([h.proxies for h in handlers if isinstance(h, b.urllib.request.ProxyHandler)], [{}])
+            opener_handlers.append([type(h).__name__ for h in handlers])
+            return original_build(*handlers, Transport())
+        def forbidden_discovery(*args, **kwargs):
+            discoveries.append("proxy-discovery-or-bypass")
+            raise AssertionError("environment/Darwin proxy lookup forbidden")
+        with ExitStack() as patches:
+            patches.enter_context(patch.dict(os.environ, {"HTTP_PROXY": "SENTINEL", "no_proxy": "SENTINEL",
+                "hTtPs_PrOxY": "SENTINEL"}, clear=True))
+            patches.enter_context(patch.object(b.urllib.request, "build_opener", side_effect=build))
+            install = patches.enter_context(patch.object(b.urllib.request, "install_opener"))
+            patches.enter_context(patch("socket.socket", side_effect=AssertionError("no sockets")))
+            for name in ("getproxies", "getproxies_environment", "getproxies_macosx_sysconf",
+                         "_get_proxy_settings", "proxy_bypass", "proxy_bypass_environment",
+                         "proxy_bypass_macosx_sysconf", "_proxy_bypass_macosx_sysconf"):
+                patches.enter_context(patch.object(b.urllib.request, name, side_effect=forbidden_discovery, create=True))
+            yield calls, opener_handlers, discoveries
+        install.assert_not_called()
+        self.assertIs(b.urllib.request._opener, original_global)
+        self.assertEqual(discoveries, [])
+
+    def test_both_actual_gate_GET_kinds_use_empty_proxies_with_auth_only_at_canonical_URLs(self):
+        comment = GateTests().comments()
+        review = {"user": {"login": "lossyrob"},
+                  "html_url": "https://github.com/lossyrob/telex/issues/172#issuecomment-123",
+                  "issue_url": "https://api.github.com/repos/lossyrob/telex/issues/172",
+                  "body": "synthetic approved body"}
+        responses = [(200, {}, json.dumps([comment]).encode()), (200, {}, json.dumps(review).encode())]
+        with tempfile.TemporaryDirectory() as temp, self.transport(responses) as (calls, handlers, discoveries), \
+                patch.dict(os.environ, GateTests().environment()), \
+                patch.object(b.github, "fetch_json", side_effect=AssertionError("old proxy-aware getter unused")):
+            b.check_gate(BOUNDS, "b" * 64, "c" * 64, b.Evidence(Path(temp), BOUNDS["limits"]), float("inf"))
+            self.assertEqual([r["url"] for r in calls], [
+                "https://api.github.com/repos/lossyrob/telex/issues/172/comments?per_page=100&page=1",
+                "https://api.github.com/repos/lossyrob/telex/issues/comments/123"])
+            self.assertTrue(all(r["headers"]["Authorization"] == "Bearer synthetic" for r in calls))
+            self.assertEqual(handlers, [["RefuseRedirects", "ProxyHandler"]] * 2)
+            self.assertFalse(discoveries)
+
+    def test_all_gate_redirect_statuses_same_and_cross_origin_never_follow(self):
+        for endpoint in ("issues/172/comments?per_page=100&page=1", "issues/comments/123"):
+            for code in (301, 302, 303, 307, 308):
+                for target in ("https://api.github.com/other", "https://example.invalid/other"):
+                    with self.subTest(endpoint=endpoint, code=code, target=target), \
+                            self.transport([(code, {"Location": target}, b"redirect")]) as (calls, _, _):
+                        with self.assertRaisesRegex(b.Error, "redirect refused"):
+                            b.fetch_github_json(endpoint, "synthetic", {
+                                "github_request_seconds": 15, "github_response_bytes": 128}, float("inf"))
+                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(calls[0]["url"], "https://api.github.com/repos/lossyrob/telex/" + endpoint)
+
+    def test_payload_initial_and_redirect_transports_never_discover_proxies(self):
+        with tempfile.TemporaryDirectory() as temp, self.transport([
+                (302, {"Location": "https://storage.googleapis.com/module"}, b"hop"),
+                (200, {}, b"body")]) as (calls, handlers, discoveries):
+            ledger = []
+            fetcher = b.Fetcher(BOUNDS["limits"], float("inf"), ledger)
+            fetcher.fetch("https://proxy.golang.org/module", Path(temp) / "data", "module",
+                          ["proxy.golang.org", "storage.googleapis.com"])
+            self.assertEqual([r["url"] for r in calls],
+                             ["https://proxy.golang.org/module", "https://storage.googleapis.com/module"])
+            self.assertTrue(all("Authorization" not in r["headers"] for r in calls))
+            self.assertEqual(handlers, [["ReturnRedirect", "ProxyHandler"]])
+            self.assertEqual(fetcher.counts["module"], 7)
+            self.assertFalse(discoveries)
+
+    def test_gate_read_bounds_errors_deadline_and_response_close_preserved(self):
+        limits = {"github_request_seconds": 15, "github_response_bytes": 8}
+        for code, raw, expected in ((200, b"123456789", b.Error), (404, b"failed", b.urllib.error.HTTPError),
+                                    (200, b'{"cut":', json.JSONDecodeError)):
+            with self.subTest(code=code, raw=raw), self.transport([(code, {}, raw)]) as (calls, _, _), \
+                    self.assertRaises(expected):
+                b.fetch_github_json("issues/172", "synthetic", limits, float("inf"))
+            self.assertEqual(len(calls), 1)
+        with self.transport([]) as (calls, _, _), patch.object(b.time, "monotonic", return_value=10), \
+                self.assertRaisesRegex(b.Error, "deadline"):
+            b.fetch_github_json("issues/172", "synthetic", limits, 9)
+        self.assertFalse(calls)
+        url = "https://api.github.com/repos/lossyrob/telex/issues/172"
+        response = Response(url, b"{}")
+        with patch.object(b.urllib.request, "build_opener",
+                          return_value=SimpleNamespace(open=lambda *args, **kwargs: response)), \
+                patch.object(response, "read1", side_effect=OSError("truncated transport")):
+            with self.assertRaisesRegex(OSError, "truncated transport"):
+                b.fetch_github_json("issues/172", "synthetic", limits, float("inf"))
+        self.assertTrue(response.closed)
+
+    def test_gate_getter_is_exact_a303_read_logic_except_explicit_empty_proxy_opener(self):
+        import inspect
+        expected = inspect.getsource(b.github.fetch_json).replace(
+            "def fetch_json(", "def fetch_github_json(").replace(
+            "urllib.request.build_opener(RefuseRedirects())",
+            "urllib.request.build_opener(github.RefuseRedirects(), urllib.request.ProxyHandler({}))")
+        self.assertEqual(inspect.getsource(b.fetch_github_json), expected)
+
+    def test_empty_environment_does_not_fall_back_to_Darwin_system_proxies(self):
+        with self.transport([(200, {}, b"{}")]) as (calls, handlers, discoveries), \
+                patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(b.fetch_github_json("issues/172", "synthetic",
+                {"github_request_seconds": 15, "github_response_bytes": 8}, float("inf")), {})
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(discoveries)
+        with tempfile.TemporaryDirectory() as temp, self.transport([(200, {}, b"x")]) as (
+                calls, handlers, discoveries), patch.dict(os.environ, {}, clear=True):
+            b.Fetcher(BOUNDS["limits"], float("inf"), []).fetch("https://proxy.golang.org/x",
+                Path(temp) / "data", "module", ["proxy.golang.org"])
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(discoveries)
+
+    def test_gate_response_URL_deadline_and_close_errors_never_fall_back(self):
+        url = "https://api.github.com/repos/lossyrob/telex/issues/172"
+        limits = {"github_request_seconds": 15, "github_response_bytes": 8}
+        for kind in ("wrong-url", "deadline", "close-error", "success"):
+            with self.subTest(kind=kind):
+                response = Response(url if kind != "wrong-url" else "https://example.invalid/", b"{}")
+                original_close = response.close
+                def close():
+                    original_close()
+                    if kind == "close-error":
+                        raise OSError("synthetic response close")
+                with patch.object(response, "close", side_effect=close), \
+                        patch.object(b.urllib.request, "build_opener", return_value=SimpleNamespace(
+                            open=lambda *args, **kwargs: response)) as constructor, \
+                        patch.object(b.time, "monotonic", side_effect=[0, 20] if kind == "deadline" else lambda: 0):
+                    if kind == "success":
+                        self.assertEqual(b.fetch_github_json("issues/172", "synthetic", limits, 10), {})
+                    else:
+                        with self.assertRaises(b.Error if kind != "close-error" else OSError):
+                            b.fetch_github_json("issues/172", "synthetic", limits, 10)
+                self.assertTrue(response.closed)
+                self.assertEqual(constructor.call_count, 1)
+
+
+class FullRecipeEnvironmentTests(unittest.TestCase):
+    labels = [
+        "host-uname", "host-product", "host-build", "source", "clang-version", "SDK-version",
+        "image-create", "image-attach", "patch-check", "patch-apply", "go-version", "go-env",
+        "modules", "modules-verify-before", "compile", "modules-verify-after",
+        "go-metadata-pre", "ad-hoc-sign", "signature-verify", "signature-display",
+        "signature-entitlements", "go-metadata-post", "image-detach",
+    ]
+
+    def expected_maps(self, work):
+        volume = work / "volume"
+        developer = "/Applications/Xcode_26.6.app/Contents/Developer"
+        tools = developer + "/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+        build = {
+            "DEVELOPER_DIR": developer, "TOOLCHAINS": "com.apple.dt.toolchain.XcodeDefault",
+            "GOTOOLCHAIN": "local", "GOENV": "off", "GOWORK": "off", "GOOS": "darwin", "GOARCH": "arm64",
+            "GOARM64": "v8.0", "CGO_ENABLED": "1", "GOFLAGS": "-mod=readonly", "GOSUMDB": "off",
+            "GOVCS": "*:off", "GOPRIVATE": "", "GONOPROXY": "", "GONOSUMDB": "", "GOINSECURE": "",
+            "GOTELEMETRY": "off", "GOMAXPROCS": "2", "LANG": "C", "LC_ALL": "C", "NO_COLOR": "1",
+            "SDKROOT": developer + "/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            "CC": tools + "/clang", "CXX": tools + "/clang++",
+            "PATH": str(volume / "go" / "bin") + ":" + tools + ":/usr/bin:/bin",
+            "HOME": str(volume / "home"), "TMPDIR": str(volume / "tmp"), "GOTMPDIR": str(volume / "tmp"),
+            "GOCACHE": str(volume / "gocache"), "GOMODCACHE": str(volume / "gomodcache"),
+            "GOPATH": str(volume / "gopath"), "GOPROXY": volume.as_uri() + "/proxy",
+            "TELEX_HOME": str(volume / "telex-home"), "TELEX_DB": str(volume / "telex.sqlite"),
+            "TELEX_INSTALL_ROOT": str(volume / "telex-install"),
+        }
+        initial = dict(build, HOME=str(work), TMPDIR=str(work))
+        detach = {"PATH": "/usr/bin:/bin", "HOME": str(work), "TMPDIR": str(work)}
+        return initial, build, detach
+
+    def expected_argv(self, work):
+        volume = work / "volume"
+        source, unsigned, signed = volume / "source", volume / "output" / "ipsw", volume / "signing" / "ipsw"
+        go = str(volume / "go" / "bin" / "go")
+        clang = "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
+        ldflags = ("-ldflags=-s -w -X github.com/blacktop/ipsw/cmd/ipsw/cmd.AppVersion=3.1.739-telex-swvers-b401e5777696 "
+                   "-X github.com/blacktop/ipsw/cmd/ipsw/cmd.AppBuildCommit="
+                   "1f8b657858d7510219f59bf9ba183bf4c0a59104+telex-b401e5777696")
+        return [
+            ["/usr/bin/uname", "-a"], ["/usr/bin/sw_vers", "-productVersion"], ["/usr/bin/sw_vers", "-buildVersion"],
+            ["/usr/bin/git", "-C", str(b.ROOT), "rev-parse", "HEAD"], [clang, "--version"],
+            ["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-version"],
+            ["/usr/bin/hdiutil", "create", "-size", "12288m", "-fs", "APFS", "-volname", "TelexDerivedBuild",
+             "-format", "UDRW", str(work / "build.dmg")],
+            ["/usr/bin/hdiutil", "attach", "-readwrite", "-nobrowse", "-noautoopen", "-mountpoint",
+             str(volume), "-plist", str(work / "build.dmg")],
+            ["/usr/bin/git", "-C", str(source), "apply", "--check", "--whitespace=error-all", str(volume / "get-build-info.patch")],
+            ["/usr/bin/git", "-C", str(source), "apply", "--whitespace=error-all", str(volume / "get-build-info.patch")],
+            [go, "version"],
+            [go, "env", "-json", "GOTOOLCHAIN", "GOENV", "GOWORK", "GOOS", "GOARCH", "GOARM64", "CGO_ENABLED",
+             "GOFLAGS", "GOPROXY", "GOSUMDB", "GOVCS", "GOPRIVATE", "GONOPROXY", "GONOSUMDB", "GOINSECURE",
+             "GOMODCACHE", "GOCACHE", "GOPATH", "CC", "CXX"],
+            [go, "mod", "download", "-json"], [go, "mod", "verify"],
+            [go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-p=2", "-tags=sandbox",
+             ldflags, "-o=" + str(unsigned), "./cmd/ipsw"],
+            [go, "mod", "verify"], [go, "version", "-m", str(unsigned)],
+            ["/usr/bin/codesign", "--force", "--sign", "-", "--timestamp=none", "--identifier",
+             "org.telex.harness.ipsw.stdout-only", str(signed)],
+            ["/usr/bin/codesign", "--verify", "--strict", "--verbose=4", str(signed)],
+            ["/usr/bin/codesign", "--display", "--verbose=4", str(signed)],
+            ["/usr/bin/codesign", "--display", "--entitlements", ":-", str(signed)],
+            [go, "version", "-m", str(signed)],
+            ["/usr/bin/hdiutil", "detach", str(volume)],
+        ]
+
+    @contextmanager
+    def recipe(self, fail_label=None, go_env_mismatch=False, fail_fetch=False):
+        with tempfile.TemporaryDirectory() as temporary:
+            work, evidence = Path(temporary) / "work", Path(temporary) / "evidence"
+            volume = work / "volume"
+            initial, build, detach = self.expected_maps(work)
+            argvs = self.expected_argv(work)
+            sequence, streams, events, runners = [], {}, [], []
+            environment = GateTests().environment()
+            environment["ImageVersion"] = "synthetic-image"
+            for name in ("GOROOT_1_24_ARM64", "GOFLAGS", "GOEXPERIMENT", "CGO_CFLAGS", "CC", "CXX",
+                         "SDKROOT", "DEVELOPER_DIR", "TOOLCHAINS", "CFLAGS", "LIBRARY_PATH", "CPATH",
+                         "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD",
+                         "HTTP_PROXY", "https_proxy", "nO_PrOxY", "OPENSSL_TRACE", "OPENSSL_ENGINES",
+                         "OPENSSL_armcap", "RANDFILE", "QLOGDIR", "AMBIENT_UNRELATED"):
+                environment[name] = "AMBIENT_SENTINEL"
+            environment["GH_TOKEN"] = "CONTROLLER_ONLY_TOKEN"
+            original_init, original_stat, original_resolve = b.Runner.__init__, Path.stat, Path.resolve
+
+            def init(runner, *args, **kwargs):
+                original_init(runner, *args, **kwargs)
+                runners.append(runner)
+
+            def gate(bounds, bounds_hash, closure_hash, sink, deadline):
+                events.append("gate")
+                sink.json("gate.json", {"synthetic": True})
+                return "a" * 40
+
+            def resolve(file, strict=False):
+                if str(file) in BOUNDS["tools"].values() or str(file) == BOUNDS["compiler_identity"]["SDKROOT"]:
+                    return Path(BOUNDS["tools"]["clang"]) if str(file) == BOUNDS["tools"]["clangxx_nominal"] else file
+                return original_resolve(file, strict=strict)
+
+            def stat_file(file, *args, **kwargs):
+                result = original_stat(file, *args, **kwargs)
+                if file == volume:
+                    fields = list(result)
+                    fields[2] += 1
+                    return os.stat_result(fields)
+                return result
+
+            def unpack(archive, destination, root_name, maximum, deadline):
+                destination.mkdir(parents=True)
+                if root_name == "go":
+                    (destination / "bin").mkdir()
+                    (destination / "bin" / "go").write_bytes(b"synthetic-go")
+                    (destination / "LICENSE").write_bytes(b"synthetic-license")
+                else:
+                    (destination / "go.mod").write_bytes((HERE / "inputs" / "go.mod").read_bytes())
+                    (destination / "go.sum").write_bytes((HERE / "inputs" / "go.sum").read_bytes())
+                    (destination / "LICENSE").write_bytes(b"synthetic-license")
+                return 0
+
+            def fetch(fetcher, url, destination, kind, hosts, file_limit=None):
+                events.append("fetch-" + kind)
+                if fail_fetch:
+                    raise b.Error("synthetic execute payload failure")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                raw = b"synthetic"
+                if destination.suffix == ".info":
+                    version = destination.name[:-5]
+                    raw = json.dumps({"Version": version}).encode()
+                destination.write_bytes(raw)
+                if kind == "compiler":
+                    return {"path": str(destination), "bytes": 68196737,
+                            "sha256": "dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2"}
+                return {"path": str(destination), "bytes": len(raw), "sha256": b.digest(raw)}
+
+            def spawn(argv, **kwargs):
+                self.assertTrue(runners)
+                label = runners[-1].records[-1]["label"]
+                index = self.labels.index(label)
+                self.assertEqual(argv, argvs[index])
+                expected_env = initial if index < 8 else detach if label == "image-detach" else build
+                self.assertIsInstance(kwargs["env"], dict)
+                self.assertEqual(kwargs["env"], expected_env)
+                self.assertNotIn("AMBIENT_SENTINEL", kwargs["env"].values())
+                self.assertNotIn("CONTROLLER_ONLY_TOKEN", kwargs["env"].values())
+                self.assertNotIn("GH_TOKEN", kwargs["env"])
+                self.assertEqual(os.environ, environment)
+                self.assertTrue(kwargs["start_new_session"])
+                sequence.append({"label": label, "argv": list(argv), "env": kwargs["env"].copy()})
+                events.append("spawn-" + label)
+                stdout, stderr = b"", b""
+                if label == "host-uname": stdout = b"Darwin synthetic\n"
+                elif label == "host-product": stdout = b"26.6.2\n"
+                elif label == "host-build": stdout = b"25G83\n"
+                elif label == "source": stdout = b"a" * 40 + b"\n"
+                elif label == "clang-version": stdout = b"Apple clang version synthetic\n"
+                elif label == "SDK-version": stdout = b"26.5\n"
+                elif label == "image-create": (work / "build.dmg").write_bytes(b"tiny-fake-image")
+                elif label == "image-attach":
+                    stdout = b.plistlib.dumps({"system-entities": [{"mount-point": str(volume)}]})
+                elif label == "go-version": stdout = b"go version go1.27.3 darwin/arm64\n"
+                elif label == "go-env":
+                    effective = {name: build[name] for name in argv[3:]}
+                    if go_env_mismatch: effective["CC"] = "/synthetic/unfrozen"
+                    stdout = json.dumps(effective).encode()
+                elif label == "compile": (volume / "output" / "ipsw").write_bytes(b"synthetic-binary")
+                elif label in ("go-metadata-pre", "go-metadata-post"): stdout = b"synthetic-static-metadata"
+                elif label == "signature-display": stderr = b"Signature=adhoc\nTimestamp=none\n"
+                process = Process(argv.copy())
+                fd = 100 + len(sequence) * 2
+                process.stdout, process.stderr = Pipe(fd), Pipe(fd + 1)
+                process.pid = 1000 + len(sequence)
+                code = 1 if label == fail_label else 0
+                def wait(timeout):
+                    process.waited = True
+                    return code
+                process.wait = wait
+                streams[fd], streams[fd + 1] = bytearray(stdout), bytearray(stderr)
+                return process
+
+            def pipe_read(fd, maximum):
+                raw = bytes(streams[fd][:maximum])
+                del streams[fd][:maximum]
+                return raw
+
+            with ExitStack() as patches:
+                patches.enter_context(patch.dict(os.environ, environment, clear=True))
+                patches.enter_context(patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]))
+                patches.enter_context(patch.object(b.Runner, "__init__", init))
+                patches.enter_context(patch.object(b, "check_gate", side_effect=gate))
+                patches.enter_context(patch.object(b.sys, "platform", "darwin"))
+                patches.enter_context(patch.object(b.os, "getuid", return_value=501))
+                patches.enter_context(patch.object(b.os, "uname", return_value=SimpleNamespace(machine="arm64")))
+                patches.enter_context(patch.object(Path, "resolve", resolve))
+                patches.enter_context(patch.object(Path, "stat", stat_file))
+                patches.enter_context(patch.object(b.os, "statvfs",
+                    return_value=SimpleNamespace(f_blocks=1024, f_frsize=4096, f_bavail=16777216)))
+                patches.enter_context(patch.object(b, "file_hash",
+                    side_effect=lambda file, *args: {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}))
+                patches.enter_context(patch.object(b, "macho_signature", side_effect=lambda file, *args:
+                    {"path": str(file), "bytes": file.stat().st_size, "sha256": b.digest(file.read_bytes())}))
+                patches.enter_context(patch.object(b, "go_metadata", return_value={"synthetic": "unchanged"}))
+                patches.enter_context(patch.object(b, "unpack", side_effect=unpack))
+                patches.enter_context(patch.object(b, "verify_tree"))
+                patches.enter_context(patch.object(b, "archive_bytes", return_value=b"synthetic-archive"))
+                patches.enter_context(patch.object(b.urllib.request, "build_opener", return_value=object()))
+                patches.enter_context(patch.object(b.Fetcher, "fetch", fetch))
+                patches.enter_context(patch.object(b.subprocess, "Popen", side_effect=spawn))
+                patches.enter_context(patch.object(b.selectors, "DefaultSelector", side_effect=Poller))
+                patches.enter_context(patch.object(b.os, "read", side_effect=pipe_read))
+                patches.enter_context(patch.object(b.os, "killpg", side_effect=AssertionError("unexpected real signal")))
+                patches.enter_context(patch.object(b.time, "monotonic", return_value=0))
+                code = b.main()
+                self.assertEqual(os.environ, environment)
+            provenance = json.loads((evidence / "provenance.json").read_bytes())
+            self.assertFalse(provenance["output_binary_accepted"])
+            self.assertEqual(provenance["inherited_input_names"], b.controller_inputs(environment))
+            for value in ("AMBIENT_SENTINEL", "CONTROLLER_ONLY_TOKEN"):
+                self.assertNotIn(value, (evidence / "provenance.json").read_text())
+            self.assertTrue((work / "build.dmg").is_file())
+            self.assertEqual(events[0], "gate")
+            yield {"code": code, "sequence": sequence, "expected_argv": argvs,
+                   "expected_maps": {"initial-control": initial, "volume-build": build, "minimal-detach": detach},
+                   "provenance": provenance, "events": events,
+                   "manifest_valid": LateRetentionTests().manifest_valid(evidence),
+                   "backing_retained": (work / "build.dmg").is_file()}
+
+    def test_all_23_actual_Runner_invocations_have_exact_independent_maps_and_order(self):
+        with self.recipe() as result:
+            self.assertEqual(result["code"], 0)
+            self.assertEqual([r["label"] for r in result["sequence"]], self.labels)
+            self.assertEqual(len(result["sequence"]), 23)
+            self.assertTrue(result["manifest_valid"])
+            self.assertTrue(result["provenance"]["finalization_candidate"])
+            self.assertEqual(result["provenance"]["build_environment"], result["expected_maps"]["volume-build"])
+            self.assertEqual([r["label"] for r in result["sequence"]].count("clang-version"), 1)
+            self.assertEqual([r["label"] for r in result["sequence"]].count("SDK-version"), 1)
+
+    def test_detach_after_attach_failure_is_minimal_even_without_build_environment_provenance(self):
+        with self.recipe(fail_label="image-attach") as result:
+            self.assertEqual(result["code"], 1)
+            self.assertEqual([r["label"] for r in result["sequence"]], self.labels[:8] + ["image-detach"])
+            self.assertNotIn("build_environment", result["provenance"])
+            self.assertEqual(result["sequence"][-1]["env"], result["expected_maps"]["minimal-detach"])
+            self.assertFalse(any(e.startswith("fetch-") for e in result["events"]))
+
+    def test_detach_after_execute_payload_failure_uses_minimal_map(self):
+        with self.recipe(fail_fetch=True) as result:
+            self.assertEqual(result["code"], 1)
+            self.assertEqual([r["label"] for r in result["sequence"]], self.labels[:8] + ["image-detach"])
+            self.assertIn("synthetic execute payload failure", result["provenance"]["failure"]["message"])
+            self.assertEqual(result["sequence"][-1]["env"], result["expected_maps"]["minimal-detach"])
+
+    def test_effective_go_env_mismatch_still_stops_before_modules_and_compile(self):
+        with self.recipe(go_env_mismatch=True) as result:
+            self.assertEqual(result["code"], 1)
+            self.assertEqual([r["label"] for r in result["sequence"]], self.labels[:12] + ["image-detach"])
+            self.assertEqual(result["provenance"]["failure"]["message"], "effective Go environment mismatch: CC")
+            self.assertNotIn("spawn-compile", result["events"])
+
+
+class SourceSurfaceTests(unittest.TestCase):
+    def test_first_entry_checks_and_complete_launch_network_inventory(self):
+        source = (HERE / "build.py").read_text()
+        tree = ast.parse(source)
+        functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+        for name in ("main", "execute"):
+            first = functions[name].body[0]
+            self.assertIsInstance(first, ast.Assign)
+            self.assertEqual(ast.unparse(first.value), "controller_inputs(os.environ)")
+        calls = [(ast.unparse(n.func), n.lineno, n) for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        popen = [(name, line, n) for name, line, n in calls if name == "subprocess.Popen"]
+        self.assertEqual(len(popen), 1)
+        self.assertEqual(next(k.value.id for k in popen[0][2].keywords if k.arg == "env"), "env")
+        self.assertEqual(sum(name == "opener.open" for name, _, _ in calls), 1)
+        self.assertEqual(sum(name == "self.opener.open" for name, _, _ in calls), 1)
+        self.assertEqual(sum(name == "fetch_github_json" for name, _, _ in calls), 2)
+        self.assertFalse(any(name in ("github.fetch_json", "urllib.request.urlopen", "urllib.request.install_opener")
+                             for name, _, _ in calls))
+        constructors = [n for name, _, n in calls if name == "urllib.request.build_opener"]
+        self.assertEqual(len(constructors), 2)
+        self.assertTrue(all(any(ast.unparse(arg) == "urllib.request.ProxyHandler({})" for arg in n.args)
+                            for n in constructors))
+        launches = [n for name, _, n in calls if name == "runner.command"]
+        self.assertEqual(len(launches), 19)
+        self.assertTrue(all(len(n.args) >= 3 and isinstance(n.args[2], ast.Name) and
+                            n.args[2].id in ("env", "control_env") for n in launches))
+        self.assertFalse(any(isinstance(n, ast.Call) and ast.unparse(n.func) in
+                             ("os.environ.update", "os.environ.pop", "os.environ.clear", "os.putenv", "os.unsetenv")
+                             for n in ast.walk(tree)))
+
+    def test_module_scope_adds_no_controller_operation_or_import_deferral(self):
+        source = (HERE / "build.py").read_text()
+        tree = ast.parse(source)
+        import_calls = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                decorators = node.decorator_list
+                self.assertTrue(all(ast.unparse(d) == "contextmanager" for d in decorators))
+                continue
+            if isinstance(node, ast.If):
+                self.assertEqual(ast.unparse(node.test), "__name__ == '__main__'")
+                self.assertEqual(ast.unparse(node.body[0]), "sys.exit(main())")
+                continue
+            import_calls.extend(ast.unparse(n.func) for n in ast.walk(node) if isinstance(n, ast.Call))
+        self.assertEqual(sorted(import_calls), sorted([
+            "Path(__file__).resolve", "Path", "importlib.util.spec_from_file_location",
+            "importlib.util.module_from_spec", "SPEC.loader.exec_module", "re.compile"]))
+        self.assertIn("import hashlib", source)
+        self.assertIn("import http.client", source)
+        self.assertIn("import urllib.request", source)
 
 
 if __name__ == "__main__":
