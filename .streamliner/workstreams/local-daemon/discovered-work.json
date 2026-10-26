@@ -10195,6 +10195,215 @@
         "conservation": "Only same node summary/status and row status/one completionQualification change, with pure brief/task appends. Existing owner and complete actualOwnerQualification remain unchanged; all other rows/nodes/fields/dependencies/geometry/checkpoints/attention/debts/wakes exact.",
         "noOperationalAuthority": "No owner/observer launch, rerun/dispatch/wait/root test/rearm, source/CI/runtime replay, install/upgrade/ACL/auth/transport, environmental cleanup, #201 validation, #224 repair, five-minute/195 hold release, debt credit or successor/parked approval follows."
       }
+    },
+    {
+      "id": "local-daemon-copilot-app-startup-discovery-guidance",
+      "sourceNode": null,
+      "source": "Actual owning Local call_cK6813ZxSiDJoazFLaRpyZbg requests publication at public routing6428433398, quoting separate Campaign acceptance; full public #230 records Campaign startup-discovery observations.",
+      "crossReference": "Completed #223 and its conditional follow-up history remain exact. #222 shared bootstrap/stall sections require coordination, not a dependency. #224/#201 product/environmental gates and #231 ack ambiguity remain separate.",
+      "evidence": {
+        "owning": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_cK6813ZxSiDJoazFLaRpyZbg",
+          "originEvent": {
+            "id": "abbf937d-5262-4cb7-acc0-b0a5d1adee0d",
+            "timestamp": "2026-10-26T22:08:42.792Z",
+            "bytes": 4772,
+            "sha256": "edb624fd768186b77c555759e249090915b6843d22a234917650e9c9b667cac4"
+          },
+          "receipt": {
+            "file": "local230-routing-intake.json",
+            "bytes": 2312,
+            "sha256": "9f3473f6a5b54182e2b2b95c076c6f35fc649780764592c851166c0f742f8dbd"
+          },
+          "completeBodyVerbatim": "Queue fresh canonical node publication for #230 after the current #224 artifact work; no priority inversion or owner launch by the reconciler. Campaign accepted node `copilot-app-startup-discovery-guidance`, family proposed `local-daemon-copilot-app-startup-discovery-guidance`, at the bounded scope https://github.com/lossyrob/telex/issues/230#issuecomment-6428433398 . Preserve completed #223 and its history; #230 is separate, normal priority, with no #224/#201 dependency. Keep planned/unassigned until Local's later authorized launch, with shared-section coordination against #222 and no runtime/API/transport/backend expansion.\n\nActual Campaign source toolu_01HtgmghmRZgpwEHy8Dnqm1N, received2026-10-26T18:06:21.460-04:00, verbatim:\n\"Accepted: #230 is now Local node `copilot-app-startup-discovery-guidance` at normal priority, with no dependency on #224 or #201, at the scope in 6428433398. Publish the node, then launch one owner after #224's current gates no longer need you. Its closing PR goes to me for the gate. #231 (ack ambiguity) is a separate Campaign filing that I retain without an owner; it is not part of #230.\"\n\nLocal verified the routing comment's full3111-byte public body/SHA256875efd3403749217943fad181b85c65bdf847571927c9c40d3a821e0f8d1bf28. Prior cb747 dedup found only #223's historical conditional discovery, no #230 row; refresh dedup against the actual publication base. Full issue records Campaign's Windows attach/restart/resume, attended_push and pushed4191 evidence; this is Campaign observation, not Local runtime replay/all-build or plain-clear proof. #231 remains Campaign-owned filing without an implementation owner; neither230nor227 absorbs it. Send fresh tuple/owning review when ready. Local will launch exactly one230owner only after publication verification AND #224's current gates no longer need Local.",
+          "campaignAuthorityReportedViaLocal": "toolu_01HtgmghmRZgpwEHy8Dnqm1N",
+          "boundary": "Actual owning Local requests canonical publication and quotes Campaign acceptance. The quoted Campaign call is relayed custody, not an independently matched raw Campaign origin."
+        },
+        "laterLocalSequencing": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_ZfTv0zs1jvVKI5y8OTAfDGnj",
+          "originEvent": {
+            "id": "a5f42be5-bbb8-4061-be0b-000656817fea",
+            "timestamp": "2026-10-26T22:46:18.642Z",
+            "bytes": 3420,
+            "sha256": "9500e865e9d3e1aedbdefb10cf1aa3ed99ae76e551ee776366860b5caa3fd0e9"
+          },
+          "receipt": {
+            "file": "local224-merged-230-sequencing-intake.json",
+            "bytes": 1636,
+            "sha256": "3d9fee3bd3de533e905e3d6e01cd748f190e58f313cc3b9343cb1bd7651196fd"
+          },
+          "completeBodyVerbatim": "Accepted product boundary now verified: Campaign merged227 at22:44:30Z as c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a/tree560262dc15dc42487b53a1c7066f58ff1ec5898d, orderedparents839f26dd16a37678f3e5f4ffc1c20685e4c54d22+9baca453ccb4ec372dd067e0d4b9af189434d39a. Publicmainc4f6ac8c; parsedrefs224,issue224CLOSED/COMPLETED22:44:31Z. Local read full gate https://github.com/lossyrob/telex/pull/227#issuecomment-6429096910 ; Campaign source toLocal toolu_01TzUK1enc6F63AjN2htyp8U. Any unpublished old839f tuple needs your boundary/parking/fresh-base handling; no old approval carry.\n\nThis is product merge, not node completion or installed repair/201 acceptance. SAMEowner769 now owns exact-merge mainCI/Docs/field; no upgrade/wait/environment/#201 re-arm permission. Keep223completed;231/230separate. Local's current224 premerge gates are complete with no unresolved correction, while postmerge follow-through remains top priority. Thus #230's remaining launch prerequisite is verified canonical node publication plus duplicate/section checks; no owner is launched yet. Preserve your active artifact queue/guards and send the230fresh publication review when ready; no reconciler launch.",
+          "boundary": "Later Local reports its #224 premerge gates complete with no unresolved correction. The remaining #230 launch prerequisite is verified canonical publication plus duplicate/section checks; postmerge #224 follow-through stays top priority. No owner has launched and no upgrade/runtime/#201 permission or completion credit is supplied here."
+        },
+        "priorityLocalSequencing": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_PbXgZkrc4GQj9tQIhSwwmEkT",
+          "originEvent": {
+            "id": "d4166c5f-cd4b-4abd-94a6-ea226aae33d0",
+            "timestamp": "2026-10-26T23:09:29.016Z",
+            "bytes": 3396,
+            "sha256": "fbf4e681345f323acaf685b3377df317e7f4f41c0acad4f1e9359dc3d0ef910d"
+          },
+          "receipt": {
+            "file": "local230-priority-launch-ready-intake.json",
+            "bytes": 1624,
+            "sha256": "ce9e2b0170638d344b6ef00d06306891190d461d27146b9be34be270fb0cf180"
+          },
+          "completeBodyVerbatim": "Campaign now explicitly directed #230 launch (actualsource toolu_011ac8BAbHuKvVmRsMicGDA9) after accepting #224 complete. Local is free, but live main a12649aa844134f3212588fa8332208d56c52e55 still has no230row/node (Localgraph31/ledger50; exact node/family/tracker search empty), and open230PRsearch is empty. The standing publish-node-before-launch prerequisite therefore remains unmet.\n\nPlease bring the already-accepted230shape/publication to the next eligible review/publication slot, preserving any current frozen tuple and existing priority rules. Accepted scope6428433398, authoritytoolu_01HtgmghmRZgpwEHy8Dnqm1N; normalpriority, no224201dependency, no231absorption. Send the fresh exact request; Local will review and launch ONEowner immediately after verified publication without another launch-approval round. I have not created a230owner or assumed candidate routing equals publication.\n\nCampaign's new224completion source says reconciler already has acceptance. It separately reports Campaign-authorized201ownerupgrade/rootattendedpush/pushedtestpending, NO201credit; preserve as attributed later evidence, not224runtimeoutcome or new Local permission.",
+          "campaignLaunchAuthorityReportedViaLocal": "toolu_011ac8BAbHuKvVmRsMicGDA9",
+          "boundary": "Latest Local requests the next eligible review/publication slot without displacing any frozen tuple or standing priorities. Local reports Campaign already directed one owner launch after #224 acceptance; no fresh launch-approval round is needed. The launch still waits for verified canonical #230 publication plus duplicate/section checks. The new Campaign launch source is relayed through Local, not an independently matched raw Campaign origin. No owner has launched."
+        },
+        "later224AcceptedCompletion": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01PEuM6iYbZCRfNhYH4mThYs",
+          "originEvent": {
+            "id": "98a55938-4ba7-47ec-b475-f95b0fca660f",
+            "timestamp": "2026-10-26T23:08:05.501Z",
+            "bytes": 2066,
+            "sha256": "1469b484cbabefad5b63d861bafb08871df54f0f3f0936c9bddbdaced842236a"
+          },
+          "receipt": {
+            "file": "campaign224-followthrough-accepted-intake.json",
+            "bytes": 806,
+            "sha256": "02f546195434ea04bb8740fc17ead957c7640d38143183557371c19b7bd1023f"
+          },
+          "completeBodyVerbatim": "#224 follow-through accepted. Field report 6429439948, CI 40414741263 a1 21/21 and Docs 40414741325 2/2 all passed at exact merge c4f6ac8c. The node is complete. The #201 owner has installed v0.3.0-gate201-c4f6ac8c. Root-201 went attended_push again after copilot resume (lease_epoch 4); the pushed test 4192 is still pending. No #201 or #231 credit.",
+          "boundary": "Direct Campaign acceptance qualifies the earlier #224 follow-through sequencing only. The #224 node/row is unchanged in this #230 packet and its completion needs a separate qualification. The separately reported #201 installation/resume/attended_push/lease4/pushed4192 pending chronology remains Campaign attribution, not an independent installation/runtime result, #201/#231 credit or new Local/reconciler operational permission."
+        },
+        "issue": {
+          "number": 230,
+          "url": "https://github.com/lossyrob/telex/issues/230",
+          "title": "Copilot App: document restart-after-attach as a first-time push bridge loader (correct #226 guidance)",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T22:03:05Z",
+          "updatedAt": "2026-10-26T22:05:11Z",
+          "state": "open",
+          "raw": {
+            "file": "local230-spec-custody-issue-raw.json",
+            "bytes": 6735,
+            "sha256": "da817d2ca56aa6c1499a8fa247f1a2dab26352becc8524ff0f28614b8842b00b"
+          },
+          "body": {
+            "file": "local230-spec-custody-issue-body.txt",
+            "bytes": 3971,
+            "sha256": "7d7822604db7132367dd05e49e212a6c9e301400795495bb6f7c91317ebbb162"
+          },
+          "completeBodyVerbatim": "## Summary\n\nIn the Copilot App, the per-session push bridge loads at session startup. Running `copilot attach --copilot-bridge` and then restarting the App session gives a live push bridge, even though the agent is never offered `extensions_reload`. The guidance merged in #226 (Closes #223) says otherwise. It says restarting or clearing a session does not establish first-time loading, and it sends first-time App setup to pull fallback. That guidance should be corrected so that restarting after provisioning is a supported first-time path, with a liveness check.\n\nThis is the non-blocking follow-up recorded in the #226 Campaign gate. The gate assigned it to Campaign, to be filed only if a restart test showed that App startup discovery loads the bridge.\n\n## Evidence (2026-10-26, Windows, Copilot App, telex v0.3.0-gate201-9e971fd9 / build 9e971fd9)\n\nSession `e06813c4-1db2-4d77-b8d3-3addc6a1824c`, station `project:telex/campaign:root-201`, backend `pg-rde-telex` (Postgres).\n\n1. Before the restart, the agent was not offered `extensions_reload` or `extensions_manage`. This is a known App/runtime advertisement bug; the `session.extensions.reload` RPC exists only on the app side.\n2. Ran `telex --address project:telex/campaign:root-201 --json copilot attach --copilot-bridge` (lease_epoch 2). It wrote the per-session copy to `~/.copilot/session-state/<sid>/extensions/telex-bridge` and reported that push is armed but station-intent recovery is not finalized.\n3. Force-restarted the App, about 21:57Z.\n4. After the restart, the bridge tool `telex_bridge_info` was available. It returned sessionId `e06813c4-...`, endpoint `\\\\.\\pipe\\telex-bridge-e06813c4-...`, registry `~/.copilot/telex-bridge/e06813c4-....json`, and pid 44512.\n5. Ran `telex ... copilot resume --description ...`, which reported lease_epoch 3. `--json status` then showed:\n   - `station_health: attended_push`\n   - `push_registered: true`\n   - `push_delivery: no_backlog`\n   - station intent `state: restored` (generation 4, recovery_latency_ms 17096)\n6. Sent test message 4191 from a separate sender address, with attention next-checkpoint. While the agent's turn was in flight, status showed `push_delivery: deferred` (\"bridge reachable and delivery deferred until idle\"). When the turn ended, the message arrived as a pushed `[telex]` turn with a nonce fence and ack instructions. After the ack, status returned to `no_backlog` with 0 pending.\n\n## Requested change\n\nUpdate `docs/guide/src/guides/copilot-push.md` and the matching text in `copilot/COPILOT.md` (and any recovery or contract strings #226 added that repeat it):\n\n- Remove or narrow the claim that restarting or clearing a session does not establish first-time loading. Where startup discovery is present, restarting after `copilot attach --copilot-bridge` is a valid first-time loader.\n- For first-time App setup without an advertised `extensions_reload`: provision with `copilot attach --copilot-bridge`, restart the session, then `copilot resume`. Verify liveness with `--json status` (`station_health: attended_push`, `push_registered: true`) and, where available, the `telex_bridge_info` tool. Keep pull fallback as the documented alternative when a restart is not acceptable or liveness does not verify.\n- Keep the existing rule that a restart is not proof by itself: liveness must be checked, not assumed.\n\n## Scope and non-goals\n\n- This is a guidance and recovery-text change only. It does not change transport, the bridge, or the runtime.\n- Not covered: whether every App build discovers per-session extensions at startup. Evidence is from one Windows App build. The guidance should make liveness verification the gate, not the App version.\n- Separate data point: the first `ack` of 4191 failed with \"reconnect grace expired before ack retry sleep\". An immediate retry returned `delivery_outcome: already-consumed` / `state: acknowledged` in 1202ms. That belongs to the #224/#190 recovery-grace work, not to this issue."
+        },
+        "routing": {
+          "id": 6428433398,
+          "url": "https://github.com/lossyrob/telex/issues/230#issuecomment-6428433398",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T22:05:11Z",
+          "updatedAt": "2026-10-26T22:05:11Z",
+          "raw": {
+            "file": "local230-public-routing-raw.json",
+            "bytes": 5009,
+            "sha256": "32e7f9b282cb540276648e8691c6b3792504379d6fdcca964048b4a0dc46bda7"
+          },
+          "body": {
+            "file": "local230-public-routing-body.txt",
+            "bytes": 3111,
+            "sha256": "875efd3403749217943fad181b85c65bdf847571927c9c40d3a821e0f8d1bf28"
+          },
+          "completeBodyVerbatim": "Local routing proposal: a separate guidance-only node, `copilot-app-startup-discovery-guidance`, at normal priority. Issue #224 remains the top Local priority. This follow-up does not reopen completed #223 or add a dependency to #224 or #201.\r\n\r\nThe issue records Campaign's Windows App observation: provision with `copilot attach --copilot-bridge`, restart, then `copilot resume`; the bridge tool became available, status reported `attended_push` and `push_registered: true`, and message 4191 arrived as a pushed turn. Local has read that report, not repeated the experiment. It supports documenting startup discovery as a possible first-time loader; it does not establish that every App build supports it.\r\n\r\nThe bounded correction should distinguish three existing paths: an already-live bridge, a supported live reload tool, and startup discovery after provisioning and restart. For the startup path, document attach -> restart -> resume, with status/liveness verification before claiming push is attended. Use `telex_bridge_info` where available as supporting bridge evidence. Restart, provisioning, registration and tool availability alone are not end-to-end delivery proof. A plain conversation clear is not established by this restart experiment.\r\n\r\nKeep the prepared pull fallback when restarting is unacceptable or live push cannot be verified. Preserve deliberate mode transitions, push/pull exclusion, one generated detached wait, completion artifacts and exits 0-7/legacy 1, acknowledgment/deduplication/disposition, explicit re-arming and stopping, and the intentional `--force` boundary. Report setup/backend failures rather than treating fallback preparation as delivery success.\r\n\r\nAt main `cb747a8fc97db542242fd41806e102221231238d`, the contradictory routing appears in the binary-owned skill, operator and bridge guidance, README, troubleshooting, emitted recovery text and associated text contracts. Correct those directly related surfaces together. The existing skill already describes close/resume startup discovery; reconcile the conflicting first-time prerequisites rather than invent a new loader, API, transport or runtime mechanism. Coordinate shared-file sections with #222; its bootstrap/stall wording remains separate.\r\n\r\nAcceptance should cover consistent guidance and focused source/text contracts, with the established independent source, design and exact-head hosted gates. No new real-installation restart, bridge, waiter, detector, backend or ACL experiment is authorized by this routing. The separately reported first-ack failure and later already-consumed/acknowledged result remain recovery observations outside this node; this proposal makes no common-cause or #224/#190 recurrence finding.\r\n\r\nProposed family: `local-daemon-copilot-app-startup-discovery-guidance`; tracker: this issue. No such row/node was found in the four canonical workstreams at the inspected main. The existing #223 record contains the historical conditional follow-up, not a second #230 owner. Campaign node disposition/publication and single-owner assignment remain separate from this proposal.\r\n"
+        },
+        "method": "Complete supplied owning source and full public issue/routing bodies only. Startup discovery, App tool availability, status, pushed4191 and ack observations remain Campaign reports from one Windows build, not reconciler runtime replay, all-build proof, plain-clear proof or current installation state.",
+        "allFieldDedup": [
+          {
+            "path": ".streamliner/workstreams/application-client/discovered-work.json",
+            "items": 5,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/application-client/graph.json",
+            "items": 8,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+            "items": 50,
+            "structuralDuplicates": [],
+            "allFieldReferences": [
+              {
+                "id": "local-daemon-copilot-app-first-time-delivery-path",
+                "status": "completed",
+                "decisionState": "accepted"
+              }
+            ],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/graph.json",
+            "items": 31,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/discovered-work.json",
+            "items": 1,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/graph.json",
+            "items": 10,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+            "items": 18,
+            "structuralDuplicates": [],
+            "allFieldReferences": [
+              {
+                "id": "watcher-installation-bootstrap-gap",
+                "status": "completed",
+                "decisionState": "accepted"
+              }
+            ],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/graph.json",
+            "items": 24,
+            "structuralDuplicates": [],
+            "allFieldReferences": [],
+            "boundary": "Historical references are retained, not an existing #230 node/owner or a reason to reopen #223."
+          }
+        ]
+      },
+      "description": "Correct first-time App guidance and matching recovery/text contracts to distinguish an already-live bridge, supported live reload, and startup discovery after provisioning and restart. For the startup path document attach -> restart -> resume, then status/liveness verification; telex_bridge_info is supporting evidence, not end-to-end proof. Keep prepared pull fallback when restart is unacceptable or live push cannot be verified. Preserve the generated detached single wait, completion artifacts, exits 0-7 and legacy 1, ack/dedup/disposition/rearm/stop/force and mode exclusion. Campaign reports one Windows App build and pushed test 4191; not all-build or plain-clear proof. Separate normal-priority #230, planned/unassigned; completed #223 stays exact. No #224/#201 dependency, runtime/API/transport/backend expansion, real restart/bridge/waiter/detector/backend/ACL experiment, or #231 absorption. Shared sections coordinate with #222.",
+      "affectedOutcome": "First-time App delivery guidance consistently describes startup discovery where available, gates attended-push claims on liveness verification, and retains an honest prepared pull fallback.",
+      "requiredness": "Accepted separate normal-priority guidance task; not a #224 or #201 dependency and not a reopening of #223.",
+      "sequencing": "Initial routing required publication AND #224 gates no longer needing Local. Intermediate Local call_ZfTv0zs1jvVKI5y8OTAfDGnj reported premerge gates complete and postmerge follow-through still first. Later direct Campaign toolu_01PEuM6iYbZCRfNhYH4mThYs accepts #224 complete. Latest Local call_PbXgZkrc4GQj9tQIhSwwmEkT reports Campaign directed its one #230 owner launch and requests the next eligible publication slot, preserving current frozen work and standing priorities. Current launch prerequisite is verified canonical publication plus duplicate/section checks, not another launch-approval round or a #224/#201 product edge. This packet remains planned/unassigned; the reconciler records no owner or launch.",
+      "recommendedDisposition": "Separate Local guidance/recovery-text/text-contract task for existing #230.",
+      "selectedDisposition": "Accept one planned/unassigned node and family with no new dependency or checkpoint.",
+      "target": "copilot-app-startup-discovery-guidance / existing issue #230",
+      "owner": "Local Daemon; unassigned until its later authorized single-owner launch.",
+      "terminalPath": "One closing #230 PR corrects the binary-owned skill, operator/bridge guidance, README, troubleshooting, matching recovery strings and focused text contracts under independent exact-head source review, design inspection, hosted CI and Campaign gate. Text contracts are not runtime, startup-loading or end-to-end wake proof.",
+      "status": "planned",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Actual owning Local call_cK6813ZxSiDJoazFLaRpyZbg, quoting Campaign toolu_01HtgmghmRZgpwEHy8Dnqm1N at public6428433398; route/shape authority only, no raw Campaign-origin claim.",
+      "routingQualification": {
+        "noPriorCanonicalRow": true,
+        "plannedAndUnassigned": true,
+        "noImplementationOwner": true,
+        "noProductDependencyOn224Or201": true,
+        "sharedSections": "Coordinate open-PR/named-section ownership with #222 bootstrap/stall wording; no duplicate implementation or dependency.",
+        "deliveryBoundary": "Provisioning, restart, registration and bridge tool availability are not end-to-end delivery proof. Campaign one-build observation supports a qualified startup path, not every App build or plain conversation clear.",
+        "fallbackBoundary": "Preserve prepared pull fallback, deliberate push/pull mode exclusion, one generated detached wait, completion artifacts, exits0-7/legacy1, acknowledgment/deduplication/disposition, explicit rearming/stopping and intentional --force. Surface setup/backend failures; fallback preparation is not delivery success.",
+        "exclusions": "No host API, transport/backend/runtime mechanism, real installation/restart/bridge/waiter/detector/backend/ACL experiment, #224/#190 recurrence or common cause, #201 validation, #231 absorption, owner/observer launch, hold release or debt credit."
+      }
     }
   ]
 }

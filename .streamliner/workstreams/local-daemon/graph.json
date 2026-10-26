@@ -639,6 +639,24 @@
         "number": 223
       },
       "dependsOn": []
+    },
+    {
+      "id": "copilot-app-startup-discovery-guidance",
+      "type": "task",
+      "title": "Document Copilot App startup discovery",
+      "summary": "Correct first-time App guidance and matching recovery/text contracts to distinguish an already-live bridge, supported live reload, and startup discovery after provisioning and restart. For the startup path document attach -> restart -> resume, then status/liveness verification; telex_bridge_info is supporting evidence, not end-to-end proof. Keep prepared pull fallback when restart is unacceptable or live push cannot be verified. Preserve the generated detached single wait, completion artifacts, exits 0-7 and legacy 1, ack/dedup/disposition/rearm/stop/force and mode exclusion. Campaign reports one Windows App build and pushed test 4191; not all-build or plain-clear proof. Separate normal-priority #230, planned/unassigned; completed #223 stays exact. No #224/#201 dependency, runtime/API/transport/backend expansion, real restart/bridge/waiter/detector/backend/ACL experiment, or #231 absorption. Shared sections coordinate with #222.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 230
+      },
+      "dependsOn": []
     }
   ],
   "checkpoints": [

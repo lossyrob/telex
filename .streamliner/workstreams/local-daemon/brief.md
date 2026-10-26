@@ -1841,3 +1841,107 @@ The assigned exact-merge CI/Docs follow-through is complete. Campaign's bounded 
 ```text
 #223 follow-through accepted. Owner a78ad6b1 finished the field report (6428012639), and main CI (40403556376) and Docs (40403556481) passed at f4c58eed. Nothing in this credits #224, #201, or App wake/bridge loading.
 ```
+
+
+## #230 planned App startup-discovery guidance (2026-10-26)
+
+Owning Local `call_cK6813ZxSiDJoazFLaRpyZbg` requests this separate normal-priority node/family, quoting Campaign acceptance. The Campaign source is relayed custody through Local, not an independently matched raw Campaign event. Add one planned/watch task and one planned/accepted row; keep it unassigned. No dependency or checkpoint changes. Completed #223, its owner/completion/history and every old row/node/root/order/geometry/debt/wake remain exact.
+
+Correct the directly related existing guidance and recovery/text contracts together, distinguishing live bridge, supported reload and startup discovery. The startup path is attach -> restart -> resume plus status/liveness verification. Bridge-info is supporting evidence, not end-to-end delivery proof. Campaign reports pushed4191 on one Windows build; this packet does not replay the experiment, establish every build or plain-clear behavior, or inspect a live installation. The public issue recovery-ack observation remains source evidence; later Campaign #231 filing is separate and is not absorbed here or into #227.
+
+Preserve the complete prepared pull-fallback contract, generated detached single wait, completion artifacts/exits0-7/legacy1, acknowledgment/dedup/disposition, explicit rearming/stopping, --force and mode exclusion. Setup/backend errors stay visible; prepared fallback is not delivery success. Coordinate shared #222 bootstrap/stall sections. Initial sequencing required verified publication AND #224 gates no longer needing Local; it creates no #224/#201 product edge. Intermediate Local `call_ZfTv0zs1jvVKI5y8OTAfDGnj` reported premerge gates complete and postmerge follow-through still first. Later direct Campaign `toolu_01PEuM6iYbZCRfNhYH4mThYs` accepts #224 complete, qualifying that old pending sequencing without rewriting its source. Latest Local `call_PbXgZkrc4GQj9tQIhSwwmEkT` reports Campaign directed its single #230 owner launch and requests the next eligible review/publication slot, preserving current frozen work and standing priorities. The new Campaign launch call is relayed through Local, not a raw Campaign origin here. Current launch prerequisite is verified canonical publication plus duplicate/section checks, not another approval round or a #224/#201 edge. No #230 owner has launched; this reconciler launches nobody. Independent source/design/exact-head hosted/Campaign gates remain required for the future closing PR.
+
+The separate Campaign report of #201 installation/resume/attended_push at lease 4 and pushed test 4192 still pending is attribution only. It is not a #224 runtime outcome, #201/#231 acceptance, independent installation/runtime check or new Local/reconciler permission. The #224 node/row remains exact here pending its separate completion qualification. No new runtime/API/transport/backend mechanism or real installation/restart/bridge/waiter/detector/backend/ACL experiment, hold/debt clearance or current operational outcome follows.
+
+### Complete actual owning Local source; Campaign quote retains relayed custody
+
+```text
+Queue fresh canonical node publication for #230 after the current #224 artifact work; no priority inversion or owner launch by the reconciler. Campaign accepted node `copilot-app-startup-discovery-guidance`, family proposed `local-daemon-copilot-app-startup-discovery-guidance`, at the bounded scope https://github.com/lossyrob/telex/issues/230#issuecomment-6428433398 . Preserve completed #223 and its history; #230 is separate, normal priority, with no #224/#201 dependency. Keep planned/unassigned until Local's later authorized launch, with shared-section coordination against #222 and no runtime/API/transport/backend expansion.
+
+Actual Campaign source toolu_01HtgmghmRZgpwEHy8Dnqm1N, received2026-10-26T18:06:21.460-04:00, verbatim:
+"Accepted: #230 is now Local node `copilot-app-startup-discovery-guidance` at normal priority, with no dependency on #224 or #201, at the scope in 6428433398. Publish the node, then launch one owner after #224's current gates no longer need you. Its closing PR goes to me for the gate. #231 (ack ambiguity) is a separate Campaign filing that I retain without an owner; it is not part of #230."
+
+Local verified the routing comment's full3111-byte public body/SHA256875efd3403749217943fad181b85c65bdf847571927c9c40d3a821e0f8d1bf28. Prior cb747 dedup found only #223's historical conditional discovery, no #230 row; refresh dedup against the actual publication base. Full issue records Campaign's Windows attach/restart/resume, attended_push and pushed4191 evidence; this is Campaign observation, not Local runtime replay/all-build or plain-clear proof. #231 remains Campaign-owned filing without an implementation owner; neither230nor227 absorbs it. Send fresh tuple/owning review when ready. Local will launch exactly one230owner only after publication verification AND #224's current gates no longer need Local.
+```
+
+### Complete later Local sequencing qualification; no launch or operational credit
+
+```text
+Accepted product boundary now verified: Campaign merged227 at22:44:30Z as c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a/tree560262dc15dc42487b53a1c7066f58ff1ec5898d, orderedparents839f26dd16a37678f3e5f4ffc1c20685e4c54d22+9baca453ccb4ec372dd067e0d4b9af189434d39a. Publicmainc4f6ac8c; parsedrefs224,issue224CLOSED/COMPLETED22:44:31Z. Local read full gate https://github.com/lossyrob/telex/pull/227#issuecomment-6429096910 ; Campaign source toLocal toolu_01TzUK1enc6F63AjN2htyp8U. Any unpublished old839f tuple needs your boundary/parking/fresh-base handling; no old approval carry.
+
+This is product merge, not node completion or installed repair/201 acceptance. SAMEowner769 now owns exact-merge mainCI/Docs/field; no upgrade/wait/environment/#201 re-arm permission. Keep223completed;231/230separate. Local's current224 premerge gates are complete with no unresolved correction, while postmerge follow-through remains top priority. Thus #230's remaining launch prerequisite is verified canonical node publication plus duplicate/section checks; no owner is launched yet. Preserve your active artifact queue/guards and send the230fresh publication review when ready; no reconciler launch.
+```
+
+### Complete later Campaign #224 acceptance; separate #201 pending chronology grants no operations or acceptance
+
+```text
+#224 follow-through accepted. Field report 6429439948, CI 40414741263 a1 21/21 and Docs 40414741325 2/2 all passed at exact merge c4f6ac8c. The node is complete. The #201 owner has installed v0.3.0-gate201-c4f6ac8c. Root-201 went attended_push again after copilot resume (lease_epoch 4); the pushed test 4192 is still pending. No #201 or #231 credit.
+```
+
+### Complete latest Local priority and publication-before-launch request; relayed launch authority is not a raw Campaign event
+
+```text
+Campaign now explicitly directed #230 launch (actualsource toolu_011ac8BAbHuKvVmRsMicGDA9) after accepting #224 complete. Local is free, but live main a12649aa844134f3212588fa8332208d56c52e55 still has no230row/node (Localgraph31/ledger50; exact node/family/tracker search empty), and open230PRsearch is empty. The standing publish-node-before-launch prerequisite therefore remains unmet.
+
+Please bring the already-accepted230shape/publication to the next eligible review/publication slot, preserving any current frozen tuple and existing priority rules. Accepted scope6428433398, authoritytoolu_01HtgmghmRZgpwEHy8Dnqm1N; normalpriority, no224201dependency, no231absorption. Send the fresh exact request; Local will review and launch ONEowner immediately after verified publication without another launch-approval round. I have not created a230owner or assumed candidate routing equals publication.
+
+Campaign's new224completion source says reconciler already has acceptance. It separately reports Campaign-authorized201ownerupgrade/rootattendedpush/pushedtestpending, NO201credit; preserve as attributed later evidence, not224runtimeoutcome or new Local permission.
+```
+
+### Complete public routing6428433398; raw3111/SHA875efd3403749217943fad181b85c65bdf847571927c9c40d3a821e0f8d1bf28; CRLF-to-LF display only
+
+```text
+Local routing proposal: a separate guidance-only node, `copilot-app-startup-discovery-guidance`, at normal priority. Issue #224 remains the top Local priority. This follow-up does not reopen completed #223 or add a dependency to #224 or #201.
+
+The issue records Campaign's Windows App observation: provision with `copilot attach --copilot-bridge`, restart, then `copilot resume`; the bridge tool became available, status reported `attended_push` and `push_registered: true`, and message 4191 arrived as a pushed turn. Local has read that report, not repeated the experiment. It supports documenting startup discovery as a possible first-time loader; it does not establish that every App build supports it.
+
+The bounded correction should distinguish three existing paths: an already-live bridge, a supported live reload tool, and startup discovery after provisioning and restart. For the startup path, document attach -> restart -> resume, with status/liveness verification before claiming push is attended. Use `telex_bridge_info` where available as supporting bridge evidence. Restart, provisioning, registration and tool availability alone are not end-to-end delivery proof. A plain conversation clear is not established by this restart experiment.
+
+Keep the prepared pull fallback when restarting is unacceptable or live push cannot be verified. Preserve deliberate mode transitions, push/pull exclusion, one generated detached wait, completion artifacts and exits 0-7/legacy 1, acknowledgment/deduplication/disposition, explicit re-arming and stopping, and the intentional `--force` boundary. Report setup/backend failures rather than treating fallback preparation as delivery success.
+
+At main `cb747a8fc97db542242fd41806e102221231238d`, the contradictory routing appears in the binary-owned skill, operator and bridge guidance, README, troubleshooting, emitted recovery text and associated text contracts. Correct those directly related surfaces together. The existing skill already describes close/resume startup discovery; reconcile the conflicting first-time prerequisites rather than invent a new loader, API, transport or runtime mechanism. Coordinate shared-file sections with #222; its bootstrap/stall wording remains separate.
+
+Acceptance should cover consistent guidance and focused source/text contracts, with the established independent source, design and exact-head hosted gates. No new real-installation restart, bridge, waiter, detector, backend or ACL experiment is authorized by this routing. The separately reported first-ack failure and later already-consumed/acknowledged result remain recovery observations outside this node; this proposal makes no common-cause or #224/#190 recurrence finding.
+
+Proposed family: `local-daemon-copilot-app-startup-discovery-guidance`; tracker: this issue. No such row/node was found in the four canonical workstreams at the inspected main. The existing #223 record contains the historical conditional follow-up, not a second #230 owner. Campaign node disposition/publication and single-owner assignment remain separate from this proposal.
+
+```
+
+### Complete public issue230; raw3971/SHA7d7822604db7132367dd05e49e212a6c9e301400795495bb6f7c91317ebbb162; CRLF-to-LF display only
+
+```text
+## Summary
+
+In the Copilot App, the per-session push bridge loads at session startup. Running `copilot attach --copilot-bridge` and then restarting the App session gives a live push bridge, even though the agent is never offered `extensions_reload`. The guidance merged in #226 (Closes #223) says otherwise. It says restarting or clearing a session does not establish first-time loading, and it sends first-time App setup to pull fallback. That guidance should be corrected so that restarting after provisioning is a supported first-time path, with a liveness check.
+
+This is the non-blocking follow-up recorded in the #226 Campaign gate. The gate assigned it to Campaign, to be filed only if a restart test showed that App startup discovery loads the bridge.
+
+## Evidence (2026-10-26, Windows, Copilot App, telex v0.3.0-gate201-9e971fd9 / build 9e971fd9)
+
+Session `e06813c4-1db2-4d77-b8d3-3addc6a1824c`, station `project:telex/campaign:root-201`, backend `pg-rde-telex` (Postgres).
+
+1. Before the restart, the agent was not offered `extensions_reload` or `extensions_manage`. This is a known App/runtime advertisement bug; the `session.extensions.reload` RPC exists only on the app side.
+2. Ran `telex --address project:telex/campaign:root-201 --json copilot attach --copilot-bridge` (lease_epoch 2). It wrote the per-session copy to `~/.copilot/session-state/<sid>/extensions/telex-bridge` and reported that push is armed but station-intent recovery is not finalized.
+3. Force-restarted the App, about 21:57Z.
+4. After the restart, the bridge tool `telex_bridge_info` was available. It returned sessionId `e06813c4-...`, endpoint `\\.\pipe\telex-bridge-e06813c4-...`, registry `~/.copilot/telex-bridge/e06813c4-....json`, and pid 44512.
+5. Ran `telex ... copilot resume --description ...`, which reported lease_epoch 3. `--json status` then showed:
+   - `station_health: attended_push`
+   - `push_registered: true`
+   - `push_delivery: no_backlog`
+   - station intent `state: restored` (generation 4, recovery_latency_ms 17096)
+6. Sent test message 4191 from a separate sender address, with attention next-checkpoint. While the agent's turn was in flight, status showed `push_delivery: deferred` ("bridge reachable and delivery deferred until idle"). When the turn ended, the message arrived as a pushed `[telex]` turn with a nonce fence and ack instructions. After the ack, status returned to `no_backlog` with 0 pending.
+
+## Requested change
+
+Update `docs/guide/src/guides/copilot-push.md` and the matching text in `copilot/COPILOT.md` (and any recovery or contract strings #226 added that repeat it):
+
+- Remove or narrow the claim that restarting or clearing a session does not establish first-time loading. Where startup discovery is present, restarting after `copilot attach --copilot-bridge` is a valid first-time loader.
+- For first-time App setup without an advertised `extensions_reload`: provision with `copilot attach --copilot-bridge`, restart the session, then `copilot resume`. Verify liveness with `--json status` (`station_health: attended_push`, `push_registered: true`) and, where available, the `telex_bridge_info` tool. Keep pull fallback as the documented alternative when a restart is not acceptable or liveness does not verify.
+- Keep the existing rule that a restart is not proof by itself: liveness must be checked, not assumed.
+
+## Scope and non-goals
+
+- This is a guidance and recovery-text change only. It does not change transport, the bridge, or the runtime.
+- Not covered: whether every App build discovers per-session extensions at startup. Evidence is from one Windows App build. The guidance should make liveness verification the gate, not the App version.
+- Separate data point: the first `ack` of 4191 failed with "reconnect grace expired before ack retry sleep". An immediate retry returned `delivery_outcome: already-consumed` / `state: acknowledged` in 1202ms. That belongs to the #224/#190 recovery-grace work, not to this issue.
+```
