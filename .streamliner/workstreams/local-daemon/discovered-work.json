@@ -2636,6 +2636,161 @@
               "The workstation freeze and all issue181, Watcher, issue153 and hardening/closure boundaries remain unchanged."
             ],
             "reconcilerVerification": "The reconciler matched retained log, custody and sample bytes/hashes, read custody and sample artifacts in full, and read selected direct-checkout, panic and target-summary log excerpts. It did not read the full log, query provider runs/jobs/logs, fetch an uploaded archive or inspect/execute a binary or dump. Git metadata independently confirms tested main 7b2516e3 is a one-file ledger-only update relative to 67f84571, not a product-code change. The 3-in-24 selected-main-run sample remains sentinel-attributed, not an independently observed run census, global recurrence count or failure probability. The target's 12.30 seconds is not a measured child-writer delay. No cause, retry, source/runtime action, status/owner/graph/gate change or issue #184/#185 attribution is established."
+          },
+          {
+            "head": "72c2a093e88334a34ca6e9336474862eb3afb553",
+            "run": "40261754314",
+            "attempt": 1,
+            "job": "121375431957",
+            "deduplicationKey": "run40261754314-attempt1-job121375431957",
+            "kind": "additional-direct-main-outer-credential-writer-timeout",
+            "sourcePacket": {
+              "file": "credential167-local-intake.json",
+              "bytes": 5025,
+              "sha256": "3b98d4ba00f354560af585acce44ff40a2d7405fe1c474483b65e50213b17ac6",
+              "originalFile": "main40261754314-credential-writer-intake-20261025.json",
+              "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "localDirection": "call_JTbVwvURENoYe9vD6ojGi33X",
+              "captureReceipt": "credential167-source-capture.json"
+            },
+            "retainedLocalAdjudication": {
+              "kind": "existing-167-boundary-match-without-promotion",
+              "reporter": {
+                "session": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+                "message": "call_MmcshOiAHHgyHoQ3EZXvURSM",
+                "custodyFile": "main-40261754314-evidence-custody.json",
+                "custodyBytes": 8769,
+                "custodySha256": "bff93468754d2b178c69ff6f03c30ebef0e0aa2736de76d87406fedcefced1e0"
+              },
+              "existingDisposition": {
+                "issue": "https://github.com/lossyrob/telex/issues/167",
+                "record": "local-daemon-windows-credential-writer-timeout",
+                "sourceNode": null,
+                "status": "candidate",
+                "decisionState": "proposed",
+                "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+                "target": "hardening-gate (candidate scope)",
+                "adjudication": "Another observation of the already tracked test/assertion boundary. Retain under the existing candidate and tracker, without promotion, staffing or a cause finding."
+              },
+              "observation": {
+                "head": "72c2a093e88334a34ca6e9336474862eb3afb553",
+                "run": 40261754314,
+                "attempt": 1,
+                "event": "push",
+                "job": 121375431957,
+                "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40261754314/job/121375431957",
+                "jobName": "Build and test (windows-latest)",
+                "jobStartedAt": "2026-10-26T03:01:51Z",
+                "jobCompletedAt": "2026-10-26T03:09:34Z",
+                "runConclusion": "failure",
+                "jobConclusion": "failure",
+                "wholeRunInventory": "Sentinel reports 20 successful jobs out of 21. Local independently checked the run and failing job, not the complete job inventory.",
+                "test": "credential_command_shell_exit_preserves_delayed_inherited_writer",
+                "panicPath": "tests/credential_command.rs",
+                "panicLine": 516,
+                "panicColumn": 6,
+                "panicMessage": "called `Result::unwrap()` on an `Err` value: Elapsed(())",
+                "targetResult": {
+                  "passed": 10,
+                  "failed": 1,
+                  "ignored": 2,
+                  "durationSeconds": 10.91
+                }
+              },
+              "verifiedCustody": {
+                "rawFile": "main-40261754314-job-121375431957.log",
+                "rawBytes": 336021,
+                "rawSha256": "951a0eb22b1fd2260d332e9cea751433ced588a7af57a05f719d5692e5148726",
+                "captureKind": "Sentinel retained the public API job-log response without normalization, using --allow-escape-sequences. No NUL bytes.",
+                "sourceFile": "main-40261754314-source-boundary.json",
+                "sourceBytes": 4536,
+                "sourceSha256": "5d1a71026fefaba711e228921f81855b3e6e9d4cba55358bc3b43be41ad86551",
+                "sourceBlob": "9b580ab2828daa81039f7aeaaede1bda3c368deb",
+                "sourceRanges": [
+                  [
+                    1,
+                    18
+                  ],
+                  [
+                    500,
+                    524
+                  ]
+                ],
+                "sourceLineCount": 43,
+                "localVerification": "At 2026-10-26T03:25:18.359Z Local independently matched custody/raw/source bytes and hashes, compared all 44 retained log-excerpt lines to the raw capture, and matched all 43 source lines against the immutable Git blob. This was selected-excerpt inspection, not a full-log read or a provider log refetch. Public run/job identity, attempt and conclusions were independently checked."
+              },
+              "sourceBoundary": {
+                "outerBudgetSeconds": 5,
+                "awaitedOperation": "pg_connect_config(&profile(&command))",
+                "failedCheck": "The first unwrap of tokio::time::timeout at line 516.",
+                "unreachedChecks": "The inner pg_connect_config result unwrap at line 517, password assertion starting at 518 and empty-obligations assertion at 522 are not observed.",
+                "windowsFixture": "start /b with encoded PowerShell containing an intended 150ms delay before writing delayed-non-secret.",
+                "limits": "The configured delay is not measured helper behavior. Target duration is not command latency. This boundary provides no command-output, native-status, process-liveness, leak, root-cause or common-cause finding."
+              },
+              "geometryAndDeduplication": {
+                "checkout": "Retained log lines 97-98 identify direct main 72c2a093, not a synthetic PR merge.",
+                "delta": "Local verified that the delta from faf4f883 to 72c2a093 changes only four .streamliner Local completion files.",
+                "limits": "Metadata-only source changes do not establish controlled binary/runtime equality or attribute the failure to PR #205/#196.",
+                "deduplication": "Job 121375431957 was absent from all four canonical discovered-work ledgers at 38f3f54ff0e69483663eec65298dc16f8739f0f9. Recheck before appending once to the existing candidate."
+              },
+              "artifact": {
+                "id": 12625860097,
+                "uploadedBytes": 73006160,
+                "inspection": "Upload metadata only. No archive, dump or executable inspection or presence/absence claim."
+              },
+              "routing": "Add one bounded successor occurrence to the existing #167 candidate, preserving all prior evidence and current disposition. No new tracker, candidate, node, owner, status, graph/gate, runtime, retry, probe, observer, readiness or wake authority. Historical retries mentioned in the public issue or old records do not authorize another retry. Keep this distinct from native #166, Watcher #203 and accepted ForeignDaemon #204."
+            },
+            "publicMetadata": {
+              "run": {
+                "id": 40261754314,
+                "head_sha": "72c2a093e88334a34ca6e9336474862eb3afb553",
+                "event": "push",
+                "run_attempt": 1,
+                "status": "completed",
+                "conclusion": "failure",
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40261754314"
+              },
+              "job": {
+                "id": 121375431957,
+                "run_id": 40261754314,
+                "head_sha": "72c2a093e88334a34ca6e9336474862eb3afb553",
+                "run_attempt": 1,
+                "name": "Build and test (windows-latest)",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-10-26T03:01:51Z",
+                "completed_at": "2026-10-26T03:09:34Z",
+                "html_url": "https://github.com/lossyrob/telex/actions/runs/40261754314/job/121375431957"
+              },
+              "executedCommit": {
+                "sha": "72c2a093e88334a34ca6e9336474862eb3afb553",
+                "tree": "46494c0bca9a9c37002fb269ae710cc142a9097d",
+                "parents": [
+                  "faf4f883631c7aaec057dde4beca36daa29d29dd"
+                ]
+              }
+            },
+            "observedBoundary": "Local reports credential_command_shell_exit_preserves_delayed_inherited_writer at tests/credential_command.rs:516:6 panicking with called Result::unwrap() on an Err value: Elapsed(()). This is the first unwrap of the outer five-second tokio::time::timeout around pg_connect_config(&profile(&command)). The inner operation-result unwrap at 517, password assertion at 518 and empty-obligations assertion at 522 are not observed.",
+            "timingAndFixtureLimits": "Target 10 passed / 1 failed / 2 ignored in 10.91 seconds is not command latency, a measured writer delay or proof of a particular inner stage timeout. The Windows fixture configures start /b and encoded PowerShell with an intended 150ms writer delay; configuration is not observed execution, output delivery or actual delay.",
+            "verification": "Local independently verified the complete custody/raw/source lengths and hashes, all 44 retained log-excerpt lines and all 43 immutable source lines; its inspection was selected excerpts, not a full-log read or provider-log refetch. The reconciler matches only the complete 5,025-byte adjudication and independently reads public run/job/Git metadata. Custody 8,769 bytes / bff93468754d2b178c69ff6f03c30ebef0e0aa2736de76d87406fedcefced1e0, raw 336,021 bytes / 951a0eb22b1fd2260d332e9cea751433ced588a7af57a05f719d5692e5148726 and source 4,536 bytes / 5d1a71026fefaba711e228921f81855b3e6e9d4cba55358bc3b43be41ad86551 identify Local-verified retained captures, not files independently read here. Sentinel reports 20/21 jobs successful; neither Local nor the reconciler independently checked the complete job inventory for this intake.",
+            "checkoutAndCausalLimits": "Local-verified log identifies direct main 72c2a093, not a synthetic PR merge. Public Git confirms this single-parent artifact commit over faf4f883 changes only four Local .streamliner completion paths. That does not establish controlled binaries/runtime inputs, source causality or attribution to PR #205/#196 or planning-only changes. The repeated test/assertion boundary supports one existing-candidate observation, not a common cause.",
+            "artifact": {
+              "id": 12625860097,
+              "uploadedBytes": 73006160,
+              "inspection": "Upload metadata only. No archive, dump or executable inspection or presence/absence claim."
+            },
+            "uncertainty": "Artifact 12625860097 is upload metadata only; no archive, dump, executable or presence/absence finding. The outer timeout does not establish command output, native status, process liveness, leak, root cause or common cause. Keep distinct from #166 native exits, #203 Watcher harness exit and accepted #204 ForeignDaemon repair.",
+            "disposition": {
+              "operation": "Append once to the existing #167 candidate; no promotion or new tracker/owner/node.",
+              "sourceNode": null,
+              "status": "candidate",
+              "decisionState": "proposed",
+              "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+              "target": "hardening-gate (candidate scope)",
+              "priorEvidence": "Original fields and all three existing successor occurrences remain exact, including historical retry statements as history only. Those statements authorize no retry now.",
+              "limits": "One evidence-only successor occurrence on existing #167 credential-writer candidate, deduplicated by run 40261754314 / attempt 1 / job 121375431957. Preserve sourceNode null, candidate/proposed status, unassigned owner, hardening-candidate target, all earlier evidence and historical retry statements without granting another retry. No promotion, staffing, new candidate/tracker/node, graph/gate/status/attention/dependency/design-link change, cause/source attribution, native/output/liveness/leak/common-cause or controlled-binary finding, runtime/probe/observer/experiment/retry/waiver, #166/#203/#204 acceptance, readiness, wake, debt/HOLD or freeze credit. Counts, owners, all graphs, Watcher and both pending actual-#166-product-merge wakes stay exact; recording must not delay repairs."
+            },
+            "conservation": "One evidence-only successor occurrence on existing #167 credential-writer candidate, deduplicated by run 40261754314 / attempt 1 / job 121375431957. Preserve sourceNode null, candidate/proposed status, unassigned owner, hardening-candidate target, all earlier evidence and historical retry statements without granting another retry. No promotion, staffing, new candidate/tracker/node, graph/gate/status/attention/dependency/design-link change, cause/source attribution, native/output/liveness/leak/common-cause or controlled-binary finding, runtime/probe/observer/experiment/retry/waiver, #166/#203/#204 acceptance, readiness, wake, debt/HOLD or freeze credit. Counts, owners, all graphs, Watcher and both pending actual-#166-product-merge wakes stay exact; recording must not delay repairs."
           }
         ]
       },
