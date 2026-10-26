@@ -460,6 +460,31 @@ jobs:
           fi
           echo "ok: the Windows named-pipe route resolves a single mio >= 1.2.4"
 
+      - name: Older Tokio named-pipe route is rejected (issue 166)
+        # Tokio before 1.39.1 wraps Mio 0.8, which would sit beside the Mio floor instead of being
+        # repaired by it. A consumer that pins such a Tokio must fail to resolve with telex.
+        run: |
+          set -uo pipefail
+          probe=$(mktemp -d)
+          mkdir "$probe/src" && : > "$probe/src/lib.rs"
+          cat > "$probe/Cargo.toml" <<EOF
+          [package]
+          name = "old-tokio-probe"
+          version = "0.0.0"
+          edition = "2021"
+
+          [workspace]
+
+          [dependencies]
+          telex = { path = "$GITHUB_WORKSPACE", default-features = false }
+          tokio = { version = "=1.38.2", default-features = false }
+          EOF
+          if cargo generate-lockfile --manifest-path "$probe/Cargo.toml"; then
+            echo "::error::telex resolved beside Tokio 1.38.2, whose named pipes use Mio 0.8"
+            exit 1
+          fi
+          echo "ok: Tokio 1.38.2 is rejected"
+
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
         # actionable error AND a non-zero exit. Assert both, so a regression where the stub

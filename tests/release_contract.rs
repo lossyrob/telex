@@ -343,6 +343,17 @@ fn windows_named_pipe_transport_requires_fixed_mio() {
         Some(false),
         "the floor must not enable Mio default features"
     );
+    // Tokio before 1.39.1 wraps Mio 0.8, which would sit beside the Mio floor above.
+    let tokio = &manifest["target"]["cfg(windows)"]["dependencies"]["tokio"];
+    let tokio_requirement = tokio["version"].as_str().expect("windows tokio floor");
+    assert!(
+        tokio_requirement
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && version_triple(tokio_requirement) >= (1, 39, 1),
+        "the Windows tokio floor must be a caret requirement of at least 1.39.1, found {tokio_requirement}"
+    );
     let lock: toml::Value = toml::from_str(&read("Cargo.lock")).unwrap();
     let versions: Vec<&str> = lock["package"]
         .as_array()
