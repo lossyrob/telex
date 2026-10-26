@@ -76,9 +76,9 @@ libc = "0.2"
 # report an error after a named-pipe read/write was already submitted, which leaves the completion
 # without its reserved reference (upstream tokio-rs/mio#2014; issue #166). Features stay Tokio's.
 mio = { version = "1.2.4", default-features = false }
-# Tokio before 1.39.1 (1.39.0 is yanked) wraps Mio ^0.8.9 for its named pipes, which would coexist
-# with the Mio floor above instead of being repaired by it. Tokio 1.39.1 and later require Mio
-# ^1.0.1, so the two requirements unify on one fixed Mio. Features stay the ones declared above.
+# Tokio 1.38.x wraps Mio ^0.8.9 for its named pipes, which would coexist with the Mio floor above
+# instead of being repaired by it. Tokio 1.39.1 (1.39.0 is yanked) moved to Mio ^1.0.1, so from
+# here the two requirements unify on one Mio 1.x. Features stay the ones declared above.
 tokio = { version = "1.39.1", default-features = false }
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 

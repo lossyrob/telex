@@ -343,7 +343,7 @@ fn windows_named_pipe_transport_requires_fixed_mio() {
         Some(false),
         "the floor must not enable Mio default features"
     );
-    // Tokio before 1.39.1 wraps Mio 0.8, which would sit beside the Mio floor above.
+    // Tokio 1.38.x wraps Mio 0.8, which would sit beside the Mio floor above.
     let tokio = &manifest["target"]["cfg(windows)"]["dependencies"]["tokio"];
     let tokio_requirement = tokio["version"].as_str().expect("windows tokio floor");
     assert!(

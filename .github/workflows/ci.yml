@@ -461,7 +461,7 @@ jobs:
           echo "ok: the Windows named-pipe route resolves a single mio >= 1.2.4"
 
       - name: Older Tokio named-pipe route is rejected (issue 166)
-        # Tokio before 1.39.1 wraps Mio 0.8, which would sit beside the Mio floor instead of being
+        # Tokio 1.38.x wraps Mio 0.8, which would sit beside the Mio floor instead of being
         # repaired by it. A consumer that pins such a Tokio must fail to resolve with telex.
         run: |
           set -uo pipefail
@@ -479,11 +479,24 @@ jobs:
           telex = { path = "$GITHUB_WORKSPACE", default-features = false }
           tokio = { version = "=1.38.2", default-features = false }
           EOF
-          if cargo generate-lockfile --manifest-path "$probe/Cargo.toml"; then
+          # Only the Tokio conflict between the consumer pin and telex's floor counts as the
+          # intended rejection; registry, fixture or unrelated resolver failures must fail the step.
+          if out=$(cargo generate-lockfile --manifest-path "$probe/Cargo.toml" 2>&1); then
+            echo "$out"
             echo "::error::telex resolved beside Tokio 1.38.2, whose named pipes use Mio 0.8"
             exit 1
           fi
-          echo "ok: Tokio 1.38.2 is rejected"
+          echo "$out"
+          for expected in \
+            'failed to select a version for `tokio`' \
+            'versions that meet the requirements `^1.39.1`' \
+            'previously selected package `tokio v1.38.2`'; do
+            if ! grep -qF -- "$expected" <<<"$out"; then
+              echo "::error::generate-lockfile failed, but not with the expected Tokio floor conflict: missing [$expected]"
+              exit 1
+            fi
+          done
+          echo "ok: Tokio 1.38.2 is rejected by the Tokio floor"
 
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
