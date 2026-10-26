@@ -372,17 +372,29 @@ Membership ids are 1-128 ASCII letters, digits, hyphens or underscores.
 
 Start from the root's **existing running Watcher installation**. Obtain the
 trusted absolute `telex` and `telex-watcher` executable paths from its installation
-record, and the absolute registry path, configured backend profile and send-only
-sender from its launch/registration policy. Use the backend that holds the
-members' Telex addresses, with absolute paths in profile configuration.
-If any value is unknown, ask the operator through `ask_user`; do not guess a path
-or default profile. The root's address must already receive Telex turns.
+record, along with registry, backend profile, send-only sender and cadence.
+The supported [Watcher installation and launch bootstrap](https://lossyrob.github.io/telex/guides/watcher-installation.html)
+creates that record and documents its runtime environment, shutdown and rollback.
+Read an explicit operator-supplied absolute record path, otherwise exactly
+`<config root>/watcher/installation.json`: config root is `TELEX_HOME` when set,
+otherwise `~/.telex`. Verify using the installation tool. If missing, unreadable,
+invalid or unsupported, stop and point to the bootstrap; do not search elsewhere.
+Bootstrap inputs go to the operator through `ask_user`; never guess a path,
+credential or default profile. Use the backend holding members' addresses and
+absolute paths in profile configuration. Watcher attaches the distinct sender
+send-only on registration; empty-runtime readiness does not prove that attachment.
+
+The root's address receives Telex turns through either a live **Copilot bridge
+push** path or the documented **pull fallback** (`telex copilot fallback prepare`)
+when the host cannot load the bridge. Keep these modes distinct: push has no
+waiter; a pull wait completes once and needs explicit re-arm. Fallback preparation
+alone is not root-delivery proof. Follow the corresponding delivery procedure
+above before relying on the watch.
 
 The per-group choices are group directory, root address and grace period. The
 template below copies the installation values into the exact shipped v2 fields;
 backend, registry and cadence each have one source. Choose a new permanent
-lowercase watch id; removed ids cannot be reused. This example uses a 30-second
-cadence and 30-second timeout, allowing the detector's 15-second observation
+lowercase watch id; removed ids cannot be reused. The record supplies cadence; this example uses a 30-second timeout, allowing the detector's 15-second observation
 budget plus startup. Set `pollIntervalSeconds` to the registration's interval
 (the detector default is 30); grace is required and ranges from 1 to 86400 seconds.
 
@@ -390,16 +402,19 @@ Run this inline template in **PowerShell 7**, replacing the angle-bracket values
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+$installationTool = '<absolute trusted checkout>/telex-watcher/installation.ps1'
+# Uses the default record; add -RecordPath only for an explicit operator path.
+$installation = (& $installationTool -Action verify) | ConvertFrom-Json -AsHashtable
 $groupDirectory = '<absolute group directory>'
 $rootAddress = '<root Telex address>'
 $graceSeconds = 300
-$telex = '<absolute installed telex executable>'
-$watcher = '<absolute installed telex-watcher executable>'
-$registry = '<absolute running Watcher registry>'
-$backendProfile = '<existing configured backend profile>'
-$sender = '<existing Watcher send-only address>'
+$telex = $installation.telexExecutable
+$watcher = $installation.watcherExecutable
+$registry = $installation.watcherRegistry
+$backendProfile = $installation.backendProfile
+$sender = $installation.sender
 $watchId = '<new permanent watch id>'
-$pollSeconds = 30
+$pollSeconds = $installation.pollIntervalSeconds
 $registrationFile = Join-Path $groupDirectory 'stall-watch-registration.txt'
 $registration = @{
     schemaVersion = 2
@@ -410,7 +425,7 @@ $registration = @{
     backendProfile = $backendProfile
     sender = $sender
     target = $rootAddress
-    environmentAllowlist = @('TELEX_HOME')
+    environmentAllowlist = @($installation.environmentNames)
     parameters = @{
         groupDirectory = $groupDirectory
         backendProfile = $backendProfile

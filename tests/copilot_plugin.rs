@@ -633,6 +633,14 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
         "watcherRegistry = $registry",
         "graceSeconds = $graceSeconds",
         "--registry $registry --json register $registrationFile",
+        "$installation = (& $installationTool -Action verify)",
+        "$telex = $installation.telexExecutable",
+        "$watcher = $installation.watcherExecutable",
+        "$registry = $installation.watcherRegistry",
+        "$backendProfile = $installation.backendProfile",
+        "$sender = $installation.sender",
+        "$pollSeconds = $installation.pollIntervalSeconds",
+        "environmentAllowlist = @($installation.environmentNames)",
         "-Encoding utf8NoBOM",
     ] {
         assert!(
@@ -656,6 +664,12 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
             "export --address",
             "detector-degraded",
             "ask_user",
+            "watcher/installation.json",
+            "TELEX_HOME",
+            "otherwise `~/.telex`",
+            "pull fallback",
+            "telex copilot fallback prepare",
+            "explicit re-arm",
         ] {
             assert!(
                 text.contains(required),
@@ -675,6 +689,7 @@ fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contrac
         }
     }
     assert!(include_str!("../docs/guide/src/SUMMARY.md").contains("guides/copilot-stalls.md"));
+    assert!(include_str!("../docs/guide/src/SUMMARY.md").contains("guides/watcher-installation.md"));
 }
 
 #[test]

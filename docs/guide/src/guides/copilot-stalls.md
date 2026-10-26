@@ -85,10 +85,19 @@ active members are evaluated as non-stalled.
 
 ## Use the root's existing Watcher installation
 
-The Watcher runtime must already be running, and the root's Telex address must
-already receive turns through [Copilot push delivery](copilot-push.md). Obtain
-installation values from the root's recorded runtime launch and registration
-policy:
+Start with the verified record from [Watcher installation and launch](watcher-installation.md).
+The Watcher runtime must be running. The root's Telex address receives turns
+through either a live **Copilot bridge push** path or the documented
+**pull fallback** (`telex copilot fallback prepare`) when the host cannot load
+the bridge. Follow [Copilot delivery](copilot-push.md) for that mode; push has
+no waiter, while each pull wait completes once and needs explicit re-arm.
+Fallback preparation alone is not proof of root delivery.
+
+Read an explicit operator-supplied absolute record path, otherwise exactly
+`<config root>/watcher/installation.json`, where the config root is `TELEX_HOME`
+when set, otherwise `~/.telex`. Verify the record with the installation tool.
+If it is missing, unreadable, invalid or unsupported, stop and point to the
+bootstrap; do not search elsewhere or guess installation values.
 
 | Value | Source |
 | --- | --- |
@@ -96,11 +105,11 @@ policy:
 | `watcherExecutable` | Absolute trusted `telex-watcher` path used to run this Watcher. |
 | `watcherRegistry` | Absolute registry path used by this runtime and by the registration command below. |
 | `backendProfile` | Existing configured profile holding the members' Telex addresses; use it for both the registration and detector parameter. |
-| Sender | Existing Watcher send-only address from the root's routing policy, distinct from member receive addresses. |
-| `pollIntervalSeconds` | The registration's own interval, copied from one `$pollSeconds` value below. The detector default is 30 seconds. |
+| Sender | Record's `sender`, distinct from member receive addresses; Watcher attaches it send-only on registration. |
+| `pollIntervalSeconds` | Record's cadence, copied through one `$pollSeconds` value into both registration and detector. The default is 30 seconds. |
 
-If the root does not know a value, it asks the operator through `ask_user` rather
-than guessing paths, credentials or a default profile. Profile paths should be
+If bootstrap needs an operator input, ask through `ask_user` rather than guessing
+paths, credentials or a default profile. Profile paths should be
 absolute. The detector uses its explicit backend profile and ignores `TELEX_DB`
 or global database overrides. All members belong to this one backend and one
 Watcher registry; another registry's watches are not observed.
@@ -110,22 +119,25 @@ Watcher registry; another registry's watches are not observed.
 Choose the group directory, root address and grace for this group. Use a new
 permanent lowercase ASCII watch id (`[a-z0-9][a-z0-9._-]{0,127}`); removed ids
 cannot be reused. This **PowerShell 7** template writes registration data, not a
-wrapper or detector script. Replace the angle-bracket installation values from
-the table above. The 30-second cadence is shared by the watch and detector; the
+wrapper or detector script. Read installation values through the verified record.
+The record's cadence is shared by the watch and detector; the
 30-second timeout allows the detector's 15-second observation budget plus startup.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+$installationTool = '<absolute trusted checkout>/telex-watcher/installation.ps1'
+# Uses the default record; add -RecordPath only for an explicit operator path.
+$installation = (& $installationTool -Action verify) | ConvertFrom-Json -AsHashtable
 $groupDirectory = '<absolute group directory>'
 $rootAddress = '<root Telex address>'
 $graceSeconds = 300
-$telex = '<absolute installed telex executable>'
-$watcher = '<absolute installed telex-watcher executable>'
-$registry = '<absolute running Watcher registry>'
-$backendProfile = '<existing configured backend profile>'
-$sender = '<existing Watcher send-only address>'
+$telex = $installation.telexExecutable
+$watcher = $installation.watcherExecutable
+$registry = $installation.watcherRegistry
+$backendProfile = $installation.backendProfile
+$sender = $installation.sender
 $watchId = '<new permanent watch id>'
-$pollSeconds = 30
+$pollSeconds = $installation.pollIntervalSeconds
 $registrationFile = Join-Path $groupDirectory 'stall-watch-registration.txt'
 $registration = @{
     schemaVersion = 2
@@ -136,7 +148,7 @@ $registration = @{
     backendProfile = $backendProfile
     sender = $sender
     target = $rootAddress
-    environmentAllowlist = @('TELEX_HOME')
+    environmentAllowlist = @($installation.environmentNames)
     parameters = @{
         groupDirectory = $groupDirectory
         backendProfile = $backendProfile

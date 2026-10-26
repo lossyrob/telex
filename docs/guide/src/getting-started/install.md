@@ -89,6 +89,15 @@ environment variables with `$env:` instead of `export`, for example
 `$env:TELEX_SESSION_ID = "quickstart"`. The binary is `telex.exe`, invoked as
 `telex`.
 
+## Watcher runtime
+
+Watcher is a separate application, not part of the single-binary Telex release
+install. The [Watcher installation and launch guide](../guides/watcher-installation.md)
+provides its supported Windows/Linux bootstrap, default discovery record,
+backend/authentication prerequisites, shutdown and rollback. Session-group stall
+monitoring starts from that verified record. Both Telex and Watcher need the
+`entra` feature when the existing backend profile uses Entra.
+
 ## Copilot CLI plugin
 
 If you drive agents with GitHub Copilot CLI, install the telex plugin from the
