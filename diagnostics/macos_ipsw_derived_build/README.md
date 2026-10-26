@@ -30,7 +30,7 @@ option pair from `-format UDRW` to `-type UDIF`:
 /usr/bin/hdiutil create -size 12288m -fs APFS -volname TelexDerivedBuild -type UDIF {image}
 ```
 
-Apple's [hdiutil manual, CREATE](https://keith.github.io/xcode-man-pages/hdiutil.1.html#type)
+Apple's [hdiutil manual, CREATE](https://github.com/keith/xcode-man-pages/blob/cb44759ff0c3f25182b2eeeb5d44ca0de9f3c01a/docs/hdiutil.1.html#L603-L660)
 documents `-type` for empty read/write images and says explicit `UDIF` creates a
 `UDRW` image of the specified size. `-format` is an image-from-source option,
 not this empty-image recipe. The manual also documents `-size`, APFS via `-fs`
@@ -38,6 +38,9 @@ and `-volname`. No default format, source folder/device or additional switch is
 used. This URL is a third-party HTML export of Apple's Xcode-bundled manual,
 as described by the [mirror project](https://github.com/keith/xcode-man-pages);
 it is not Apple-hosted documentation or attestation of the runner's tool.
+That immutable export is Xcode 27.2 RC1 (27B48), not the pinned Xcode 26.6.
+The Apple-hosted archived manual URL returned 404 in the owner's retained
+audit. Native behavior matching the cited recipe remains a declared risk.
 
 The fixed non-sparse read/write intent, 12 GiB logical capacity including
 metadata, ENOSPC behavior, APFS/name, existing attach/detach and initial
@@ -45,11 +48,66 @@ provisioned reserve before fetch are unchanged. No post-failure backing stat
 or other controller/finalization behavior is added. Synthetic argv tests are
 not proof of a successful native image allocation.
 
-Whole-source readiness remains **blocked** by the separate owner's pinned Go
-output audit: `GOENV=off` reports an empty `GOENV` field, and `-trimpath` omits
-embedded `-ldflags`. The current comparisons are unchanged by this image-only
-correction. Those findings need owner/steward disposition; passing mocked
-recipe tests does not resolve them or authorize a wider fix.
+Disposition [6425196426](https://github.com/lossyrob/telex/issues/172#issuecomment-6425196426)
+clarifies that hdiutil's default OS-supplied, same-user attach mechanism is
+within the trusted native tool boundary. Installed/privileged helpers, brokers
+and new services remain excluded. No `-kernel`, alternate attach path or
+fallback is added. An authorization prompt, escalation or attach failure fails
+closed and returns to design; this controller is not an OS privilege monitor.
+
+The exact plist `system-entities`/`mount-point` schema and APFS topology remain
+unestablished by the retained manual. The strict codesign parsers are also
+unchanged: `Signature=adhoc` must occur in stderr; any `Timestamp=` line must
+equal `Timestamp=none` (a timestamp line is not required); legacy `:-`
+entitlement extraction must leave stripped stdout empty. These spellings and
+stream placement remain declared residual risks, not runner/source-attested
+results. Unexpected parsed shapes fail closed with full bounded streams.
+The existing static CodeDirectory checks remain; no optional parser refactor
+or `-s -w` Mach-O enhancement is included. The retained iPhone-only
+SecurityTool source is not macOS codesign CLI proof; the Homebrew Git banner
+does not attest the controller's `/usr/bin/git` version.
+
+## Pinned Go output contracts
+
+The same disposition permits local correction of the owner's F1/F2 findings.
+The source reference is Go 1.27.3 commit
+`2aae1000ea1d4b28923b96db28acf4e3b99d6aff`, not a native build observation.
+
+F1: the constructed child map still contains `GOENV=off`.
+[cfg.EnvFile](https://github.com/golang/go/blob/2aae1000ea1d4b28923b96db28acf4e3b99d6aff/src/cmd/go/internal/cfg/cfg.go#L344-L350)
+returns an empty environment-file path for that input, and
+[MkEnv](https://github.com/golang/go/blob/2aae1000ea1d4b28923b96db28acf4e3b99d6aff/src/cmd/go/internal/envcmd/env.go#L79-L89)
+emits the empty path as effective `GOENV`. The controller compares all 20
+requested keys with an explicit expected map; only effective `GOENV` differs
+from the child map. Every key is mandatory and exact, including empty-valued
+keys. Missing `GOENV` fails. Provenance retains expected and observed maps on
+success; the complete captured JSON stream remains available on mismatch.
+No inherited environment is changed or forwarded.
+
+F2: frozen `-trimpath`, `-ldflags` and both complete `-X` values stay unchanged.
+[load/pkg.go](https://github.com/golang/go/blob/2aae1000ea1d4b28923b96db28acf4e3b99d6aff/src/cmd/go/internal/load/pkg.go#L2469-L2480)
+omits `-ldflags` from build info under `-trimpath`. Metadata now requires that
+setting to be absent, even if its value would be correct or empty. All other
+expected settings remain exact.
+
+Before and after explicit signing, the bounded Mach-O bytes must contain both
+complete UTF-8 release values: `bounds.build.version` and `commit_string`,
+not their symbol or assignment names. The existing file-hash cap is followed
+by a bounded `maximum + 1` read, deadline/length/hash equality check and static
+search in those same bytes. Each successful pre/post record retains the
+matched value, UTF-8 length and first file offset with the file hash. The
+compile command record retains the exact linker-flag argument. This proves
+complete byte occurrence, not runtime variable lookup, uniqueness,
+reproducibility or upstream binary equivalence. `ipsw` is never executed.
+
+Guarded fixtures now model empty effective GOENV, absent metadata `-ldflags`
+and tiny synthetic Mach-O files containing both complete values. The full
+23-command fixture invokes the actual static parsers rather than stubbing
+them. Missing/wrong effective keys, missing/shortened/wrong values, unexpected
+metadata flags and post-sign corruption fail without export or acceptance.
+These local checks do not constitute owner replay, whole-source approval or
+native build proof; previous blocked source packets and receipts remain
+immutable history.
 
 ## Controller inputs and trusted imports
 
@@ -138,6 +196,10 @@ Synthetic tests use mocked processes, HTTP transports and filesystem metadata.
 Do not run `build.py` locally. Review `bounds.json` and the exact source packet
 before any hosted action. BUILDs 40369808285 and 40382992497 were consumed;
 retries remain zero.
-Any future hosted work needs a fresh whole-source APPROVE, a NEW finite-attempt
-disposition, a NEW owner freeze and the independent actual verdict for
-40382992497. This local correction authorizes none.
+The independent actual verdict
+[6425115159](https://github.com/lossyrob/telex/issues/172#issuecomment-6425115159)
+is FINAL CHANGES-REQUIRED for 40382992497, with failure-data conservation
+passing and no material field-report contradiction. It is not pending or
+authority for this child. Next is whole owner replay/integration, then fresh
+whole-source independent APPROVE, a NEW finite-attempt disposition and a NEW
+genuine owner freeze. This local correction authorizes none. HOLD is unchanged.

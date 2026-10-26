@@ -609,6 +609,20 @@ def synthetic_macho(identifier, flags=2, entitlements=False, cpu=0x100000C):
     return struct.pack("<8I", 0xFEEDFACF, cpu, 0, 2, 1, 16, 0, 0) + struct.pack("<4I", 0x1D, 16, 48, len(sig)) + sig
 
 
+def synthetic_go_metadata():
+    return (b"file: go1.27.3\npath\tgithub.com/blacktop/ipsw/cmd/ipsw\n"
+            b"build\tGOOS=darwin\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=1\n"
+            b"build\t-trimpath=true\nbuild\t-tags=sandbox\nbuild\t-buildmode=exe\n")
+
+
+def synthetic_release_binary(overrides=None):
+    values = {"AppVersion": BOUNDS["build"]["version"], "AppBuildCommit": BOUNDS["build"]["commit_string"]}
+    if overrides is not None:
+        values.update(overrides)
+    return synthetic_macho(BOUNDS["signing"]["identifier"]) + b"\0" + b"\0".join(
+        value.encode("utf-8") for value in values.values() if value is not None)
+
+
 class SignatureOutputTests(unittest.TestCase):
     def test_static_signed_ARM64_identity_and_no_binary_invocation(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(b.subprocess, "Popen") as process:
@@ -629,18 +643,20 @@ class SignatureOutputTests(unittest.TestCase):
                     b.macho_signature(file, 10000, float("inf"), True, BOUNDS["signing"]["identifier"])
 
     def test_derived_go_metadata_not_upstream_version_and_not_execution(self):
-        flags = next(f.split("=", 1)[1] for f in BOUNDS["build"]["flags"] if f.startswith("-ldflags="))
-        raw = ("file: go1.27.3\npath\tgithub.com/blacktop/ipsw/cmd/ipsw\n" +
-               "build\t-ldflags=" + json.dumps(flags) +
-               "\nbuild\tGOOS=darwin\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=1\n"
-               "build\t-trimpath=true\nbuild\t-tags=sandbox\nbuild\t-buildmode=exe\n").encode()
-        self.assertEqual(b.go_metadata(raw, BOUNDS)["settings"]["-ldflags"], flags)
+        raw = synthetic_go_metadata()
+        self.assertNotIn("-ldflags", b.go_metadata(raw, BOUNDS)["settings"])
         for wrong in (raw.replace(b"GOARCH=arm64", b"GOARCH=amd64"),
                       raw.replace(b"GOARCH=arm64", b"GOARCH=arm64-extra"),
                       raw + b"build\tGOARCH=arm64\n",
-                      raw.replace(BOUNDS["build"]["version"].encode(), b"3.1.739")):
+                      raw.replace(b"go1.27.3", b"go1.27.2")):
             with self.assertRaises(b.Error):
                 b.go_metadata(wrong, BOUNDS)
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / "ipsw"
+            file.write_bytes(synthetic_release_binary({"AppVersion": "3.1.739"}))
+            with self.assertRaisesRegex(b.Error, "AppVersion"):
+                b.macho_signature(file, 4096, float("inf"), release_values={
+                    "AppVersion": BOUNDS["build"]["version"], "AppBuildCommit": BOUNDS["build"]["commit_string"]})
 
     def test_artifact_limits_overwrite_and_source_closure(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1813,7 +1829,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
         ]
 
     @contextmanager
-    def recipe(self, fail_label=None, go_env_mismatch=False, fail_fetch=False):
+    def recipe(self, fail_label=None, go_env_mismatch=False, fail_fetch=False,
+               go_env_override=None, go_env_omit=None, pre_values=None, post_values=None, metadata_ldflags=None):
         with tempfile.TemporaryDirectory() as temporary:
             work, evidence = Path(temporary) / "work", Path(temporary) / "evidence"
             volume = work / "volume"
@@ -1830,6 +1847,7 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 environment[name] = "AMBIENT_SENTINEL"
             environment["GH_TOKEN"] = "CONTROLLER_ONLY_TOKEN"
             original_init, original_stat, original_resolve = b.Runner.__init__, Path.stat, Path.resolve
+            original_hash = b.file_hash
 
             def init(runner, *args, **kwargs):
                 original_init(runner, *args, **kwargs)
@@ -1908,10 +1926,18 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 elif label == "go-version": stdout = b"go version go1.27.3 darwin/arm64\n"
                 elif label == "go-env":
                     effective = {name: build[name] for name in argv[3:]}
+                    effective["GOENV"] = ""
                     if go_env_mismatch: effective["CC"] = "/synthetic/unfrozen"
+                    if go_env_override is not None: effective.update(go_env_override)
+                    if go_env_omit is not None: del effective[go_env_omit]
                     stdout = json.dumps(effective).encode()
-                elif label == "compile": (volume / "output" / "ipsw").write_bytes(b"synthetic-binary")
-                elif label in ("go-metadata-pre", "go-metadata-post"): stdout = b"synthetic-static-metadata"
+                elif label == "compile": (volume / "output" / "ipsw").write_bytes(synthetic_release_binary(pre_values))
+                elif label in ("go-metadata-pre", "go-metadata-post"):
+                    stdout = synthetic_go_metadata()
+                    if metadata_ldflags is not None and label == metadata_ldflags[0]:
+                        stdout += ("build\t-ldflags=" + json.dumps(metadata_ldflags[1]) + "\n").encode()
+                elif label == "ad-hoc-sign" and post_values is not None:
+                    (volume / "signing" / "ipsw").write_bytes(synthetic_release_binary(post_values))
                 elif label == "signature-display": stderr = b"Signature=adhoc\nTimestamp=none\n"
                 process = Process(argv.copy())
                 fd = 100 + len(sequence) * 2
@@ -1943,10 +1969,9 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 patches.enter_context(patch.object(b.os, "statvfs",
                     return_value=SimpleNamespace(f_blocks=1024, f_frsize=4096, f_bavail=16777216)))
                 patches.enter_context(patch.object(b, "file_hash",
-                    side_effect=lambda file, *args: {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}))
-                patches.enter_context(patch.object(b, "macho_signature", side_effect=lambda file, *args:
-                    {"path": str(file), "bytes": file.stat().st_size, "sha256": b.digest(file.read_bytes())}))
-                patches.enter_context(patch.object(b, "go_metadata", return_value={"synthetic": "unchanged"}))
+                    side_effect=lambda file, *args: original_hash(file, *args)
+                    if file in (volume / "output" / "ipsw", volume / "signing" / "ipsw") else
+                    {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}))
                 patches.enter_context(patch.object(b, "unpack", side_effect=unpack))
                 patches.enter_context(patch.object(b, "verify_tree"))
                 patches.enter_context(patch.object(b, "archive_bytes", return_value=b"synthetic-archive"))
@@ -1966,10 +1991,23 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 self.assertNotIn(value, (evidence / "provenance.json").read_text())
             self.assertTrue((work / "build.dmg").is_file())
             self.assertEqual(events[0], "gate")
+            records = json.loads((evidence / "commands.json").read_bytes())
+            saved_streams = {}
+            for record in records:
+                self.assertTrue(record["complete"])
+                saved_streams[record["label"]] = {}
+                for name, stream in record["streams"].items():
+                    raw = (evidence / stream["file"]).read_bytes()
+                    self.assertTrue(stream["eof"] and stream["persisted"])
+                    self.assertEqual(len(raw), stream["bytes"])
+                    self.assertEqual(b.digest(raw), stream["sha256"])
+                    saved_streams[record["label"]][name] = raw.decode("utf-8")
             yield {"code": code, "sequence": sequence, "expected_argv": argvs,
                    "expected_maps": {"initial-control": initial, "volume-build": build, "minimal-detach": detach},
                    "provenance": provenance, "events": events,
+                   "command_records": records, "command_streams": saved_streams,
                    "manifest_valid": LateRetentionTests().manifest_valid(evidence),
+                   "export_present": (evidence / "ipsw").exists(),
                    "backing_retained": (work / "build.dmg").is_file()}
 
     def test_all_23_actual_Runner_invocations_have_exact_independent_maps_and_order(self):
@@ -1980,6 +2018,15 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             self.assertTrue(result["manifest_valid"])
             self.assertTrue(result["provenance"]["finalization_candidate"])
             self.assertEqual(result["provenance"]["build_environment"], result["expected_maps"]["volume-build"])
+            self.assertEqual(result["provenance"]["go_environment"]["GOENV"], "")
+            self.assertEqual(result["expected_maps"]["volume-build"]["GOENV"], "off")
+            self.assertEqual(result["provenance"]["go_environment_expected"], result["provenance"]["go_environment"])
+            for phase in ("pre_explicit_sign", "post_sign"):
+                matches = result["provenance"][phase]["release_identity"]["matches"]
+                self.assertEqual(matches["AppVersion"]["value"], BOUNDS["build"]["version"])
+                self.assertEqual(matches["AppBuildCommit"]["value"], BOUNDS["build"]["commit_string"])
+            self.assertNotIn("-ldflags", result["provenance"]["pre_sign_build_metadata"]["settings"])
+            self.assertNotIn("-ldflags", result["provenance"]["post_sign_build_metadata"]["settings"])
             self.assertEqual([r["label"] for r in result["sequence"]].count("clang-version"), 1)
             self.assertEqual([r["label"] for r in result["sequence"]].count("SDK-version"), 1)
 
@@ -2004,6 +2051,144 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             self.assertEqual([r["label"] for r in result["sequence"]], self.labels[:12] + ["image-detach"])
             self.assertEqual(result["provenance"]["failure"]["message"], "effective Go environment mismatch: CC")
             self.assertNotIn("spawn-compile", result["events"])
+
+
+class PinnedGoOutputTests(unittest.TestCase):
+    def expectations(self):
+        work = Path("/synthetic-frozen-work")
+        recipe = FullRecipeEnvironmentTests()
+        environment = recipe.expected_maps(work)[1]
+        keys = recipe.expected_argv(work)[11][3:]
+        expected = {key: environment[key] for key in keys}
+        expected["GOENV"] = ""
+        return environment, expected
+
+    def test_effective_map_has_all_20_keys_only_GOENV_differs_and_inputs_stay_unchanged(self):
+        environment, expected = self.expectations()
+        before, ambient = environment.copy(), os.environ.copy()
+        self.assertEqual(len(expected), 20)
+        self.assertEqual(b.validate_go_environment(expected, environment), expected)
+        self.assertEqual([key for key in expected if expected[key] != environment[key]], ["GOENV"])
+        self.assertEqual(environment["GOENV"], "off")
+        self.assertEqual(environment, before)
+        self.assertEqual(os.environ, ambient)
+
+    def test_each_of_20_missing_or_wrong_effective_keys_fails(self):
+        environment, expected = self.expectations()
+        for key in expected:
+            for mutation in ("missing", "wrong"):
+                with self.subTest(key=key, mutation=mutation):
+                    observed = expected.copy()
+                    if mutation == "missing":
+                        del observed[key]
+                    else:
+                        observed[key] = expected[key] + "-wrong"
+                    with self.assertRaisesRegex(b.Error, "effective Go environment mismatch: " + key + "$"):
+                        b.validate_go_environment(observed, environment)
+        for observed in (None, [], "", 20):
+            with self.subTest(shape=type(observed).__name__), self.assertRaises(b.Error):
+                b.validate_go_environment(observed, environment)
+
+    def test_metadata_requires_absent_ldflags_including_correct_or_empty_values(self):
+        flags = next(f.split("=", 1)[1] for f in BOUNDS["build"]["flags"] if f.startswith("-ldflags="))
+        for value in (flags, "", "wrong"):
+            with self.subTest(value=value), self.assertRaisesRegex(b.Error, "must omit -ldflags"):
+                b.go_metadata(synthetic_go_metadata() + ("build\t-ldflags=" + json.dumps(value) + "\n").encode(), BOUNDS)
+        settings = b.go_metadata(synthetic_go_metadata(), BOUNDS)["settings"]
+        for key, value in settings.items():
+            row = ("build\t" + key + "=" + value + "\n").encode()
+            for replacement in (b"", row.replace(value.encode(), (value + "-wrong").encode())):
+                with self.subTest(key=key, replacement=replacement), self.assertRaises(b.Error):
+                    b.go_metadata(synthetic_go_metadata().replace(row, replacement), BOUNDS)
+
+    def test_both_complete_release_values_have_static_evidence_pre_and_post_sign(self):
+        values = {"AppVersion": BOUNDS["build"]["version"], "AppBuildCommit": BOUNDS["build"]["commit_string"]}
+        raw = synthetic_release_binary()
+        with tempfile.TemporaryDirectory() as temp, patch.object(b.subprocess, "Popen") as process:
+            file = Path(temp) / "ipsw"
+            file.write_bytes(raw)
+            for signed in (False, True):
+                result = b.macho_signature(file, len(raw), float("inf"), signed,
+                                           BOUNDS["signing"]["identifier"], release_values=values)
+                self.assertEqual(result["sha256"], b.digest(raw))
+                for name, value in values.items():
+                    match = result["release_identity"]["matches"][name]
+                    self.assertEqual(match["value"], value)
+                    self.assertEqual(raw[match["first_file_offset"]:
+                                         match["first_file_offset"] + match["utf8_bytes"]], value.encode("utf-8"))
+            process.assert_not_called()
+
+    def test_missing_shortened_or_wrong_one_or_both_values_fail_even_with_valid_macho(self):
+        values = {"AppVersion": BOUNDS["build"]["version"], "AppBuildCommit": BOUNDS["build"]["commit_string"]}
+        cases = [{name: wrong} for name, value in values.items() for wrong in (None, value[:-1], "wrong-" + value[1:])]
+        cases += [dict.fromkeys(values, None), {name: value[:-1] for name, value in values.items()},
+                  {"AppVersion": "AppVersion", "AppBuildCommit": "AppBuildCommit"}]
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / "ipsw"
+            for overrides in cases:
+                file.write_bytes(synthetic_release_binary(overrides))
+                for signed in (False, True):
+                    with self.subTest(overrides=overrides, signed=signed), self.assertRaisesRegex(b.Error, "identity bytes absent"):
+                        b.macho_signature(file, 4096, float("inf"), signed,
+                                          BOUNDS["signing"]["identifier"], release_values=values)
+
+    def test_identity_read_is_bounded_hash_matched_and_deadline_checked(self):
+        raw = synthetic_release_binary()
+        values = {"AppVersion": BOUNDS["build"]["version"], "AppBuildCommit": BOUNDS["build"]["commit_string"]}
+        sizes = []
+        class Stream(io.BytesIO):
+            def read(self, size=-1):
+                sizes.append(size)
+                return super().read(size)
+        for data, elapsed, digest in ((raw, 0, b.digest(raw)), (raw + b"x", 0, b.digest(raw)),
+                                      (raw[:-1] + b"x", 0, b.digest(raw)), (raw, 10, b.digest(raw))):
+            with self.subTest(data=data, elapsed=elapsed), \
+                    patch.object(b, "file_hash", return_value={"path": "synthetic", "bytes": len(raw), "sha256": digest}), \
+                    patch.object(Path, "open", return_value=Stream(data)), patch.object(b.time, "monotonic", return_value=elapsed):
+                if data == raw and elapsed == 0:
+                    b.macho_signature(Path("synthetic"), len(raw), 10, release_values=values)
+                else:
+                    with self.assertRaisesRegex(b.Error, "bounded Mach-O bytes"):
+                        b.macho_signature(Path("synthetic"), len(raw), 10, release_values=values)
+        self.assertEqual(sizes, [len(raw) + 1] * 4)
+
+    def test_old_or_missing_GOENV_stops_real_Runner_recipe_before_modules(self):
+        for arguments in ({"go_env_override": {"GOENV": "off"}}, {"go_env_omit": "GOENV"}):
+            with self.subTest(arguments=arguments), FullRecipeEnvironmentTests().recipe(**arguments) as result:
+                self.assertEqual(result["code"], 1)
+                self.assertIn("mismatch: GOENV", result["provenance"]["failure"]["message"])
+                self.assertNotIn("spawn-modules", result["events"])
+                self.assertTrue(result["backing_retained"])
+                self.assertTrue(result["manifest_valid"])
+                self.assertFalse(result["export_present"])
+
+    def test_release_identity_failure_before_or_after_signing_prevents_export(self):
+        for phase, arguments in (("pre", {"pre_values": {"AppVersion": None}}),
+                                 ("post", {"post_values": {"AppBuildCommit": None}})):
+            with self.subTest(phase=phase), FullRecipeEnvironmentTests().recipe(**arguments) as result:
+                self.assertEqual(result["code"], 1)
+                self.assertIn("identity bytes absent", result["provenance"]["failure"]["message"])
+                self.assertNotIn("spawn-go-metadata-" + phase, result["events"])
+                if phase == "pre":
+                    self.assertNotIn("spawn-ad-hoc-sign", result["events"])
+                self.assertFalse(result["export_present"])
+                self.assertTrue(result["backing_retained"])
+                self.assertTrue(result["manifest_valid"])
+
+    def test_unexpected_ldflags_pre_and_post_sign_fail_with_complete_stream_evidence(self):
+        flags = next(f.split("=", 1)[1] for f in BOUNDS["build"]["flags"] if f.startswith("-ldflags="))
+        for label in ("go-metadata-pre", "go-metadata-post"):
+            for value in ("", flags):
+                with self.subTest(label=label, value=value), FullRecipeEnvironmentTests().recipe(
+                        metadata_ldflags=(label, value)) as result:
+                    self.assertEqual(result["code"], 1)
+                    self.assertIn("must omit -ldflags", result["provenance"]["failure"]["message"])
+                    self.assertIn("spawn-" + label, result["events"])
+                    self.assertIn("build\t-ldflags=" + json.dumps(value), result["command_streams"][label]["stdout"])
+                    self.assertEqual(result["command_streams"][label]["stderr"], "")
+                    self.assertFalse(result["export_present"])
+                    self.assertTrue(result["backing_retained"])
+                    self.assertTrue(result["manifest_valid"])
 
 
 class SourceSurfaceTests(unittest.TestCase):

@@ -668,9 +668,30 @@ def bind_tools(bounds, runner, env, provenance, suffix):
         require(records == provenance["tool_binding_before"], "build tools/SDK changed")
 
 
-def macho_signature(file, maximum, deadline, signed=False, identifier=None):
+def validate_go_environment(observed, environment):
+    # Go1.27.3 cfg.EnvFile/MkEnv report an empty file path for the unchanged GOENV=off input.
+    expected = {
+        "GOTOOLCHAIN": environment["GOTOOLCHAIN"], "GOENV": "", "GOWORK": environment["GOWORK"],
+        "GOOS": environment["GOOS"], "GOARCH": environment["GOARCH"], "GOARM64": environment["GOARM64"],
+        "CGO_ENABLED": environment["CGO_ENABLED"], "GOFLAGS": environment["GOFLAGS"],
+        "GOPROXY": environment["GOPROXY"], "GOSUMDB": environment["GOSUMDB"], "GOVCS": environment["GOVCS"],
+        "GOPRIVATE": environment["GOPRIVATE"], "GONOPROXY": environment["GONOPROXY"],
+        "GONOSUMDB": environment["GONOSUMDB"], "GOINSECURE": environment["GOINSECURE"],
+        "GOMODCACHE": environment["GOMODCACHE"], "GOCACHE": environment["GOCACHE"],
+        "GOPATH": environment["GOPATH"], "CC": environment["CC"], "CXX": environment["CXX"],
+    }
+    require(isinstance(observed, dict), "effective Go environment must be an object")
+    for key, value in expected.items():
+        require(key in observed and observed[key] == value, "effective Go environment mismatch: " + key)
+    return expected
+
+
+def macho_signature(file, maximum, deadline, signed=False, identifier=None, release_values=None):
     identity = file_hash(file, maximum, deadline)
-    raw = file.read_bytes()
+    with file.open("rb") as stream:
+        raw = stream.read(maximum + 1)
+    require(time.monotonic() < deadline and len(raw) <= maximum and len(raw) == identity["bytes"] and
+            digest(raw) == identity["sha256"], "bounded Mach-O bytes changed after hashing")
     require(len(raw) >= 32, "truncated Mach-O")
     magic, cpu, subtype, filetype, ncmds, size, flags, reserved = struct.unpack_from("<8I", raw)
     require(magic == 0xFEEDFACF and cpu == 0x100000C and filetype == 2 and ncmds <= 1024 and 32 + size <= len(raw),
@@ -687,6 +708,18 @@ def macho_signature(file, maximum, deadline, signed=False, identifier=None):
         offset += length
     require(offset == 32 + size and len(signatures) <= 1, "ambiguous Mach-O signature")
     record = {**identity, "cpu": cpu, "subtype": subtype, "signature_present": bool(signatures)}
+    if release_values is not None:
+        require(set(release_values) == {"AppVersion", "AppBuildCommit"}, "both release values required")
+        matches = {}
+        for name, value in release_values.items():
+            require(isinstance(value, str) and value, "empty or invalid release identity value")
+            needle = value.encode("utf-8")
+            first = raw.find(needle)
+            require(first >= 0, "complete release identity bytes absent: " + name)
+            matches[name] = {"value": value, "utf8_bytes": len(needle), "first_file_offset": first}
+        record["release_identity"] = {
+            "matches": matches, "scope": "Both complete UTF-8 value byte sequences in the bounded hashed file; no decoder execution.",
+            "not_claimed": "Runtime variable lookup, uniqueness or whole-binary equivalence to the upstream release."}
     if signed:
         require(len(signatures) == 1 and len(signatures[0]) >= 12, "missing explicit signature")
         sig = signatures[0]
@@ -733,9 +766,10 @@ def go_metadata(raw, bounds):
         else:
             modules.append(fields)
     require(paths == ["github.com/blacktop/ipsw/cmd/ipsw"], "static Go package path mismatch")
+    # Pinned Go1.27.3 load/pkg.go omits this setting under -trimpath; presence is a mismatch.
+    require("-ldflags" not in settings, "static Go metadata must omit -ldflags under -trimpath")
     expected = {"GOOS": "darwin", "GOARCH": "arm64", "CGO_ENABLED": "1",
-                "-trimpath": "true", "-tags": "sandbox", "-buildmode": "exe",
-                "-ldflags": next(f.split("=", 1)[1] for f in bounds["build"]["flags"] if f.startswith("-ldflags="))}
+                "-trimpath": "true", "-tags": "sandbox", "-buildmode": "exe"}
     require(all(settings.get(k) == v for k, v in expected.items()), "static Go build setting mismatch")
     return {"toolchain": bounds["go"]["version"], "path": paths[0], "settings": settings, "modules": modules}
 
@@ -864,8 +898,7 @@ def execute(bounds, output, work, provenance, runner, ledger):
                 "GOMODCACHE", "GOCACHE", "GOPATH", "CC", "CXX")
     stdout, _ = runner.command("go-env", [str(go), "env", "-json", *go_keys], env)
     observed = json.loads(stdout)
-    for key in go_keys:
-        require(observed.get(key) == env[key], "effective Go environment mismatch: " + key)
+    provenance["go_environment_expected"] = validate_go_environment(observed, env)
     provenance["go_environment"] = observed
     runner.work = source
     def modules_unchanged():
@@ -882,8 +915,10 @@ def execute(bounds, output, work, provenance, runner, ledger):
     modules_unchanged()
     verify_tree(source, tree, True, bounds["upstream"]["candidate_macos_sha256"], runner.deadline)
     signed = mount / "signing" / "ipsw"
+    release_values = {"AppVersion": bounds["build"]["version"], "AppBuildCommit": bounds["build"]["commit_string"]}
     with metadata_phase(runner):
-        provenance["pre_explicit_sign"] = macho_signature(binary, limits["binary_bytes"], runner.phase_deadline)
+        provenance["pre_explicit_sign"] = macho_signature(binary, limits["binary_bytes"], runner.phase_deadline,
+                                                         release_values=release_values)
         provenance["pre_sign_build_metadata"] = go_metadata(runner.command("go-metadata-pre", [str(go), "version", "-m", str(binary)], env)[0], bounds)
         shutil.copyfile(binary, signed)
         runner.command("ad-hoc-sign", [bounds["tools"]["codesign"], *[
@@ -895,7 +930,8 @@ def execute(bounds, output, work, provenance, runner, ledger):
             "unexpected signing identity/timestamp")
         entitlements = runner.command("signature-entitlements", [bounds["tools"]["codesign"], "--display", "--entitlements", ":-", str(signed)], env)
         require(not entitlements[0].strip(), "signature entitlements must be absent")
-        provenance["post_sign"] = macho_signature(signed, limits["binary_bytes"], runner.phase_deadline, True, bounds["signing"]["identifier"])
+        provenance["post_sign"] = macho_signature(signed, limits["binary_bytes"], runner.phase_deadline,
+                                                 True, bounds["signing"]["identifier"], release_values=release_values)
         provenance["post_sign_build_metadata"] = go_metadata(runner.command("go-metadata-post", [str(go), "version", "-m", str(signed)], env)[0], bounds)
         require(provenance["pre_sign_build_metadata"] == provenance["post_sign_build_metadata"],
                 "static Go metadata changed during signing")
