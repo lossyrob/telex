@@ -1,0 +1,77 @@
+# Branch-only diagnostic for #203: named-pipe transport stress, mio differential.
+# Removed before the fix PR is marked ready; never lands on main.
+name: diag-203-pipes
+
+on:
+  push:
+    branches:
+      - lossyrob-fix-watcher-lib-harness-0xc0000409
+    paths:
+      - .github/diag-203/run-pipe-stress.ps1
+      - .github/workflows/diag-203-pipes.yml
+  workflow_dispatch:
+
+concurrency:
+  group: diag-203-pipes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    name: pipe stress (mio ${{ matrix.mio }}, shard ${{ matrix.shard }})
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        mio: ["1.2.1", "1.2.4"]
+        shard: [1, 2, 3]
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+      CARGO_PROFILE_TEST_DEBUG: "2"
+      CARGO_TERM_COLOR: never
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Evidence root
+        shell: pwsh
+        run: '"DIAG203_EVIDENCE=$env:RUNNER_TEMP\diag203-evidence" >> $env:GITHUB_ENV'
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Select mio ${{ matrix.mio }}
+        run: cargo update -p mio --precise ${{ matrix.mio }}
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Prebuild workspace tests
+        run: cargo test --workspace --no-run
+
+      - name: Configure and verify fail-fast capture
+        shell: pwsh
+        run: .github/diag-203/setup-capture.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
+
+      - name: Stress named-pipe transport tests
+        shell: pwsh
+        run: >-
+          .github/diag-203/run-pipe-stress.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
+          -Minutes 60 -Parallel 6 -Hogs 2 -Attach on -Filter "transport::"
+          -Label "pipes-mio-${{ matrix.mio }}-${{ matrix.shard }}"
+
+      - name: Analyze native dumps
+        if: always()
+        shell: pwsh
+        run: .github/diag-203/analyze.ps1 -EvidenceRoot $env:DIAG203_EVIDENCE
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag203-pipes-mio-${{ matrix.mio }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}\diag203-evidence
+          retention-days: 14
+          if-no-files-found: warn

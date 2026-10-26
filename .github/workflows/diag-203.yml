@@ -6,6 +6,8 @@ on:
   push:
     branches:
       - lossyrob-fix-watcher-lib-harness-0xc0000409
+    paths:
+      - .github/diag-203/run-workspace-loop.ps1
   workflow_dispatch:
 
 concurrency:
