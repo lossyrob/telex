@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 const MAX_REGISTRATION_FILE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Telex Watcher v2 local management and runtime host")]
+#[command(version, long_version = build_version(), about = "Telex Watcher v2 local management and runtime host")]
 pub struct Cli {
     #[arg(long, env = "TELEX_WATCHER_REGISTRY", global = true)]
     pub registry: Option<PathBuf>,
@@ -22,6 +22,40 @@ pub struct Cli {
     pub json: bool,
     #[command(subcommand)]
     pub action: Option<Action>,
+}
+
+fn build_version() -> &'static str {
+    if cfg!(all(feature = "sqlite", feature = "entra")) {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends [sqlite, postgres]; entra auth available"
+        )
+    } else if cfg!(feature = "entra") {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends [postgres]; entra auth available"
+        )
+    } else if cfg!(all(feature = "sqlite", feature = "postgres")) {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends [sqlite, postgres]; entra auth unavailable"
+        )
+    } else if cfg!(feature = "sqlite") {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends [sqlite]; entra auth unavailable"
+        )
+    } else if cfg!(feature = "postgres") {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends [postgres]; entra auth unavailable"
+        )
+    } else {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            "\nbuild: backends []; entra auth unavailable"
+        )
+    }
 }
 
 #[derive(Debug, Subcommand)]
