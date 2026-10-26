@@ -462,6 +462,68 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
 }
 
 #[test]
+fn binary_owned_stall_guidance_and_guide_share_registration_and_response_contract() {
+    let instructions = include_str!("../copilot/COPILOT.md");
+    let guide = include_str!("../docs/guide/src/guides/copilot-stalls.md");
+    let registration = |text: &str| {
+        let normalized = text.replace("\r\n", "\n");
+        normalized
+            .split("### Register the watch")
+            .nth(1)
+            .expect("registration heading")
+            .split("```powershell\n")
+            .nth(1)
+            .expect("registration template")
+            .split("```")
+            .next()
+            .expect("template closing fence")
+            .to_owned()
+    };
+    let template = registration(instructions);
+    assert_eq!(
+        template,
+        registration(guide),
+        "binary-owned instructions and guide must use the same registration"
+    );
+    for required in [
+        "schemaVersion = 2",
+        "command = @($telex, 'copilot', 'stall-detect')",
+        "intervalSeconds = $pollSeconds",
+        "pollIntervalSeconds = $pollSeconds",
+        "target = $rootAddress",
+        "groupDirectory = $groupDirectory",
+        "watcherExecutable = $watcher",
+        "watcherRegistry = $registry",
+        "graceSeconds = $graceSeconds",
+        "--registry $registry --json register $registrationFile",
+        "-Encoding utf8NoBOM",
+    ] {
+        assert!(
+            template.contains(required),
+            "registration template must preserve {required:?}"
+        );
+    }
+    assert_eq!(template.matches("backendProfile = $backendProfile").count(), 2);
+    for text in [instructions, guide] {
+        for required in [
+            "get_sessions_status",
+            "copilot.group.stalled",
+            "copilot.group.attention-needed",
+            "backgroundWork: \"unobserved\"",
+            "operator-held",
+            "inbox --all --limit 1025",
+            "ask_user",
+        ] {
+            assert!(
+                text.contains(required),
+                "stall guidance must preserve {required:?}"
+            );
+        }
+    }
+    assert!(include_str!("../docs/guide/src/SUMMARY.md").contains("guides/copilot-stalls.md"));
+}
+
+#[test]
 fn plugin_version_is_consistent_across_manifest_marketplace_and_bootstrap() {
     let manifest: Value =
         serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json");

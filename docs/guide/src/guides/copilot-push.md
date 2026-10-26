@@ -11,6 +11,10 @@ telex copilot skill
 That command is the source of truth for the Copilot path. This guide is the
 operator's overview.
 
+For a root coordinating local sessions, [group stall detection](copilot-stalls.md)
+adds an opt-in Watcher watch, planned-wait membership and a confirm-then-ring
+response when progress stops.
+
 ## Install the plugin
 
 ```sh
