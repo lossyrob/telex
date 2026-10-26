@@ -498,39 +498,26 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
 
 /// Issue #167 phase evidence for the delayed inherited writer on Windows.
 ///
-/// The writer records its PID and script-start time through atomic marker
-/// files. The test retains a query/synchronize handle (never a terminate
-/// right) so creation and exit times stay readable after the writer exits.
-/// All times share the system FILETIME clock.
+/// The writer stamps its own process creation time, script start and write
+/// completion into atomic marker files. The test reads them only after the
+/// operation has completed or has been dropped (cancelled), so no file or
+/// process query precedes cancellation. Cross-process phases use the UTC
+/// FILETIME wall clock and are not a monotonic ordering: writer stamps come
+/// from .NET `DateTime.UtcNow`, whose resolution is not verified here, and
+/// marker I/O inside the writer is an observer effect. Only the total is
+/// also measured monotonically.
 #[cfg(windows)]
 mod delayed_writer_phases {
     use std::fmt::Write as _;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::path::PathBuf;
-    use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
-    use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
-        PROCESS_SYNCHRONIZE,
-    };
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    const ZERO: FILETIME = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
+    /// 100ns intervals between 1601-01-01 and 1970-01-01.
+    const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
 
-    fn ticks(time: FILETIME) -> u64 {
-        (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
-    }
-
-    fn now() -> u64 {
-        let mut time = ZERO;
-        unsafe { GetSystemTimePreciseAsFileTime(&mut time) };
-        ticks(time)
+    fn filetime_now() -> u64 {
+        let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        UNIX_EPOCH_TICKS + since.as_secs() * 10_000_000 + u64::from(since.subsec_nanos() / 100)
     }
 
     fn span(from: Option<u64>, to: Option<u64>) -> String {
@@ -540,67 +527,38 @@ mod delayed_writer_phases {
         }
     }
 
-    fn open(pid: u32) -> Option<OwnedHandle> {
-        let handle = unsafe {
-            OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
-                0,
-                pid,
-            )
-        };
-        (handle != 0).then(|| unsafe { OwnedHandle::from_raw_handle(handle as *mut _) })
+    fn ms(duration: Duration) -> String {
+        format!("{:.1}", duration.as_secs_f64() * 1000.0)
     }
 
-    /// Creation time, and exit time once the process object is signaled.
-    fn times(handle: &OwnedHandle) -> (Option<u64>, Option<u64>) {
-        let raw = handle.as_raw_handle() as isize;
-        let (mut created, mut exited, mut kernel, mut user) = (ZERO, ZERO, ZERO, ZERO);
-        if unsafe { GetProcessTimes(raw, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
-            return (None, None);
-        }
-        let ended = unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0;
-        (Some(ticks(created)), ended.then(|| ticks(exited)))
-    }
-
-    struct Writer {
-        pid: u32,
-        script_started: u64,
-        handle: Option<OwnedHandle>,
-    }
-
-    pub struct Observer {
+    pub struct Markers {
         root: PathBuf,
-        invoked: u64,
-        writer: Option<Writer>,
     }
 
-    impl Observer {
-        pub fn new(iteration: usize) -> Self {
+    impl Markers {
+        pub fn new() -> Self {
             let root = std::env::current_dir()
                 .unwrap()
                 .join("target")
                 .join("credential-command-fixtures")
                 .join(format!(
-                    "telex-credential-delayed-writer-{}-{}-{iteration}",
+                    "telex-credential-delayed-writer-{}-{}",
                     std::process::id(),
                     telex::model::now_ms(),
                 ));
             assert!(!root.to_string_lossy().contains('\''));
             std::fs::create_dir_all(&root).unwrap();
-            Self {
-                root,
-                invoked: 0,
-                writer: None,
-            }
+            Self { root }
         }
 
-        /// Wrap the delayed writer with atomic start/written markers. The
+        /// Wrap the delayed writer with atomic started/written markers. The
         /// stdout contract is unchanged; marker failures only reach stderr.
         pub fn script(&self, body: &str) -> String {
             let root = self.root.display();
             format!(
-                "$m='{root}'; \
-                 [IO.File]::WriteAllText(\"$m\\started.tmp\", \"$PID \" + [DateTime]::UtcNow.ToFileTimeUtc()); \
+                "$m='{root}'; $s=[DateTime]::UtcNow.ToFileTimeUtc(); \
+                 $c=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc(); \
+                 [IO.File]::WriteAllText(\"$m\\started.tmp\", \"$c $s\"); \
                  [IO.File]::Move(\"$m\\started.tmp\", \"$m\\started\"); \
                  {body}; \
                  [IO.File]::WriteAllText(\"$m\\written.tmp\", [string][DateTime]::UtcNow.ToFileTimeUtc()); \
@@ -608,121 +566,105 @@ mod delayed_writer_phases {
             )
         }
 
-        pub fn invoked(&mut self) {
-            self.invoked = now();
-        }
-
-        pub fn poll(&mut self) {
-            if self.writer.is_some() {
-                return;
-            }
-            let Ok(text) = std::fs::read_to_string(self.root.join("started")) else {
-                return;
-            };
-            let mut fields = text.split_whitespace();
-            let (Some(Ok(pid)), Some(Ok(script_started))) = (
-                fields.next().map(str::parse::<u32>),
-                fields.next().map(str::parse::<u64>),
-            ) else {
-                return;
-            };
-            self.writer = Some(Writer {
-                pid,
-                script_started,
-                handle: open(pid),
-            });
-        }
-
-        pub fn report(&mut self, outcome: &str) -> String {
-            let finished = now();
-            self.poll();
+        /// Writer creation, script start and write completion stamps.
+        fn read(&self) -> (Option<u64>, Option<u64>, Option<u64>) {
+            let started = std::fs::read_to_string(self.root.join("started")).unwrap_or_default();
+            let mut fields = started.split_whitespace().map(|field| field.parse().ok());
             let written = std::fs::read_to_string(self.root.join("written"))
                 .ok()
-                .and_then(|text| text.trim().parse::<u64>().ok());
-            let invoked = Some(self.invoked);
-            let mut line = format!(
-                "[issue-167 delayed-writer phases] outcome={outcome} total_ms={}",
-                span(invoked, Some(finished)),
-            );
-            match &self.writer {
-                Some(writer) => {
-                    let (created, exited) = writer.handle.as_ref().map_or((None, None), times);
-                    let script = Some(writer.script_started);
-                    write!(
-                        line,
-                        " writer_pid={} handle_retained={} writer_exited={} \
-                         invoked_to_writer_created_ms={} writer_created_to_script_ms={} \
-                         script_to_written_ms={} written_to_writer_exit_ms={} \
-                         writer_exit_to_outcome_ms={}",
-                        writer.pid,
-                        writer.handle.is_some(),
-                        exited.is_some(),
-                        span(invoked, created),
-                        span(created, script),
-                        span(script, written),
-                        span(written, exited),
-                        span(exited, Some(finished)),
-                    )
-                    .unwrap();
-                }
-                None => line.push_str(" writer_script=unobserved"),
-            }
-            if outcome != "ok" || self.writer.is_none() {
-                write!(line, " processes={}", self.snapshot()).unwrap();
-            }
-            line
-        }
-
-        /// Shell children of this test process and PowerShell processes
-        /// created since invocation, with exit state. Observation only.
-        fn snapshot(&self) -> String {
-            let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-            if raw == INVALID_HANDLE_VALUE {
-                return format!(
-                    "snapshot-error:{:?}",
-                    std::io::Error::last_os_error().raw_os_error()
-                );
-            }
-            let snapshot = unsafe { OwnedHandle::from_raw_handle(raw as *mut _) };
-            let raw = snapshot.as_raw_handle() as isize;
-            let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-            let mut found = Vec::new();
-            let mut more = unsafe { Process32FirstW(raw, &mut entry) } != 0;
-            while more {
-                let length = entry
-                    .szExeFile
-                    .iter()
-                    .position(|unit| *unit == 0)
-                    .unwrap_or(entry.szExeFile.len());
-                let name =
-                    String::from_utf16_lossy(&entry.szExeFile[..length]).to_ascii_lowercase();
-                let candidate = (name == "cmd.exe"
-                    && entry.th32ParentProcessID == std::process::id())
-                    || name == "powershell.exe";
-                if let Some(handle) = candidate.then(|| open(entry.th32ProcessID)).flatten() {
-                    let (created, exited) = times(&handle);
-                    if created.is_some_and(|created| created >= self.invoked) {
-                        found.push(format!(
-                            "{name}:{}:parent={}:created_ms={}:exited={}",
-                            entry.th32ProcessID,
-                            entry.th32ParentProcessID,
-                            span(Some(self.invoked), created),
-                            exited.is_some(),
-                        ));
-                    }
-                }
-                more = unsafe { Process32NextW(raw, &mut entry) } != 0;
-            }
-            format!("[{}]", found.join(","))
+                .and_then(|text| text.trim().parse().ok());
+            (fields.next().flatten(), fields.next().flatten(), written)
         }
     }
 
-    impl Drop for Observer {
+    impl Drop for Markers {
         fn drop(&mut self) {
             if !std::thread::panicking() {
                 let _ = std::fs::remove_dir_all(&self.root);
             }
+        }
+    }
+
+    pub struct Clock {
+        invoked: u64,
+        started: Instant,
+    }
+
+    /// Both clocks sampled at the outcome, before any observer I/O.
+    pub struct Finished {
+        filetime: u64,
+        monotonic_total: Duration,
+        at: Instant,
+    }
+
+    impl Finished {
+        pub fn since(&self) -> Duration {
+            self.at.elapsed()
+        }
+    }
+
+    impl Clock {
+        pub fn start() -> Self {
+            Self {
+                invoked: filetime_now(),
+                started: Instant::now(),
+            }
+        }
+
+        pub fn finish(&self) -> Finished {
+            Finished {
+                filetime: filetime_now(),
+                monotonic_total: self.started.elapsed(),
+                at: Instant::now(),
+            }
+        }
+
+        /// `cancellation` carries the in-memory snapshot and drop times,
+        /// measured from the outcome, for a timed-out operation.
+        pub fn report(
+            &self,
+            markers: &Markers,
+            finished: &Finished,
+            cancellation: Option<(Duration, Duration)>,
+        ) -> String {
+            let (created, script, written) = markers.read();
+            let invoked = Some(self.invoked);
+            let outcome = Some(finished.filetime);
+            let mut line = format!(
+                "[issue-167 delayed-writer phases] outcome={} monotonic_total_ms={} \
+                 filetime_total_ms={} invoked_to_writer_created_ms={} \
+                 writer_created_to_script_ms={} script_to_written_ms={} \
+                 written_to_outcome_ms={} writer_exit=unobserved",
+                if cancellation.is_some() {
+                    "elapsed"
+                } else {
+                    "ok"
+                },
+                ms(finished.monotonic_total),
+                span(invoked, outcome),
+                span(invoked, created),
+                span(created, script),
+                span(script, written),
+                span(written, outcome),
+            );
+            if let Some((snapshot, dropped)) = cancellation {
+                write!(
+                    line,
+                    " pre_cancel_obligations_ms={} cancel_requested_ms={} markers=post_cancel_racy",
+                    ms(snapshot),
+                    ms(dropped),
+                )
+                .unwrap();
+            }
+            write!(
+                line,
+                " capture_elapsed_ms={} limits=filetime_wall_clock_not_monotonic,\
+                 writer_utcnow_resolution_unverified,writer_marker_io_observer_effect,\
+                 script_to_written_includes_configured_150ms_sleep",
+                ms(finished.since()),
+            )
+            .unwrap();
+            line
         }
     }
 }
@@ -734,132 +676,51 @@ fn emit_uncaptured(line: &str) {
     let _ = writeln!(std::io::stderr(), "{line}");
 }
 
-/// Issue #167 diagnostic sampling (diagnostic-only head): at most ten
-/// sequential iterations per test invocation on Windows, each with the
-/// unchanged five-second budget and every assertion, stopping at the first
-/// failure. New iterations are admitted only while a full budget plus capture
-/// allowance fits inside the admission cutoff; this is an admission cutoff,
-/// not an end-to-end deadline (TEST_LOCK wait, capture and asynchronous
-/// post-cancel cleanup are outside it).
-#[cfg(windows)]
-const DELAYED_WRITER_ITERATIONS: usize = 10;
-#[cfg(unix)]
-const DELAYED_WRITER_ITERATIONS: usize = 1;
-const DELAYED_WRITER_BUDGET: Duration = Duration::from_secs(5);
-const DELAYED_WRITER_CAPTURE_ALLOWANCE: Duration = Duration::from_secs(1);
-const DELAYED_WRITER_ADMISSION_CUTOFF: Duration = Duration::from_secs(40);
-const DELAYED_WRITER_LOOP_CEILING: Duration = Duration::from_secs(600);
-
-fn test_threads() -> String {
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--test-threads=") {
-            return value.to_string();
-        }
-        if arg == "--test-threads" {
-            return args.next().unwrap_or_default();
-        }
-    }
-    std::env::var("RUST_TEST_THREADS").unwrap_or_else(|_| "default".into())
-}
-
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
-    let started = Instant::now();
-    let threads = test_threads();
-    let mut completed = 0;
-    for iteration in 1..=DELAYED_WRITER_ITERATIONS {
-        let remaining = DELAYED_WRITER_ADMISSION_CUTOFF.saturating_sub(started.elapsed());
-        if remaining < DELAYED_WRITER_BUDGET + DELAYED_WRITER_CAPTURE_ALLOWANCE {
-            break;
-        }
-        let context = format!(
-            "iteration={iteration}/{DELAYED_WRITER_ITERATIONS} completed={completed} failed=1 \
-             not_started={} test_threads={threads} loop_wall_at_start_ms={} \
-             excluded=test_lock_wait,post_cancel_cleanup",
-            DELAYED_WRITER_ITERATIONS - iteration,
-            started.elapsed().as_millis(),
-        );
-        delayed_inherited_writer_once(iteration, &context).await;
-        completed += 1;
-        assert!(
-            started.elapsed() < DELAYED_WRITER_LOOP_CEILING,
-            "issue-167 sampling exceeded the ten-minute loop ceiling after {completed} completed iterations"
-        );
-    }
     #[cfg(windows)]
-    emit_uncaptured(&format!(
-        "[issue-167 delayed-writer summary] test_threads={threads} iterations_max={DELAYED_WRITER_ITERATIONS} \
-         completed={completed} failed=0 not_started={} loop_wall_ms={} admission_cutoff_ms={} \
-         excluded=test_lock_wait,post_cancel_cleanup",
-        DELAYED_WRITER_ITERATIONS - completed,
-        started.elapsed().as_millis(),
-        DELAYED_WRITER_ADMISSION_CUTOFF.as_millis(),
-    ));
-    assert!(completed > 0, "no delayed-writer iteration was admitted");
-}
-
-async fn delayed_inherited_writer_once(iteration: usize, context: &str) {
-    #[cfg(not(windows))]
-    let _ = iteration;
-    #[cfg(windows)]
-    let mut phases = delayed_writer_phases::Observer::new(iteration);
+    let markers = delayed_writer_phases::Markers::new();
     #[cfg(windows)]
     let command = format!(
         "start /b {}",
-        encoded_powershell(&phases.script(
+        encoded_powershell(&markers.script(
             "Start-Sleep -Milliseconds 150; [Console]::Out.Write('  delayed-non-secret  ')",
         ))
     );
     #[cfg(unix)]
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
     let profile = profile(&command);
-    let operation = pg_connect_config(&profile);
-    tokio::pin!(operation);
-    // Same five-second budget as tokio::time::timeout (the operation is polled
-    // first), but the pending operation stays alive until phase evidence and
-    // owned obligations are recorded, before cancellation runs.
-    let deadline = tokio::time::Instant::now() + DELAYED_WRITER_BUDGET;
+    // Boxed so a timed-out operation is dropped (cancelled) immediately after
+    // an in-memory obligation snapshot, before any observer file I/O.
+    let mut operation = Box::pin(pg_connect_config(&profile));
     #[cfg(windows)]
-    phases.invoked();
-    let outcome = loop {
-        tokio::select! {
-            biased;
-            result = &mut operation => break Some(result),
-            _ = tokio::time::sleep_until(deadline) => break None,
-            _ = tokio::time::sleep(Duration::from_millis(5)) => {
-                #[cfg(windows)]
-                phases.poll();
-            }
-        }
-    };
+    let clock = delayed_writer_phases::Clock::start();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), &mut operation).await;
     #[cfg(windows)]
-    let report = format!(
-        "{} iteration={iteration}",
-        phases.report(if outcome.is_some() { "ok" } else { "elapsed" })
-    );
-    #[cfg(unix)]
-    let report = String::new();
-    let Some(result) = outcome else {
+    let finished = clock.finish();
+    let Ok(result) = outcome else {
         let obligations = telex::profiles::credential_command_obligations();
+        #[cfg(windows)]
+        let snapshot = finished.since();
+        drop(operation);
+        #[cfg(windows)]
+        let report = clock.report(&markers, &finished, Some((snapshot, finished.since())));
+        #[cfg(unix)]
+        let report = String::new();
         panic!(
             "delayed inherited writer was not collected within the 5s budget; \
-             obligations={obligations:?} {report} {context}"
+             pre_cancel_obligations={obligations:?} {report}"
         );
     };
     #[cfg(windows)]
-    emit_uncaptured(&report);
-    let (config, _) = result.unwrap_or_else(|error| panic!("{error:?} {report} {context}"));
+    emit_uncaptured(&clock.report(&markers, &finished, None));
+    let (config, _) = result.unwrap();
     assert_eq!(
         config.get_password(),
-        Some(b"delayed-non-secret".as_slice()),
-        "{report} {context}"
+        Some(b"delayed-non-secret".as_slice())
     );
-    assert!(
-        telex::profiles::credential_command_obligations().is_empty(),
-        "{report} {context}"
-    );
+    assert!(telex::profiles::credential_command_obligations().is_empty());
 }
 
 #[tokio::test]
