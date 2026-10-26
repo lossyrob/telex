@@ -445,20 +445,14 @@ Use the same Watcher registry's `health $watchId` and `attempts $watchId`:
 `diagnosticCategory: "detector-degraded"` needs inspection, not an assumption that
 someone is busy. Default management output hides detector diagnostic text.
 
-In the current bounded-inbox implementation, **more than 1024 retained inbox
-entries** for an active member, with no known unacknowledged/recent deferred
-message, prevents proving that no older deferred work exists. This can keep the
-watch degraded with no root-facing event or dedicated member hint. This limit
-applies until a release includes
-[issue #216](https://github.com/lossyrob/telex/issues/216). Acking/handling recent
-messages does not shrink retained history. Inspect that member's inbox using the
-same backend, including consumed history (`inbox --all --limit 1025`); use
+Check membership limits/format, local session ids, backend/environment access
+and the running Watcher management endpoint. Inspect the member's inbox using
+the same backend, including consumed history (`inbox --all`); use
 `export --address <addr>` to review older disposition history.
 
-While the limit prevents observation, show monitoring coverage as incomplete and
-use App inspection. Keep the existing routing identity and message history; the
-product repair belongs to #216. Do not mark active work parked/done merely to
-suppress degradation.
+While observations are unavailable, show monitoring coverage as incomplete and
+use App inspection. Keep the existing routing identity and message history.
+Do not mark active work parked/done merely to suppress degradation.
 
 The [group stall guide](https://github.com/lossyrob/telex/blob/main/docs/guide/src/guides/copilot-stalls.md)
 has a member-update example and the root's status-view checklist.

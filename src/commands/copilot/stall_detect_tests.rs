@@ -635,6 +635,13 @@ async fn long_inbox_history_observes_old_deferred_work_and_evaluates_normally_wi
     observations[0].wake_sources = Some(wakes);
     let state = quiet_state(&observations);
     assert_eq!(run(61, state, &observations).outcome, Outcome::Event);
+    observations[0].session = observation("a", SessionState::Unknown).session;
+    let advisory = run(0, Value::Null, &observations);
+    assert_eq!(advisory.outcome, Outcome::Event);
+    assert_eq!(
+        advisory.event.unwrap().kind,
+        "copilot.group.attention-needed"
+    );
     drop(readonly);
     assert_eq!(std::fs::read(path).unwrap(), before);
 }
