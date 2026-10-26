@@ -764,7 +764,7 @@
       "status": "in-progress",
       "decisionState": "accepted",
       "rationale": "Cargo identifies the affected Watcher library harness, not a culprit component or test. sourceNodeId watcher-runtime-core marks crate scope only; it is not causal attribution or a new dependency. This is separate from #166 command-child exits and the external Local signatures record.",
-      "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. No retry, waiver or flake exception. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203.",
+      "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. Same-head failed-job CI reruns are allowed after existing-tracker run/job/test retention; green exact-head reruns satisfy CI, red merges remain forbidden, and repeated same-test failure is a finding. This supersedes only the earlier no-retry/flake-exception clause for CI reruns, not hosted-only runtime or required checks. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203.",
       "dispositionAuthority": "Campaign original direction toolu_01YYygb1QTgk6ahpmW3XrMxw is confirmed by Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c in actual correction toolu_01JVjJSa3b4msyzxVzPYAHQU, which supplies the canonical register text and identifies the earlier confirmation as a reconstruction. It authorized one immediate #203 owner. Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports actual launch and directs this owner/status recording in toolu_011KH1FEA1Js2QGRAao8jtL6. The original unassigned evidence-routing disposition remains historical below.",
       "evidence": [
         {
@@ -1095,6 +1095,38 @@
         },
         "scope": "Hosted-only diagnosis and repair of the #203 Watcher library-test 0xc0000409 failure, beginning with public CI evidence. No retry, waiver or flake exception; PR closes #203. Coordinate with Local rather than duplicate only if evidence establishes the same defect as #166. No workstation PageHeap, WER, debugger or system-state changes.",
         "conservation": "11 records/21 Watcher nodes and all ten other records remain exact. Entire Local tree, 48 records/27 nodes, both graphs, all #166 qualifications and both pending #193/#198 product-repair-merge wakes remain exact. No graph node, edge or #198/#202 relationship is added."
+      },
+      "sameHeadRerunAndSentinelPolicyQualification": {
+        "kind": "campaign-directed-same-head-ci-reruns-and-existing-sentinel-scope",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01BAMphx5UxVR6KEHAWxh5Ud",
+          "operatorDirectiveVerbatim": "That seems like a bad rule. \"no reruns\" doesn't make sense. Remove that rule. Reruns are fine. We need a separate session to investigate the flaky tests and windows environrment, and decide what the best approach is there. perhaps something for the dedicated integration session"
+        },
+        "rules": {
+          "sameHeadCiReruns": "Failed CI jobs may rerun at the unchanged head after recording run, job and test on the existing tracker or discovered-work record. A green rerun at that exact head satisfies CI; merging red remains forbidden. Repeated failure of the same test across reruns is a finding to report, not noise or permission to weaken a check.",
+          "supersession": "The prior #167 and #203 no-retry/flake-exception scope clauses are superseded only for these same-head CI reruns. All prior failures, observations and scope statements remain history; a green rerun is not a causal fix, repair acceptance or debt clearance. No cosmetic-head retry, waived/skipped/weakened required check, local runtime or product retry weakening is authorized.",
+          "sentinel": {
+            "sessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "authority": "Campaign assigns the existing test sentinel the cross-family Windows flake and environment investigation and the approach decision, amending R15 for this purpose. This records the assignment, not a new session launch, new implementation owner or evidence of execution or a recommendation.",
+            "deferredDecisions": "#167 B/C and #175/LockFileEx-33 staffing are deferred to the sentinel's recommendation. #167 remains held with no merge; both unstaffed candidates remain unstaffed. No recommendation, staffing or repair outcome is inferred."
+          },
+          "planningCommit": {
+            "commit": "74721a829f1dda93d1d2acc869a60fa2266c45f1",
+            "repositoryKind": "operator private planning repository",
+            "meaning": "Campaign process-document change to the owner guide and merge-gate charter; not a telex main commit or product merge. Only the operator directive and rule summary are projected here, not private planning-document content."
+          },
+          "conservation": "No new observation, candidate, node, graph edge, implementation owner, scheduler or wake. Existing #167/#203 repair ownership, candidate dispositions, statuses, attention, dependencies, design links and all evidence/history remain exact. No CI result, #166 debt clearance or causality, #167/#203/#207 acceptance, release, hardening or workstation-freeze credit. Recording does not delay existing owners, reruns or the sentinel."
+        },
+        "scope": "#203 same-head CI rerun clause superseded only; existing repair owner, in-progress status, public-record-only/hosted-only scope and outside-graph disposition unchanged.",
+        "historicalCurrentFields": {
+          "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. No retry, waiver or flake exception. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203."
+        },
+        "provenance": {
+          "directionReceipt": "rerun-policyv4-campaign-direction.json",
+          "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
+        },
+        "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
       }
     }
   ]

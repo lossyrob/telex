@@ -2703,3 +2703,46 @@ Bounds remain finite; a genuinely oversized projected result fails explicitly
 with existing fixed-ID, filter, or history-limit narrowing guidance. Results
 are not silently truncated, and a response failure never reruns or rolls back
 an admitted mutation.
+
+## 0056 - Copilot stall detection uses a binary-owned conservative local-log classifier
+
+- **Date:** 2026-10-25
+- **Status:** Accepted
+
+**Context.** A group of Copilot CLI sessions can stop progressing with no wake
+source. The operator accepted the group-stall design in
+[issue #197](https://github.com/lossyrob/telex/issues/197). Copilot's local event
+log is private and undocumented; assistant turn end occurs per model call and
+does not prove that the session stopped.
+
+**Decision.** A shared classifier ships as `telex copilot session-state` in the
+binary and reads only a fixed 256 KiB suffix of one same-user local session log.
+It returns busy, idle, waiting-on-operator, not-loaded or unknown, plus a safe
+reason and the latest non-accounting activity id/timestamp. Only a successful
+root agentStop hook explicitly allowing the stop establishes idle. Unknown
+never establishes idle. The accepted design, exact evidence rules and
+root-confirmation flow are in [copilot-session-stalls.md](copilot-session-stalls.md).
+The later group detector uses ordinary Watcher v2 registration, root-owned
+membership and opaque episode state; neither classifier nor detector changes
+Watcher runtime semantics.
+
+**Consequences.** A format repair is released once in the binary rather than
+copied into agent-authored scripts. Bounded reads can lose evidence and return
+unknown. A one-time sample of 20 local tails returned 7 unknown (all unsupported
+events, none insufficient-evidence at the bound), not a fleet coverage claim.
+A real async-shell probe completed its log tool call at launch, so unmatched
+tool starts do not inventory all background work; background-agent semantics
+were not observed in the sample. No tool-result-text heuristic is introduced.
+Detector wake-source completeness requires separate evidence, and roots
+confirm through the App before acting. This observation path is read-only,
+same-machine/same-user, and excludes remote/cloud sessions.
+
+The successful allowing root stop is assumed to end the agent loop; that
+producer guarantee is unverified, and overlapping hooks and producer scheduling
+were not observed. The
+[review clarification](https://github.com/lossyrob/telex/pull/202#issuecomment-6403276332)
+retains decisive allowing-stop evidence even in front-clipped suffixes. A
+retained stop start explicitly invalidated by newer root activity or a
+lifecycle transition cannot later establish idle. This bounded hardening
+does not reconstruct pending starts outside the suffix or claim verified
+producer ordering.

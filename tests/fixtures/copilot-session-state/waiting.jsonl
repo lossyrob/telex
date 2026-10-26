@@ -1,0 +1,3 @@
+{"type":"tool.execution_start","id":"ask-start","timestamp":"2026-10-25T20:00:00Z","data":{"toolCallId":"ask-1","toolName":"ask_user","arguments":{"question":"Synthetic question"}}}
+{"type":"tool.execution_start","id":"shell-start","timestamp":"2026-10-25T20:00:01Z","data":{"toolCallId":"shell-1","toolName":"powershell"}}
+{"type":"tool.execution_complete","id":"shell-end","timestamp":"2026-10-25T20:00:02Z","data":{"toolCallId":"shell-1","success":true,"result":{"content":"Synthetic result"}}}
