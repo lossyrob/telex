@@ -109,6 +109,76 @@ These local checks do not constitute owner replay, whole-source approval or
 native build proof; previous blocked source packets and receipts remain
 immutable history.
 
+## Public no-tags configuration and static import closure
+
+Disposition [6426580271](https://github.com/lossyrob/telex/issues/172#issuecomment-6426580271)
+removes only `-tags=sandbox` from the build arguments. The public frozen tree
+does not contain the closed-source `pkg/sandbox` imports selected by that
+tag. No missing source or module is added. Every other flag, F1/F2, patch,
+toolchain, image recipe and numeric limit remains unchanged.
+
+Metadata requires **absent `-tags`**, even an empty value.
+[Pinned Go load/pkg.go:2492-2493](https://github.com/golang/go/blob/2aae1000ea1d4b28923b96db28acf4e3b99d6aff/src/cmd/go/internal/load/pkg.go#L2492-L2493)
+appends this setting only when `cfg.BuildContext.BuildTags` is nonempty.
+This is source reasoning, not a Go invocation.
+
+The standard-library-only `static_imports.py` runs after exact source-tree
+verification, before patching, compiler acquisition or module transfers.
+It checks the frozen request plan against go.sum before using it. It records
+`import-closure.json` under the existing evidence caps, then rejects any
+unsatisfied check. Its source and tests are part of the explicit source closure.
+Neither the checker nor its fixtures execute upstream source, `go list`, a
+toolchain or the decoder.
+
+The checker follows reachable main-module imports from `cmd/ipsw` for
+darwin/arm64, cgo, gc, Go 1.1-1.27 and arm64.v8.0 with no custom tags.
+It evaluates filename suffixes, modern Boolean `//go:build` and legacy
+`// +build` expressions; modern constraints take precedence. Test/hidden files
+are excluded. Package/import prefixes support comments, aliases, raw and
+unescaped interpreted import strings. Unsupported escapes, malformed prefix
+syntax, misplaced/unseparated constraints, experiment-tag uncertainty, nested
+modules, vendor trees, module replacements/exclusions, missing/mixed packages,
+unknown imports and main-module cycles fail closed. All loaded source bytes
+must match the manifest's size and Git blob identity within existing source
+byte/deadline limits. Reads use expected size plus one, not unbounded reads.
+
+Each external import must match a module path in the frozen plan on a path
+boundary and a required version in frozen go.mod; the longest matching module,
+required version and all planned versions are recorded.
+This is module membership, not proof that the package exists inside that
+module or that MVS selects a particular version. Standard-library names are
+classified by an explicit allowlist whose names were checked against source
+directories in the hash-verified pinned Go archive. This is not target-specific
+standard-library compilation proof. `C` is the cgo pseudo-import, not an
+external module. Repeated import paths under aliases
+collapse to one graph edge; import-name binding is not checked. The report
+explicitly disclaims external transitive closure, compilation/type/link correctness, cgo libraries, assembly, embed
+resources, generated code and runtime behavior. Unsupported standard-library
+names fail rather than being silently treated as a planned dependency.
+
+Tiny guarded fixtures include the historical sandbox-tagged configuration
+failing on `github.com/blacktop/ipsw/pkg/sandbox`, no-tags selection of the
+public stub, and a real controller-to-checker failure before compiler fetch.
+The preparation replay also checked all 1665 frozen source identities before
+using the owner-rehydrated inert bytes. Its no-tags graph contains 148 reachable
+main-module packages, 717 selected Go files and 2335 import edges. The 119 unique
+external imports map to 75 required/planned modules. The full historical
+sandbox graph fails on missing `pkg/sandbox/graph`. These are parsed-source
+results, not compilation proof. Source and Go archives were acquired once by
+the owner under [6426649700](https://github.com/lossyrob/telex/issues/172#issuecomment-6426649700);
+the helper did not fetch inputs. No upstream bytes are vendored or committed.
+
+**Closed-source sandbox features are absent.** No release feature equivalence
+or whole-binary equivalence is claimed. The owner must establish separately
+that the frozen component commands and patched GetBuildInfo use do not depend
+on sandbox-tagged code; a dependency returns to design, not source acquisition.
+The owner's separate sealed purpose proof reports that `ipsw version` and
+`ipsw ota patch rsr --cryptex` use untagged command registration and the
+darwin/cgo GetBuildInfo/RawImagePatch route, not sandbox features. Root still
+registers the public `sb` group. That selected-route proof does not replace the
+whole-root graph check or claim a complete runtime call graph. Both exact
+attributed receipts are included in the preparation packet before source review.
+
 ## Controller inputs and trusted imports
 
 Under dispositions 6423437079 and 6423574173, the first statement of both `main`
@@ -194,12 +264,16 @@ attach failure and execute failure. No claim is made that Go opens no sockets.
 
 Synthetic tests use mocked processes, HTTP transports and filesystem metadata.
 Do not run `build.py` locally. Review `bounds.json` and the exact source packet
-before any hosted action. BUILDs 40369808285 and 40382992497 were consumed;
+before any hosted action. BUILDs 40369808285, 40382992497 and 40392033737 were consumed;
 retries remain zero.
 The independent actual verdict
 [6425115159](https://github.com/lossyrob/telex/issues/172#issuecomment-6425115159)
 is FINAL CHANGES-REQUIRED for 40382992497, with failure-data conservation
 passing and no material field-report contradiction. It is not pending or
-authority for this child. Next is whole owner replay/integration, then fresh
+authority for this child. The later actual verdict
+[6426534955](https://github.com/lossyrob/telex/issues/172#issuecomment-6426534955)
+is also FINAL CHANGES-REQUIRED for failed compilation in 40392033737, with
+conservation passing and no material field-report contradiction. Next is
+whole owner replay/integration, then fresh
 whole-source independent APPROVE, a NEW finite-attempt disposition and a NEW
 genuine owner freeze. This local correction authorizes none. HOLD is unchanged.

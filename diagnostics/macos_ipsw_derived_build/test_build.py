@@ -612,7 +612,7 @@ def synthetic_macho(identifier, flags=2, entitlements=False, cpu=0x100000C):
 def synthetic_go_metadata():
     return (b"file: go1.27.3\npath\tgithub.com/blacktop/ipsw/cmd/ipsw\n"
             b"build\tGOOS=darwin\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=1\n"
-            b"build\t-trimpath=true\nbuild\t-tags=sandbox\nbuild\t-buildmode=exe\n")
+            b"build\t-trimpath=true\nbuild\t-buildmode=exe\n")
 
 
 def synthetic_release_binary(overrides=None):
@@ -668,7 +668,7 @@ class SignatureOutputTests(unittest.TestCase):
                     out.write(name, raw)
             self.assertEqual((root / "raw.bin").read_bytes(), b"1234")
         rows, identity = b.closure(BOUNDS)
-        self.assertEqual(len(rows), 13)
+        self.assertEqual(len(rows), 14)
         self.assertEqual(identity, b.digest(b.encoded(rows)))
         self.assertIn("diagnostics/macos_sw_vers/diagnostic.py", [r["file"] for r in rows])
 
@@ -1816,7 +1816,7 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
              "GOFLAGS", "GOPROXY", "GOSUMDB", "GOVCS", "GOPRIVATE", "GONOPROXY", "GONOSUMDB", "GOINSECURE",
              "GOMODCACHE", "GOCACHE", "GOPATH", "CC", "CXX"],
             [go, "mod", "download", "-json"], [go, "mod", "verify"],
-            [go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-p=2", "-tags=sandbox",
+            [go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-p=2",
              ldflags, "-o=" + str(unsigned), "./cmd/ipsw"],
             [go, "mod", "verify"], [go, "version", "-m", str(unsigned)],
             ["/usr/bin/codesign", "--force", "--sign", "-", "--timestamp=none", "--identifier",
@@ -1830,7 +1830,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
 
     @contextmanager
     def recipe(self, fail_label=None, go_env_mismatch=False, fail_fetch=False,
-               go_env_override=None, go_env_omit=None, pre_values=None, post_values=None, metadata_ldflags=None):
+               go_env_override=None, go_env_omit=None, pre_values=None, post_values=None, metadata_ldflags=None,
+               import_tags=(), metadata_tags=None):
         with tempfile.TemporaryDirectory() as temporary:
             work, evidence = Path(temporary) / "work", Path(temporary) / "evidence"
             volume = work / "volume"
@@ -1848,6 +1849,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             environment["GH_TOKEN"] = "CONTROLLER_ONLY_TOKEN"
             original_init, original_stat, original_resolve = b.Runner.__init__, Path.stat, Path.resolve
             original_hash = b.file_hash
+            original_import_check = b.static_imports.check_tree
+            import_files = synthetic_import_files()
 
             def init(runner, *args, **kwargs):
                 original_init(runner, *args, **kwargs)
@@ -1881,7 +1884,20 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                     (destination / "go.mod").write_bytes((HERE / "inputs" / "go.mod").read_bytes())
                     (destination / "go.sum").write_bytes((HERE / "inputs" / "go.sum").read_bytes())
                     (destination / "LICENSE").write_bytes(b"synthetic-license")
+                    for name, raw in import_files.items():
+                        if name != "go.mod":
+                            target = destination.joinpath(*name.split("/"))
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(raw)
                 return 0
+
+            def import_check(source, tree, requests, maximum, deadline):
+                events.append("static-import-closure")
+                files = dict(import_files, **{"go.mod": (source / "go.mod").read_bytes()})
+                self.assertEqual(tree["commit"], BOUNDS["upstream"]["commit"])
+                self.assertEqual(len(requests), 1856)
+                return original_import_check(source, synthetic_import_manifest(files), requests,
+                                             maximum, deadline, import_tags)
 
             def fetch(fetcher, url, destination, kind, hosts, file_limit=None):
                 events.append("fetch-" + kind)
@@ -1936,6 +1952,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                     stdout = synthetic_go_metadata()
                     if metadata_ldflags is not None and label == metadata_ldflags[0]:
                         stdout += ("build\t-ldflags=" + json.dumps(metadata_ldflags[1]) + "\n").encode()
+                    if metadata_tags is not None and label == metadata_tags[0]:
+                        stdout += ("build\t-tags=" + json.dumps(metadata_tags[1]) + "\n").encode()
                 elif label == "ad-hoc-sign" and post_values is not None:
                     (volume / "signing" / "ipsw").write_bytes(synthetic_release_binary(post_values))
                 elif label == "signature-display": stderr = b"Signature=adhoc\nTimestamp=none\n"
@@ -1974,6 +1992,7 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                     {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}))
                 patches.enter_context(patch.object(b, "unpack", side_effect=unpack))
                 patches.enter_context(patch.object(b, "verify_tree"))
+                patches.enter_context(patch.object(b.static_imports, "check_tree", side_effect=import_check))
                 patches.enter_context(patch.object(b, "archive_bytes", return_value=b"synthetic-archive"))
                 patches.enter_context(patch.object(b.urllib.request, "build_opener", return_value=object()))
                 patches.enter_context(patch.object(b.Fetcher, "fetch", fetch))
@@ -2008,6 +2027,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                    "command_records": records, "command_streams": saved_streams,
                    "manifest_valid": LateRetentionTests().manifest_valid(evidence),
                    "export_present": (evidence / "ipsw").exists(),
+                   "import_report": json.loads((evidence / "import-closure.json").read_bytes())
+                       if (evidence / "import-closure.json").exists() else None,
                    "backing_retained": (work / "build.dmg").is_file()}
 
     def test_all_23_actual_Runner_invocations_have_exact_independent_maps_and_order(self):
@@ -2237,7 +2258,9 @@ class SourceSurfaceTests(unittest.TestCase):
             import_calls.extend(ast.unparse(n.func) for n in ast.walk(node) if isinstance(n, ast.Call))
         self.assertEqual(sorted(import_calls), sorted([
             "Path(__file__).resolve", "Path", "importlib.util.spec_from_file_location",
-            "importlib.util.module_from_spec", "SPEC.loader.exec_module", "re.compile"]))
+            "importlib.util.module_from_spec", "SPEC.loader.exec_module", "re.compile",
+            "importlib.util.spec_from_file_location", "importlib.util.module_from_spec",
+            "IMPORT_SPEC.loader.exec_module"]))
         self.assertIn("import hashlib", source)
         self.assertIn("import http.client", source)
         self.assertIn("import urllib.request", source)
@@ -2280,6 +2303,205 @@ class EmptyImageRecipeTests(unittest.TestCase):
             self.assertFalse(any(event.startswith("fetch-") for event in result["events"]))
             self.assertEqual(result["provenance"]["failure"]["message"], "command failed; no retry: image-create")
             self.assertFalse(result["provenance"]["output_binary_accepted"])
+
+
+def synthetic_import_files():
+    return {
+        "go.mod": b"module github.com/blacktop/ipsw\n\ngo 1.27\n",
+        "cmd/ipsw/main.go": b'package main\nimport "github.com/blacktop/ipsw/internal/public"\nfunc main() {}\n',
+        "internal/public/public.go": b'package public\nimport "fmt"\n',
+        "internal/public/sandbox.go": b'//go:build sandbox\n\npackage public\nimport "github.com/blacktop/ipsw/pkg/sandbox"\n',
+        "internal/public/stub.go": b'//go:build !sandbox\n\npackage public\n',
+    }
+
+
+def synthetic_import_manifest(files):
+    return {"files": [{"path": name, "bytes": len(raw), "mode": "100644",
+                       "sha": hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()}
+                      for name, raw in sorted(files.items())]}
+
+
+class StaticImportTests(unittest.TestCase):
+    def check(self, files=None, requests=(), tags=(), maximum=4194304, deadline=float("inf")):
+        files = synthetic_import_files() if files is None else files
+        return b.static_imports.analyze(synthetic_import_manifest(files), requests,
+                                       lambda path, size: files[path], maximum, deadline, tags)
+
+    def test_untagged_closure_and_old_sandbox_configuration_negative(self):
+        good = self.check()
+        self.assertEqual(good["status"], "static-closure-only")
+        self.assertEqual(good["packages"], ["cmd/ipsw", "internal/public"])
+        self.assertEqual(good["standard_imports"], ["fmt"])
+        self.assertEqual(good["errors"], [])
+        bad = self.check(tags=("sandbox",))
+        self.assertEqual(bad["status"], "rejected")
+        self.assertIn("missing main-module package: github.com/blacktop/ipsw/pkg/sandbox",
+                      bad["errors"][0]["message"])
+        self.assertTrue(any(row["import"].endswith("/pkg/sandbox") for row in bad["edges"]))
+
+    def test_boolean_release_platform_and_cgo_constraints(self):
+        for condition, expected in (
+            ("darwin && arm64 && cgo && gc && unix && go1.27 && arm64.v8.0", True),
+            ("!(linux || windows) && (cgo || sandbox)", True),
+            ("sandbox || !darwin", False), ("go1.28", False),
+            ("arm64.v8.1", False), ("ios", False), ("race || msan || asan", False),
+            ("linux || darwin && !cgo", False), ("!(!darwin)", True),
+        ):
+            with self.subTest(condition=condition):
+                self.assertEqual(b.static_imports.expression(condition, ()), expected)
+        for condition in ("", "darwin &&", "(darwin", "darwin)", "darwin arm64",
+                          "darwin & arm64", "goexperiment.greenteagc", "boringcrypto"):
+            with self.subTest(condition=condition), self.assertRaises(b.static_imports.Error):
+                b.static_imports.expression(condition, ())
+
+    def test_legacy_constraints_and_modern_precedence(self):
+        for header, selected in (
+            ("// +build darwin,arm64 linux\n// +build cgo\n\n", True),
+            ("// +build !darwin\n\n", False),
+            ("//+build !darwin\n\n", False),
+            ("//go:build darwin\n// +build linux\n\n", True),
+        ):
+            with self.subTest(header=header):
+                self.assertEqual(b.static_imports.source_prefix((header + "package p\n").encode(), ())["enabled"], selected)
+        for header in ("//go:build darwin\n", "// +build darwin\n", "//go:build darwin\n//go:build arm64\n\n",
+                       "// +build darwin,,arm64\n\n"):
+            with self.subTest(header=header), self.assertRaises(b.static_imports.Error):
+                b.static_imports.source_prefix((header + "package p\n").encode(), ())
+
+    def test_filename_filters_and_test_or_hidden_packages(self):
+        for name, selected in (("a_darwin_arm64.go", True), ("a_linux_arm64.go", False),
+                               ("a_darwin_amd64.go", False), ("a_arm64.go", True),
+                               ("a_ios.go", False), ("darwin.go", True), ("a_test.go", False),
+                               ("_ignored.go", False), (".ignored.go", False), ("a.s", False)):
+            with self.subTest(name=name):
+                self.assertEqual(b.static_imports.filename_enabled(name), selected)
+        files = synthetic_import_files()
+        files["cmd/ipsw/unused_test.go"] = b'package main\nimport "unknown.example/no"\n'
+        files["cmd/ipsw/unused_windows.go"] = b'package main\nimport "unknown.example/no"\n'
+        self.assertEqual(self.check(files)["status"], "static-closure-only")
+        files["cmd/ipsw/main.go"] = b'package main\nimport "github.com/blacktop/ipsw/testdata/p"\n'
+        self.assertEqual(self.check(files)["status"], "rejected")
+
+    def test_import_prefix_handles_aliases_comments_raw_strings_and_blocks(self):
+        raw = b'''/* import "fake" */\npackage p\nimport (\n _ "net/http/pprof"; . `fmt`\n x /* comment */ "example.org/x" // comment\n)\nimport "C"\nfunc f() { println("not parsed") }\n'''
+        parsed = b.static_imports.source_prefix(raw, ())
+        self.assertEqual(parsed["imports"], ["net/http/pprof", "fmt", "example.org/x", "C"])
+        for raw in (b'package p\nimport "x\\x2fy"\n', b'package p\nimport "../x"\n',
+                    b'package p\nimport ("fmt" "os")\n',
+                    b'package p\nimport ("fmt"\n', b'/* no close', b'package p import "fmt"\n',
+                    b'package p\n//go:build darwin\nimport "fmt"\n', b'package p\nimport "\xff"\n'):
+            with self.subTest(raw=raw), self.assertRaises((b.static_imports.Error, UnicodeError)):
+                b.static_imports.source_prefix(raw, ())
+        self.assertEqual(b.static_imports.source_prefix(
+            b'package p\nimport ("fmt"; other "fmt")\n', ())["imports"], ["fmt"])
+
+    def test_external_module_membership_uses_longest_boundary_prefix(self):
+        files = synthetic_import_files()
+        files["internal/public/public.go"] = b'package public\nimport (\n"github.com/acme/dep/sub/api"\n"fmt"\n)\n'
+        requests = [{"module": "github.com/acme/dep", "version": "v1.0.0"},
+                    {"module": "github.com/acme/dep/sub", "version": "v1.2.0"}]
+        files["go.mod"] += b"\nrequire github.com/acme/dep/sub v1.2.0\n"
+        result = self.check(files, requests)
+        self.assertEqual(result["status"], "static-closure-only")
+        self.assertEqual(result["external_imports"], [{"import": "github.com/acme/dep/sub/api",
+                         "module": "github.com/acme/dep/sub", "required_version": "v1.2.0",
+                         "planned_versions": ["v1.2.0"]}])
+        without_requirement = dict(files, **{"go.mod": synthetic_import_files()["go.mod"]})
+        self.assertEqual(self.check(without_requirement, requests)["status"], "rejected")
+        for imported in ("github.com/acme/dependency/api", "stdtypo"):
+            files["internal/public/public.go"] = ('package public\nimport "' + imported + '"\n').encode()
+            failed = self.check(files, requests)
+            self.assertEqual(failed["status"], "rejected")
+            self.assertIn(imported, failed["errors"][0]["message"])
+
+    def test_missing_empty_mixed_or_main_imported_package_fails(self):
+        for kind in ("missing", "empty", "mixed", "main"):
+            with self.subTest(kind=kind):
+                files = synthetic_import_files()
+                if kind == "missing":
+                    files = {name: raw for name, raw in files.items() if not name.startswith("internal/public/")}
+                elif kind == "empty":
+                    files = {name: raw for name, raw in files.items() if not name.startswith("internal/public/")}
+                    files["internal/public/x_windows.go"] = b"package public\n"
+                elif kind == "mixed":
+                    files["internal/public/wrong.go"] = b"package wrong\n"
+                else:
+                    files["internal/public/public.go"] = b"package main\n"
+                    files["internal/public/stub.go"] = b"//go:build !sandbox\n\npackage main\n"
+                self.assertEqual(self.check(files)["status"], "rejected")
+
+    def test_cycles_fail_and_unreachable_missing_import_does_not_expand(self):
+        files = synthetic_import_files()
+        files["internal/public/public.go"] = b'package public\nimport "github.com/blacktop/ipsw/internal/second"\n'
+        files["internal/second/second.go"] = b'package second\nimport "github.com/blacktop/ipsw/internal/public"\n'
+        files["internal/unreachable/u.go"] = b'package unreachable\nimport "absent.example/x"\n'
+        result = self.check(files)
+        self.assertEqual(result["status"], "rejected")
+        self.assertIn("import cycle", result["errors"][0]["message"])
+        self.assertEqual(result["packages"], ["cmd/ipsw", "internal/public", "internal/second"])
+        files["internal/second/second.go"] = b"package second\n"
+        self.assertEqual(self.check(files)["status"], "static-closure-only")
+        self.assertTrue(any("not compilation" in risk for risk in result["residuals"]))
+
+    def test_source_identity_byte_time_and_unsupported_module_shapes_fail_closed(self):
+        files = synthetic_import_files()
+        manifest = synthetic_import_manifest(files)
+        corrupted = b.static_imports.analyze(manifest, [], lambda path, size: b"wrong", 4194304, float("inf"))
+        self.assertEqual(corrupted["status"], "rejected")
+        self.assertIn("blob mismatch", corrupted["errors"][0]["message"])
+        self.assertEqual(self.check(maximum=1)["status"], "rejected")
+        self.assertEqual(self.check(deadline=0)["status"], "rejected")
+        for name, raw in (("go.mod", b"module other\n"), ("go.mod", files["go.mod"] + b"replace a => b\n"),
+                          ("sub/go.mod", files["go.mod"]), ("vendor/a/a.go", b"package a\n")):
+            with self.subTest(name=name, raw=raw):
+                changed = dict(files)
+                changed[name] = raw
+                self.assertEqual(self.check(changed)["status"], "rejected")
+        self.assertEqual(self.check(tags=("unknown",))["status"], "rejected")
+
+    def test_tree_reader_is_bounded_and_never_runs_tools(self):
+        files = synthetic_import_files()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(b.subprocess, "Popen") as process:
+            root = Path(temporary)
+            for name, raw in files.items():
+                file = root.joinpath(*name.split("/"))
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(raw)
+            result = b.static_imports.check_tree(root, synthetic_import_manifest(files), [],
+                                                4194304, float("inf"))
+            self.assertEqual(result["status"], "static-closure-only")
+            (root / "go.mod").write_bytes(files["go.mod"] + b"x")
+            self.assertEqual(b.static_imports.check_tree(root, synthetic_import_manifest(files), [],
+                4194304, float("inf"))["status"], "rejected")
+            process.assert_not_called()
+
+    def test_actual_recipe_records_closure_before_patch_compiler_fetch_and_fails_closed(self):
+        with FullRecipeEnvironmentTests().recipe() as result:
+            self.assertEqual(result["import_report"]["status"], "static-closure-only")
+            events = result["events"]
+            self.assertLess(events.index("static-import-closure"), events.index("spawn-patch-check"))
+            self.assertLess(events.index("static-import-closure"), events.index("fetch-compiler"))
+            self.assertNotIn("-tags=sandbox", result["sequence"][14]["argv"])
+        with FullRecipeEnvironmentTests().recipe(import_tags=("sandbox",)) as result:
+            self.assertEqual(result["code"], 1)
+            self.assertEqual(result["import_report"]["status"], "rejected")
+            self.assertIn("pkg/sandbox", result["import_report"]["errors"][0]["message"])
+            self.assertNotIn("fetch-compiler", result["events"])
+            self.assertNotIn("spawn-patch-check", result["events"])
+            self.assertTrue(result["backing_retained"] and result["manifest_valid"])
+            self.assertFalse(result["export_present"])
+
+    def test_no_tags_metadata_requires_absence_even_empty_and_both_phases_fail(self):
+        for value in ("", "sandbox"):
+            with self.subTest(value=value), self.assertRaisesRegex(b.Error, "must omit -tags"):
+                b.go_metadata(synthetic_go_metadata() + ("build\t-tags=" + json.dumps(value) + "\n").encode(), BOUNDS)
+            for label in ("go-metadata-pre", "go-metadata-post"):
+                with self.subTest(value=value, label=label), FullRecipeEnvironmentTests().recipe(
+                        metadata_tags=(label, value)) as result:
+                    self.assertEqual(result["code"], 1)
+                    self.assertIn("must omit -tags", result["provenance"]["failure"]["message"])
+                    self.assertTrue(result["backing_retained"] and result["manifest_valid"])
+                    self.assertFalse(result["export_present"])
 
 
 if __name__ == "__main__":

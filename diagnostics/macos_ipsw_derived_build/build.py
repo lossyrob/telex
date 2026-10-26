@@ -30,6 +30,9 @@ ROOT = HERE.parents[1]
 SPEC = importlib.util.spec_from_file_location("bounded_github", HERE.parent / "macos_sw_vers" / "diagnostic.py")
 github = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(github)
+IMPORT_SPEC = importlib.util.spec_from_file_location("static_imports", HERE / "static_imports.py")
+static_imports = importlib.util.module_from_spec(IMPORT_SPEC)
+IMPORT_SPEC.loader.exec_module(static_imports)
 require = github.require
 Error = github.DiagnosticError
 encoded = github.encoded
@@ -768,8 +771,10 @@ def go_metadata(raw, bounds):
     require(paths == ["github.com/blacktop/ipsw/cmd/ipsw"], "static Go package path mismatch")
     # Pinned Go1.27.3 load/pkg.go omits this setting under -trimpath; presence is a mismatch.
     require("-ldflags" not in settings, "static Go metadata must omit -ldflags under -trimpath")
+    # Pinned Go1.27.3 load/pkg.go:2492-2493 records tags only for nonempty BuildTags.
+    require("-tags" not in settings, "static Go metadata must omit -tags for the no-tags build")
     expected = {"GOOS": "darwin", "GOARCH": "arm64", "CGO_ENABLED": "1",
-                "-trimpath": "true", "-tags": "sandbox", "-buildmode": "exe"}
+                "-trimpath": "true", "-buildmode": "exe"}
     require(all(settings.get(k) == v for k, v in expected.items()), "static Go build setting mismatch")
     return {"toolchain": bounds["go"]["version"], "path": paths[0], "settings": settings, "modules": modules}
 
@@ -860,6 +865,15 @@ def execute(bounds, output, work, provenance, runner, ledger):
             tree_identity(tree["files"]) == tree["tree"] == bounds["upstream"]["tree"], "frozen Git tree mismatch")
     verify_tree(source, tree, False, bounds["upstream"]["candidate_macos_sha256"], runner.deadline)
     provenance["source_tree_before"] = {"commit": tree["commit"], "tree": tree["tree"], "all_blobs_match": True}
+    plan = json.loads((HERE / bounds["module_fetch"]["plan"]).read_bytes())
+    require(plan["requests"] == request_plan((source / "go.sum").read_bytes()), "frozen request plan is not exact go.sum derivation")
+    import_report = static_imports.check_tree(source, tree, plan["requests"],
+                                              limits["source_expanded_bytes"], runner.deadline)
+    output.json("import-closure.json", import_report)
+    provenance["static_import_closure"] = {"status": import_report["status"], "errors": import_report["errors"],
+                                          "report": "import-closure.json", "compilation_proven": False}
+    require(import_report["status"] == "static-closure-only" and not import_report["errors"],
+            "static import closure rejected; no compiler fetch or build")
     patch = (HERE / "get-build-info.patch").read_bytes()
     require(len(patch) == bounds["upstream"]["patch_bytes"] and digest(patch) == bounds["upstream"]["patch_sha256"],
             "exact patch identity")
@@ -881,8 +895,6 @@ def execute(bounds, output, work, provenance, runner, ledger):
     sum_raw = (source / "go.sum").read_bytes()
     require(digest(sum_raw) == bounds["upstream"]["go_sum_sha256"] and
             digest((source / "go.mod").read_bytes()) == bounds["upstream"]["go_mod_sha256"], "module graph mismatch")
-    plan = json.loads((HERE / bounds["module_fetch"]["plan"]).read_bytes())
-    require(plan["requests"] == request_plan(sum_raw), "frozen request plan is not exact go.sum derivation")
     for item in plan["requests"]:
         destination = mount / "proxy" / item["relative_path"]
         fetcher.fetch(item["url"], destination, "module", bounds["module_fetch"]["redirect_hosts"])

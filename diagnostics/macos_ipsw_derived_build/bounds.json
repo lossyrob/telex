@@ -87,7 +87,7 @@
   },
   "build": {
     "flags": [
-      "-mod=readonly", "-trimpath", "-buildvcs=false", "-p=2", "-tags=sandbox",
+      "-mod=readonly", "-trimpath", "-buildvcs=false", "-p=2",
       "-ldflags=-s -w -X github.com/blacktop/ipsw/cmd/ipsw/cmd.AppVersion=3.1.739-telex-swvers-b401e5777696 -X github.com/blacktop/ipsw/cmd/ipsw/cmd.AppBuildCommit=1f8b657858d7510219f59bf9ba183bf4c0a59104+telex-b401e5777696",
       "-o={output}/ipsw", "./cmd/ipsw"
     ],
@@ -147,6 +147,7 @@
     "diagnostics/macos_ipsw_derived_build/README.md",
     "diagnostics/macos_ipsw_derived_build/bounds.json",
     "diagnostics/macos_ipsw_derived_build/build.py",
+    "diagnostics/macos_ipsw_derived_build/static_imports.py",
     "diagnostics/macos_ipsw_derived_build/test_build.py",
     "diagnostics/macos_ipsw_derived_build/get-build-info.patch",
     "diagnostics/macos_ipsw_derived_build/inputs/go.mod",
@@ -158,8 +159,8 @@
     ".github/workflows/macos-ipsw-derived-build.yml",
     "diagnostics/macos_sw_vers/diagnostic.py"
   ],
-  "import_closure": "Python standard library plus exact unchanged a303 diagnostic.py for bounded authenticated GitHub no-follow reads only. No full-component/provider/FFI imports.",
+  "import_closure": "Python standard library, the source-only static_imports.py checker and exact unchanged a303 diagnostic.py for bounded authenticated GitHub no-follow reads only. No full-component/provider/FFI imports.",
   "artifact_retention_days": 30,
   "later_component": "Separate source change binds retained post-sign SHA/version/build strings, not upstream release pin. One separately frozen arm64 two-context attempt while artifact retained, zero retries; trace remains an outcome to verify.",
-  "not_claimed": ["original failure cause", "upstream binary identity", "whole-binary equivalence", "reproducibility", "actual ipsw execution/library loading", "socket isolation", "all host writes bounded", "live reserve floor", "native/physical/admission/product readiness", "HOLD clearance"]
+  "not_claimed": ["original failure cause", "upstream binary identity", "whole-binary equivalence", "release feature equivalence; closed-source sandbox features absent", "static import closure proves compilation", "reproducibility", "actual ipsw execution/library loading", "socket isolation", "all host writes bounded", "live reserve floor", "native/physical/admission/product readiness", "HOLD clearance"]
 }
