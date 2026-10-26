@@ -1755,3 +1755,38 @@ Capability-based delivery guidance replaces the CLI-only /experimental assumptio
 
 **Post-merge obligations (owner a78ad6b1):** exact-main CI and Docs at the merge commit, field report on #223. No #224 repair, #201 acceptance, or App wake/bridge-load proof is credited by this merge.
 ```
+
+
+## #224 actual owner, implementation phase and additive identity correction (2026-10-26)
+
+Local reports the existing owner `769a992c-7319-4d2e-b93a-4977094d7715` launched at `2026-10-26T19:59:29.847Z` after verified canonical publication `51a94f8ef0126e74f89f0f4b7fcd6201d718b793`. The complete supplied controller is retained in the same ledger row, replacing only its private App-observation path with checkout name `lossyrob-crispy-giggle`; restoring that one value recovers the full original object. Interactive was requested, with null model/reasoning/context overrides, no base override and no idle notification. Local-reported busy for fourteen seconds/no input is a temporal observation, not current activity, effective capacity or current owner checkout HEAD/cleanliness. The supplied controller is not a raw create_session result or full kickoff payload. No recipient/private referenced path, runtime or actual delivery was inspected here.
+
+The same node and row become in-progress, attention watch unchanged. Local reports Campaign `toolu_01QLkaykjbzhsK7TeNYSpRyS` accepted the evidence-only diagnosis and selected path (a): one closing #224 PR fixing shared-client contention with phase-specific exhaustion diagnostics, retaining the 3000 ms grace. This is a Local-attributed Campaign phase decision, not independently captured raw Campaign authority. No second family, row, node, tracker, occurrence or implementation worker is created. The complete original planned/unassigned snapshot and all existing authority/history remain retained; recording does not hold the owner work.
+
+The diagnosis packet remains reported as 17,464 bytes / `10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db`. Sufficient isolated contention and a distinct slow-credential alternative do not establish the historical production cause or calibrated production replay. Failed setup assertions and partial-run limits remain evidence, not erased by later progress. The 12,669-byte cleanup command/timestamp packet / `b7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029` does not independently establish external-command outcomes: actual Docker stop and resource absence remain owner-attested. This reconciler read no diagnosis, manifest, nineteen-file set, command transcript, experiment or production evidence. Local reports its byte-custody checks; no experiment/production/cleanup replay is inferred.
+
+The original diagnosis owner_session `0a11050e-77b7-4b4d-8eed-f8ac937e9957` stays unchanged. Local reports independently querying both IDs and receiving canonical/active owner `769a992c-7319-4d2e-b93a-4977094d7715`, same checkout/current branch and Local creator. The workspace alias is not another owner. The complete separately provided 1,239-byte correction / `0dcf579c8c847156506d4e3db142a104bfab2c593edda6c46249cbbfaa922795` is retained unchanged in the ledger; its complete object follows. Local reports the unchanged 3,391-byte manifest with SHA-256 prefix `b6c15760` and all nineteen file hashes matching; the prefix is not promoted to a full hash and no referenced file or App lookup was read/repeated here.
+
+```json
+{
+  "kind": "additive-owner-identity-binding",
+  "original_packet": "issue224-diagnosis-disposition.json",
+  "original_bytes": 17464,
+  "original_sha256": "10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db",
+  "original_packet_and_manifest_preserved": true,
+  "canonical_app_owner_session": "769a992c-7319-4d2e-b93a-4977094d7715",
+  "original_owner_session_value": "0a11050e-77b7-4b4d-8eed-f8ac937e9957",
+  "binding_evidence": "The initial workspace envelope supplied 0a11050e as project_session_id. On 2026-10-26, get_session invoked independently with 0a11050e and with 769a992c returned the same canonical id/active_session_id 769a992c, project d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54, original checkout path, current branch and Local creator. Thus the original field used a resolvable workspace alias rather than the canonical App session ID; it is not evidence of a second owner.",
+  "cleanup_provenance": "Cleanup was observed by this owner in tool output. The retained Docker transcript records commands/timestamps but is not claimed to contain every external-command receipt. Cleanup remains owner-attested for an independent packet reader. No restart or experiment was performed to reconstruct receipts."
+}
+```
+
+Environmental closure and #201 root re-arm remain blocked until BOTH PR merge and installed-build upgrade. Neither a successful experiment nor this record grants upgrade permission, environmental clearance, supported-wait authorization, root retry/re-arm, #201 validation or runtime repair. #223 guidance, #222 bootstrap, parked #212 and all other families/debts/wakes stay separate; #155 remains completed related history, not a proved regression or reopened node.
+
+Actual sources: launch `call_snSu89ZCyTsGxy7QTsNISKt3`; phase `call_v9EqKx99uvyHMavvBRiF5rFq`; additive correction `call_QNYGcQ0UNjFkBw8WJnFiZ9sy`. Full captured phase source follows verbatim; compressed spacing is quoted source, not newly authored operative prose.
+
+```text
+Same-node #224 phase decision, NOT a shape change: Campaign toolu_01QLkaykjbzhsK7TeNYSpRyS accepts owner769a992c's evidence-only diagnosis and chooses path(a): one bounded closingPR fixing shared-client contention plusphase-specificexhaustiondiagnostics, unchanged3000msgrace. Environmentalclosureand201rootrearmremainblockeduntilPRmergeANDinstalledbuildupgrade. No installed-upgradepermission or outcomecredit follows;samefamily/node/owner.
+
+Ownerfinaldiagnosispacket17464/SHA10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db readbyLocal;mechanismis sufficientisolatedcontention+separateslowcredentialalternatives,NOThistoricalcauseorcalibratedproductionreplay. I requested additiveidentitycorrectionbecausepacketowner_session0a11050e differsAppowner769a992c;do notsilentlybindit/overwriteoriginalorcopyprivatepaths. Cleanupcommand/timestampspacket12669/SHAb7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029 bindsrecordedcommands,whileactualDockerstop/resourceabsencearemereownerattestationinLocalreview. Keepfailingsetupassertions/partialrunlimits. Existingactual-ownerqualificationcanrecordthisnewphaseadditivelywhenin scope;no duplicateowner/shape/publicationhold.
+```

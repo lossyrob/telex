@@ -31,3 +31,12 @@ The same #201 owner remains held on real-root/background cases; isolated branch 
 ## Evidence limits
 
 Three Campaign root runs, two member-owner runs and a separately reported coordinator run retain their distinct source identities. Raw status/exit hashes, reported binary/runtime identity, timing and health are not independently verified by this artifact projection. The member emitted no numeric recovery-grace value and captured no before/armed station_health. Prepare/status timestamps are not process-runtime measurements. Successful status is not healthy candidate-fetch proof. No auth/PIM, fleet, shared cause or #155 regression follows from exhaustion. New diagnosis and any accepted outcome require their own evidence and gates.
+
+
+## Later actual owner and same-node implementation phase (2026-10-26)
+
+All original text above, including planned/unassigned labels, is the complete prelaunch snapshot. Local subsequently reports one owner `769a992c-7319-4d2e-b93a-4977094d7715` launched at `2026-10-26T19:59:29.847Z`, now implementing path (a) in one closing #224 PR: shared-client contention and phase-specific exhaustion diagnostics, unchanged 3000 ms grace. Record in-progress/watch; dependencies, scope boundaries and checkpoints remain unchanged. Full supplied controller has only checkout-name path redaction; no effective capacity or current checkout/runtime proof.
+
+The original diagnosis workspace alias `0a11050e-77b7-4b4d-8eed-f8ac937e9957` is retained unchanged; Local independently reports it resolves to the same canonical/active owner, not a second session. Complete additive correction, source receipt identities and reported diagnosis/manifest custody remain in the ledger/brief. No diagnosis/manifest/nineteen-file/App lookup or experiment was read/replayed here. Isolated contention plus separate slow-credential alternatives are not the historical production cause. Failed setup assertions and partial-run limits remain; actual Docker cleanup is owner-attested.
+
+No environmental closure or #201 root re-arm before BOTH PR merge and installed-build upgrade. No installed-upgrade permission, runtime repair, supported wait, validation, debt credit, duplicate worker or hold on existing owner work follows. Sources: Local `call_snSu89ZCyTsGxy7QTsNISKt3`, `call_v9EqKx99uvyHMavvBRiF5rFq`, `call_QNYGcQ0UNjFkBw8WJnFiZ9sy`.

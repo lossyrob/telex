@@ -9326,9 +9326,9 @@
       "recommendedDisposition": "Separate tracked Local diagnosis-first task for existing #224.",
       "selectedDisposition": "Accept the same new family into one planned/unlaunched Local node/task; preserve candidate history, null discovery provenance and all evidence limits.",
       "target": "postgres-fallback-recovery-exhaustion / existing issue #224",
-      "owner": "Local Daemon routing; implementation/diagnosis owner unassigned until verified publication and Local launch.",
+      "owner": "Local Daemon; existing implementation owner 769a992c-7319-4d2e-b93a-4977094d7715 (reported same-owner path (a), not a new launch).",
       "terminalPath": "Path (a): a closing product/guidance PR with independent exact-head source review, design and hosted gates, followed by Campaign acceptance. Path (b): specific diagnosis that a transient/environmental cause has cleared, then prior design-steward approval for exactly one supported same-profile wait outlasting the observed failure window and Campaign disposition. Neither path is satisfied now. After acceptance Campaign re-arms root once and reports station_health; that later action is not authorized or performed by this recording.",
-      "status": "planned",
+      "status": "in-progress",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01JR27dM8djhYUzuMCGXmgYN then toolu_012dMoYnEa5LdQd2wUwFehr1, supplied in exact Local controller custody and actual Local call_Ltnq26mZRnQscWnsSbCG8ugr. Routing/shape acceptance only, not outcome acceptance.",
       "routingQualification": {
@@ -9368,6 +9368,189 @@
         "noCurrentRealWaitAuthorization": true,
         "watcherBoundary": "Watcher owns its graph/status/ledger projection. This Local-only shape records no #201 activation/block status/edge or validation, and conserves the complete Watcher files.",
         "exclusions": "No #155 reopening, #223 product absorption or fallback-wake proof, #212 publication/approval carry, other-family completion/intake, cause, repair, runtime/profile operation, owner/observer/wake or debt clearance."
+      },
+      "actualOwnerQualification": {
+        "kind": "same-family-actual-owner-with-later-phase-and-additive-identity-correction",
+        "source": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_snSu89ZCyTsGxy7QTsNISKt3",
+          "originEvent": {
+            "id": "176a7622-4f0a-4044-b478-c4e788ce45c0",
+            "timestamp": "2026-10-26T20:03:24.536Z",
+            "bytes": 3781,
+            "sha256": "a3580f52180eb10ffaa83ac521bb6190378615fbdbd8717e81d99625c6c2b322"
+          },
+          "receipt": {
+            "file": "local224-actual-owner-launch-intake.json",
+            "bytes": 1816,
+            "sha256": "03f35b6bccc5cab7a74cc10a0c926b4e84c2de596754e24e06d0345cb09f9f1b"
+          }
+        },
+        "controllerSource": {
+          "file": "local224-actual-owner-controller-source.json",
+          "bytes": 5312,
+          "sha256": "ce0fefd7e5defc825d352918ba68e61e72ea2478c8b14ff51cbece09e5f6df53"
+        },
+        "controllerCapture": {
+          "file": "local224-actual-owner-controller-capture.json",
+          "bytes": 728,
+          "sha256": "b5e38a733190b8d93db38871d66e4567bf8ce9bcc8a6a3eaa1153a1c7399e14a"
+        },
+        "controller": {
+          "kind": "published-node-followed-by-single-authorized-owner-launch",
+          "issue": 224,
+          "issueUrl": "https://github.com/lossyrob/telex/issues/224",
+          "nodeId": "postgres-fallback-recovery-exhaustion",
+          "familyId": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+          "campaignAuthority": [
+            "toolu_01JR27dM8djhYUzuMCGXmgYN",
+            "toolu_012dMoYnEa5LdQd2wUwFehr1"
+          ],
+          "publicationPrerequisite": {
+            "verifiedAt": "2026-10-26T19:58:33.719Z",
+            "commit": "51a94f8ef0126e74f89f0f4b7fcd6201d718b793",
+            "parent": "9e971fd9ee877a20d13c97ad59b25d477b5c6ad0",
+            "tree": "b41027839a5925c40e0f89e4f99a186b2fbc4091",
+            "patchBytes": 80769,
+            "patchSha256": "5c51bc15e7aef0936c8a50f95912e64aaebf69b0bd9f8452cbcfa7e150247415",
+            "taskPath": ".streamliner/workstreams/local-daemon/tasks/postgres-fallback-recovery-exhaustion.md",
+            "taskSha256": "9a87f79f352b1ef0c60c4824dc9e644f91cf35cd7617bb2818895bdeed674ead",
+            "verification": "Local independently verified public main/commit/parent/tree, exact approved patch, published planned node/task, all actor receipt bindings and final Tier B zero-blocker/zero-warning header; persistent closure records 30 published packets across 13 boundaries.",
+            "prelaunchSnapshot": "Planned/watch, unassigned/unlaunched, dependsOn empty, sourceNode null. Those published fields describe the prelaunch snapshot, not a renewed hold after this actual launch."
+          },
+          "duplicateGuard": {
+            "sessions": "Fresh App inventory contained no #224 diagnosis/implementation session.",
+            "pullRequests": "Open repository PR search for 224 returned none.",
+            "boundary": "Inventory/ledger check before creation, not a general guarantee about unregistered external activity."
+          },
+          "launch": {
+            "sessionId": "769a992c-7319-4d2e-b93a-4977094d7715",
+            "name": "224 postgres fallback diagnosis",
+            "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+            "creatorAndCoordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "createdAt": "2026-10-26T19:59:29.847Z",
+            "requestedMode": "interactive",
+            "modelOverride": null,
+            "reasoningOverride": null,
+            "contextOverride": null,
+            "baseBranchOverride": false,
+            "notifyOnIdle": false,
+            "kickoffAtCreation": true,
+            "appObservation": {
+              "path": "lossyrob-crispy-giggle",
+              "branch": "lossyrob-crispy-giggle",
+              "activity": "busy",
+              "busyForSeconds": 14,
+              "awaitingInput": false,
+              "interrupted": false
+            },
+            "limits": "App identity/activity independently read by Local. No requested model override was supplied, and resolved effective model/capacity was not independently verified. Local did not inspect the owner's checkout HEAD, dirty state, profile, runtime or evidence directories."
+          },
+          "assignment": {
+            "outcome": "Diagnose candidate-fetch/reconnect exhaustion as transient/environmental versus lifecycle defect, preserving explicit unattended health, finite deadlines and actionable diagnostics.",
+            "diagnosisAuthority": "Read-only pg-rde-telex status/schema/catalog, EXPLAIN without ANALYZE, connection/latency timing, server activity views and explicitly supplied existing run/custody files; isolated separate TELEX_HOME/TELEX_CONFIG/temporary LOCALAPPDATA and disposable Postgres seeded to production-like history.",
+            "prohibitions": "No real campaign-address wait retry, timeout/auth/PIM/install change, ACL restoration or real-directory permission change, detector-event staging or production-row write. Do not leak credentials or connection details. No new campaign waiter/Telex bridge for coordination.",
+            "environmentalPath": "Specific evidence of transient/environmental cause and clearance first; then request design-steward approval for exactly one supported same-profile wait outlasting the failure window. Do not execute it without that separate approval. Final disposition goes to Campaign; Campaign re-arms root once after acceptance.",
+            "repairPath": "If a product/guidance fix is warranted, closing PR for #224 with its own exact-head independent source review, design inspection, hosted CI and Campaign gate; no autonomous merge or issue closure.",
+            "evidenceBoundaries": "Three Campaign root runs, two member-owner runs and one separately reported coordinator run remain distinct actor reports. No cause or runtime measurement inferred from preparation timestamps or successful status. #155 is related completed history, not automatically reopened.",
+            "coordination": "Local parent; existing design steward and sole CI observer; #201 owner and Watcher coordinator for retained evidence and dependency. No second implementation owner or new observer.",
+            "exclusions": "No #223/#222 absorption or dependency, #201 validation/pass credit, installed-runtime/registry changes, other-family repair or parked #212 publication authority."
+          },
+          "recordingRequest": "Add actual launch/owner qualification to the same published #224 row/node under the usual fresh artifact review. Preserve the complete planned-before-launch snapshot and authority/controller evidence. No duplicate row/node/tracker/worker or new failure occurrence. Operational owner work does not wait for recording."
+        },
+        "projection": "The complete supplied controller is retained; only launch.appObservation.path becomes its checkout name. Restoring that one value exactly recovers the full original object.",
+        "methodBoundary": "Local publication/duplicate/launch/requested-setting and temporal App observations are attributed. The supplied controller is not raw create_session output or a complete kickoff payload. No effective model/capacity, current owner checkout HEAD/cleanliness, referenced private file, recipient, runtime or actual delivery was inspected here.",
+        "noDuplicateOrWorkHold": "Same previously launched owner, not a second worker/node/family/occurrence; no operational work or publication hold follows from recording.",
+        "phase": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_v9EqKx99uvyHMavvBRiF5rFq",
+            "originEvent": {
+              "id": "f391fbb6-c341-4b12-ab5f-cdc494173209",
+              "timestamp": "2026-10-26T20:32:27.516Z",
+              "bytes": 3455,
+              "sha256": "acfe0f8e6f737ad666c0b01292ec1d3fe0613a6cedb53aa88997d15424935757"
+            },
+            "receipt": {
+              "file": "local224-phase-a-decision-intake.json",
+              "bytes": 1654,
+              "sha256": "85b3036f142506de201ff495677ee49c9d97a08a1da0358c2c1c8a14c190a065"
+            }
+          },
+          "verbatim": "Same-node #224 phase decision, NOT a shape change: Campaign toolu_01QLkaykjbzhsK7TeNYSpRyS accepts owner769a992c's evidence-only diagnosis and chooses path(a): one bounded closingPR fixing shared-client contention plusphase-specificexhaustiondiagnostics, unchanged3000msgrace. Environmentalclosureand201rootrearmremainblockeduntilPRmergeANDinstalledbuildupgrade. No installed-upgradepermission or outcomecredit follows;samefamily/node/owner.\n\nOwnerfinaldiagnosispacket17464/SHA10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db readbyLocal;mechanismis sufficientisolatedcontention+separateslowcredentialalternatives,NOThistoricalcauseorcalibratedproductionreplay. I requested additiveidentitycorrectionbecausepacketowner_session0a11050e differsAppowner769a992c;do notsilentlybindit/overwriteoriginalorcopyprivatepaths. Cleanupcommand/timestampspacket12669/SHAb7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029 bindsrecordedcommands,whileactualDockerstop/resourceabsencearemereownerattestationinLocalreview. Keepfailingsetupassertions/partialrunlimits. Existingactual-ownerqualificationcanrecordthisnewphaseadditivelywhenin scope;no duplicateowner/shape/publicationhold.",
+          "campaignAuthority": "Local reports Campaign toolu_01QLkaykjbzhsK7TeNYSpRyS; no independent raw Campaign origin is claimed.",
+          "outcome": "Same family/node/owner now implements path (a): one bounded closing #224 PR for shared-client contention and phase-specific exhaustion diagnostics, unchanged 3000 ms grace. No environmental closure or #201 root re-arm before BOTH PR merge and installed-build upgrade; no upgrade permission is granted here.",
+          "diagnosisBoundary": "Sufficient isolated contention and a distinct slow-credential alternative, not the historical production cause or calibrated production replay. Failed setup assertions and partial-run limits remain retained; no diagnosis packet/manifest/19-file set or experiment was read/replayed here.",
+          "cleanup": {
+            "reportedCommandPacketBytes": 12669,
+            "reportedCommandPacketSha256": "b7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029",
+            "boundary": "Recorded commands/timestamps do not independently establish Docker stop or resource absence. Actual cleanup remains owner-attested, not environmental clearance or #201 unblock."
+          }
+        },
+        "additiveIdentityCorrection": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_QNYGcQ0UNjFkBw8WJnFiZ9sy",
+            "originEvent": {
+              "id": "b337fde7-a4fb-4464-8115-730a6e7444b2",
+              "timestamp": "2026-10-26T20:36:50.777Z",
+              "bytes": 3294,
+              "sha256": "97ddcff2e09b7061941daa7b47cb5b493ee0a2d8cb0a7560647208c886bd5a54"
+            },
+            "receipt": {
+              "file": "local224-binding-correction-intake.json",
+              "bytes": 1573,
+              "sha256": "a812577401e2f2b5d4f60830a2abeef54a49f6c620ceac1d23518da2d36ddcda"
+            }
+          },
+          "original": {
+            "file": "local224-binding-correction-controller-source.json",
+            "bytes": 1239,
+            "sha256": "0dcf579c8c847156506d4e3db142a104bfab2c593edda6c46249cbbfaa922795"
+          },
+          "capture": {
+            "file": "local224-binding-correction-controller-capture.json",
+            "bytes": 1060,
+            "sha256": "dc7f21bb4f270049c4a0de8aa6769ec6978288b560ac5f586aa1cbef053e71b1"
+          },
+          "completeProvidedCorrection": {
+            "kind": "additive-owner-identity-binding",
+            "original_packet": "issue224-diagnosis-disposition.json",
+            "original_bytes": 17464,
+            "original_sha256": "10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db",
+            "original_packet_and_manifest_preserved": true,
+            "canonical_app_owner_session": "769a992c-7319-4d2e-b93a-4977094d7715",
+            "original_owner_session_value": "0a11050e-77b7-4b4d-8eed-f8ac937e9957",
+            "binding_evidence": "The initial workspace envelope supplied 0a11050e as project_session_id. On 2026-10-26, get_session invoked independently with 0a11050e and with 769a992c returned the same canonical id/active_session_id 769a992c, project d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54, original checkout path, current branch and Local creator. Thus the original field used a resolvable workspace alias rather than the canonical App session ID; it is not evidence of a second owner.",
+            "cleanup_provenance": "Cleanup was observed by this owner in tool output. The retained Docker transcript records commands/timestamps but is not claimed to contain every external-command receipt. Cleanup remains owner-attested for an independent packet reader. No restart or experiment was performed to reconstruct receipts."
+          },
+          "interpretation": "Local reports independently resolving both IDs to the same canonical/active App owner, checkout/current branch and Local creator. The original workspace alias is not a second owner; original diagnosis bytes/field remain unchanged and this correction is additive.",
+          "reportedCustody": {
+            "originalDiagnosisBytes": 17464,
+            "originalDiagnosisSha256": "10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db",
+            "manifestBytes": 3391,
+            "manifestSha256Prefix": "b6c15760",
+            "manifestFileCount": 19,
+            "boundary": "Local reports unchanged manifest and matching bytes/hashes for all 19 files. This reconciler did not read the diagnosis, manifest, listed files, App lookup or experiments; the statement is source-attributed byte custody, not experiment/production/cleanup replay."
+          },
+          "noOutcomeCredit": "No environmental clearance, historical cause, runtime repair, installed upgrade, root re-arm, #201 validation, second worker or artifact-review authority follows."
+        },
+        "prelaunchFields": {
+          "node": {
+            "summary": "Diagnose the #224 Postgres pull-fallback candidate-fetch/query/reconnect exhaustion observation before deciding environmental disposition or a product/guidance fix. Preserve finite recovery versus idle timeout, typed exit 7, explicit unattended health and actionable diagnostics. Campaign requires this reviewed planned node on canonical main before Local launches exactly one owner; no owner, requested model, launch, diagnosis or readiness is recorded now. Watcher owns the separate #201 upstream edge; no dependency on #222/#223 is inferred. Completed #155 is related history only, not reopened or proved regressed.",
+            "status": "planned"
+          },
+          "row": {
+            "owner": "Local Daemon routing; implementation/diagnosis owner unassigned until verified publication and Local launch.",
+            "status": "planned"
+          },
+          "task": {
+            "path": ".streamliner/workstreams/local-daemon/tasks/postgres-fallback-recovery-exhaustion.md",
+            "bytes": 4298,
+            "sha256": "9a87f79f352b1ef0c60c4824dc9e644f91cf35cd7617bb2818895bdeed674ead"
+          }
+        },
+        "prelaunchHistoryBoundary": "All unchanged old candidate, routing, planned/unlaunched and no-owner fields describe the original prelaunch snapshot. This additive later assignment/phase/correction qualifies that snapshot without deleting or rewriting it, and creates no new work hold."
       }
     },
     {
