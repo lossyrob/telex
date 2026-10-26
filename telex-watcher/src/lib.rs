@@ -9,6 +9,8 @@ mod client;
 pub mod evidence;
 pub mod management;
 mod ownership;
+#[cfg(test)]
+mod pilot209;
 pub mod presentation;
 pub mod process;
 pub mod protocol_v2;

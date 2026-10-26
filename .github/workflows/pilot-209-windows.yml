@@ -1,0 +1,176 @@
+# Issue #209 bounded hosted Windows measurement pilot. NON-MERGING diagnostic
+# branch; never lands on main. Campaign-approved limits: at most 4 Windows
+# jobs in total (one dispatch, four matrix entries, no reruns), at most 5
+# minutes of runtime sampling per job (hosted step timeout), read-only
+# Defender status, durability unchanged. No registry, volume, journal/sync,
+# Defender, runner-size or debugger changes; no synthetic CPU load.
+name: pilot-209-windows
+
+on:
+  push:
+    branches:
+      - lossyrob-windows-hosted-pilot-209
+    paths:
+      - .github/workflows/pilot-209-windows.yml
+      - .github/pilot-209/**
+      - telex-watcher/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  preflight:
+    # Linux compile/behavior gate so a compile error cannot spend the
+    # Windows job budget. Not part of the Windows measurement.
+    name: preflight (ubuntu, compile + record shape)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        timeout-minutes: 10
+        with:
+          toolchain: stable
+
+      - name: Install Linux TLS dependencies
+        timeout-minutes: 5
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Full telex-watcher lib suite without recording
+        timeout-minutes: 25
+        run: cargo test -p telex-watcher --lib --locked
+
+      - name: Focused workload with recording
+        timeout-minutes: 5
+        env:
+          PILOT209_OUT: ${{ runner.temp }}/pilot209-preflight
+          PILOT209_ITERATION: "1"
+          PILOT209_ARM: preflight
+        run: |
+          cargo test -p telex-watcher --lib --locked runtime::tests:: -- --list
+          cargo test -p telex-watcher --lib --locked runtime::tests::
+          set -euo pipefail
+          files=("$PILOT209_OUT"/opaque-*.jsonl)
+          cat "${files[@]}" | jq -c '{state_index, commands_ok, owner_ok, phases: [.events[].phase] | unique}'
+          test "$(cat "${files[@]}" | jq -s 'length')" -eq 3
+          cat "${files[@]}" | jq -se 'all(.[]; .schema == "pilot209-opaque/v1" and .commands_ok and .owner_ok and (.events | length) > 0)'
+          for phase in open:ownership-total open:connection-open open:schema-batch-composite open:meta-insert-autocommit \
+            open:isolate-v1-row-commit ownership:lock owner:startup owner:manage:show test:cmd:show test:guarded-commands; do
+            cat "${files[@]}" | jq -se --arg p "$phase" 'all(.[]; any(.events[]; .phase == $p))' > /dev/null \
+              || { echo "missing phase $phase"; exit 1; }
+          done
+          cat "${files[@]}" | jq -se 'all(.[]; any(.events[]; (.phase | startswith("sql:COMMIT")) and .elapsed_us != null))'
+
+  windows:
+    name: windows ${{ matrix.arm }} shard ${{ matrix.shard }}
+    needs: preflight
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pilot-209-windows]')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - { arm: normal, shard: 1 }
+          - { arm: normal, shard: 2 }
+          - { arm: reduced, shard: 3 }
+          - { arm: reduced, shard: 4 }
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+      CARGO_PROFILE_TEST_DEBUG: "2"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Evidence root and start receipt (read-only)
+        timeout-minutes: 3
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "pilot209-${{ matrix.arm }}-${{ matrix.shard }}"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          "PILOT209_EVIDENCE=$out" >> $env:GITHUB_ENV
+          [IO.File]::WriteAllText("$out\job-start-utc.txt", (Get-Date).ToUniversalTime().ToString('o'))
+          ./.github/pilot-209/receipt.ps1 -Out "$out\receipt-start.json" -Label start
+
+      - name: Install Rust stable (cold, no cache)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        timeout-minutes: 10
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Build focused harness (cold, timed)
+        timeout-minutes: 30
+        run: |
+          $out = $env:PILOT209_EVIDENCE
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          cargo test -p telex-watcher --lib --locked --no-run --message-format=json > "$out\build-messages.jsonl" 2> "$out\build-stderr.txt"
+          $code = $LASTEXITCODE
+          $watch.Stop()
+          $exe = Get-Content "$out\build-messages.jsonl" | ForEach-Object { try { $_ | ConvertFrom-Json } catch { } } |
+            Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'telex_watcher' -and $_.profile.test -and $_.executable } |
+            Select-Object -Last 1 -ExpandProperty executable
+          $list = if ($exe) { & $exe runtime::tests:: --list 2>&1 } else { @() }
+          $build = [ordered]@{
+            exit = $code; wall_s = [math]::Round($watch.Elapsed.TotalSeconds, 3); executable = $exe
+            selected_tests = @($list | Where-Object { "$_" -match ': test$' } | ForEach-Object { "$_" })
+          }
+          [IO.File]::WriteAllText("$out\build.json", ($build | ConvertTo-Json -Depth 4))
+          $build | ConvertTo-Json -Depth 4
+          if ($code -ne 0 -or -not $exe) { Get-Content "$out\build-stderr.txt" -Tail 60; exit 1 }
+          "PILOT209_EXE=$exe" >> $env:GITHUB_ENV
+          ./.github/pilot-209/receipt.ps1 -Out "$out\receipt-post-build.json" -Label post-build
+
+      - name: Runtime sampling (hard 5-minute hosted bound)
+        timeout-minutes: 5
+        run: ./.github/pilot-209/run-sampling.ps1 -Exe $env:PILOT209_EXE -OutDir $env:PILOT209_EVIDENCE -Arm ${{ matrix.arm }}
+
+      - name: Stop sampler and post-sampling receipt (read-only)
+        if: always() && env.PILOT209_EVIDENCE != ''
+        timeout-minutes: 2
+        run: |
+          $out = $env:PILOT209_EVIDENCE
+          New-Item -ItemType File -Force -Path "$out\sampler.stop" | Out-Null
+          $stops = [ordered]@{ utc = (Get-Date).ToUniversalTime().ToString('o'); sampler_killed = $false; harness_killed = @() }
+          if (Test-Path "$out\sampler.pid") {
+            $id = [int](Get-Content "$out\sampler.pid")
+            $p = Get-Process -Id $id -ErrorAction SilentlyContinue
+            if ($p -and -not $p.WaitForExit(15000)) { Stop-Process -Id $id -Force; $stops.sampler_killed = $true }
+          }
+          if ($env:PILOT209_EXE) {
+            foreach ($h in @(Get-Process | Where-Object { $_.Path -eq $env:PILOT209_EXE })) {
+              $stops.harness_killed += $h.Id; Stop-Process -Id $h.Id -Force
+            }
+          }
+          [IO.File]::WriteAllText("$out\stop.json", ($stops | ConvertTo-Json))
+          $stops | ConvertTo-Json
+          ./.github/pilot-209/receipt.ps1 -Out "$out\receipt-post-sampling.json" -Label post-sampling
+
+      - name: Summarize (fails on missing or erroneous metrics)
+        if: always() && env.PILOT209_EVIDENCE != ''
+        timeout-minutes: 3
+        run: ./.github/pilot-209/summarize.ps1 -OutDir $env:PILOT209_EVIDENCE -Arm ${{ matrix.arm }} -Shard ${{ matrix.shard }}
+
+      - name: Upload evidence
+        if: always() && env.PILOT209_EVIDENCE != ''
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot209-${{ matrix.arm }}-${{ matrix.shard }}
+          path: |
+            ${{ env.PILOT209_EVIDENCE }}
+            !${{ env.PILOT209_EVIDENCE }}/build-messages.jsonl
+          if-no-files-found: error
+          retention-days: 30

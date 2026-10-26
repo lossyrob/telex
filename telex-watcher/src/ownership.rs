@@ -16,17 +16,33 @@ impl Ownership {
         } else {
             std::env::current_dir()?.join(path)
         };
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        #[cfg(test)]
+        crate::pilot209::record("ownership:create-dir-all", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .open(&path)?;
+        #[cfg(test)]
+        crate::pilot209::record("ownership:file-open", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         lock(&file).context("registry-already-owned")?;
+        #[cfg(test)]
+        crate::pilot209::record("ownership:lock", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         let path = std::fs::canonicalize(path)?;
+        #[cfg(test)]
+        crate::pilot209::record("ownership:canonicalize", pilot);
         Ok(Self { _file: file, path })
     }
 }

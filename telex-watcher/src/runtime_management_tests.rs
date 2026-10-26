@@ -185,13 +185,27 @@ async fn management_resume_recovers_only_after_original_store_verification() {
 
 #[tokio::test]
 async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
-    for state in [
+    // Issue #209 pilot (non-merging): records phases only when PILOT209_OUT is set.
+    let pilot_out = crate::pilot209::output_dir();
+    let mut pilot_writes = Vec::new();
+    for (pilot_state, state) in [
         json!({"checksum": u64::MAX}),
         json!({"nested": [i64::MIN]}),
         json!({"opaque": "\u{ffff}"}),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if pilot_out.is_some() {
+            crate::pilot209::begin();
+        }
+        let pilot = std::time::Instant::now();
         let fixture = Fixture::new();
-        let connection = rusqlite::Connection::open(fixture.root.join("registry.sqlite")).unwrap();
+        crate::pilot209::record("test:fixture-new", pilot);
+        let pilot = std::time::Instant::now();
+        let mut connection =
+            rusqlite::Connection::open(fixture.root.join("registry.sqlite")).unwrap();
+        crate::pilot209::attach(&mut connection);
         connection
             .execute_batch("CREATE TABLE watches(id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")
             .unwrap();
@@ -202,9 +216,13 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
             )
             .unwrap();
         drop(connection);
+        crate::pilot209::record("test:legacy-seed", pilot);
+        let pilot = std::time::Instant::now();
         let (runtime, management) = fixture.open();
+        crate::pilot209::record("test:open-composite", pilot);
         let owner = tokio::spawn(runtime.run());
-        let (rejected, removed, shown, reused, attempts) =
+        let pilot_guarded = std::time::Instant::now();
+        let pilot_commands =
             tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, async {
                 let registration = |id, initial_state| Command::Register {
                     json: serde_json::to_vec(&json!({
@@ -216,35 +234,78 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
                     .unwrap(),
                     working_directory: fixture.root.clone(),
                 };
+                let pilot = std::time::Instant::now();
                 let rejected = management
                     .execute(registration("new-watch", state.clone()))
                     .await;
+                crate::pilot209::record("test:cmd:register-rejected", pilot);
+                let pilot = std::time::Instant::now();
                 let removed = management
                     .execute(Command::Remove {
                         id: "old-watch".into(),
                     })
                     .await;
+                crate::pilot209::record("test:cmd:remove", pilot);
+                let pilot = std::time::Instant::now();
                 let shown = management
                     .execute(Command::Show {
                         id: "old-watch".into(),
                     })
                     .await;
+                crate::pilot209::record("test:cmd:show", pilot);
+                let pilot = std::time::Instant::now();
                 let reused = management
                     .execute(registration("old-watch", serde_json::Value::Null))
                     .await;
+                crate::pilot209::record("test:cmd:register-reused", pilot);
+                let pilot = std::time::Instant::now();
                 let attempts = management
                     .execute(Command::Attempts {
                         id: "old-watch".into(),
                         limit: 10,
                     })
                     .await;
+                crate::pilot209::record("test:cmd:attempts", pilot);
+                let pilot = std::time::Instant::now();
                 management.execute(Command::Shutdown).await.unwrap();
+                crate::pilot209::record("test:cmd:shutdown", pilot);
                 (rejected, removed, shown, reused, attempts)
             })
-            .await
-            .unwrap();
-        tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, owner)
-            .await
+            .await;
+        crate::pilot209::record("test:guarded-commands", pilot_guarded);
+        let pilot = std::time::Instant::now();
+        let pilot_owner = if pilot_commands.is_ok() {
+            Some(tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, owner).await)
+        } else {
+            None
+        };
+        crate::pilot209::record("test:owner-join", pilot);
+        if let Some(dir) = &pilot_out {
+            let line = json!({
+                "schema": "pilot209-opaque/v1",
+                "pid": std::process::id(),
+                "thread": format!("{:?}", std::thread::current().id()),
+                "iteration": std::env::var("PILOT209_ITERATION").ok(),
+                "arm": std::env::var("PILOT209_ARM").ok(),
+                "state_index": pilot_state,
+                "guard_s": DURABLE_MANAGEMENT_HANG_GUARD.as_secs(),
+                "commands_ok": pilot_commands.is_ok(),
+                "owner_ok": pilot_owner.as_ref().map(|owner| owner.is_ok()),
+                "events": crate::pilot209::end(),
+            });
+            pilot_writes.push((|| -> std::io::Result<()> {
+                use std::io::Write;
+                std::fs::create_dir_all(dir)?;
+                let mut out = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(dir.join(format!("opaque-{}.jsonl", std::process::id())))?;
+                out.write_all(format!("{line}\n").as_bytes())
+            })());
+        }
+        let (rejected, removed, shown, reused, attempts) = pilot_commands.unwrap();
+        pilot_owner
+            .expect("owner joined after commands")
             .unwrap()
             .unwrap()
             .unwrap();
@@ -260,5 +321,8 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
         assert!(matches!(reused.unwrap(), Response::Mutation(result)
             if result.refusal == Some(Refusal::IdAlreadyAllocated)));
         assert!(matches!(attempts.unwrap(), Response::Attempts(attempts) if attempts.is_empty()));
+    }
+    for write in pilot_writes {
+        write.expect("write pilot209 phase record");
     }
 }

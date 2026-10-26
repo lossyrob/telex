@@ -117,6 +117,8 @@ impl Runtime {
 
     /// Owns scheduling and administration until Shutdown or a registry failure.
     pub async fn run(mut self) -> Result<()> {
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         let previous = lock(&self.registry)?.unfinished_containment()?;
         let mut proofs = Vec::new();
         for (_, evidence) in &previous {
@@ -128,6 +130,8 @@ impl Runtime {
             evidence
                 .is_none_or(|value| proofs.iter().any(|(prior, ended)| prior == value && *ended))
         })?;
+        #[cfg(test)]
+        crate::pilot209::record("owner:startup", pilot);
         let registry = self.registry.clone();
         let id = self.id.clone();
         let (heartbeat_error, mut heartbeat_failure) = mpsc::channel(1);
@@ -135,6 +139,8 @@ impl Runtime {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
+                #[cfg(test)]
+                let pilot = std::time::Instant::now();
                 let update = (|| -> Result<()> {
                     let registry = lock(&registry)?;
                     let mut health = registry.runtime(&id)?.context("runtime record missing")?;
@@ -154,6 +160,8 @@ impl Runtime {
                     health.retention = registry.retention(None)?;
                     registry.save_runtime(&health)
                 })();
+                #[cfg(test)]
+                crate::pilot209::record("heartbeat:update", pilot);
                 if let Err(error) = update {
                     let _ = heartbeat_error.send(error).await;
                     break;
@@ -230,7 +238,14 @@ impl Runtime {
                 }
                 request = self.requests.recv() => {
                     if let Some(request) = request {
+                        #[cfg(test)]
+                        let (pilot, pilot_kind) = (
+                            std::time::Instant::now(),
+                            crate::pilot209::command_kind(&request.command),
+                        );
                         let response = self.manage(request.command).await;
+                        #[cfg(test)]
+                        crate::pilot209::record(&format!("owner:manage:{pilot_kind}"), pilot);
                         // Losing a caller does not undo an admitted operation.
                         let _ = request.reply.send(response);
                     } else {
@@ -243,6 +258,8 @@ impl Runtime {
                     self.complete_attempt(completed).await?;
                 }
                 _ = tick.tick() => {
+                    #[cfg(test)]
+                    let pilot = std::time::Instant::now();
                     let now = now_ms();
                     let revision = lock(&self.registry)?.revision()?;
                     if now >= next_membership || Some(revision) != self.reconciled_registry_revision || self.clients.reconciliation_needed {
@@ -271,6 +288,8 @@ impl Runtime {
                     }
                     self.launch_due()?;
                     self.refresh_health()?;
+                    #[cfg(test)]
+                    crate::pilot209::record("owner:tick", pilot);
                 }
             }
         }

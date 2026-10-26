@@ -109,9 +109,22 @@ impl Registry {
         if warning_rows == 0 || warning_bytes == 0 {
             bail!("retention warning thresholds must be positive");
         }
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         let ownership = Ownership::acquire(path)?;
-        let connection = Connection::open(&ownership.path)?;
+        #[cfg(test)]
+        crate::pilot209::record("open:ownership-total", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
+        #[allow(unused_mut)]
+        let mut connection = Connection::open(&ownership.path)?;
+        #[cfg(test)]
+        crate::pilot209::record("open:connection-open", pilot);
+        #[cfg(test)]
+        crate::pilot209::attach(&mut connection);
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         let has_version: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='watcher_v2_meta')",
             [], |row| row.get(0))?;
@@ -123,6 +136,10 @@ impl Registry {
             )?;
             anyhow::ensure!(version == 2, "unsupported-registry-version: {version}");
         }
+        #[cfg(test)]
+        crate::pilot209::record("open:version-probe", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         connection.execute_batch(
             "PRAGMA foreign_keys=ON;
              PRAGMA synchronous=FULL;
@@ -150,10 +167,16 @@ impl Registry {
              CREATE TABLE IF NOT EXISTS watcher_v2_runtimes (
                id TEXT PRIMARY KEY, data TEXT NOT NULL);",
         )?;
+        #[cfg(test)]
+        crate::pilot209::record("open:schema-batch-composite", pilot);
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         connection.execute(
             "INSERT OR IGNORE INTO watcher_v2_meta VALUES(1,2,0,?1)",
             [format!("watcher:{}", Uuid::new_v4())],
         )?;
+        #[cfg(test)]
+        crate::pilot209::record("open:meta-insert-autocommit", pilot);
         let (version, responsibility): (u32, String) = connection.query_row(
             "SELECT version,responsibility FROM watcher_v2_meta WHERE singleton=1",
             [],
@@ -171,7 +194,11 @@ impl Registry {
             #[cfg(test)]
             fail_next_accept_commit: false,
         };
+        #[cfg(test)]
+        let pilot = std::time::Instant::now();
         registry.isolate_v1()?;
+        #[cfg(test)]
+        crate::pilot209::record("open:isolate-v1-total", pilot);
         Ok(registry)
     }
 
@@ -202,11 +229,19 @@ impl Registry {
             let mut watch = new_watch(id, None, serde_json::from_str(&state)?, now_ms());
             watch.schema_version = 1;
             watch.block(BlockedReason::UnsupportedRegistrationVersion);
+            #[cfg(test)]
+            let pilot = std::time::Instant::now();
             let tx = self.connection.transaction()?;
             save_watch(&tx, &watch)?;
             audit(&tx, Some(&watch.id), "isolate-v1", &json!({"version": 1}))?;
             bump(&tx)?;
+            #[cfg(test)]
+            crate::pilot209::record("open:isolate-v1-row-writes", pilot);
+            #[cfg(test)]
+            let pilot = std::time::Instant::now();
             tx.commit()?;
+            #[cfg(test)]
+            crate::pilot209::record("open:isolate-v1-row-commit", pilot);
         }
         Ok(())
     }
