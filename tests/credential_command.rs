@@ -496,25 +496,231 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
     wait_for_fixture_process_completion(&second).await;
 }
 
+/// Issue #167 phase evidence for the delayed inherited writer on Windows.
+///
+/// The writer stamps its own process creation time, script start and write
+/// completion into atomic marker files. The test reads them only after the
+/// operation has completed or has been dropped (cancellation requested), so
+/// no file or process query precedes cancellation. Cross-process phases use the UTC
+/// FILETIME wall clock and are not a monotonic ordering: writer stamps come
+/// from .NET `DateTime.UtcNow`, whose resolution is not verified here, and
+/// marker I/O inside the writer is an observer effect. Only the total is
+/// also measured monotonically.
+#[cfg(windows)]
+mod delayed_writer_phases {
+    use std::fmt::Write as _;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    /// 100ns intervals between 1601-01-01 and 1970-01-01.
+    const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
+
+    fn filetime_now() -> u64 {
+        let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        UNIX_EPOCH_TICKS + since.as_secs() * 10_000_000 + u64::from(since.subsec_nanos() / 100)
+    }
+
+    fn span(from: Option<u64>, to: Option<u64>) -> String {
+        match (from, to) {
+            (Some(from), Some(to)) => format!("{:.1}", (to as i64 - from as i64) as f64 / 10_000.0),
+            _ => "unobserved".into(),
+        }
+    }
+
+    fn ms(duration: Duration) -> String {
+        format!("{:.1}", duration.as_secs_f64() * 1000.0)
+    }
+
+    pub struct Markers {
+        root: PathBuf,
+    }
+
+    impl Markers {
+        pub fn new() -> Self {
+            let root = std::env::current_dir()
+                .unwrap()
+                .join("target")
+                .join("credential-command-fixtures")
+                .join(format!(
+                    "telex-credential-delayed-writer-{}-{}",
+                    std::process::id(),
+                    telex::model::now_ms(),
+                ));
+            assert!(!root.to_string_lossy().contains('\''));
+            std::fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        /// Wrap the delayed writer with atomic started/written markers. The
+        /// stdout contract is unchanged; marker failures only reach stderr.
+        pub fn script(&self, body: &str) -> String {
+            let root = self.root.display();
+            format!(
+                "$m='{root}'; $s=[DateTime]::UtcNow.ToFileTimeUtc(); \
+                 $c=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc(); \
+                 [IO.File]::WriteAllText(\"$m\\started.tmp\", \"$c $s\"); \
+                 [IO.File]::Move(\"$m\\started.tmp\", \"$m\\started\"); \
+                 {body}; \
+                 [IO.File]::WriteAllText(\"$m\\written.tmp\", [string][DateTime]::UtcNow.ToFileTimeUtc()); \
+                 [IO.File]::Move(\"$m\\written.tmp\", \"$m\\written\")"
+            )
+        }
+
+        /// Writer creation, script start and write completion stamps.
+        fn read(&self) -> (Option<u64>, Option<u64>, Option<u64>) {
+            let started = std::fs::read_to_string(self.root.join("started")).unwrap_or_default();
+            let mut fields = started.split_whitespace().map(|field| field.parse().ok());
+            let written = std::fs::read_to_string(self.root.join("written"))
+                .ok()
+                .and_then(|text| text.trim().parse().ok());
+            (fields.next().flatten(), fields.next().flatten(), written)
+        }
+    }
+
+    impl Drop for Markers {
+        fn drop(&mut self) {
+            if !std::thread::panicking() {
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+    }
+
+    pub struct Clock {
+        invoked: u64,
+        started: Instant,
+    }
+
+    /// Both clocks sampled at the outcome, before any observer I/O.
+    pub struct Finished {
+        filetime: u64,
+        monotonic_total: Duration,
+        at: Instant,
+    }
+
+    impl Finished {
+        pub fn since(&self) -> Duration {
+            self.at.elapsed()
+        }
+    }
+
+    impl Clock {
+        pub fn start() -> Self {
+            Self {
+                invoked: filetime_now(),
+                started: Instant::now(),
+            }
+        }
+
+        pub fn finish(&self) -> Finished {
+            Finished {
+                filetime: filetime_now(),
+                monotonic_total: self.started.elapsed(),
+                at: Instant::now(),
+            }
+        }
+
+        /// `cancellation` carries the drop (cancel request) and post-cancel
+        /// obligation-query times, measured from the outcome, for a timed-out
+        /// operation. `capture_elapsed_ms` is observer cost from the outcome
+        /// through the marker read, not writer or operation duration.
+        pub fn report(
+            &self,
+            markers: &Markers,
+            finished: &Finished,
+            cancellation: Option<(Duration, Duration)>,
+        ) -> String {
+            let (created, script, written) = markers.read();
+            let invoked = Some(self.invoked);
+            let outcome = Some(finished.filetime);
+            let mut line = format!(
+                "[issue-167 delayed-writer phases] outcome={} monotonic_total_ms={} \
+                 filetime_total_ms={} invoked_to_writer_created_ms={} \
+                 writer_created_to_script_ms={} script_to_written_ms={} \
+                 written_to_outcome_ms={} writer_exit=unobserved",
+                if cancellation.is_some() {
+                    "elapsed"
+                } else {
+                    "ok"
+                },
+                ms(finished.monotonic_total),
+                span(invoked, outcome),
+                span(invoked, created),
+                span(created, script),
+                span(script, written),
+                span(written, outcome),
+            );
+            if let Some((dropped, snapshot)) = cancellation {
+                write!(
+                    line,
+                    " cancel_requested_ms={} post_cancel_obligations_ms={} obligations=post_cancel_reaping_racy markers=post_cancel_racy",
+                    ms(dropped),
+                    ms(snapshot),
+                )
+                .unwrap();
+            }
+            write!(
+                line,
+                " capture_elapsed_ms={} limits=filetime_wall_clock_not_monotonic,\
+                 writer_utcnow_resolution_unverified,writer_marker_io_observer_effect,\
+                 script_to_written_includes_configured_150ms_sleep,\
+                 capture_elapsed_is_observer_cost_after_outcome",
+                ms(finished.since()),
+            )
+            .unwrap();
+            line
+        }
+    }
+}
+
+/// Write past libtest output capture so passing hosted runs retain measured phases.
+#[cfg(windows)]
+fn emit_uncaptured(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
     #[cfg(windows)]
+    let markers = delayed_writer_phases::Markers::new();
+    #[cfg(windows)]
     let command = format!(
         "start /b {}",
-        encoded_powershell(
+        encoded_powershell(&markers.script(
             "Start-Sleep -Milliseconds 150; [Console]::Out.Write('  delayed-non-secret  ')",
-        )
+        ))
     );
     #[cfg(unix)]
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
-    let (config, _) = tokio::time::timeout(
-        Duration::from_secs(5),
-        pg_connect_config(&profile(&command)),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let profile = profile(&command);
+    // Boxed so a timed-out operation is dropped first. Dropping only requests
+    // cancellation in memory. The later obligation query reaps: it may join a
+    // finished owner, publish and remove its entry, so an empty list does not
+    // mean nothing was outstanding at the timeout. Observer file I/O follows.
+    let mut operation = Box::pin(pg_connect_config(&profile));
+    #[cfg(windows)]
+    let clock = delayed_writer_phases::Clock::start();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), &mut operation).await;
+    #[cfg(windows)]
+    let finished = clock.finish();
+    let Ok(result) = outcome else {
+        drop(operation);
+        #[cfg(windows)]
+        let dropped = finished.since();
+        let obligations = telex::profiles::credential_command_obligations();
+        #[cfg(windows)]
+        let report = clock.report(&markers, &finished, Some((dropped, finished.since())));
+        #[cfg(unix)]
+        let report = String::new();
+        panic!(
+            "delayed inherited writer was not collected within the 5s budget; \
+             post_cancel_obligations={obligations:?} {report}"
+        );
+    };
+    #[cfg(windows)]
+    emit_uncaptured(&clock.report(&markers, &finished, None));
+    let (config, _) = result.unwrap();
     assert_eq!(
         config.get_password(),
         Some(b"delayed-non-secret".as_slice())
