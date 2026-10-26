@@ -118,6 +118,14 @@ pub fn process_alive_with_start_time(pid: u32, expected_start_time: Option<u64>)
     }
 }
 
+/// Returns `true` only when the exact `pid`/`start_time` instance has definitely exited: the pid
+/// is gone, now names a different instance, or (on Unix) is that instance as a fully exited zombie
+/// its parent has not reaped yet. Unknown or ambiguous probes count as not exited.
+pub fn process_exited_with_start_time(pid: u32, start_time: u64) -> bool {
+    !process_alive_with_start_time(pid, Some(start_time))
+        || platform::is_exited_zombie(pid, start_time)
+}
+
 /// Why an exact-process exit watch could not be established or completed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExitWatchError {
@@ -246,14 +254,20 @@ mod platform {
         None
     }
 
-    /// Start time of `pid` if, in one read, it is an exited-but-unreaped (zombie) process; `None`
-    /// if it is not a zombie or that cannot be determined.
+    /// Start time of `pid` if, in one read, it is a fully exited but unreaped (zombie) process;
+    /// `None` if it is not, or that cannot be determined.
+    ///
+    /// Linux reports the thread-group leader as `Z` as soon as the *main thread* exits, while
+    /// sibling threads -- which share the open file table, and with it any store lock -- may still
+    /// be exiting. Only `num_threads == 1` (the zombie leader alone) proves every thread has
+    /// exited and the shared descriptors are released.
     #[cfg(target_os = "linux")]
     fn zombie_start_time(pid: u32) -> Option<u64> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         let after_name = stat.rsplit_once(") ")?;
         let fields: Vec<&str> = after_name.1.split_whitespace().collect();
-        if *fields.first()? != "Z" {
+        // Index 0 is stat field 3 (state); 17 is field 20 (num_threads); 19 is field 22.
+        if *fields.first()? != "Z" || *fields.get(17)? != "1" {
             return None;
         }
         fields.get(19)?.parse::<u64>().ok()
@@ -286,11 +300,16 @@ mod platform {
         None
     }
 
+    /// Whether `pid` is that exact start-time instance, fully exited but not yet reaped.
+    pub fn is_exited_zombie(pid: u32, start_time: u64) -> bool {
+        zombie_start_time(pid) == Some(start_time)
+    }
+
     /// Unix has no retained process handle here, so the watch re-probes the exact pid/start-time
     /// identity: the process has exited once the pid no longer exists, carries a different start
-    /// time, or is that same instance as an exited-but-unreaped zombie. A zombie has already
-    /// terminated (its descriptors are closed); only its parent's reap is outstanding, which a
-    /// supervisor may legitimately do only after `stop --drain` returns.
+    /// time, or is that same instance as a fully exited, unreaped zombie. Such a zombie has
+    /// already terminated and released its descriptors; only its parent's reap is outstanding,
+    /// which a supervisor may legitimately do only after `stop --drain` returns.
     pub struct ExitHandle {
         pid: u32,
         start_time: u64,
@@ -321,11 +340,7 @@ mod platform {
         deadline: std::time::Instant,
     ) -> Result<bool, super::ExitWatchError> {
         loop {
-            let probe = process_probe(handle.pid);
-            if !probe.alive
-                || probe.start_time.is_some_and(|t| t != handle.start_time)
-                || zombie_start_time(handle.pid) == Some(handle.start_time)
-            {
+            if super::process_exited_with_start_time(handle.pid, handle.start_time) {
                 return Ok(true);
             }
             let now = std::time::Instant::now();
@@ -404,6 +419,12 @@ mod platform {
         } else {
             Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
         }
+    }
+
+    /// Windows has no zombie state: the process object is signaled at exit regardless of who
+    /// still holds a handle to it, so the liveness probe alone decides.
+    pub fn is_exited_zombie(_pid: u32, _start_time: u64) -> bool {
+        false
     }
 
     const WAIT_TIMEOUT: u32 = 0x0000_0102;

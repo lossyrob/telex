@@ -4688,7 +4688,7 @@ fn daemon_stop_drain_returns_only_after_the_drained_process_exits() {
         "the drained predecessor must have exercised the endpoint-gone/process-alive window"
     );
     assert!(
-        !telex::session_watch::process_alive_with_start_time(pid, Some(start_time)),
+        telex::session_watch::process_exited_with_start_time(pid, start_time),
         "stop --drain returned while the drained process {pid} was still alive: {drained}"
     );
     assert_eq!(drained.get("exited").and_then(Value::as_bool), Some(true));
