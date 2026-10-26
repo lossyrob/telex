@@ -1061,3 +1061,35 @@ Watcher edge/status change is added. Both #166 actual-product-merge wakes
 remain pending and unchanged. Deliver one separately reviewed PR closing
 #204 with discriminating evidence, exact-final-head hosted coverage and
 the normal Campaign merge gate; launch is not repair, CI or readiness.
+
+## 2026-10-26 - Operator choice for the existing #166 repair
+
+Campaign confirms the operator's conditional choice of Mio 1.2.4 as the
+fix and judges its comparison-job condition met. The public Mio 1.2.4
+job `121354231722` in run `40254795271`, attempt 1, at PR #196 event
+head `b0ab5f2cf067f08afbb20bd807a89af1e0affb46` succeeded at
+`2026-10-26T01:48:20Z`; the overall run failed. d7's report of three
+clean 400,000-round configurations remains owner-attributed, not a
+reconciler archive/log finding or causal proof for the five Telex cases.
+The exact Local packet and direct Campaign confirmation are retained;
+no originating ask_user transcript, source, archive or runtime replay
+is claimed.
+
+The already-authorized sole writer remains
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c` on
+`lossyrob-windows-heap-av-repair`. Bookkeeping must not delay that work.
+Upgrade Mio to 1.2.4 with the Windows normal-dependency floor, validate
+cross-platform/features, remove diagnostic-only scaffolding except the
+retained capture, and use `Closes #166` in PR #196. Any recurrence reopens
+#166. Prior evidence and B/no-push holds remain history; only this
+implementation hold is superseded. No five-case common cause, new
+occurrence, owner or experiment extension is accepted.
+
+Hosted-only runtime and no retry/waiver/flake exception continue.
+Exact-final-head source/design review, reviewer-origin public receipt,
+strict green CI and the Campaign merge gate remain. #203 and #204 must
+clear as far as they affect #196's required jobs; a green run alone does
+not independently accept those repairs. Both pending #193/#198 wakes
+still require Local's verification of the actual #166 repair merge.
+No graph edge, status change, repair/readiness/merge, debt/HOLD or
+workstation-freeze credit follows from this decision recording.

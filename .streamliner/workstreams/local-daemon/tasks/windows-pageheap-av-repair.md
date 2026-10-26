@@ -380,3 +380,76 @@ no retry, readiness, dependency/status, debt/HOLD/release/freeze credit.
 The later #166 heap-routing qualification and BOTH still-pending
 #193/#198 actual-repair-merge wakes remain unchanged. This older
 identity/draft snapshot supplies no delivery or current gate credit.
+
+## 2026-10-26 - Operator-authorized Mio 1.2.4 repair choice
+
+This later operator decision qualifies the earlier diagnosis-only and
+B/no-push holds for this bounded implementation. Those statements remain
+history, not a current bar to work already authorized and forwarded to
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`. The same owner remains the sole
+#166 / PR #196 writer on `lossyrob-windows-heap-av-repair`. This recording
+is neither a new launch nor an implementation prerequisite.
+
+Campaign directly confirms the operator's choice via ask_user:
+
+> B: authorize the Mio 1.2.4 upgrade as the fix, only if the 1.2.4 comparison job finishes without the panic; the PR closes #166, and a repeat crash reopens it (Recommended)
+
+The quote and condition judgment are Campaign-attributed. The reconciler
+has not independently read the originating ask_user transcript. Campaign
+judged the condition met using the public successful job status and d7's
+report of three clean 400,000-round configurations. Run `40254795271`,
+attempt 1, at event head
+`b0ab5f2cf067f08afbb20bd807a89af1e0affb46` failed overall; comparison
+job `121354231722` succeeded and completed at `2026-10-26T01:48:20Z`.
+The comparison job is not an all-green PR run or final-head validation.
+
+The complete 5,876-byte Local decision packet is retained unchanged:
+`70cb77fcf0a4b19f1b99fdca2377520daa7448f5fb13085ad87158bab6422f1e`.
+Its comparison outcomes, rounds and artifact contents remain attributed
+to the owner; Local independently verified public run/job metadata.
+The reconciler separately reads only that complete packet, the direct
+Campaign confirmation and public run/job identity/status metadata.
+No log, source, archive, dump or runtime replay is claimed. Artifact IDs,
+lengths and digests in the packet are retained reports, not verification
+against downloaded bytes.
+
+### Authorized implementation and unchanged causal limits
+
+Upgrade Mio to 1.2.4 and add the Windows normal-dependency floor. Perform
+cross-platform and feature validation within the existing hosted-only
+runtime restrictions. Remove diagnostic-only experiment scaffolding
+except the retained capture, preserving the evidence and its capture gaps.
+Use `Closes #166` in PR #196; any recurrence reopens #166.
+
+Describe this as the authorized repair of the reached Mio defect, not
+proof that it explains the five retained Telex observations. One reached
+failure and a clean comparison are not statistical proof; seeds do not
+fix thread scheduling. The submitted-I/O/Arc explanation and mapping to
+the five cases remain unestablished. The separately reported 40 clean
+real-daemon iterations are not evidence of absence. No new native-crash
+occurrence or candidate is added by recording the comparison.
+
+Preserve owner-private locks, non-theft, generation fencing, late-guard
+disposal and the production 480ms budget. Existing owners coordinate
+overlapping edits. Hosted-only runtime, the workstation freeze, no retry,
+waiver or flake exception, and all other restrictions continue. This
+choice authorizes no fresh experiment extension or broader runtime scope.
+
+### Remaining gates and event-driven wakes
+
+Fresh exact-final-head source review with its reviewer-origin public
+receipt, design inspection and strict green CI without waiver remain
+required. #203 and #204 must be cleared as far as they affect PR #196's
+required jobs, as Campaign directly confirms. A green run alone is not
+independent acceptance of either separately required repair. Request the
+Campaign merge gate when the required evidence is ready; this decision
+accepts no implementation, repair, CI/readiness or merge now.
+
+Only the actual #166 product-repair merge, independently verified by
+Local, triggers the existing two wakes. The owner reports the merge to
+Local immediately; Local separately wakes #193 / PR #194 owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` and #198 / PR #202 owner
+`a96926b1-3e4f-4578-a197-33de51d669c7`. Both remain pending.
+Authorization, comparison success, artifact publication and readiness
+are not the trigger. No automatic graph edge or status/dependency change,
+owner replacement, accepted debt/HOLD reversal or freeze clearance follows.
