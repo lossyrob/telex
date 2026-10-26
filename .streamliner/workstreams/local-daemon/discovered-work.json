@@ -1734,7 +1734,116 @@
         "run": "CI run 39854080691, Windows heap diagnostics job 120087601259: failure.",
         "artifact": "windows-heap-diagnostics-40a5c916d839dc81432738f122e03a00fd31628e, ID 12458867179, 49,342,145 bytes; no .dmp file.",
         "details": "Under PageHeap, a Telex child exited with 0xc0000005 during root daemon_process_sqlite test real_process_status_hints_when_address_active_on_other_store. The job ran the full target three times: two passed 49/49, and the third passed 48/49. Root cause and fault location are unknown; no causal link to the #154 TOKEN_USER fix is established.",
-        "predecessor": "d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the daemon test or daemon, backend, or Watcher runtime source in the final-head delta."
+        "predecessor": "d17100bfce6b17ccd03dff01fc66e3d8455cd812 passed all 18 CI jobs in run 39849919584. PR #164 does not change the daemon test or daemon, backend, or Watcher runtime source in the final-head delta.",
+        "laterPublicNativeObservations": [
+          {
+            "kind": "additional-main-native-command-child-observation",
+            "deduplication": {
+              "run": 40260369255,
+              "attempt": 1,
+              "job": 121371242766,
+              "key": "run40260369255-attempt1-job121371242766",
+              "occurrencesAdded": 1
+            },
+            "executedMain": {
+              "commit": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "tree": "1b754b186622b384bc9adaf3a835be7c6faa4df7",
+              "event": "push",
+              "directCheckout": true,
+              "syntheticPrMerge": false,
+              "mioVersion": "1.2.1"
+            },
+            "sourcePacket": {
+              "file": "fieldnative-local-intake.json",
+              "bytes": 6277,
+              "sha256": "05e31a05f8f63346b48f6b99d3bd49c659e876515c03eb43b1bbc3403ee47b0c",
+              "originalFile": "main-faf4f883-field-and-native-observation-20261025.json",
+              "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "localDirection": "call_SYH0cTp2bTmzr6RUBiUj5iUy",
+              "captureReceipt": "fieldnative-source-capture.json"
+            },
+            "retainedNativeObservation": {
+              "record": "local-daemon-windows-pageheap-access-violation",
+              "owner": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+              "job": 121371242766,
+              "jobName": "Build and test (windows-latest)",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40260369255/job/121371242766",
+              "jobStartedAt": "2026-10-26T02:42:32Z",
+              "jobCompletedAt": "2026-10-26T02:48:56Z",
+              "publicLog": {
+                "file": "run40260369255-job121371242766-public.log",
+                "bytes": 337894,
+                "sha256": "63da493df3584aefbb82fa37d80c1da2371ecfb316247de2b1731d49e3a8058b",
+                "captureSource": "Completed-job public API response, independently retrieved by Local, with no NUL bytes.",
+                "checkoutLines": [
+                  97,
+                  98
+                ],
+                "failureLines": [
+                  2294,
+                  2319
+                ],
+                "nativeExitLine": 2297
+              },
+              "executedCheckout": "Direct main faf4f883631c7aaec057dde4beca36daa29d29dd, not a synthetic PR merge.",
+              "source": {
+                "path": "tests/daemon_process_sqlite.rs",
+                "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+                "test": "station_intent_upgrade_runs_the_selected_successor_and_restores_push",
+                "testStart": 4763,
+                "observingGuard": 518,
+                "caller": 4808,
+                "operation": "The selected predecessor's initial attach, before intent seeding at line 4810 and before constructing the successor upgrade at line 4827.",
+                "arguments": [
+                  "--json",
+                  "--address",
+                  "addr:station-intent-upgrade",
+                  "attach",
+                  "--session",
+                  "station-intent-upgrade-session"
+                ],
+                "configuredCommandTimeoutSeconds": 10,
+                "inspection": "Local read immutable source lines 503-522 and 4763-4832. The Rust backtrace identifies the capture guard/caller, not a native fault stack."
+              },
+              "exitStatus": "0xc0000374",
+              "stdout": "",
+              "stderr": "",
+              "captureNames": [
+                "cmd-320.out",
+                "cmd-320.err"
+              ],
+              "targetAggregate": "48 passed; 1 failed; 0 ignored",
+              "targetDurationSeconds": 24.35,
+              "mioAtExecutedMain": "1.2.1",
+              "mioVerification": "Local independently read Cargo.lock at the executed immutable main commit. The Mio 1.2.4 implementation is still separate on PR #196; this occurrence does not evaluate its integrated head 98c40f3d.",
+              "artifact": {
+                "id": 12624059243,
+                "name": "windows-build-test-crash",
+                "bytes": 73053770,
+                "localInspection": "Not downloaded or inspected. No claim about a failing-process dump or its absence."
+              },
+              "limits": "Native Telex command-child status, not ForeignDaemon or the Watcher harness. The test name does not make successor upgrade/drain the failed operation. Empty output and status do not identify the fault site, corrupting operation or common cause. Duration is the target aggregate, not attach latency or a measured timeout.",
+              "routing": "Local sent this additional occurrence to the existing #166 owner for run/job deduplication and retention, without retry, waiver, new owner, experiment extension or causal inference."
+            },
+            "publicJobMetadata": {
+              "id": 121371242766,
+              "run_id": 40260369255,
+              "head_sha": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "run_attempt": 1,
+              "name": "Build and test (windows-latest)",
+              "status": "completed",
+              "conclusion": "failure",
+              "started_at": "2026-10-26T02:42:32Z",
+              "completed_at": "2026-10-26T02:48:56Z",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40260369255/job/121371242766"
+            },
+            "operation": "Native Telex command child exited 0xc0000374 during the selected predecessor initial attach at caller 4808/capture guard 518 in station_intent_upgrade_runs_the_selected_successor_and_restores_push. This precedes intent seeding at line 4810 and successor-upgrade construction at line 4827. The test name does not locate the failure in successor upgrade/drain.",
+            "attribution": "Local independently retrieved both completed-job public logs, verified their byte/hash and line anchors, and read immutable source and Cargo.lock at the executed main. The reconciler reads the full 6,277-byte classification, public field report and provider run/job/Git metadata, not logs, source or the lockfile. Source/caller/Mio/empty-output/count/duration details remain Local-verified, not independently recounted here.",
+            "limits": "Executed main still locks Mio 1.2.1; this is not a result on pending Mio 1.2.4/PR #196 integrated head 98c40f3d. Empty stdout/stderr, Rust capture backtrace and native status do not identify native fault site, corrupting operation or common cause. Target 48/1/0 and 24.35s are target aggregates, not attach latency, a measured timeout or stage budgets. Artifact 12624059243 metadata does not establish archive/dump contents or failing-process dump presence/absence. No artifact was downloaded or inspected here or by Local.",
+            "routing": "Local reports delivering the occurrence to existing d7 for run/job deduplication. This is one additive #166 observation, not #204 ForeignDaemon recurrence or the #203 Watcher harness, a new owner/tracker, a new experiment permission, retry, causal repair evaluation or a wake. No ongoing repair waits on this recording.",
+            "conservation": "Additive follow-through successor only. Preserve the complete accepted #204 snapshot and all earlier evidence/observations, owners and statuses. Fulfill only debt 1 textual omissions, owner field reporting and initial exact-main observation; debts 2-4, ongoing recurrence watch and independent #196 integration confirmation remain. Append exactly one run/job-deduplicated #166 native observation at executed Mio 1.2.1 main, before seed or successor upgrade, not a pending Mio 1.2.4 result or cause/repair acceptance. Preserve all graphs, Watcher and both pending actual-#166-product-merge wakes; no new owner, tracker, candidate, #204 recurrence, retry, experiment extension, runtime, #166/#203 acceptance, overall-main-green, dump/archive finding, waiver, debt/HOLD or freeze credit. New evidence must not delay ongoing repairs."
+          }
+        ]
       },
       "description": "Diagnose the intermittent Windows access violation in the hosted daemon process diagnostics target.",
       "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
@@ -5035,10 +5144,10 @@
       "sequencing": "One independently launched public-record-only owner works on its own main-based branch. Coordinate overlapping daemon/bootstrap/test/CI edits with d7 before publishing; do not write PR #196 branch. Launch first, record afterward as Campaign directed. No retry, waiver or flake exception.",
       "target": "local-daemon/foreigndaemon-reattach-repair / https://github.com/lossyrob/telex/issues/204",
       "owner": "Actual #204 owner 8afc363c-1af3-447d-a472-336f92d57998, coordinated by Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, on its own main-based lossyrob-foreigndaemon-reattach-repair branch. d7 remains #166 / PR #196 only.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Campaign original direction toolu_01An1S92Jpt43cjRLd4HDCXC, confirmed directly with exact sent/register wording in toolu_014EXnE5H5oXyQfrYA6reKfs, authorizes one separate tracker and public-record-only owner, hosted-only diagnosis/repair, launch first/record after. Owning Local call_Hm5HNZfojopq27h8yU4vvjeO reports issue #204 and actual owner launch and requests this promotion. Candidate/unassigned/no-runtime source snapshots remain historical, not current repair authority or launch prerequisites.",
-      "terminalPath": "One separately reviewed PR closes #204 after a bounded cause-level diagnosis and justified correction, preserved authentication/owner-private authority/non-theft/fencing/bounded recovery, meaningful regression or discriminating evidence, exact-final-head hosted Windows InstalledCurrent and relevant required CI, public reviewer-origin source receipt, design review and normal Campaign merge gate. No unchanged-head retry/rerun, waiver, flake exception, budget widening or blanket ForeignDaemon success; launch alone is not implementation, repair, CI/readiness or accepted delivery.",
+      "dispositionAuthority": "Campaign toolu_01PMAPJmqa8eQpqmCn13r85n explicitly accepts #204 completed with the same owner after PR #205 merged under gate 6407030627 (MERGE + debt, high confidence). Direct confirmation toolu_01FtkRbxxFYvMWS8H47FBdps retains exactly the four gate debts and pending follow-ups. Local call_jZJCbE30clLBlRrzkQc1Ai6W requests this terminal recording; merge/closure alone is not the acceptance authority. The earlier launch authority remains historical below.",
+      "terminalPath": "Campaign-accepted bounded #204 repair is complete at PR #205 merge faf4f883631c7aaec057dde4beca36daa29d29dd with all four gate debts retained. Same owner 8afc363c supplies the consequence/no-discoveries PR-body statements and field report after main Windows InstalledCurrent; exact-main observation and d7 fresh integration/full CI/#196 Windows-job confirmation remain pending follow-through, not completion holds. Debt-3 recurrence creates a new item, not retry or automatic #204 reopening. No main CI/Docs success, debt clearance or #166 acceptance is inferred. Both #193/#198 wakes still require Local-verified actual #166 product-repair merge.",
       "separate204RepairPromotionAndActualLaunch": {
         "kind": "additive-separate204-promotion-and-already-launched-owner",
         "historicalCandidateFields": {
@@ -5153,6 +5262,413 @@
         "deduplication": "One existing record retains its initial observation and one prior appended occurrence. Search every canonical discovered-work ledger for the exact new run 40250813915 and job 121342086267 before appending this public PR #196 occurrence. Do not create another record or duplicate an already retained run/job.",
         "coordination": "d7 remains the sole #166 / PR #196 writer. The new #204 owner uses its own main-based branch and separate closing PR, coordinates overlapping edits before publishing, and never writes PR #196's branch. Unrelated analysis is not serialized. No Watcher graph edge or status change is implied.",
         "conservation": "The Local ledger retains 48 unique records. Exactly one new Local node increases the count from 27 to 28, with no dependency edges or edits to existing nodes, status, attention or design references. The entire Watcher tree remains exact. All other 47 records and ledger root fields, all original #166 evidence and launch/recovery/heap/alias/stop-drain qualifications, and both pending #193/#198 product-repair-merge wakes remain exact. No new retry or runtime permission, source/design/CI/readiness credit, repair/delivery, debt/HOLD or freeze acceptance follows."
+      },
+      "acceptedCompletionWithRetainedDebt": {
+        "kind": "campaign-accepted-terminal-completion-with-four-retained-debts",
+        "historicalCurrentFields": {
+          "status": "routed",
+          "dispositionAuthority": "Campaign original direction toolu_01An1S92Jpt43cjRLd4HDCXC, confirmed directly with exact sent/register wording in toolu_014EXnE5H5oXyQfrYA6reKfs, authorizes one separate tracker and public-record-only owner, hosted-only diagnosis/repair, launch first/record after. Owning Local call_Hm5HNZfojopq27h8yU4vvjeO reports issue #204 and actual owner launch and requests this promotion. Candidate/unassigned/no-runtime source snapshots remain historical, not current repair authority or launch prerequisites.",
+          "terminalPath": "One separately reviewed PR closes #204 after a bounded cause-level diagnosis and justified correction, preserved authentication/owner-private authority/non-theft/fencing/bounded recovery, meaningful regression or discriminating evidence, exact-final-head hosted Windows InstalledCurrent and relevant required CI, public reviewer-origin source receipt, design review and normal Campaign merge gate. No unchanged-head retry/rerun, waiver, flake exception, budget widening or blanket ForeignDaemon success; launch alone is not implementation, repair, CI/readiness or accepted delivery."
+        },
+        "historicalNodeFields": {
+          "status": "in-progress",
+          "summary": "Diagnose the concrete admission/recovery precondition behind the Windows crash/reattach ForeignDaemon signature and deliver the minimal complete correction without weakening authentication, ownership, fencing or bounded recovery. Campaign authorized one public-record-only owner; Local reports the actual launch of owner 8afc363c-1af3-447d-a472-336f92d57998 on its own main-based branch. Runtime stays hosted-only, with no retry, waiver or flake exception. The owner must not write PR #196's branch and must coordinate overlapping edits with d7, the sole #166 writer. Close #204 through exact-final-head source/design review, hosted CI and the Campaign gate. Matching public signatures do not establish a common cause; the original two Windows observations and third public PR #196 occurrence remain distinct. Launch grants no repair/readiness credit or downstream wake acceptance."
+        },
+        "historyBoundary": "All original evidence, three retained Windows observations, candidate/unassigned history, launch binding/projection and every existing qualification remain exact. The earlier current status/terminal/launch authority and node status/summary are saved here; they are history, not a current bar to Campaign-accepted completion. This does not retroactively prove any previously missing source/native/coverage evidence.",
+        "sourcePacket": {
+          "file": "complete204-local-decision.json",
+          "bytes": 8019,
+          "sha256": "2d3b9d8b651085ee169069e2880a4242251774e2edf89b7b29d701b553401dbe",
+          "originalFile": "issue204-accepted-merge-and-followthrough-20261025.json",
+          "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "captureReceipt": "complete204-source-capture.json"
+        },
+        "retainedLocalAcceptance": {
+          "kind": "campaign-accepted-completion-with-retained-debt",
+          "issue": 204,
+          "pullRequest": 205,
+          "owner": "8afc363c-1af3-447d-a472-336f92d57998",
+          "node": "foreigndaemon-reattach-repair",
+          "campaignAuthority": {
+            "session": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01PMAPJmqa8eQpqmCn13r85n",
+            "receivedAt": "2026-10-26T02:42:07.085Z",
+            "verbatim": "Campaign: PR #205 is merged as faf4f883 after the gate, and #204 is closed. The gate record is issuecomment-6407030627.\n\n1. Record #204 as completed with owner 8afc363c.\n2. d7 must merge main into PR #196 and get fresh full CI at the new head, so it can show whether this clears #196's Windows required job.\n3. Gate debt 3: watch main's Windows InstalledCurrent, and file a new item if the failure recurs.\n\nThe #193/#198 wakes still wait on the #166 merge."
+          },
+          "localProviderVerification": {
+            "verifiedAt": "2026-10-26T02:42:42.410Z",
+            "pullRequestUrl": "https://github.com/lossyrob/telex/pull/205",
+            "reviewedHead": "e11c56ce2eb9005edd81e42f77c4a5a571128a98",
+            "reviewedTree": "1707ac6b24fd323f320ff551dfaaf3614b25e09f",
+            "merged": true,
+            "mergedAt": "2026-10-26T02:41:47Z",
+            "mergeCommit": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+            "mergeTree": "1b754b186622b384bc9adaf3a835be7c6faa4df7",
+            "orderedParents": [
+              "7e91a2337b7768e767f75c80b2535b7b0cd2530d",
+              "e11c56ce2eb9005edd81e42f77c4a5a571128a98"
+            ],
+            "mainAtVerification": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+            "issueUrl": "https://github.com/lossyrob/telex/issues/204",
+            "issueState": "closed",
+            "issueStateReason": "completed",
+            "issueClosedAt": "2026-10-26T02:41:49Z",
+            "boundary": "Public PR, issue, merge commit/tree/parents, main reference and gate comment independently read by Local. Acceptance is Campaign's explicit decision, not inferred merely from GitHub closure."
+          },
+          "gate": {
+            "url": "https://github.com/lossyrob/telex/pull/205#issuecomment-6407030627",
+            "createdAt": "2026-10-26T02:41:44Z",
+            "verdict": "MERGE + debt",
+            "confidence": "high",
+            "fullBody": "Campaign merge gate: MERGE + debt (confidence high). No hard stop, no fork.\n\nHead e11c56ce2eb9005edd81e42f77c4a5a571128a98, tree 1707ac6b. Base main 7e91a233; drift since merge base is .streamliner only.\n\nFloor:\n- CI: 21/21 green at the exact head (run 40258493286, attempt 1), including Windows Build and test and InstalledCurrent. No retry, rerun or waiver.\n- Merge: merge-tree is clean against main and against open PRs #194, #196 and #202. 0 unresolved threads.\n- Exact-head receipts: independent source review issuecomment-6406872345, and steward design inspection issuecomment-6406877057.\n- Body: says Closes #204. Local independently confirmed this packet.\n\nHard stops: none. The change is next to peer authentication but doesn't relax it. Only an exit that can be proven becomes retryable NotRunning; access denied or an unclear state stays terminal ForeignDaemon. There are no new variants, no wire or schema changes, and no release or #203 surface.\n\nCorrectness: the fix matches the #204 trace (a killed predecessor whose pipe is still open), sending it into the existing bounded probe and spawn loops. The exit check is conservative about PID reuse and about the STILL_ACTIVE (259) exit code.\n\nDebt:\n1. The PR body has no consequence line (normal) and no \"no discoveries\" statement.\n2. In a contrived same-user case, a squatter whose pipe-creating process has exited while another process still holds the pipe gets a bounded Timeout/Unavailable instead of ForeignDaemon. The peer is still refused, so only the diagnostic class gets worse.\n3. Nothing forces the ERROR_INVALID_PARAMETER branch or a connection during handle rundown. Watch Windows InstalledCurrent on main, and file a new item if it recurs.\n4. The evidence that the test fails before the fix is from diagnostic head 4f133e02, not this head.\n\nFollow-up: the #204 field report, and the #196 owner's confirmation that this clears #196's Windows required job.",
+            "scope": "Accepted bounded #204 repair with all four debts retained. No retrospective claim that missing native-branch or rundown coverage was supplied."
+          },
+          "preMergeEvidence": {
+            "sourceReceipt": "https://github.com/lossyrob/telex/pull/205#issuecomment-6406872345",
+            "designReceipt": "https://github.com/lossyrob/telex/pull/205#issuecomment-6406877057",
+            "ownerSummary": "https://github.com/lossyrob/telex/pull/205#issuecomment-6406996294",
+            "run": 40258493286,
+            "attempt": 1,
+            "head": "e11c56ce2eb9005edd81e42f77c4a5a571128a98",
+            "jobs": 21,
+            "successfulJobs": 21,
+            "localVerification": "Both public review receipts and exact-head CI job/check metadata were independently read before merge. Source review found no actionable findings; design inspection passed. This is pre-merge evidence, not a claim that the subsequent main run has passed.",
+            "limits": "Classifier regression, not deterministic fresh-connect-during-rundown proof; not every Win32 branch is forced. The original diagnostic trace and diagnostic regression failure are not exact-fix-head runtime results. No Local runtime execution or duplicate source review."
+          },
+          "postMergeObservation": {
+            "head": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+            "ciRun": 40260369255,
+            "ciAttempt": 1,
+            "ciStatusAtLocalVerification": "queued",
+            "docsRun": 40260369359,
+            "docsStatusAtLocalVerification": "in_progress",
+            "ciRegistration": {
+              "coordinator": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+              "source": "call_5bYbSYmuphykDCXVrAOaPJfz",
+              "waitId": "wait-pr205-main-ci40260369255-faf4f88",
+              "jobs": 21,
+              "reportedState": "Registered under the existing single verified observer."
+            },
+            "deduplicatedFollowUp": {
+              "source": "call_73u3Q30ErgoVjAF0RPSuV1Ps",
+              "ci": "The existing exact CI wait now includes Local as a recipient.",
+              "docsWaitId": "wait-pr205-main-docs40260369359-faf4f88",
+              "docs": "A distinct same-head Docs wait is registered under the same singular verified scheduler.",
+              "failureRouting": "InstalledCurrent failure routes to Local and the existing #204 owner, never to #193/#198."
+            },
+            "boundary": "No terminal main CI or Docs result is accepted here. Monitoring does not delay Campaign's accepted completion. Both observations use the same single scheduler; neither is a retry or a downstream wake."
+          },
+          "remainingFollowThrough": {
+            "fieldReport": "Existing #204 owner 8af supplies the gate's field report with merged-head evidence and retained limits.",
+            "mainDebt": "Observe Windows InstalledCurrent on main through the existing sole observer/Sentinel arrangement. A recurrence requires a new item with exact evidence, not a retry or automatic reopening of #204.",
+            "integration": "Campaign directs existing sole #166 writer d7a17cd2-08c2-4760-b1a6-1209c2d0f80c to merge current main into PR #196, obtain fresh full CI at the new head, and confirm whether its Windows required job clears. Local forwarded the verified merge and direction.",
+            "integrationLimits": "Integration and fresh validation only; no old-head CI carry, waiver or #196 merge authorization. #203 remains separate.",
+            "wakes": "Both #193/#198 wakes remain pending until the actual #166 product-repair merge is independently verified by Local."
+          },
+          "canonicalRequest": "Record Campaign-accepted #204 completion on the existing record/node/task with the same 8af owner. Preserve all prior source evidence, diagnostic head geometry, launch history, review limits and the four gate debts. Retain pending field/main/integration follow-through without keeping the completed repair artificially in progress. No new owner, occurrence, graph dependency or #166 acceptance is implied; preserve the entire #166 record and both pending wakes unless a separately scoped reviewed update is needed."
+        },
+        "directCampaignConfirmation": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01FtkRbxxFYvMWS8H47FBdps",
+          "receipt": "complete204-campaign-confirmation.json",
+          "verbatim": "Campaign: confirmed. #204 is accepted as completed with debt. PR #205 merged as faf4f883 under gate record issuecomment-6407030627 (merge with debt, high confidence), and the owner is 8afc363c.\n\nThe qualifications are exactly the four gate debts, plus the follow-ups I sent:\n- the owner adds the consequence line and the no-discoveries statement to the PR body, and posts a #204 field report after main's Windows InstalledCurrent runs;\n- d7 merges main into #196 and gets fresh full CI;\n- if debt 3 recurs, it becomes a new item, with no retry and no automatic reopening of #204.\n\nNothing else. Your scope is right."
+        },
+        "publicVerification": {
+          "identity": {
+            "pr": {
+              "baseRefName": "main",
+              "headRefName": "lossyrob-foreigndaemon-reattach-repair",
+              "headRefOid": "e11c56ce2eb9005edd81e42f77c4a5a571128a98",
+              "mergeCommit": {
+                "oid": "faf4f883631c7aaec057dde4beca36daa29d29dd"
+              },
+              "mergedAt": "2026-10-26T02:41:47Z",
+              "number": 205,
+              "state": "MERGED",
+              "url": "https://github.com/lossyrob/telex/pull/205"
+            },
+            "issue": {
+              "id": 6031383295,
+              "number": 204,
+              "state": "closed",
+              "state_reason": "completed",
+              "closed_at": "2026-10-26T02:41:49Z",
+              "html_url": "https://github.com/lossyrob/telex/issues/204"
+            },
+            "merge": {
+              "sha": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "tree": "1b754b186622b384bc9adaf3a835be7c6faa4df7",
+              "parents": [
+                "7e91a2337b7768e767f75c80b2535b7b0cd2530d",
+                "e11c56ce2eb9005edd81e42f77c4a5a571128a98"
+              ]
+            }
+          },
+          "gateCapture": {
+            "rawFile": "complete204-gate-raw.json",
+            "bodyFile": "complete204-gate-body.txt",
+            "bytes": 1930,
+            "sha256": "5ae938300e7a24e5d29e5e3cecf83e2a6aefddc0ed90cb24577dc6c28131c36b"
+          },
+          "fullGateBody": "Campaign merge gate: MERGE + debt (confidence high). No hard stop, no fork.\n\nHead e11c56ce2eb9005edd81e42f77c4a5a571128a98, tree 1707ac6b. Base main 7e91a233; drift since merge base is .streamliner only.\n\nFloor:\n- CI: 21/21 green at the exact head (run 40258493286, attempt 1), including Windows Build and test and InstalledCurrent. No retry, rerun or waiver.\n- Merge: merge-tree is clean against main and against open PRs #194, #196 and #202. 0 unresolved threads.\n- Exact-head receipts: independent source review issuecomment-6406872345, and steward design inspection issuecomment-6406877057.\n- Body: says Closes #204. Local independently confirmed this packet.\n\nHard stops: none. The change is next to peer authentication but doesn't relax it. Only an exit that can be proven becomes retryable NotRunning; access denied or an unclear state stays terminal ForeignDaemon. There are no new variants, no wire or schema changes, and no release or #203 surface.\n\nCorrectness: the fix matches the #204 trace (a killed predecessor whose pipe is still open), sending it into the existing bounded probe and spawn loops. The exit check is conservative about PID reuse and about the STILL_ACTIVE (259) exit code.\n\nDebt:\n1. The PR body has no consequence line (normal) and no \"no discoveries\" statement.\n2. In a contrived same-user case, a squatter whose pipe-creating process has exited while another process still holds the pipe gets a bounded Timeout/Unavailable instead of ForeignDaemon. The peer is still refused, so only the diagnostic class gets worse.\n3. Nothing forces the ERROR_INVALID_PARAMETER branch or a connection during handle rundown. Watch Windows InstalledCurrent on main, and file a new item if it recurs.\n4. The evidence that the test fails before the fix is from diagnostic head 4f133e02, not this head.\n\nFollow-up: the #204 field report, and the #196 owner's confirmation that this clears #196's Windows required job.",
+          "verificationBoundary": "The reconciler independently verified provider PR merge/issue closure, Git merge/tree/ordered parents and full public gate equality to the packet. The public gate and explicit Campaign direction establish bounded acceptance. Source/design findings, 21/21 pre-merge CI, clean merge-tree checks and post-merge observer registration remain Local/gate-attributed; no new source review or main CI/Docs/scheduler result is claimed."
+        },
+        "retainedDebts": [
+          {
+            "number": 1,
+            "gateText": "1. The PR body has no consequence line (normal) and no \"no discoveries\" statement.",
+            "state": "retained-not-cleared"
+          },
+          {
+            "number": 2,
+            "gateText": "2. In a contrived same-user case, a squatter whose pipe-creating process has exited while another process still holds the pipe gets a bounded Timeout/Unavailable instead of ForeignDaemon. The peer is still refused, so only the diagnostic class gets worse.",
+            "state": "retained-not-cleared"
+          },
+          {
+            "number": 3,
+            "gateText": "3. Nothing forces the ERROR_INVALID_PARAMETER branch or a connection during handle rundown. Watch Windows InstalledCurrent on main, and file a new item if it recurs.",
+            "state": "retained-not-cleared"
+          },
+          {
+            "number": 4,
+            "gateText": "4. The evidence that the test fails before the fix is from diagnostic head 4f133e02, not this head.",
+            "state": "retained-not-cleared"
+          }
+        ],
+        "pendingFollowThrough": {
+          "state": "Pending in this acceptance record; not a hold on completed bounded #204 delivery.",
+          "ownerBody": "Same #204 owner adds the consequence line and no-discoveries statement to the PR body. No edit is claimed here.",
+          "ownerField": "Same owner posts #204 field report after main Windows InstalledCurrent runs; report not accepted here.",
+          "exactMainObservation": "Observe exact faf4f883 main through the existing sole coordinator/Sentinel arrangement. Packet CI queued/Docs in-progress and registration metadata are historical snapshots, not terminal results or an independent scheduler audit. No duplicate observer or retry.",
+          "integration": "Existing d7 merges main into PR #196, gets fresh full CI at the new head and confirms whether #196 Windows required job clears. Local reports forwarding the direction; no integration result, old-head CI carry or #196 merge permission follows. #203 remains separate.",
+          "recurrence": "Gate debt 3 recurrence requires a new item with exact evidence, no retry and no automatic #204 reopening.",
+          "wakes": "Both existing #193/#198 wakes remain pending and byte-exact; only Local-verified actual #166 product-repair merge triggers them, not this #204 completion."
+        },
+        "conservation": "Campaign-accepted bounded #204 terminal completion with the same owner and all four gate debts retained. Pending body corrections, field report, exact-main observation and #196 fresh integration/validation do not withhold accepted completion. Debt-3 recurrence creates a new item, not a retry or automatic #204 reopening. Preserve all prior evidence/launch history, entire #166 record and both pending #193/#198 wakes. No new owner, candidate, occurrence, graph edge, product-source review, main CI/Docs success, separate #166/#203/Watcher acceptance, debt clearance, runtime expansion, retry/waiver/flake exception, hardening/closure, release or freeze credit."
+      },
+      "laterFieldBodyAndInitialMainFollowThrough": {
+        "kind": "additive-field-body-and-initial-main-follow-through-after-accepted204",
+        "classificationPacket": {
+          "file": "fieldnative-local-intake.json",
+          "bytes": 6277,
+          "sha256": "05e31a05f8f63346b48f6b99d3bd49c659e876515c03eb43b1bbc3403ee47b0c",
+          "originalFile": "main-faf4f883-field-and-native-observation-20261025.json",
+          "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "localDirection": "call_SYH0cTp2bTmzr6RUBiUj5iUy",
+          "captureReceipt": "fieldnative-source-capture.json"
+        },
+        "retainedLocalFollowThroughAndNativeIntake": {
+          "kind": "post-204-field-followthrough-and-separate-native-intake",
+          "mainHead": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+          "mainTree": "1b754b186622b384bc9adaf3a835be7c6faa4df7",
+          "run": 40260369255,
+          "attempt": 1,
+          "event": "push",
+          "overallResult": "failure",
+          "field204": {
+            "owner": "8afc363c-1af3-447d-a472-336f92d57998",
+            "ownerMessage": "toolu_017mzdu45Sh6tVYJJaDgJdJB",
+            "publicReport": "https://github.com/lossyrob/telex/issues/204#issuecomment-6407206963",
+            "publicReportCreatedAt": "2026-10-26T02:57:33Z",
+            "reportReadByLocal": true,
+            "installedCurrentJob": 121371242830,
+            "jobConclusion": "success",
+            "publicLog": {
+              "file": "run40260369255-job121371242830-public.log",
+              "bytes": 48380,
+              "sha256": "cde3b6ef9f046ea5e9b8690f5b523971099236f2c17fda5474abd16783b86f15",
+              "captureSource": "Completed-job public API response, independently retrieved by Local.",
+              "checkoutLine": 96,
+              "namedProofLine": 503,
+              "namedProof": "installed_current_crash_restart_and_reattach_recovers_membership ... ok",
+              "aggregateLine": 526,
+              "aggregate": "30 passed; 0 failed; 2 ignored",
+              "fixtureAggregate": "6 passed; 0 failed; 1 ignored"
+            },
+            "classifierRegression": "Local independently observed windows_exited_pipe_server_is_not_a_foreign_daemon ... ok at line 1781 of the ordinary Windows log, despite that job later failing in another target.",
+            "docs": {
+              "run": 40260369359,
+              "attempt": 1,
+              "head": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "result": "success",
+              "attribution": "Sole wait coordinator report call_iPu4xaUmiSWDnwKWollJBhqE; two successful jobs. Local did not inspect the Pages artifact."
+            },
+            "bodyDebt": {
+              "gateItem": 1,
+              "disposition": "Textual omissions corrected.",
+              "localVerification": "Local directly read the merged PR #205 body and found Consequence: normal. and the No discoveries. statement. The public owner report marks item 1 resolved.",
+              "limits": "Verifies the required body statements exist; not an independent guarantee that no undiscovered work exists."
+            },
+            "retainedGateDebts": [
+              2,
+              3,
+              4
+            ],
+            "acceptance": "#204 remains Campaign-accepted completed. Initial exact-main observation and field reporting are fulfilled, but debt-3 ongoing observation and its new-item-on-recurrence rule remain. One passing run does not prove elimination or force the uncovered Windows branches.",
+            "separateIntegration": "#196's fresh-head Windows-job confirmation remains separate; this packet accepts no #166 repair or CI result."
+          },
+          "nativeObservation166": {
+            "record": "local-daemon-windows-pageheap-access-violation",
+            "owner": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+            "job": 121371242766,
+            "jobName": "Build and test (windows-latest)",
+            "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40260369255/job/121371242766",
+            "jobStartedAt": "2026-10-26T02:42:32Z",
+            "jobCompletedAt": "2026-10-26T02:48:56Z",
+            "publicLog": {
+              "file": "run40260369255-job121371242766-public.log",
+              "bytes": 337894,
+              "sha256": "63da493df3584aefbb82fa37d80c1da2371ecfb316247de2b1731d49e3a8058b",
+              "captureSource": "Completed-job public API response, independently retrieved by Local, with no NUL bytes.",
+              "checkoutLines": [
+                97,
+                98
+              ],
+              "failureLines": [
+                2294,
+                2319
+              ],
+              "nativeExitLine": 2297
+            },
+            "executedCheckout": "Direct main faf4f883631c7aaec057dde4beca36daa29d29dd, not a synthetic PR merge.",
+            "source": {
+              "path": "tests/daemon_process_sqlite.rs",
+              "blob": "b1f708c5e8948884c49207fe4aba4e051dc7f23a",
+              "test": "station_intent_upgrade_runs_the_selected_successor_and_restores_push",
+              "testStart": 4763,
+              "observingGuard": 518,
+              "caller": 4808,
+              "operation": "The selected predecessor's initial attach, before intent seeding at line 4810 and before constructing the successor upgrade at line 4827.",
+              "arguments": [
+                "--json",
+                "--address",
+                "addr:station-intent-upgrade",
+                "attach",
+                "--session",
+                "station-intent-upgrade-session"
+              ],
+              "configuredCommandTimeoutSeconds": 10,
+              "inspection": "Local read immutable source lines 503-522 and 4763-4832. The Rust backtrace identifies the capture guard/caller, not a native fault stack."
+            },
+            "exitStatus": "0xc0000374",
+            "stdout": "",
+            "stderr": "",
+            "captureNames": [
+              "cmd-320.out",
+              "cmd-320.err"
+            ],
+            "targetAggregate": "48 passed; 1 failed; 0 ignored",
+            "targetDurationSeconds": 24.35,
+            "mioAtExecutedMain": "1.2.1",
+            "mioVerification": "Local independently read Cargo.lock at the executed immutable main commit. The Mio 1.2.4 implementation is still separate on PR #196; this occurrence does not evaluate its integrated head 98c40f3d.",
+            "artifact": {
+              "id": 12624059243,
+              "name": "windows-build-test-crash",
+              "bytes": 73053770,
+              "localInspection": "Not downloaded or inspected. No claim about a failing-process dump or its absence."
+            },
+            "limits": "Native Telex command-child status, not ForeignDaemon or the Watcher harness. The test name does not make successor upgrade/drain the failed operation. Empty output and status do not identify the fault site, corrupting operation or common cause. Duration is the target aggregate, not attach latency or a measured timeout.",
+            "routing": "Local sent this additional occurrence to the existing #166 owner for run/job deduplication and retention, without retry, waiver, new owner, experiment extension or causal inference."
+          },
+          "canonicalRequest": "After the accepted-completion tuple is landed, add a bounded successor qualification for #204's field/body/initial-main follow-through and one deduplicated native run/job occurrence to the existing #166 record. Preserve the original four-debt acceptance snapshot; only debt 1's specified textual omissions are corrected, while debts 2-4 and future observation remain. Do not create a new native-family tracker or #204 recurrence item, change graph status/dependencies, accept #166/#203, or deliver either #193/#198 wake. Fresh exact artifact reviews are required; original packet sources stay immutable."
+        },
+        "historicalAcceptanceBoundary": "The entire acceptedCompletionWithRetainedDebt qualification, its complete four-debt snapshot and earlier current terminal/authority fields remain unchanged as the exact acceptance-time record. This separate later qualification records only subsequent fulfillment and the remaining limits; accepted #204 status and same 8af owner are unchanged.",
+        "publicFieldReport": {
+          "url": "https://github.com/lossyrob/telex/issues/204#issuecomment-6407206963",
+          "createdAt": "2026-10-26T02:57:33Z",
+          "body": "Field report for #204 after merging PR #205 (owner session 0fda8afd-ccfa-4aba-bbf2-c625b09280da).\n\nMerged commit on main: faf4f883631c7aaec057dde4beca36daa29d29dd. Reviewed PR head: e11c56ce2eb9005edd81e42f77c4a5a571128a98. Gate: https://github.com/lossyrob/telex/pull/205#issuecomment-6407030627\n\nMain CI push run 40260369255, attempt 1, at faf4f883, concluded failure overall:\n- InstalledCurrent Postgres process proofs (Windows), job 121371242830: success. The crash-reattach proof did not reproduce ForeignDaemon on this run.\n- Build and test (windows-latest), job 121371242766: failure. The #204 regression test `daemon::platform::tests::windows_exited_pipe_server_is_not_a_foreign_daemon` passed there (lib 573 passed, 0 failed). The failing test is `station_intent_upgrade_runs_the_selected_successor_and_restores_push` (tests/daemon_process_sqlite.rs:518), which exited with native abnormal status 0xc0000374. That is the #166 / PR #196 native error family, not #204's ForeignDaemon signature. It is retained as-is; I will not retry, rerun or waive it, and #204 is not reopened. It is routed to Local and the #166 owner.\n- The other 19 jobs succeeded. The Docs push run 40260369359 at faf4f883 also succeeded.\n- Retained artifacts: windows-build-test-crash 12624059243, windows-heap-diagnostics 12623779867, released-v021-upgrade-proof 12624622245.\n\nOne green InstalledCurrent run is not proof that the race is gone. Before the fix, the race reproduced in about 3 of roughly 58 Windows jobs.\n\nRetained limits (gate debt):\n1. PR body consequence/discoveries lines: resolved. The body now states \"Consequence: normal.\" and \"No discoveries.\"\n2. Retained. In a contrived same-user case, a squatter whose pipe-creating process has exited while another process still holds the pipe now gets a bounded Timeout/Unavailable instead of ForeignDaemon. The peer is still refused; only the diagnostic class is worse.\n3. Retained. No test forces the ERROR_INVALID_PARAMETER branch or a connection during handle rundown. Watch Windows InstalledCurrent on main. A recurring ForeignDaemon there becomes a new item, not a retry and not an automatic reopening of #204.\n4. Retained. The evidence that the regression test fails before the fix comes from diagnostic head 4f133e02 (job 121359776324), not the merged head.\r\n",
+          "bodyCapture": {
+            "file": "fieldnative-comment-body.txt",
+            "bytes": 2308,
+            "sha256": "29649128876237c009bcff63c351cf22cb3f0ed43bb5f59fc40be540424e78c8"
+          },
+          "attribution": "Local supplies the report as the existing owner field report; the reconciler independently reads its complete public text. The public header claims session 0fda8afd-ccfa-4aba-bbf2-c625b09280da; the canonical App owner remains 8afc363c-1af3-447d-a472-336f92d57998. No new owner or independent alias/equivalence finding is inferred from that header. The report statistic about roughly 3 of 58 jobs and its other-19-jobs inventory are retained report statements, not a new reconciler census or causal/statistical proof."
+        },
+        "debt1TextualFulfillment": {
+          "gateItem": 1,
+          "state": "specified-textual-omissions-fulfilled",
+          "publicPrUrl": "https://github.com/lossyrob/telex/pull/205",
+          "bodyCapture": {
+            "file": "fieldnative-pr-body.txt",
+            "bytes": 4131,
+            "sha256": "a3c487348dd8e46be7b5a57def470920cfa3383c04583b5b2dbbe51955d41135"
+          },
+          "verifiedStatements": [
+            "Consequence: normal.",
+            "No discoveries."
+          ],
+          "verification": "Both complete public PR body and Local packet confirm these exact statements exist. This fulfills only the specified body-text requirement, not an independent guarantee that undiscovered work does not exist or clearance of other debt."
+        },
+        "initialMainAndFieldFulfillment": {
+          "state": "initial-exact-main-observation-and-public-field-report-fulfilled-with-limits",
+          "identity": {
+            "run": {
+              "id": 40260369255,
+              "head_sha": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "event": "push",
+              "run_attempt": 1,
+              "status": "completed",
+              "conclusion": "failure",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40260369255"
+            },
+            "nativeJob": {
+              "id": 121371242766,
+              "run_id": 40260369255,
+              "head_sha": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "run_attempt": 1,
+              "name": "Build and test (windows-latest)",
+              "status": "completed",
+              "conclusion": "failure",
+              "started_at": "2026-10-26T02:42:32Z",
+              "completed_at": "2026-10-26T02:48:56Z",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40260369255/job/121371242766"
+            },
+            "installedCurrentJob": {
+              "id": 121371242830,
+              "run_id": 40260369255,
+              "head_sha": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+              "run_attempt": 1,
+              "name": "InstalledCurrent Postgres process proofs (Windows)",
+              "status": "completed",
+              "conclusion": "success",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40260369255/job/121371242830"
+            }
+          },
+          "installedCurrentProof": {
+            "file": "run40260369255-job121371242830-public.log",
+            "bytes": 48380,
+            "sha256": "cde3b6ef9f046ea5e9b8690f5b523971099236f2c17fda5474abd16783b86f15",
+            "captureSource": "Completed-job public API response, independently retrieved by Local.",
+            "checkoutLine": 96,
+            "namedProofLine": 503,
+            "namedProof": "installed_current_crash_restart_and_reattach_recovers_membership ... ok",
+            "aggregateLine": 526,
+            "aggregate": "30 passed; 0 failed; 2 ignored",
+            "fixtureAggregate": "6 passed; 0 failed; 1 ignored"
+          },
+          "classifierRegression": "Local independently observed windows_exited_pipe_server_is_not_a_foreign_daemon ... ok at line 1781 of the ordinary Windows log, despite that job later failing in another target.",
+          "docs": {
+            "run": 40260369359,
+            "attempt": 1,
+            "head": "faf4f883631c7aaec057dde4beca36daa29d29dd",
+            "result": "success",
+            "attribution": "Sole wait coordinator report call_iPu4xaUmiSWDnwKWollJBhqE; two successful jobs. Local did not inspect the Pages artifact."
+          },
+          "verification": "The reconciler independently verifies exact run/job identity and InstalledCurrent success, with the overall main run failed. Named crash-reattach proof, 30/0/2 aggregate, fixture 6/0/1, classifier printed ok and both log hashes/counts/line anchors remain Local-verified completed-job-text observations, not a reconciler log read. Docs success is retained from the sole observer and public report, not a reconciler Docs inventory, Pages inspection or scheduler audit.",
+          "limit": "One passing InstalledCurrent job does not prove race elimination or force ERROR_INVALID_PARAMETER/handle-rundown coverage. The ordinary Windows job failed later in a separate native child, despite the classifier regression printing ok."
+        },
+        "remaining": {
+          "gateDebts": [
+            2,
+            3,
+            4
+          ],
+          "state": "retained-not-cleared",
+          "debt3Watch": "Ongoing Windows InstalledCurrent observation remains. Recurrence of its ForeignDaemon signature creates a new item with exact evidence, no retry and no automatic #204 reopening.",
+          "independent196": "Fresh-head #196 integration/full-CI/Windows-job confirmation remains separate and unaccepted by this packet. No #166/#203 acceptance or overall-main-green follows.",
+          "wake": "Both existing #193/#198 wakes remain unchanged and pending; only Local-verified actual #166 product-repair merge triggers them."
+        },
+        "conservation": "Additive follow-through successor only. Preserve the complete accepted #204 snapshot and all earlier evidence/observations, owners and statuses. Fulfill only debt 1 textual omissions, owner field reporting and initial exact-main observation; debts 2-4, ongoing recurrence watch and independent #196 integration confirmation remain. Append exactly one run/job-deduplicated #166 native observation at executed Mio 1.2.1 main, before seed or successor upgrade, not a pending Mio 1.2.4 result or cause/repair acceptance. Preserve all graphs, Watcher and both pending actual-#166-product-merge wakes; no new owner, tracker, candidate, #204 recurrence, retry, experiment extension, runtime, #166/#203 acceptance, overall-main-green, dump/archive finding, waiver, debt/HOLD or freeze credit. New evidence must not delay ongoing repairs."
       }
     },
     {

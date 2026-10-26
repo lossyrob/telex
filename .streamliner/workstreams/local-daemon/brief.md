@@ -1093,3 +1093,39 @@ not independently accept those repairs. Both pending #193/#198 wakes
 still require Local's verification of the actual #166 repair merge.
 No graph edge, status change, repair/readiness/merge, debt/HOLD or
 workstation-freeze credit follows from this decision recording.
+
+## 2026-10-26 - ForeignDaemon #204 accepted complete with debt
+
+Campaign explicitly accepts the bounded #204 repair as completed with
+debt under [gate 6407030627](
+https://github.com/lossyrob/telex/pull/205#issuecomment-6407030627),
+`MERGE + debt`, high confidence. PR #205 merged as
+`faf4f883631c7aaec057dde4beca36daa29d29dd`, tree
+`1b754b186622b384bc9adaf3a835be7c6faa4df7`, with ordered parents
+`7e91a233` and reviewed `e11c56ce`; #204 closed completed.
+The same owner `8afc363c-1af3-447d-a472-336f92d57998` retains follow-through.
+The ledger/node are completed; pending main observation and field work
+must not keep this accepted repair artificially in progress.
+
+All four debts remain: the missing PR-body consequence/no-discoveries
+statements; the contrived same-user squatter's worse diagnostic class
+while still refused; unforced `ERROR_INVALID_PARAMETER`/handle-rundown
+branches; and pre-fix failure evidence from diagnostic rather than final
+head. The owner must add the body statements and post the field report
+after main's Windows InstalledCurrent runs. Debt-3 recurrence creates a
+new item, not a retry or automatic #204 reopening. No debt is cleared here.
+
+The complete 8,019-byte Local acceptance packet and full 1,930-byte public
+gate are retained and projected by hash. Merge/closure/Git geometry/gate
+were independently read; pre-merge 21/21 CI and source/design findings
+remain Local/gate-attributed, not new product review or main CI proof.
+The packet's exact-merge CI/Docs waits share one existing scheduler;
+their captured states are historical, with terminal results uncredited.
+
+d7 must integrate main into PR #196, obtain fresh full CI and confirm
+its Windows required job clears. That remains follow-through, not #196
+readiness or merge authority; #203 remains separate. All prior #204
+evidence/launch history, the entire #166 record and both pending #193/#198
+wakes stay exact. Only Local-verified actual #166 repair merge triggers
+those wakes. No new owner, occurrence, graph edge, runtime/retry, broader
+acceptance, debt/HOLD reversal or workstation-freeze clearance follows.
