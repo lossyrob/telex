@@ -1670,3 +1670,88 @@ Campaign node acceptance above supersedes the original pending-staffing paragrap
 Open-PR plus named-section overlap coordination is required with #222 for copilot/COPILOT.md: #222 owns stall-group installation/root-mode wording; #223 owns host-capability/first-load/fallback/recovery text. No duplicate repair or silent overlap. Local tests follow current isolated TELEX_* and temporary LOCALAPPDATA policy; no real ACL/permission change or I161-1 restore/reset, no reinstated blanket freeze and no replacement of exact-head hosted gates.
 
 Only this new row/node/task, root-summary prefix with full old suffix and append-only brief change. All 49 old rows/30 old nodes and every other workstream/dependency/checkpoint/design/presentation/debt/wake remain exact. No owner launch, source/runtime/recipient proof, broader family intake/repair/acceptance, observer/wake or debt clearance follows.
+
+
+## #223 actual owner and later review-phase qualification (2026-10-26)
+
+Local reports the existing owner `a78ad6b1-1f7d-4936-85d7-6cf660022386` was launched at `2026-10-26T20:17:58.585Z` after its verified publication prerequisite. The requested mode was interactive; model, reasoning and context overrides were null, with no base-branch override or idle notification. The complete supplied controller is retained in this same ledger row, changing only its private App-observation path to checkout name `lossyrob-bookish-train`. Restoring that one value recovers the complete original object. This is the provided controller/assignment report, not a raw create_session response or complete kickoff payload. Busy for three seconds and no awaiting input are the controller temporal snapshot, not continuing activity or effective capacity. No recipient checkout, HEAD, cleanliness, model, runtime, referenced private path or actual delivery was inspected.
+
+The later actual Local report changes this same node and row from planned to in-progress; attention stays watch, with no new node, row, tracker, occurrence or worker. PR #226 was open and non-draft at captured head `274c1195db078a70b6fc5f546d29b351c6b8a935`, with parsed closing reference exactly [223]. Its public branch is `lossyrob-223-app-delivery-guidance`; the launch controller remains unchanged. No rename mechanism/time or current owner checkout state is inferred.
+
+The historical P2 review at `0bc480eae8bcc22c7d7d7d56e46bc19c2d2a09a6` remains history: https://github.com/lossyrob/telex/pull/226#issuecomment-6426679183. The later reviewer-authored source verdict at https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756 resolves that P2 at the new head, retaining its prior ten-file inspection and verified three-file delta; this is not source approval at an unreviewed head or merge authorization. Local reports CI 40397079900 attempt 1 succeeded with 21 unique jobs for candidate/event head 274c1195. The observer terminal https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198 separately identifies Windows provider/checkout `37cc92d6e903376a180e52106611471eef4e0608`, tree `632f2ad3123b6035b29c92b93d43803b8d83c7c7`, parents `331c4da1ed9970771e3d7213d13dc2ed068d31e7` and `274c1195db078a70b6fc5f546d29b351c6b8a935`. Bounded public Git metadata was captured, not execution. Actual checkout/execution remains observer-log-attributed through Local. Docs was not scheduled for this PR and is not passed; the workflow-source assessment and scheduler-clearance report remain Local-attributed. No CI run/job/log or product source was inspected by this reconciler.
+
+Formal design inspection was requested under its separately reported exact tuple; no design PASS/provider receipt or Campaign gate existed at the later report. Reported owner 21 unit and three guidance checks remain attributed support, not actual App wake/bridge loading or #201 acceptance. No merge, completion, operator readiness, #224 repair, debt clearance, five-minute hold release or operational action follows. #222 / PR #228 named-section coordination remains mandatory and separate; no new dependency, scope absorption or review of #228 is inferred. The owner work is not held on this recording. #224, #201, parked #212 and other queued residuals remain separate.
+
+The initial planned/unassigned text above is the preserved prelaunch snapshot, not a denial of the later owner. Actual launch intake `call_zru2oYv7FN9jbHBzw8pTWUSC`, origin `eea3f9c9-c4e8-4ee6-8342-3c2f01e60187`; later Local source `call_WSt05WJGuvIa4JQyLPAIIV9t`, origin `3bea7132-7608-4bd5-9e53-71920e1a24fe`. Complete later source body follows verbatim; compressed source spacing is quoted, not newly authored operative prose.
+
+```text
+Actual later same-owner #223 phase, freshly checked now: a78ad6b1-1f7d-4936-85d7-6cf660022386 owns OPEN/non-draft PR226 https://github.com/lossyrob/telex/pull/226 at head274c1195db078a70b6fc5f546d29b351c6b8a935/tree02e053f5c271d34a4a9fdee75e788325fd67e4f0, recordedbasea3a788063b558927bfe914c50613d421a50a60af; parsedclosingrefs[223]. Mainfc962a6ab7d12f40b004b4eed6b5d18700292a34. This is implementation/review in progress, not merge/readiness/Campaign acceptance or issue completion.
+
+Actual source sequence: reviewer77597d21-e23e-4b66-ab48-02418854e927 AUTHORED historicalreceipt6426679183at0bc480ea withP2missingexistingexit6/7guidance/contracts; ownercorrectedskill/guide/tests inone+56line3filecommit274c1195. Reviewer-authoredfinal https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756 resolvesP2/no source blockers atnewhead, coveringprior10fileinspection+verifieddelta;Localreadfullreceipt/identity,notcode/runtimereplay.
+
+Hosted: CI40397079900attempt1pull_request candidate/EVENT274c1195 completedSUCCESS/21uniquejobs independentlyverifiedbyLocal. Observer-authoredterminal https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198 retainsfullinventoryandWindowsprovider/CHECKOUT37cc92d6e903376a180e52106611471eef4e0608;Localverifiedthatcommittree632f2ad3123b6035b29c92b93d43803b8d83c7c7/parents331c4da1ed9970771e3d7213d13dc2ed068d31e7+274c1195,executionclaimobserverlog-attributed. DocsPRN/A/notscheduled/notpassed:exactdocs.ymlnoPRtrigger,pushmain+dispatchonly/Pagesdeploy;Localreadsource,no dispatch/newwatch. Scheduler clearedperobserver.
+
+Formaldesign-pr226-274c1195-20261026requestedbyLocal withcanonicalmainfc962a6a/designba29e6b7b99d5c3990f56bf7a5ee1ed3a84dc3d3/currentbridge394b0e7edc4ae8af61979d08b453cf2d9f4d0989/proposed9165f24edfb625b55555bedf04aadeb30eb3a946. Stewardcall_NMLH1LNIPeueueR8mCnwqFED independentlyagreesprereqs21:03:42Zandislaunchingonefreshreadonlyinspector;NOdesignPASS/providerreceipt orCampaigngateyet. Ownerlocal21unit+3guidancepassesareattributedsupportonly,notrealAppwake/bridge-load/#201proof. #222sharedsectioncoordinationandPR228remainseparate;onlyscopeoverlapreport,notreviewof228. Preservecompleteoriginallaunch/prelaunch/historicalP2andalllimitsadditively;no oldheadcarry/newworker/debtclearance oroperationalhold.
+```
+
+
+### Later posted formal design qualification
+
+After the earlier report, actual Local `call_0F9MTGeJqsX6Ws8PTJWu8kah`, origin `b0ec9aa8-aedf-4edd-9fe1-78d52ba25123`, reports the same-owner, same-head formal inspection posted and verified at https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907. The complete 4,085-byte ASCII public body has SHA-256 `81f6a245ac5ff3bfef25b823a0a2e1a6265b871ebd7c46977e09a4730189e5b9`. Its raw bytes remain exact; the following display normalizes CRLF to LF only. This supersedes only the earlier pending-design phase. Source review, observer CI and distinct provider/checkout identity remain separate; Docs PR N/A is not passed. The public receipt asks for a stale PR-body status refresh; Local reports a final design-link refresh before future readiness routing, not that either operation or Campaign acceptance has occurred. No merge, completion, readiness, runtime/App wake, #201/#224 release, debt credit, second worker or hold on existing work follows. Complete public receipt:
+
+```text
+Design Inspection: +1
+
+Initial design inspection for local-daemon / copilot-app-delivery-path, closing #223. Correlation: `design-pr226-274c1195-20261026`. The Local Daemon design steward adjudicated this result and authorized this one receipt.
+
+Exact binding:
+- Head: `274c1195db078a70b6fc5f546d29b351c6b8a935`; tree: `02e053f5c271d34a4a9fdee75e788325fd67e4f0`.
+- Base: `a3a788063b558927bfe914c50613d421a50a60af`.
+- Canonical design revision: `fc962a6ab7d12f40b004b4eed6b5d18700292a34`; `current-design.md` blob: `ba29e6b7b99d5c3990f56bf7a5ee1ed3a84dc3d3`.
+- Canonical `docs/design/copilot-bridge-push.md` blob: `394b0e7edc4ae8af61979d08b453cf2d9f4d0989`; proposed blob: `9165f24edfb625b55555bedf04aadeb30eb3a946`.
+
+**No design blockers.** The complete #223 guidance outcome matches the accepted capability-based routing. Already-live push remains supported, including in App; hosts with a supported loader can load the bridge; first-time App setup without one uses existing Telex-owned prepared pull. Provisioning and registration are not loading proof, and restart/clear do not substitute for an unavailable loader.
+
+The single-shot detached launcher contract preserves completion artifacts and exit.code-first interpretation, exits 0-7 and legacy exit 1, quarantine metadata/no-ack/conditional continuation, recovery before re-arming backend failure, message-id acknowledgment/deduplication/disposition and the CC exception, explicit re-arm/stop, intentional --force downgrade, and push/pull exclusion. See the [binary-owned skill](https://github.com/lossyrob/telex/blob/274c1195db078a70b6fc5f546d29b351c6b8a935/copilot/COPILOT.md#L198-L318) and [design boundary](https://github.com/lossyrob/telex/blob/274c1195db078a70b6fc5f546d29b351c6b8a935/docs/design/copilot-bridge-push.md#L39-L65).
+
+Proposed durable documentation promotion is adequate across the design of record, skill, guide, bridge overview, README, troubleshooting and recovery messages. No daemon protocol, ADR or canonical current-design rewrite is needed for this bounded repair. No new API, transport, polling loop or readiness mechanism is introduced. #222 retains Watcher bootstrap/stall wording; #224 retains backend repair; #201 retains real-root delivery acceptance.
+
+Prerequisites are separately evidenced by the [reviewer-authored source receipt](https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756) and [observer-owned hosted receipt](https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198). The parent steward independently verified CI run `40397079900`, attempt 1, pull_request event/API candidate head `274c1195db078a70b6fc5f546d29b351c6b8a935`, and all 21 successful jobs. The observer's Windows provider/checkout SHA is the distinct synthetic merge `37cc92d6e903376a180e52106611471eef4e0608`, with ordered parents `331c4da1ed9970771e3d7213d13dc2ed068d31e7` and `274c1195db078a70b6fc5f546d29b351c6b8a935`. I verified that commit geometry; execution attribution remains observer-log-derived, not my or the parent's log replay. Candidate and checkout SHAs are not equated; aggregate CI is not per-test, causal or App-runtime proof.
+
+PR Docs is N/A, not passed: exact-head `.github/workflows/docs.yml` blob `ef2945ac216695eabde74a1d324f78efea0602d4` has only path-filtered push to main and workflow_dispatch, not pull_request. Any applicable post-merge Docs run is separate.
+
+The owner should refresh the PR body's stale source/CI status before readiness. This separately routed evidence bookkeeping is not a source/design blocker; this receipt does not claim the body was updated.
+
+Confidence is high for source/design alignment only. This was read-only exact-source design inspection, not another implementation review. I did not rerun the owner's 21 unit/3 guidance checks, execute or poll CI, replay logs, perform runtime/installation/auth/ACL actions, inspect recipients, or merge. No real App wakeup, bridge loading, #224 repair or #201 acceptance is certified. This receipt grants no merge authority. Any head/base or relevant canonical-design change invalidates coverage.
+```
+
+
+### Subsequent accepted product merge and pending follow-through
+
+Actual Campaign `toolu_01SzupWWGaZeqoNRuZgTMCPb` reports PR #226 merged as `f4c58eed5fe9336408750d69d59ae446707c9f88`, closing #223. Local `call_v7l5SEzgZfdIqX5Bbx07zR65` independently reports ordered parents `fc962a6ab7d12f40b004b4eed6b5d18700292a34` + `274c1195db078a70b6fc5f546d29b351c6b8a935`, tree `28dc7120912323257f6ab07d6255c2ea447c63c1`, and public issue closed/completed at 21:20:42Z. The bounded public/metadata capture confirms that merge and the unchanged complete `.streamliner` tree; no product source was inspected. This new product boundary invalidated the unpublished old-base tuple; both earlier owner packets remain frozen, unreviewed, exactly reversed history with no authority carry. A clean fast-forward adopted the accepted merge without creating a merge commit or pushing.
+
+The same owner still owes exact-main CI, any applicable main Docs and a #223 field report at this source. Public issue closure does not automatically complete this node: lifecycle remains in-progress, attention watch. Earlier review/design/CI receipts remain their exact premerge identities, not new-main execution proof. PR Docs N/A is not a main Docs pass. No post-merge completion, runtime/App wake, bridge loading, #224 repair, #201 acceptance or debt credit follows.
+
+The merge gate separately preserves a nonblocking operator report that startup extension discovery may load session-scoped App extensions even without advertised reload/manage tools. Only if the Campaign root restart test actually confirms a live bridge should an evidence-backed restart/resume/first-time wording correction be filed. This is conditional source history, not observed behavior, a new row/family, an experiment, root action or current runtime authorization.
+
+Complete Campaign gate (raw body retained exactly; this display changes CRLF to LF only):
+
+```text
+## Campaign merge gate: PR #226 (Closes #223) - MERGE
+
+Head 274c1195db078a70b6fc5f546d29b351c6b8a935 (tree 02e053f5). PR base a3a78806; current main fc962a6a.
+
+**Floor**
+- OPEN, non-draft, MERGEABLE/CLEAN; closing refs exactly [#223]; 0 unresolved review threads.
+- Hosted CI: run 40397079900 attempt 1, pull_request, head 274c1195, completed/success, 21/21 jobs. Synthetic merge parents 331c4da1 + 274c.
+- Final-main drift: 331c4da1..fc962a6a touches only .streamliner/workstreams/telex-watcher/{brief.md,discovered-work.json,graph.json}. Disjoint from the 10 PR files; disjoint-drift exception applies, no refresh.
+- Docs: PR Docs not applicable (docs.yml has no pull_request trigger). Main Docs is post-merge follow-through, not credited as passed.
+- Receipts: source review 6426763756 (no blockers), design 6427438907 (+1, no blockers), observer 6427256198.
+
+**Merits**
+Capability-based delivery guidance replaces the CLI-only /experimental assumption for App sessions; keeps live and loader-capable push; adds exit 6/7 fallback handling and states that docs/contract tests prove neither App wake nor bridge loading. No transport/API/runtime change claimed.
+
+**Follow-up (non-blocking, recorded):** the operator reports that in Copilot App, startup extension discovery still loads session-scoped extensions even though extensions_reload/extensions_manage are not advertised. If the Campaign root restart test confirms the bridge goes live that way, the sentence "Restarting or clearing a session is not a substitute for an unavailable loader" and the App first-time routing to pull fallback need a follow-up correction naming restart/resume startup discovery as an App first-time path. To be filed with evidence, not assumed here.
+
+**Post-merge obligations (owner a78ad6b1):** exact-main CI and Docs at the merge commit, field report on #223. No #224 repair, #201 acceptance, or App wake/bridge-load proof is credited by this merge.
+```

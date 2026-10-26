@@ -16,6 +16,9 @@ Omitting `run` preserves the original runtime-host invocation. In another
 process, use the same `--registry` with the management commands below. Only
 runtime startup requires `--install-root`; management never connects a sender.
 Service installation, supervision, and automatic upgrades remain separate work.
+For the supported Windows/Linux installation record, required authentication
+features and launch/rollback procedure, start with
+[Watcher installation and launch](guide/src/guides/watcher-installation.md).
 The experimental v1 CLI adapter is retired; v1 example detectors and schemas
 remain historical evidence and are not accepted by this runtime.
 

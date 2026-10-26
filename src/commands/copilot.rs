@@ -28,7 +28,7 @@ pub mod session_state;
 pub mod stall_detect;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
-const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "Bridge files and push registration do not prove the bridge loaded. Keep an already-loaded, live bridge in push mode. If this host exposes a supported live bridge loader, re-provision with `telex --address <station> copilot resume` and use that loader (`extensions_reload` where available), then verify bridge liveness. On Copilot CLI only, enabling Copilot Extensions under `/experimental` may expose that tool. If the bridge is not live and this host has no supported live loader (including App sessions), use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill` for completion artifacts, ack/deduplication, re-arming and stopping. Preparation is not wakeup proof; report setup/backend failures. Do not use --force unless intentionally downgrading. Or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
@@ -2199,8 +2199,9 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                                 finalize_intent(ctx, &session, &address, Some(&member)).await
                             {
                                 eprintln!(
-                                    "telex: push is armed, but station-intent recovery is not finalized yet ({e}). \
-                                     Run `extensions_reload`; the next turn boundary finalizes it automatically."
+                                    "telex: push is registered, but station-intent recovery is not finalized yet ({e}). \
+                                     {PUSH_BRIDGE_RECOVERY_GUIDANCE} \
+                                     The next turn boundary retries finalization once the live producer can be verified."
                                 );
                             } else {
                                 // Tell the daemon straight away. The pre-drain report is projected
@@ -2876,7 +2877,7 @@ fn render_copilot_skill(plugin_version: Option<&str>) -> String {
     };
     let mut out = String::new();
     out.push_str(&format!(
-        "telex v{DAEMON_VERSION} -- Copilot CLI skill (version-matched)\n"
+        "telex v{DAEMON_VERSION} -- Copilot CLI and Copilot App skill (version-matched)\n"
     ));
     out.push_str(&format!("binary build: {}\n", crate::install::BUILD_ID));
     out.push_str(&format!(
@@ -3455,7 +3456,7 @@ fn evaluate_guard(
                 decision: HookDecision::Allow,
                 reason_code: "push_intent_unrestored",
                 summary: format!(
-                    "Push delivery is not restored for: {}. Messages stay durable; run `telex --address <station> copilot resume` (and `extensions_reload`) to restore push, or `telex inbox` to read them now.",
+                    "Push delivery is not restored for: {}. Messages stay durable; use `telex inbox` for recovery inspection. {PUSH_BRIDGE_RECOVERY_GUIDANCE}",
                     unrestored_summary()
                 ),
                 nudges: 0,
@@ -3526,13 +3527,16 @@ fn evaluate_guard(
     }
     let mut guidance_parts: Vec<&str> = Vec::new();
     if !unrestored_push_intents.is_empty() {
-        guidance_parts.push("Restore unrestored push stations with `telex --address <station> copilot resume` (then `extensions_reload`), or read them with `telex inbox`.");
+        guidance_parts.push("Push delivery is not restored; messages stay durable. Use `telex inbox` for recovery inspection.");
     }
     if !push_dead.is_empty() {
+        guidance_parts.push("The telex push bridge is not live.");
+    }
+    if !unrestored_push_intents.is_empty() || !push_dead.is_empty() {
         guidance_parts.push(PUSH_BRIDGE_RECOVERY_GUIDANCE);
     }
     if !unarmed.is_empty() {
-        guidance_parts.push("Re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done.");
+        guidance_parts.push("If still attending, process the prior run's completion artifacts, then re-arm with `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill`. Or run `telex --address <station> station stop --session <session-id>` if done.");
     }
     if !conflicts.is_empty() {
         guidance_parts.push("Push and pull are both active for the same station -- stop the pull waiter or detach push before continuing.");
@@ -4372,29 +4376,12 @@ mod tests {
             "copilot bridge protocol: v{COPILOT_BRIDGE_PROTOCOL}"
         )));
         assert!(doc.contains(MIN_COMPATIBLE_PLUGIN_VERSION));
-        // The bridge workflow, extension prerequisite, recovery path, and --help
-        // source-of-truth guidance are present.
+        // The workflow and --help source of truth are shipped with the binary.
         assert!(doc.contains("copilot attach --copilot-bridge"));
         assert!(doc.contains("extensions_reload"));
-        assert!(doc.contains("Enable **Copilot Extensions** under `/experimental`"));
-        assert!(doc.contains("If `extensions_reload` is unavailable"));
         assert!(doc.contains("copilot resume"));
         assert!(doc.contains("supported pull"));
         assert!(doc.contains("fallback below"));
-        let unavailable_recovery = doc
-            .split_once("If `extensions_reload` is unavailable")
-            .expect("skill should explain unavailable extensions_reload recovery")
-            .1;
-        assert_in_order(
-            unavailable_recovery,
-            &[
-                "Enable Copilot Extensions",
-                "copilot resume",
-                "Run `extensions_reload`",
-                "supported pull",
-                "copilot detach",
-            ],
-        );
         assert!(doc.contains("copilot detach"));
         assert!(doc.contains("telex copilot --help"));
         let normalized = doc.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -4424,6 +4411,57 @@ mod tests {
         }
         // No inline warning without a stale plugin version.
         assert!(!doc.contains("[!WARNING]"));
+    }
+
+    #[test]
+    fn copilot_skill_routes_by_host_capability_before_provisioning() {
+        let doc = render_copilot_skill(None);
+        let routing = doc
+            .split_once("## Choose delivery by host capability")
+            .expect("capability selection")
+            .1
+            .split_once("## The bridge path")
+            .expect("selection precedes provisioning")
+            .0
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_in_order(
+            &routing,
+            &[
+                "**Already-loaded, live bridge:** keep push, including in Copilot App",
+                "**Supported live bridge loader available:** use the bridge path below",
+                "On Copilot CLI",
+                "That CLI setting is not an App prerequisite",
+                "**No supported live bridge loader:**",
+                "first-time setup in Copilot App",
+                "copilot fallback prepare",
+            ],
+        );
+        assert!(
+            routing.contains("Bridge files and push registration do not prove the bridge loaded")
+        );
+        assert!(routing.contains("Restarting or clearing a session is not a substitute"));
+        let transition = doc
+            .split_once("### Switch modes and stop")
+            .unwrap()
+            .1
+            .split_once("## Watch a local session group for stalls")
+            .unwrap()
+            .0
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_in_order(
+            &transition,
+            &[
+                "first confirm a supported loader",
+                "station stop",
+                "copilot attach --copilot-bridge",
+                "verify bridge liveness",
+            ],
+        );
+        assert!(transition.contains("Do not leave working pull for a loader the host lacks"));
     }
 
     #[test]
@@ -5161,6 +5199,7 @@ mod tests {
                     reason.contains("addr:a"),
                     "the unrestored intent must be reported too: {reason}"
                 );
+                assert!(reason.contains(PUSH_BRIDGE_RECOVERY_GUIDANCE), "{reason}");
             }
             other => panic!("expected block, got {other:?}"),
         }
@@ -5177,6 +5216,7 @@ mod tests {
         assert_eq!(eval.reason_code, "push_intent_unrestored");
         assert!(matches!(eval.decision, HookDecision::Allow));
         assert!(eval.summary.contains("addr:a"), "{}", eval.summary);
+        assert!(eval.summary.contains(PUSH_BRIDGE_RECOVERY_GUIDANCE));
     }
 
     fn unrestored_intent_status(
@@ -5238,6 +5278,9 @@ mod tests {
             HookDecision::Block { reason } => {
                 assert!(reason.contains("addr:a has no live waiter (pending 2)"));
                 assert!(reason.contains("Nudge 1/3"));
+                assert!(reason.contains("copilot fallback prepare"));
+                assert!(reason.contains("exactly one returned command"));
+                assert!(!reason.contains("Re-arm `telex wait"));
             }
             other => panic!("expected block, got {other:?}"),
         }
@@ -5362,13 +5405,19 @@ mod tests {
                     assert_in_order(
                         reason,
                         &[
-                            "Run `extensions_reload` to load it",
-                            "If `extensions_reload` is unavailable",
-                            "enable Copilot Extensions under `/experimental`",
+                            "push bridge is not live",
+                            "Bridge files and push registration do not prove",
+                            "Keep an already-loaded, live bridge in push mode",
+                            "If this host exposes a supported live bridge loader",
                             "copilot resume",
-                            "run `extensions_reload`",
+                            "extensions_reload` where available",
+                            "On Copilot CLI only",
+                            "If the bridge is not live and this host has no supported live loader (including App sessions)",
                             "supported pull fallback",
                             "copilot fallback prepare",
+                            "exactly one returned command",
+                            "Preparation is not wakeup proof",
+                            "Do not use --force unless intentionally downgrading",
                             "copilot detach",
                         ],
                     );

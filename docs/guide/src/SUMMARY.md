@@ -25,6 +25,7 @@
 
 - [Set up an agent (pull)](guides/agent-pull.md)
 - [Copilot CLI push delivery](guides/copilot-push.md)
+- [Watcher installation and launch](guides/watcher-installation.md)
 - [Copilot group stall detection](guides/copilot-stalls.md)
 - [Coordinate multiple sessions](guides/multi-session.md)
 - [Networked Postgres backend](guides/postgres.md)
