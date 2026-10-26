@@ -23,7 +23,7 @@ function Read-Jsonl([string] $Path) {
 }
 function Stat([double[]] $values) {
     if (-not $values -or $values.Count -eq 0) { return $null }
-    $sorted = $values | Sort-Object
+    $sorted = @($values | Sort-Object)
     $c = $sorted.Count
     $median = if ($c % 2) { $sorted[[int][math]::Floor($c / 2)] } else { ($sorted[$c / 2 - 1] + $sorted[$c / 2]) / 2 }
     [ordered]@{ n = $c; min = $sorted[0]; median = $median; max = $sorted[$c - 1]; sum = ($sorted | Measure-Object -Sum).Sum }
