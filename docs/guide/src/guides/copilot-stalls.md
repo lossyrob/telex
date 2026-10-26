@@ -238,14 +238,13 @@ detector's diagnostic text. Check membership limits/format, local session ids,
 backend/environment access and the running Watcher management endpoint. An
 unchanged already-advised unknown episode can also remain degraded.
 
-The current bounded-inbox implementation has a known limitation: it reads at most 1025
-recent inbox entries per active member. With **more than 1024 retained entries**
+The current bounded-inbox implementation has a known limitation: it reads at most
+1025 recent inbox entries per active member. With **more than 1024 retained entries**
 and no known unacknowledged/recent deferred message, it cannot rule out older
 deferred work and stays degraded. It may send neither a stall nor an advisory,
 and there is no dedicated operator-facing hint identifying the member.
-Removal of this limit is tracked in
-[issue #216](https://github.com/lossyrob/telex/issues/216); check the installed
-version before applying this recovery.
+This limit applies until a release includes
+[issue #216](https://github.com/lossyrob/telex/issues/216).
 
 Inspect each active member's history using the same configured backend:
 
@@ -260,15 +259,9 @@ Review outstanding/deferred work, including work outside the recent suffix.
 Acking or terminally dispositioning recent messages does **not** shrink retained
 history, so it does not remove this bound.
 
-To restore coverage, the root and member arrange a fresh Telex address and a
-history-preserving handoff: reconcile/transfer outstanding work at the old
-address, provision delivery at the new address, redirect peers and watches, and
-have the root atomically replace the member record's address. Watch targets are
-immutable; a re-routed watch needs a new permanent id. Keep old messages and
-their dispositions available. Do not delete the store/logs or bulk-ack work to
-make the watch green.
-
-Until the handoff is complete, mark monitoring coverage incomplete in the root's
-view and use App inspection. A real planned wait may be parked, but do not park
-or finish active work merely to bypass degradation. A missing event is not a
-clean bill of health.
+While the limit prevents observation, mark monitoring coverage incomplete in the
+root's view and use App inspection. Keep the existing routing identity and
+message history; the product repair belongs to #216. Do not delete the store/logs
+or bulk-ack work to make the watch green. A real planned wait may be parked, but
+do not park or finish active work merely to bypass degradation. A missing event
+is not a clean bill of health.

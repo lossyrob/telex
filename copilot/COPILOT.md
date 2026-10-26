@@ -434,9 +434,9 @@ depends on another idle member. An empty/no-active-member group is not stalled.
 
 Known idle/not-loaded members with no observed wake source must remain unchanged
 for strictly longer than grace before a stall event. Busy and operator-waiting
-members prevent a stall; unknown is never idle. Membership or non-accounting
-activity changes start a new episode. Duplicate transport delivery still needs
-message-id deduplication.
+members prevent a stall; unknown is never idle. Membership changes or new activity
+(other than usage accounting) start a new episode. Duplicate transport delivery
+still needs message-id deduplication.
 
 ### Degraded does not mean healthy silence
 
@@ -445,23 +445,20 @@ Use the same Watcher registry's `health $watchId` and `attempts $watchId`:
 `diagnosticCategory: "detector-degraded"` needs inspection, not an assumption that
 someone is busy. Default management output hides detector diagnostic text.
 
-In the current bounded-inbox implementation, **more than 1024 retained inbox entries** for an active member,
-with no known unacknowledged/recent deferred message, prevents proving that no
-older deferred work exists. This can keep the watch degraded with no root-facing
-event or dedicated member hint. Removal of this limit is tracked in
-[issue #216](https://github.com/lossyrob/telex/issues/216); check the installed
-version before applying this recovery. Acking/handling recent messages does not
-shrink retained history. Inspect that member's inbox using the same backend, including
-consumed history (`inbox --all --limit 1025`); use `export --address <addr>` to
-review older disposition history.
+In the current bounded-inbox implementation, **more than 1024 retained inbox
+entries** for an active member, with no known unacknowledged/recent deferred
+message, prevents proving that no older deferred work exists. This can keep the
+watch degraded with no root-facing event or dedicated member hint. This limit
+applies until a release includes
+[issue #216](https://github.com/lossyrob/telex/issues/216). Acking/handling recent
+messages does not shrink retained history. Inspect that member's inbox using the
+same backend, including consumed history (`inbox --all --limit 1025`); use
+`export --address <addr>` to review older disposition history.
 
-To restore coverage without deleting history, the root and member arrange a fresh
-Telex address, reconcile/transfer outstanding work at the old address, provision
-delivery at the new one, and have the root atomically replace the member record's
-address. Re-route watches and peers too: watch targets are immutable, so a changed
-target needs a new watch id. Keep the old history. Until that handoff is complete,
-show monitoring as incomplete and use App inspection; do not mark active work
-parked/done merely to suppress degradation.
+While the limit prevents observation, show monitoring coverage as incomplete and
+use App inspection. Keep the existing routing identity and message history; the
+product repair belongs to #216. Do not mark active work parked/done merely to
+suppress degradation.
 
 The [group stall guide](https://github.com/lossyrob/telex/blob/main/docs/guide/src/guides/copilot-stalls.md)
 has a member-update example and the root's status-view checklist.
