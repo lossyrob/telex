@@ -478,6 +478,15 @@ def otool_instructions(text, container, start, end):
     # These real ARM/x86 mnemonics must not be mistaken for hexadecimal encodings.
     hex_mnemonics = {"aaa", "aad", "adc", "adcb", "add", "addb", "b", "bfc", "bfadd",
                      "cadd", "daa", "dc", "dec", "decb", "fabd", "fadd", "fadda", "fcadd"}
+    number = r"[+-]?(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?)"
+    arm_register = r"(?:[bhsdqvwxzp]\d+(?:\.\w+)?(?:\[\d+\])?(?:/[mz])?|[wx]?sp|[wx]zr)"
+    x86_register = r"%[a-zA-Z][a-zA-Z0-9]*(?:\(\d+\))?"
+    index = rf"(?:{x86_register}(?:, *{x86_register}(?:, *[1248])?)?|, *{x86_register}(?:, *[1248])?)"
+    memory = rf"(?:%[a-zA-Z]+:)?(?:(?:{number})?\({index}\)|{number})"
+    shift = rf"(?:lsl|lsr|asr|ror|[us]xt[bwhx])(?: +#{number})?"
+    operand = rf"(?:{memory}|{x86_register}|{arm_register}|[#$]{number}|{number})"
+    comment = r"(?: *(?:;|##).*)?"
+    operand_list = rf"{operand}(?:, *(?:{operand}|{shift}))*{comment}"
     for line in lines[2:]:
         row = re.fullmatch(r"\s*[0-9a-fA-F]{8,16}\t([a-zA-Z][a-zA-Z0-9_.]*)(?:(?: +|\t)([^\t]*))?",
                            line)
@@ -486,11 +495,12 @@ def otool_instructions(text, container, start, end):
         if re.fullmatch(r"[0-9a-f]+", mnemonic):
             operands = (row[2] or "").strip()
             require(mnemonic in hex_mnemonics, "unexpected otool encoding column")
-            # A legal hex-looking mnemonic cannot hide a following mnemonic as its operands.
-            operand_start = re.match(r"(?:[%$#(+\-\d]|(?:[bhsdqvwxzp]\d+(?:\.\w+)?|[wx]?sp|[wx]zr)\b)",
-                                     operands)
-            dc_operands = mnemonic == "dc" and re.fullmatch(r"\w+, *x(?:\d+|zr)", operands)
-            require(not operands or operand_start or dc_operands, "unexpected otool encoding operands")
+            # Validate the whole field, not a numeric/register prefix of an encoding column.
+            if mnemonic == "dc":
+                valid_operands = re.fullmatch(rf"[a-zA-Z]\w*, *x(?:\d+|zr){comment}", operands)
+            else:
+                valid_operands = not operands or re.fullmatch(operand_list, operands)
+            require(valid_operands, "unexpected otool encoding operands")
     decoded = instructions(text, start, end)
     require(len(decoded) == len(lines) - 2 and decoded[0]["address"] == start and
             all(left["address"] < right["address"] for left, right in zip(decoded, decoded[1:])),

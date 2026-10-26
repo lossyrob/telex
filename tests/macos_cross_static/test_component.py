@@ -1720,5 +1720,66 @@ class OtoolEncodingColumnTests(unittest.TestCase):
                     self.assertIn("unresolved", branches[0])
 
 
+class OtoolCompleteOperandTests(unittest.TestCase):
+    container = OtoolEncodingColumnTests.container
+    prefix = OtoolEncodingColumnTests.prefix
+    assert_rejected_before_decoding = OtoolEncodingColumnTests.assert_rejected_before_decoding
+
+    def test_exact_dc00_compact_encoding_fails_without_footer(self):
+        self.assert_rejected_before_decoding("0000000000001000\tdc\t00 faddl (%rax)\n", 0x1002)
+
+    def test_every_hex_mnemonic_exception_rejects_compact_numeric_encoding_tails(self):
+        mnemonics = ("aaa", "aad", "adc", "adcb", "add", "addb", "b", "bfc", "bfadd",
+                     "cadd", "daa", "dc", "dec", "decb", "fabd", "fadd", "fadda", "fcadd")
+        for mnemonic in mnemonics:
+            for operand in ("00 faddl (%rax)", "00 ret", "12 34 br x0", "0x00 callq 0x2000"):
+                with self.subTest(mnemonic=mnemonic, operand=operand):
+                    self.assert_rejected_before_decoding(f"0000000000001000\t{mnemonic}\t{operand}\n")
+
+    def test_register_immediate_memory_or_later_operand_prefix_cannot_hide_instruction(self):
+        for mnemonic in ("add", "adc", "fadd", "dec"):
+            for operand in ("%eax jmpq 0x2000", "x0 br x1", "$0x00 faddl (%rax)",
+                            "#0 ret", "(%rax) callq 0x2000", "0x10(%rax) ret",
+                            "x0, 00 faddl (%rax)", "%eax, %ebx jmpq 0x2000"):
+                with self.subTest(mnemonic=mnemonic, operand=operand):
+                    self.assert_rejected_before_decoding(f"0000000000001000\t{mnemonic}\t{operand}\n")
+
+    def test_dc_requires_its_complete_named_operation_register_form_exclusively(self):
+        for operand in ("", "00", "00, x0", "%eax", "x0", "#0", "(%rax)", "cvau, x0 ret",
+                        "cvau, x0, 00 faddl (%rax)", "cvau, x0 ;ok\tbr x0"):
+            with self.subTest(operand=operand):
+                self.assert_rejected_before_decoding(f"0000000000001000\tdc\t{operand}\n")
+
+    def test_complete_canonical_operand_forms_are_retained_without_rewriting(self):
+        examples = [
+            ("b", "0x2000"), ("dc", "cvau, x0"), ("dc", "zva, xzr"),
+            ("dc", "cvau, x0 ; canonical comment"),
+            ("add", "x0, x1, x2, lsl #0x2"), ("add", "x0, x1, w2, uxtw #2"),
+            ("add", "sp, sp, #0x10"), ("adc", "xzr, x0, x1"), ("adc", "%eax, %ebx"),
+            ("addb", "$0x1, %al"), ("decb", "(%rax)"), ("decb", "0x10(%rax)"),
+            ("decb", "%fs:0x10(%rax,%rcx,4)"), ("decb", "0x20(,%rax,8)"),
+            ("decb", "%gs:0x10"), ("dec", "0x1000"), ("dec", "-0x10(%rax)"),
+            ("fadd", "%st(1), %st"), ("fadd", "d0, d1, d2"),
+            ("fadd", "z0.s, p0/m, z0.s, #0.5"), ("fcadd", "v0.4s, v1.4s, v2.4s, #90"),
+            ("addb", "%al, 0x10(%rax) ## canonical comment"), ("aad", "$0xa"), ("aaa", ""),
+        ]
+        for mnemonic, operands in examples:
+            with self.subTest(mnemonic=mnemonic, operands=operands):
+                text = self.prefix + f"0000000000001000\t{mnemonic}" + (
+                    "\t" + operands if operands else "") + "\n"
+                decoded = cache.otool_instructions(text, self.container, 0x1000, 0x1004)
+                self.assertEqual((decoded[0]["mnemonic"], decoded[0]["operands"]), (mnemonic, operands))
+
+    def test_incomplete_operand_lists_or_unbalanced_memory_are_not_valid_prefixes(self):
+        for operand in ("x0,", ",x0", "x0,,x1", "0x10(%rax", "(%rax))", "%st(1",
+                        "(%rax,%rcx,4) junk", "$0x1foo", "#0x1 ret", "x0, lsl #2 junk", "lsl #1"):
+            with self.subTest(operand=operand):
+                self.assert_rejected_before_decoding(f"0000000000001000\tadd\t{operand}\n")
+
+    def test_bad_compact_encoding_after_valid_branch_blocks_the_whole_body(self):
+        self.assert_rejected_before_decoding(
+            "0000000000001000\tjmpq\t0x2000\n0000000000001005\tdc\t00 faddl (%rax)\n", 0x1007)
+
+
 if __name__ == "__main__":
     unittest.main()
