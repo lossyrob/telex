@@ -124,6 +124,154 @@ fn parse(arguments: &[&str]) -> Cli {
     .unwrap()
 }
 
+#[cfg(feature = "sqlite")]
+#[tokio::test]
+async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() {
+    use std::io::Write;
+    use telex::backend::{sqlite::SqliteBackend, Backend};
+    let fixture = Fixture::new();
+    let telex = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(if cfg!(windows) { "telex.exe" } else { "telex" });
+    assert!(
+        telex.is_absolute() && telex.is_file(),
+        "run this test with cargo test --workspace"
+    );
+    let store = fixture.root.join("source.sqlite");
+    let backend = SqliteBackend::open(store.to_str().unwrap()).unwrap();
+    backend.init_schema().await.unwrap();
+    drop(backend);
+    let config = fixture.file("profiles.toml", format!(
+        "[backends.fixture]\nkind = \"sqlite\"\npath = {}\n[backends.alias]\nkind = \"sqlite\"\npath = {}\n",
+        serde_json::to_string(&store).unwrap(), serde_json::to_string(&store).unwrap()
+    ));
+    let group = fixture.root.join("group");
+    std::fs::create_dir(&group).unwrap();
+    fixture.file(
+        "group/member.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":1,"sessionId":"member","address":"member:a","state":"active"
+        }))
+        .unwrap(),
+    );
+    let log_dir = fixture
+        .root
+        .join(".copilot")
+        .join("session-state")
+        .join("member");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join("events.jsonl"),
+        include_bytes!("../../tests/fixtures/copilot-session-state/idle.jsonl"),
+    )
+    .unwrap();
+    let mut host = fixture.start_host();
+    let parameters = json!({
+        "groupDirectory":group,"backendProfile":"fixture","watcherExecutable":env!("CARGO_BIN_EXE_telex-watcher"),
+        "watcherRegistry":fixture.root.join("registry.sqlite"),"graceSeconds":60
+    });
+    let invoke = |seconds: i64, state: Value| {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z").unwrap()
+            + chrono::Duration::seconds(seconds);
+        let request = json!({
+            "schemaVersion":2,"attempt":{"id":"fixture","now":now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)},
+            "watch":{"id":"group-stall","activatedAt":"2026-10-26T11:00:00Z","lastSuccessAt":null,
+                "parameters":parameters}, "state":state
+        });
+        let mut child = ProcessCommand::new(&telex)
+            .args(["copilot", "stall-detect"])
+            .env("HOME", &fixture.root)
+            .env("USERPROFILE", &fixture.root)
+            .env("LOCALAPPDATA", fixture.root.join("local"))
+            .env("TELEX_HOME", fixture.root.join("home"))
+            .env("TELEX_DB", &store)
+            .env("TELEX_CONFIG", &config)
+            .env("TELEX_INSTALL_ROOT", fixture.root.join("install"))
+            .env_remove("TELEX_BACKEND")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&request).unwrap())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        telex::watcher_protocol::parse_result(&output.stdout).unwrap();
+        (result, output)
+    };
+    let before_store = std::fs::read(&store).unwrap();
+    let before_log = std::fs::read(log_dir.join("events.jsonl")).unwrap();
+    let mut state = Value::Null;
+    for seconds in [0, 30, 60] {
+        let (result, output) = invoke(seconds, state);
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(result["outcome"], "idle");
+        state = result["nextState"].clone();
+    }
+    let (event, _) = invoke(61, state);
+    assert_eq!(event["event"]["kind"], "copilot.group.stalled");
+    assert_eq!(invoke(62, event["nextState"].clone()).0["outcome"], "idle");
+    assert_eq!(std::fs::read(&store).unwrap(), before_store);
+    assert_eq!(
+        std::fs::read(log_dir.join("events.jsonl")).unwrap(),
+        before_log
+    );
+    std::fs::write(
+        log_dir.join("events.jsonl"),
+        concat!(
+            "{\"type\":\"session.error\",\"id\":\"error-1\",",
+            "\"timestamp\":\"2026-10-25T20:00:00Z\",\"data\":{}}\n"
+        ),
+    )
+    .unwrap();
+    let (advisory, _) = invoke(90, event["nextState"].clone());
+    assert_eq!(advisory["event"]["kind"], "copilot.group.attention-needed");
+    assert_eq!(advisory["event"]["metadata"]["degraded"], true);
+    assert_eq!(
+        invoke(100, advisory["nextState"].clone()).0["outcome"],
+        "degraded"
+    );
+    std::fs::write(log_dir.join("events.jsonl"), before_log).unwrap();
+    // The same physical store under a different profile still arms a member's wake source.
+    let registration = fixture.file(
+        "wake.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":2,"id":"member-wake","command":[&telex,"copilot","stall-detect"],
+            "intervalSeconds":86400,"timeoutSeconds":1,"backendProfile":"alias",
+            "sender":"service:fixture","target":"member:a"
+        }))
+        .unwrap(),
+    );
+    let (_, registered) = fixture.execute(&["register", registration.to_str().unwrap()]);
+    assert_eq!(registered["ok"], true);
+    let (result, _) = invoke(120, Value::Null);
+    assert_eq!(result["outcome"], "idle");
+    assert_eq!(result["nextState"], Value::Null);
+    fixture.stop_host(&mut host);
+    let (result, output) = invoke(180, Value::Null);
+    assert_eq!(result["outcome"], "degraded");
+    assert!(!output.stderr.is_empty());
+    assert!(result.get("nextState").is_none());
+}
+
 #[test]
 fn parser_covers_every_operation_without_requiring_install_root() {
     let commands = [

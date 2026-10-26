@@ -498,6 +498,8 @@ pub enum CopilotCmd {
     Skill(CopilotSkillArgs),
     /// Classify one same-user local Copilot CLI session from a bounded event-log tail.
     SessionState(CopilotSessionStateArgs),
+    /// Observe a local session group; read one Watcher v2 request from stdin.
+    StallDetect,
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),

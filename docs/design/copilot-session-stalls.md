@@ -4,8 +4,8 @@ This records the design agreed with the operator on 2026-10-25 in
 [issue #197](https://github.com/lossyrob/telex/issues/197), with classifier
 details from [issue #198](https://github.com/lossyrob/telex/issues/198).
 [ADR 0056](DECISIONS.md#0056---copilot-stall-detection-uses-a-binary-owned-conservative-local-log-classifier)
-records the architectural decision. The classifier is implemented here; the
-group detector, guidance and workstream validation remain separate items.
+records the architectural decision. The classifier and group detector are
+implemented here; agent guidance and workstream validation remain separate items.
 This chain does not gate the first Watcher dogfood release.
 
 ## Outcome and terms
@@ -141,8 +141,37 @@ depends on another idle member: the detector cannot infer a watch's meaning.
 
 The root owns a group directory with one file per member, creates/removes
 membership files, and members update only their own state. The detector
-item defines the exact schema and location; one file per member avoids a
-shared concurrent-writer file.
+reads an explicit absolute group directory; one file per member avoids a
+shared concurrent-writer file. The root chooses the directory and owns file
+creation, removal, session identity and address. Each `<session-id>.json` is:
+
+```json
+{
+  "schemaVersion": 1,
+  "sessionId": "local-copilot-cli-id",
+  "address": "project:example/worker:one",
+  "state": "active",
+  "reason": "Optional explanation of the current membership state"
+}
+```
+
+Members update only their own `state` and optional `reason`, preserving the
+other fields. Write a temporary non-JSON file in the same directory and
+atomically replace the member file. Files are strict JSON with no duplicate or
+unknown fields. The filename must match the validated local session id.
+Addresses must be distinct, nonempty, free of whitespace/control characters,
+and at most 256 UTF-8 bytes. Reasons are at most 256 UTF-8 bytes. The detector
+admits at most 32 members, 4096 bytes per record and 64 directory entries
+(including temporary files). Symlinks and directories with a `.json` extension
+are rejected. The detector rereads membership after observation; a change
+during the read is degraded. Missing, malformed or over-limit membership is
+degraded, never an empty group.
+
+Inactive members remain in event snapshots but do not require session logs or
+wake-source queries. An empty group, or one with no active members, is
+successfully evaluated as non-stalled and clears the prior episode. If the
+root includes itself as active, its own armed monitoring watch counts as a
+wake source; there is no special exemption for circular watches.
 
 ## Detection and distribution
 
@@ -159,6 +188,107 @@ Telex delivers the event as a turn. Before acting, the root confirms using
 the App's `get_sessions_status`, because the local log is not authoritative.
 The detector only observes and alerts. Consequential action belongs to the
 root, and Watcher remains provider-neutral and unchanged.
+
+### Detector interface
+
+`telex copilot stall-detect` reads one strict Watcher v2 request on stdin and
+writes exactly one v2 result on stdout, regardless of the global text/JSON
+presentation option. It uses the same parser, canonicalizer and validators as
+Watcher: `telex::watcher_protocol`, re-exported at
+`telex_watcher::protocol_v2`. The normative wire contract remains
+[watcher.md](watcher.md).
+
+The watch's opaque `parameters` are a strict object:
+
+| Field | Meaning |
+|---|---|
+| `groupDirectory` | Absolute path to the root-owned membership directory. |
+| `backendProfile` | Explicit configured backend name used by this group. |
+| `watcherExecutable` | Absolute path to the trusted local `telex-watcher` binary. |
+| `watcherRegistry` | Absolute path to the group's Watcher registry. |
+| `graceSeconds` | Required grace, 1-86400 seconds. |
+| `pollIntervalSeconds` | Expected watch cadence, 1-86400 seconds; default 30. Set it to the registration's interval. |
+
+One group observes one configured backend and one Watcher registry. Register
+the detector with its fixed target set to the root's address and its backend
+set to the same profile. Backend profiles must be available to the detector
+through the controlled launch environment; allowlist `TELEX_HOME` and, when
+used, `TELEX_CONFIG` and backend credential environment names. Paths in profile
+configuration should be absolute. The detector deliberately does not apply
+ambient `TELEX_DB` or global CLI database overrides to this explicit profile.
+Profiles naming the same effective store also match watches targeting a member.
+
+The detector opens Telex using `build_readonly`, which skips schema
+initialization and uses a read-only SQLite connection. It reads aggregate
+unconsumed primary-recipient counts and at most 1025 recent inbox entries per
+active member to find deferred dispositions, including messages already
+transport-consumed. If the suffix is full and contains no known message wake
+source, the absence of older deferred work cannot be established and the run
+is degraded. Message bodies and tool result text never enter the event snapshot.
+Postgres uses the existing read-only consumer connection path with SELECT
+queries; a SELECT-only database role is needed for a credential-level guarantee.
+
+Watcher observations use only its public
+`--json --registry <path> list --active` management command. Active watches
+targeting a member at the selected store count even when their source depends
+on another idle member. The command has a five-second deadline and 256 KiB
+stdout/64 KiB stderr bounds. A failed, missing, malformed or unsupported
+inventory degrades the observation; it never establishes no watches. The
+detector starts no daemon or runtime and writes no membership or session files.
+All asynchronous observations share a 15-second budget; registration timeout
+must allow that budget plus command startup. Group/session file reads and the
+underlying database queries still rely on Watcher's process timeout for a hard
+host-level bound.
+
+Background shells and agents are **unobserved** by this implementation.
+Every member snapshot explicitly carries `"backgroundWork": "unobserved"`;
+this is not proof of absence. This implements the steward's
+[background-work decision](https://github.com/lossyrob/telex/issues/197#issuecomment-6402758809).
+Planned background waits belong in parked membership.
+
+### Episodes, degraded observations and advisories
+
+Opaque state version 1 contains `fingerprint`, `firstSeenAt`, `lastObservedAt`,
+`gapRestarted` and `emitted`, with times in Unix milliseconds. The fingerprint
+covers parameters, activation time, sorted membership, classifications,
+non-accounting activity markers and wake-source observations. Poll time and
+usage accounting do not affect it. Non-stalled successful observations clear
+the episode. A membership/evidence change starts a new episode, including an
+idle-to-busy-to-idle cycle between polls whose final activity marker changed.
+
+A known quiet group emits `copilot.group.stalled` only after the unchanged
+candidate has persisted for **strictly more** than `graceSeconds`. Freshness
+is twice `pollIntervalSeconds` (60 seconds by default). An observation gap
+longer than freshness restarts grace at most once per unchanged episode.
+Later gaps cannot keep alternating degraded/successful runs from alerting
+indefinitely. A backward clock adjustment restarts elapsed-time measurement
+without clearing an already-emitted event. Wall-clock time is not monotonic.
+
+`degraded` never advances opaque state. Under the steward's
+[quiet-unknown decision](https://github.com/lossyrob/telex/issues/197#issuecomment-6418380723),
+unknown members instead produce one `copilot.group.attention-needed` advisory
+when every active member is idle/not-loaded/unknown, no wake source is observed,
+and every unknown member has a valid evidence timestamp strictly older than
+grace. This includes a quiet `session.error`, `session.start` or any other
+unsupported event; the classifier still reports unknown. The advisory does
+not need a second observation grace after the evidence has already aged.
+An unknown with no retained evidence timestamp, or one with invalid/future
+evidence time, cannot establish this trigger and remains degraded. Other
+unknown runs, including unchanged already-notified unknown episodes, are degraded.
+
+Both event kinds share the fingerprint and emitted bit. Watcher commits the
+event-producing `nextState` only after durable Telex acceptance; an unresolved
+send cannot suppress a notification by prematurely committing `emitted`.
+Re-evaluation with uncommitted prior state offers the episode again, while
+normal delivery recovery retains Watcher's exact staged event identity.
+
+The event body is a JSON snapshot with `schemaVersion: 1`, `groupDirectory`,
+`degraded`, `members`, `firstSeenAt`, `observedAt` and `fingerprint`. Each member
+contains its membership record, optional classifier result, optional message
+counts/watch ids, and explicit background uncertainty. Advisory bodies and
+metadata set `degraded: true` and never claim a stall. Both require root App
+confirmation before any response. Oversized snapshots produce a diagnostic
+and a degraded result instead of violating the v2 output limits.
 
 Both the classifier and detector live in the versioned binary under
 `telex copilot`. The detector speaks Watcher detector protocol v2 and is
@@ -181,5 +311,6 @@ and a status view over the same observations.
 - Whether a watch dependent only on another idle member should count as a
   wake source, and how to detect such internal deadlocks.
 - Whether the root should also be told when all active members await input.
-- Whether persistent unknown state should eventually alert the root rather
-  than only making the detector degraded.
+- How unknown observations with no usable evidence timestamp should eventually
+  reach the root. Quiet unknowns with retained old evidence are covered by
+  `copilot.group.attention-needed`.
