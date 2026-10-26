@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-10-25T19:34:27.823Z",
+  "updatedAt": "2026-10-25T20:31:59.069Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -391,6 +391,84 @@
         "runtime-hardening",
         "watcher-macos-containment-runtime"
       ]
+    },
+    {
+      "id": "copilot-session-state-classifier",
+      "type": "task",
+      "title": "Copilot session-state classifier",
+      "summary": "Work-start metadata, separately pinned by the owning Watcher after the historical launch binding: the same owner a96926b1-3e4f-4578-a197-33de51d669c7 has started work; first reported draft PR https://github.com/lossyrob/telex/pull/202 (Closes #198), head 02d2cbbdb93af264d46763c6d86b0b8ea5691f14, branch lossyrob-copilot-session-classifier. Public work-start evidence: https://github.com/lossyrob/telex/issues/198#issuecomment-6402709899. The branch change is an app-managed rename of the same lossyrob-super-adventure checkout, not a second owner, rebind or relaunch. Status is in-progress, attention focus. The PR is a draft. The design steward's design PASS at exact head 02d2cbbdb93af264d46763c6d86b0b8ea5691f14 (https://github.com/lossyrob/telex/pull/202#issuecomment-6402758553) is not merge approval and does not review code correctness or test evidence; independent review and CI remain pending, and no readiness credit follows. Implementation, checks, convenience local-log sampling and finite async-shell observations in the owner comment remain owner reports, not accepted validation, fleet coverage, wake-source completeness or freeze/proof-scope clearance. The original launch branch, canonical 1302634b owner-history landing, kickoff identity and complete earlier summary below remain history; its planned/focus launch snapshot is historical, not the current work-start status. On 2026-10-25 owning Watcher reports one launched owner a96926b1-3e4f-4578-a197-33de51d669c7 on branch/checkout lossyrob-super-adventure from canonical fb22c9c0/tree1db01491. The 12,052-byte kickoff (SHA-256 741f0c6e09707bdca9b7044d964eac4800df0ddd0db690b34990d7e0730091a8) was delivered by reference according to the coordinator; the reconciler verified byte equality with the complete handoff prompt. Original launch binding (2,433 bytes/SHA-256 808a7c75fbbed11819c017be5303654f7dafddf61d2e6efaf69b298236b92065) was captured before later observations, not reinterpreted afterward. Preparation, profile and delivery checks remain coordinator-attributed, not replayed by the reconciler. Status remains planned/focus pending actual work start; launch alone gives no implementation, source, CI or readiness credit. Original #197 scope follows unchanged: Adds the classifier subcommand with fixture tests, tail-bounded reads, and `unknown` for unrecognized patterns. Records this design in `docs/design` with a DECISIONS entry. Depends on nothing open.",
+      "status": "in-progress",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 198
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "copilot-group-stall-detector",
+      "type": "task",
+      "title": "Copilot group stall detector",
+      "summary": "Adds the detector subcommand, the membership format, the stall condition, grace and deduplication in opaque state, and the event. Depends on item 1.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 199
+      },
+      "dependsOn": [
+        "copilot-session-state-classifier"
+      ]
+    },
+    {
+      "id": "stall-detection-agent-guidance",
+      "type": "task",
+      "title": "Stall detection agent guidance",
+      "summary": "Adds `telex copilot skill` instructions and a guide page for creating a group, registering the watch, member state changes, and the root's confirm-then-ring response. Depends on item 2.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 200
+      },
+      "dependsOn": [
+        "copilot-group-stall-detector"
+      ]
+    },
+    {
+      "id": "stall-detection-workstream-gate",
+      "type": "gate",
+      "title": "Stall detection validated against a workstream",
+      "summary": "Runs the detector against a real workstream. Passes when a real or staged stall produces exactly one event per episode, busy members, members waiting on the operator, and armed watches produce no stall, the root confirms and rings, and a status view can be built from the same data. Depends on item 3.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 201
+      },
+      "dependsOn": [
+        "stall-detection-agent-guidance"
+      ]
     }
   ],
   "checkpoints": [
@@ -437,6 +515,18 @@
         "runtime-hardening",
         "closure-gate",
         "watcher-macos-containment-runtime"
+      ]
+    },
+    {
+      "id": "stall-detection-validated",
+      "title": "Copilot group stall detection validated",
+      "summary": "A group's root session is woken once, with a snapshot, when every active member of the group has been idle with no wake source for longer than a grace period. The root confirms the stall, diagnoses it, and rings members. The operator can see who is watching what on a status view the root hosts.",
+      "status": "planned",
+      "nodeIds": [
+        "copilot-session-state-classifier",
+        "copilot-group-stall-detector",
+        "stall-detection-agent-guidance",
+        "stall-detection-workstream-gate"
       ]
     }
   ],

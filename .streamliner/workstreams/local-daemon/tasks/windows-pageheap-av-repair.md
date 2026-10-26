@@ -197,3 +197,186 @@ Reviewer/steward results use direct messages.
 No new Watcher edge, #153/closure/hardening completion, product runtime
 action, admission/debt/release clearance or workstation-freeze waiver
 follows from this artifact promotion.
+
+## 2026-10-25 - Actual owner launch and future merge notification
+
+This is an additive current-owner qualification. The original promotion's
+pending preparation/owner statements above remain the historical snapshot,
+not a claim that no owner has now launched.
+
+Local reports one actual v2 owner:
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, checkout and launch branch
+`lossyrob-special-meme`, context package
+`ctx-20261025193837-7445b42c`. Its requested profile is
+`gpt-6.1-sol / high / default / interactive`, no idle notification.
+Local reports the kickoff delivered once and that same identity, checkout
+and branch observed busy at `2026-10-25T19:44:19.2231752Z`.
+Those are Local-attributed observations, not a reconciler App/provider
+query or independent verification of effective model/capacity.
+
+Local's separate branch packet received at
+`2026-10-25T19:47:02.524Z` reports independent App confirmation of that same
+owner/checkout, busy on current branch `lossyrob-windows-heap-av-repair`.
+The original preparation/delivery branch remains `lossyrob-special-meme`.
+This is not another owner, checkout or preparation. The packet's later
+archive-inventory and dependency-candidate reports are excluded from this
+launch-only successor; they are not diagnosis or source/design approval.
+
+The original immutable launch-binding snapshot is 4,407 bytes, SHA-256:
+`9c36cb79f92ae6defc70faed72a5455c872cd9aeec2dc1a7fdf165e66be030a3`.
+Kickoff is 15,666 bytes, SHA-256:
+`54b679962dc4fd1f01a7e98340185d76fe630108735a291295675784b7a55086`.
+The reconciler read/captured the full binding, kickoff and handoff and
+verified exact kickoff/handoff byte equality. Full guide/current overrides,
+installed context equality, only two untracked `.paw` preparation files and
+unchanged source/index checks remain Local-attributed; no replay is claimed.
+
+Preparation is pinned to actual promotion
+`f0053e3b94349b91dace2ca691d03fb281815c76`. The later observed
+`df37d5683683662db3ede85b86d7b66e9f4064cb` changed only three Watcher
+artifacts; Local reports the selected #166 node/task/policy exact.
+This is not source integration, new preparation or review/CI carry.
+
+### Event-driven follow-through, not completed delivery
+
+Campaign authority `toolu_01KB1nMvqiqDxQiC7MQkUWPP`, relayed in the
+original Local binding and complete delivered kickoff, requires the #166
+owner to report its actual repair merge immediately to Local rather than
+waiting for post-merge validation or the field report. Local verifies the
+actual merge and then wakes the existing #193 owner,
+`519693a5-0607-4aba-a968-345f3b1cd1b5`, to integrate main, run fresh CI
+and request the PR #194 gate. The #166 owner continues its own post-merge
+obligations separately.
+
+This future merge/wake has not occurred in these sources. It does not
+change #193/#194 ownership, scope, dependencies, status or gates; a future
+fresh gate is not readiness now. There is no second launch/preparation,
+product/source/diagnostic/CI replay, shared native-cause conclusion,
+rerun/waiver, debt/HOLD/release or workstation-freeze clearance.
+All original distinct AV observations and hosted-only exact-head review,
+public reviewer receipt, diagnostic coverage and non-theft/fencing/480ms
+requirements remain controlling.
+
+## 2026-10-25 - Default-Windows heap observation and dual merge wake
+
+### Same owner and investigation, distinct exception and job stage
+
+Campaign `toolu_011HendiW3BJzkXVtPYrCfq6` assigns the PR #202 / #198
+heap-corruption observation to existing owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, not a new owner or issue.
+Local reports immediate delivery and later executed-merge correction to
+that owner. Campaign makes #166 its top critical-path repair for #194 and
+#202 under unchanged strict CI. This is routing/priority qualification,
+not an automatic graph edge, status change, waiver or causal diagnosis.
+
+The initial 4,095-byte Local packet remains immutable, SHA-256:
+`c224ad7464e3a66adda6bd451ba2c83b03e45ab67bdfb12911488d1cce0330b2`.
+It did not establish the exact head/source/custody. The later 6,801-byte
+Local qualification concerns the SAME observation, not a new occurrence:
+`4a33013e497ff7ac024f517cafa7ce2f1ff55f618668acb795ca5f1ba27ebe6f`.
+The ledger retains both packets and their attribution/chronology.
+
+### Retained checkout, command and failure qualification
+
+The complete [Watcher public record](
+https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431),
+updated `2026-10-25T20:51:48Z`, reports run `40230509989`, historical
+attempt 2, ordinary `Build and test (windows-latest)` job `121284088689`.
+This is not the PageHeap diagnostics job. That already-taken failed-jobs
+rerun gives no permission for another retry.
+
+PR/event head:
+`02d2cbbdb93af264d46763c6d86b0b8ea5691f14`.
+Executed ref: `refs/remotes/pull/202/merge`.
+Executed commit:
+`0cbecafc3b944bf920aad34e5fa8764ac683653c`.
+Ordered parents:
+`6c7ff0680dd428af2cc765aa13d827bc140943f0`, then the PR head above.
+Executed tree:
+`488493820fd72455807cdad8e2ddd4957da52fec`.
+Artifact names refer to the PR head; binaries/symbols refer to the
+executed merge, not a direct PR-head checkout.
+
+Local reports matching 465,915 bytes of retained, job/step-labeled
+`gh run view --job --log` UTF-8 text, SHA-256:
+`73a58636fce10cf603034fcdae9ce9f64670e02ab2e1d3cf0e3a4c469b4a798d`.
+These are not raw API log or archive bytes. Local read bounded checkout,
+command, exception/backtrace and complete target-result excerpts, not the
+entire log. Checkout lines 93/111/114 and immutable Git API checks identify
+the merge/tree/parents above. Local reports source blob
+`b1f708c5e8948884c49207fe4aba4e051dc7f23a` (196,727 bytes), equal to
+the inspected PR-head test source. Equality of that test blob does not
+prove all production dependencies/runtime inputs unchanged or PR causality.
+These checks remain Local-attributed; the reconciler did not replay them.
+
+Recorded commands are `cargo build --workspace --verbose`,
+`cargo test --workspace --no-run --verbose` and
+`cargo test --workspace --verbose`, without `--all-features`.
+The failing `real_process_01_concurrent_first_use` has eight synchronized
+attach workers. One command child reported `0xc0000374`
+(`STATUS_HEAP_CORRUPTION`), empty stdout/stderr, at the abnormal-exit guard
+line 518 through capture line 793; its worker join propagated at line 800
+in test line 746. Target result: 48 passed, 1 failed, 25.34 seconds.
+The configured eight-second capture budget is not the fault duration or
+a timeout diagnosis. Rust harness frames are not a native child stack.
+The exact worker/child PID, corrupting operation and fault site are unknown.
+
+Keep this default-Windows status/stage distinct from earlier PageHeap
+`0xc0000005` cases. A common cause is not established. Attempt 1 failed
+earlier in the separate #167 credential-command case; whether it reached
+this process target is unestablished. The public record corrected its
+earlier passed-target and no-retained-artifact claims. Two same-name
+archive IDs, digests and timing associations are metadata only; neither
+Local nor Watcher downloaded/inspected them or established dump presence.
+Use immutable IDs, not name selection. No new runtime/archive/log fetch
+or source/native replay is authorized by this artifact.
+
+### Supplement the original future wake; neither delivery has occurred
+
+After the actual #166 product repair merges, its owner immediately reports
+that merge to Local. Local verifies it and separately wakes BOTH:
+#193 / PR #194 owner `519693a5-0607-4aba-a968-345f3b1cd1b5`, and
+#198 / PR #202 owner `a96926b1-3e4f-4578-a197-33de51d669c7`.
+Each integrates main, obtains fresh exact-head CI/review and requests its
+own PR gate. Record each delivery separately; both remain pending.
+Keep the original #193 launch/kickoff obligation as history and current
+obligation, not a replaced or completed wake. Artifact publication,
+diagnostic green and readiness are not this trigger.
+
+No owner replacement, automatic dependency/status change, common cause,
+retry, flake exception, waived/ignored abnormal exit, repair, review/CI/
+readiness, debt/HOLD or workstation-permission credit follows. #198 remains
+in progress; its CI-blocked stage on external #166/#167 is attributed
+metadata, not readiness. All original launch history, distinct AV evidence,
+strict exact-head hosted gates and workstation restrictions remain.
+
+## 2026-10-25 - Later observed reply alias and diagnostic draft
+
+In a separate observation at `2026-10-25T19:51:53.4869007Z`, Local
+queried both identifiers and reports that each resolves to canonical owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, the same creation/parent,
+checkout `lossyrob-special-meme`, current branch
+`lossyrob-windows-heap-av-repair` and draft PR association.
+The owner requests replies via observed alias
+`57bcb249-2ec6-4272-be67-31b9f0f59d7d`.
+This records observed resolution equivalence, not internal namespace
+implementation, replacement, a second owner or preparation.
+
+Local's direct provider metadata then showed
+[PR #196](https://github.com/lossyrob/telex/pull/196) OPEN/draft,
+base main, head
+`b0f59d408b32d61cc4cfd9c5a5310a8c522567e1`.
+The described capture instrumentation and unproved source candidate remain
+owner-reported, not source/design/CI acceptance or a diagnosed cause.
+The reconciler read/captured the complete Local packet, not the live App,
+provider inventory, source, archive, native execution or hosted result.
+
+The complete original launch qualification, 4,407-byte binding,
+15,666-byte kickoff and earlier branch observations remain unchanged.
+No actual repair merge or Local #193 wake is evidenced by this metadata.
+Fresh exact-head review, CI, Campaign and post-merge obligations continue;
+no retry, readiness, dependency/status, debt/HOLD/release/freeze credit.
+
+The later #166 heap-routing qualification and BOTH still-pending
+#193/#198 actual-repair-merge wakes remain unchanged. This older
+identity/draft snapshot supplies no delivery or current gate credit.
