@@ -1790,3 +1790,54 @@ Same-node #224 phase decision, NOT a shape change: Campaign toolu_01QLkaykjbzhsK
 
 Ownerfinaldiagnosispacket17464/SHA10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db readbyLocal;mechanismis sufficientisolatedcontention+separateslowcredentialalternatives,NOThistoricalcauseorcalibratedproductionreplay. I requested additiveidentitycorrectionbecausepacketowner_session0a11050e differsAppowner769a992c;do notsilentlybindit/overwriteoriginalorcopyprivatepaths. Cleanupcommand/timestampspacket12669/SHAb7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029 bindsrecordedcommands,whileactualDockerstop/resourceabsencearemereownerattestationinLocalreview. Keepfailingsetupassertions/partialrunlimits. Existingactual-ownerqualificationcanrecordthisnewphaseadditivelywhenin scope;no duplicateowner/shape/publicationhold.
 ```
+
+
+## #223 bounded guidance follow-through accepted (2026-10-26)
+
+Campaign `toolu_01RtX3dmYB4DhkWdLrKE9wqf` accepts the same owner a78ad6b1-1f7d-4936-85d7-6cf660022386 follow-through: [field report 6428012639](https://github.com/lossyrob/telex/issues/223#issuecomment-6428012639), main CI `40403556376` and Docs `40403556481` succeeded at exact product merge `f4c58eed5fe9336408750d69d59ae446707c9f88`. This later acceptance completes the bounded #223 guidance node/row, attention watch unchanged, without reopening it or replacing its launch/review/design/merge/pending history. The owner and complete actualOwnerQualification remain exact; the original brief/task text stays complete.
+
+Complete public field body is 3734 bytes / `b2b3defb2ee80b333664dce9a92ad3ad0ee9de02b1c80ad77b0951292bb2a8dc`. Public field readback and run metadata independently match exact push/attempt 1/completed/success. CI21/21 and Docs build/Pages inventories, Windows event/provider/checkout equality and observer terminal/scheduler/support-test claims remain owner/observer-attributed. No job/log/source/runtime/recipient or scheduler was replayed. Earlier PR Docs N/A is not rewritten as passed; later exact-main Docs is separate evidence.
+
+No real App fallback wake or bridge loading, #224 repair, #201 acceptance, installed migration, backend/transport repair or debt credit follows. The complete field retains its conditional startup-discovery follow-up at its source; later Campaign root observations and #230 routing are separate qualifications, not a denial/rewrite of that field or scope absorbed by #223. No new worker, observer, rerun/dispatch, wait/root test/rearm, installation/auth/ACL operation, cleanup/environmental clearance, five-minute/195 hold release or successor/parked authority is granted here.
+
+### Complete field report (CRLF-to-LF display only)
+
+```text
+## Field report: bounded guidance repair and merged-head follow-through
+
+[PR #226](https://github.com/lossyrob/telex/pull/226) merged at `f4c58eed5fe9336408750d69d59ae446707c9f88` on 2026-10-26 at 21:20:40Z; this issue closed at 21:20:42Z. The merge tree is `28dc7120912323257f6ab07d6255c2ea447c63c1`, with ordered parents `fc962a6ab7d12f40b004b4eed6b5d18700292a34` and reviewed candidate `274c1195db078a70b6fc5f546d29b351c6b8a935`.
+
+The bounded change aligns the binary-owned skill, operator/bridge documentation, README, troubleshooting and recovery messages with host capabilities. It preserves live push and the existing prepared single-shot pull procedure, including completion artifacts, exits 0-7, acknowledgment/deduplication/disposition, explicit re-arming/stopping and mode exclusion. No transport, host API, backend repair or polling loop was introduced. The Watcher stall subsection and its mirrored guide remain unchanged for #222.
+
+### Exact-merge checks
+
+The existing observer reported terminal success, and I independently read back the run identities and complete job conclusions through GitHub:
+
+| Workflow | Exact merge | Attempt | Result |
+|---|---|---|---|
+| [CI 40403556376](https://github.com/lossyrob/telex/actions/runs/40403556376) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; 21/21 jobs successful |
+| [Docs 40403556481](https://github.com/lossyrob/telex/actions/runs/40403556481) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; build and Pages deployment both successful |
+
+The observer's Windows Build/test execution-context read records event, provider and checkout SHA all equal to this actual merge. That execution attribution is observer-log-derived, not my independent log replay or an every-job checkout claim. This post-merge evidence is distinct from the earlier candidate CI, whose Windows checkout was a generated PR merge ref. PR Docs was not scheduled; the actual main Docs result above supplies the post-merge follow-through.
+
+The observer reports all waits terminal and its scheduler cleared. No rerun, manual dispatch or local runtime mutation was performed for this follow-through.
+
+### Review and limits
+
+- [Independent source review](https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756): no blockers at the reviewed candidate, with the exit 6/7 documentation gap resolved.
+- [Formal design inspection](https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907): +1, no design blockers.
+- [Campaign merge gate](https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103): authorized the actual merge with disjoint final-main drift and retained follow-up.
+
+Local support checks passed 21 unit and three guidance contracts using isolated roots. Those checks, hosted CI and this report establish neither real App fallback wakeup nor bridge loading. They do not repair #224 or satisfy #201 real-root delivery acceptance. No real installation, campaign waiter, bridge reload, detector, backend probe or real-user ACL change was part of this work.
+
+The gate's non-blocking startup-discovery follow-up remains explicit: the operator reports that App startup discovery can load session-scoped extensions even without an advertised live reload tool. Campaign owns the root restart test and evidence-backed filing. If confirmed, the restart wording and App first-time routing need a separate correction. This report does not claim that experiment ran or infer its result, and no speculative correction was added here.
+
+The assigned exact-merge CI/Docs follow-through is complete. Campaign's bounded delivery acceptance and the separately owned runtime evidence remain distinct.
+
+```
+
+### Complete actual Campaign acceptance
+
+```text
+#223 follow-through accepted. Owner a78ad6b1 finished the field report (6428012639), and main CI (40403556376) and Docs (40403556481) passed at f4c58eed. Nothing in this credits #224, #201, or App wake/bridge loading.
+```

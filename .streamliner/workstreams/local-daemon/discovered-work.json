@@ -9662,7 +9662,7 @@
       "target": "copilot-app-delivery-path / existing issue #223",
       "owner": "Local Daemon; existing implementation owner a78ad6b1-1f7d-4936-85d7-6cf660022386 (source-attributed assignment, not a new launch).",
       "terminalPath": "A separate closing #223 PR aligns the binary-owned skill, guide, bridge design/overview and directly related recovery text/tests under independent exact-head source review, design inspection and hosted CI, then Campaign gate/accepted disposition. Source-text checks are not App wake/bridge-loading proof. No delivery or repair acceptance is recorded now.",
-      "status": "in-progress",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01Y5o2oxjb7MD82B7hCRAj5r, quoted in actual Local call_kUHJSXbVmnRG8PJlpwsuplKL; route/shape authority only.",
       "routingQualification": {
@@ -10099,6 +10099,101 @@
           "conditionalDiscovery": "The gate records only an operator-reported startup-extension discovery possibility. A future evidence-backed wording correction is conditional on the Campaign root restart test actually confirming the bridge goes live. No such result, current bridge loading/wake, new family/row or runtime/test authorization is inferred.",
           "methodBoundary": "Actual Campaign/Local receipts, complete public gate, public merge/issue/parsed-reference metadata, ordered commit parents/path names and identical whole .streamliner tree were checked. The stale authored tuple was exactly reversed and accepted main cleanly fast-forwarded. No product source/log/runtime or recipient inspection, merge creation/push, follow-through completion, observer or root experiment."
         }
+      },
+      "completionQualification": {
+        "kind": "later-campaign-accepted-bounded-guidance-followthrough",
+        "source": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01RtX3dmYB4DhkWdLrKE9wqf",
+          "verbatim": "#223 follow-through accepted. Owner a78ad6b1 finished the field report (6428012639), and main CI (40403556376) and Docs (40403556481) passed at f4c58eed. Nothing in this credits #224, #201, or App wake/bridge loading.",
+          "originEvent": {
+            "id": "0a58891f-3772-4fe9-95bc-1fcf932635e7",
+            "timestamp": "2026-10-26T21:42:04.157Z",
+            "bytes": 1800,
+            "sha256": "51eaa30a27e96101e41604b49aa2c1ccbf987e0d8f67b545b22ef71922b058af"
+          },
+          "receipt": {
+            "file": "campaign223-followthrough-accepted-intake.json",
+            "bytes": 673,
+            "sha256": "aa2ee352e7aa49ce34d19ac93c7933ab83ed1683e4f8802bddd8ec75480e1ed4"
+          }
+        },
+        "publicFollowthrough": {
+          "observedAt": "2026-10-26T22:11:27.761Z",
+          "result": "PASS",
+          "campaignSource": {
+            "file": "campaign223-followthrough-accepted-intake.json",
+            "bytes": 673,
+            "sha256": "aa2ee352e7aa49ce34d19ac93c7933ab83ed1683e4f8802bddd8ec75480e1ed4"
+          },
+          "field": {
+            "id": 6428012639,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6428012639",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T21:41:20Z",
+            "updatedAt": "2026-10-26T21:41:20Z",
+            "raw": {
+              "file": "complete223-owner-field-raw.json",
+              "bytes": 5666,
+              "sha256": "bb6150059cab9db1a4eed1db60db92b8dee361bacb47de9ac96989b7e11ddb14"
+            },
+            "body": {
+              "file": "complete223-owner-field-body.txt",
+              "bytes": 3734,
+              "sha256": "b2b3defb2ee80b333664dce9a92ad3ad0ee9de02b1c80ad77b0951292bb2a8dc"
+            }
+          },
+          "runs": [
+            {
+              "workflow": "CI",
+              "id": 40403556376,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40403556376",
+              "head": "f4c58eed5fe9336408750d69d59ae446707c9f88",
+              "attempt": 1,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete223-ci-run-raw.json",
+                "bytes": 11716,
+                "sha256": "3c2e61fb73de19eadf842ea5d6b885a5e586708f333a3b64bd6225e3f51de55a"
+              }
+            },
+            {
+              "workflow": "Docs",
+              "id": 40403556481,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40403556481",
+              "head": "f4c58eed5fe9336408750d69d59ae446707c9f88",
+              "attempt": 1,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete223-docs-run-raw.json",
+                "bytes": 11719,
+                "sha256": "f750e0bbc37948de9dabcf15ac695194f0ec66eb326bed92bbfdff4c949966ac"
+              }
+            }
+          ],
+          "method": "Complete public field body/identity and exact push-run metadata readback only. Job inventory totals, Windows event/provider/checkout context and scheduler termination remain owner/observer-attributed in the complete field body; no jobs/logs/source/runtime/archive/recipient or scheduler was inspected, and no run/wait/dispatch was started.",
+          "boundary": "Evidence for bounded #223 follow-through only, not App loading/wake, #224 repair, #201 validation, installed upgrade, root test, environmental clearance, debt or hold release, nor artifact landing authority."
+        },
+        "completeFieldBodyVerbatim": "## Field report: bounded guidance repair and merged-head follow-through\r\n\r\n[PR #226](https://github.com/lossyrob/telex/pull/226) merged at `f4c58eed5fe9336408750d69d59ae446707c9f88` on 2026-10-26 at 21:20:40Z; this issue closed at 21:20:42Z. The merge tree is `28dc7120912323257f6ab07d6255c2ea447c63c1`, with ordered parents `fc962a6ab7d12f40b004b4eed6b5d18700292a34` and reviewed candidate `274c1195db078a70b6fc5f546d29b351c6b8a935`.\r\n\r\nThe bounded change aligns the binary-owned skill, operator/bridge documentation, README, troubleshooting and recovery messages with host capabilities. It preserves live push and the existing prepared single-shot pull procedure, including completion artifacts, exits 0-7, acknowledgment/deduplication/disposition, explicit re-arming/stopping and mode exclusion. No transport, host API, backend repair or polling loop was introduced. The Watcher stall subsection and its mirrored guide remain unchanged for #222.\r\n\r\n### Exact-merge checks\r\n\r\nThe existing observer reported terminal success, and I independently read back the run identities and complete job conclusions through GitHub:\r\n\r\n| Workflow | Exact merge | Attempt | Result |\r\n|---|---|---|---|\r\n| [CI 40403556376](https://github.com/lossyrob/telex/actions/runs/40403556376) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; 21/21 jobs successful |\r\n| [Docs 40403556481](https://github.com/lossyrob/telex/actions/runs/40403556481) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; build and Pages deployment both successful |\r\n\r\nThe observer's Windows Build/test execution-context read records event, provider and checkout SHA all equal to this actual merge. That execution attribution is observer-log-derived, not my independent log replay or an every-job checkout claim. This post-merge evidence is distinct from the earlier candidate CI, whose Windows checkout was a generated PR merge ref. PR Docs was not scheduled; the actual main Docs result above supplies the post-merge follow-through.\r\n\r\nThe observer reports all waits terminal and its scheduler cleared. No rerun, manual dispatch or local runtime mutation was performed for this follow-through.\r\n\r\n### Review and limits\r\n\r\n- [Independent source review](https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756): no blockers at the reviewed candidate, with the exit 6/7 documentation gap resolved.\r\n- [Formal design inspection](https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907): +1, no design blockers.\r\n- [Campaign merge gate](https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103): authorized the actual merge with disjoint final-main drift and retained follow-up.\r\n\r\nLocal support checks passed 21 unit and three guidance contracts using isolated roots. Those checks, hosted CI and this report establish neither real App fallback wakeup nor bridge loading. They do not repair #224 or satisfy #201 real-root delivery acceptance. No real installation, campaign waiter, bridge reload, detector, backend probe or real-user ACL change was part of this work.\r\n\r\nThe gate's non-blocking startup-discovery follow-up remains explicit: the operator reports that App startup discovery can load session-scoped extensions even without an advertised live reload tool. Campaign owns the root restart test and evidence-backed filing. If confirmed, the restart wording and App first-time routing need a separate correction. This report does not claim that experiment ran or infer its result, and no speculative correction was added here.\r\n\r\nThe assigned exact-merge CI/Docs follow-through is complete. Campaign's bounded delivery acceptance and the separately owned runtime evidence remain distinct.\r\n",
+        "priorFields": {
+          "node": {
+            "summary": "Campaign subsequently merged PR #226 as f4c58eed5fe9336408750d69d59ae446707c9f88, closing #223. The same owner has post-merge exact-main CI, Docs and field follow-through pending at the source; retain in-progress/watch, not completed. The conditional startup-extension-discovery report is not observed bridge loading/wake, test authorization or #201/#224 credit. All premerge owner/review/design snapshots below remain history, not a denial of that merge: A later Local report records the posted, verified formal design receipt for PR #226 at the same 274c1195 head as design-aligned with no blockers. Source review and hosted CI remain separate; Docs PR N/A is not passed, and Campaign acceptance, merge, completion and runtime/wake evidence are not credited. The earlier pending-design report below remains history, not a current denial: Local reports implementation/review in progress under the same previously launched owner a78ad6b1-1f7d-4936-85d7-6cf660022386, with open non-draft PR #226 at 274c1195db078a70b6fc5f546d29b351c6b8a935 and parsed closing reference [223]. The later source-review receipt resolves the historical P2 at its new head; Local reports exact-head hosted CI success, with the separate Windows provider/checkout merge identity and Docs not scheduled for PRs. Formal design PASS and Campaign acceptance were absent at the report; no merge, completion, operator readiness, runtime/wake proof or debt credit follows. Initial controller checkout/branch lossyrob-bookish-train and later public PR branch lossyrob-223-app-delivery-guidance are distinct snapshots; no rename timing/mechanism or current owner checkout state is inferred. Attention, geometry, dependencies and checkpoints remain unchanged. The complete prelaunch summary remains history: Align first-time Copilot delivery guidance and directly related recovery messages/tests with actual host capabilities. App without a supported live loader uses documented Telex-owned pull fallback; loader-capable or already-live push remains supported, and provisioning is not loading proof. Preserve one supported pull wait, completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics. No new host API, transport or shell polling loop; no fallback-wake proof or #224 backend repair. #222 owns Watcher bootstrap/stall-group installation/root-mode wording. No #201/#222 dependency or #53 reopening.",
+            "status": "in-progress"
+          },
+          "row": {
+            "status": "in-progress"
+          }
+        },
+        "chronology": "Later Campaign acceptance and field/exact-merge CI/Docs follow-through qualify the complete earlier owner223v3 pending-at-source history. All earlier controller, source/review/design/candidate CI, merge gate, pending statements and task/brief prefixes remain unchanged, not current denials or reopened work.",
+        "acceptedOutcome": "Completed only #223 bounded first-time App delivery guidance/recovery repair and assigned exact-merge follow-through; same historical owner. No actual App fallback wake, bridge load, runtime transport/backend repair or #201/#224 credit.",
+        "hostedBoundary": "Run metadata independently matched exact f4c58eed push/attempt1/completed/success. CI21/21 and Docs build+Pages job inventory, Windows event/provider/checkout equality, observer terminal/scheduler and support21unit/3guidance remain complete-field owner/observer attribution; no log/job/runtime replay here. PR Docs N/A remains its premerge history; actual main Docs is the later distinct follow-through.",
+        "discoveryBoundary": "The field report retains startup-discovery as conditional at its source. Later Campaign root startup/push reports and separate #230 routing are subsequent distinct work; they neither rewrite that field body nor reopen #223, and this packet does not independently claim their runtime result or absorb #230/#231.",
+        "conservation": "Only same node summary/status and row status/one completionQualification change, with pure brief/task appends. Existing owner and complete actualOwnerQualification remain unchanged; all other rows/nodes/fields/dependencies/geometry/checkpoints/attention/debts/wakes exact.",
+        "noOperationalAuthority": "No owner/observer launch, rerun/dispatch/wait/root test/rearm, source/CI/runtime replay, install/upgrade/ACL/auth/transport, environmental cleanup, #201 validation, #224 repair, five-minute/195 hold release, debt credit or successor/parked approval follows."
       }
     }
   ]

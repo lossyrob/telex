@@ -40,3 +40,8 @@ Actual Local `call_0F9MTGeJqsX6Ws8PTJWu8kah` subsequently reports posted/verifie
 ### Subsequent merge; post-merge obligations pending
 
 Campaign `toolu_01SzupWWGaZeqoNRuZgTMCPb` subsequently merged PR #226 as `f4c58eed5fe9336408750d69d59ae446707c9f88`, closing #223. Local `call_v7l5SEzgZfdIqX5Bbx07zR65` reports same-owner exact-main CI/Docs/field follow-through still pending. Keep this node in-progress/watch; public issue closure alone is not node completion or post-merge acceptance. Earlier phase reports remain history, not a denial of the merge. Full gate https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103 and its conditional startup-discovery follow-up are retained in the brief/ledger. No restart experiment, actual App loading/wake, #224 repair, #201 release, new worker or debt credit is authorized or proved here.
+
+
+## Later bounded completion accepted (2026-10-26)
+
+Campaign `toolu_01RtX3dmYB4DhkWdLrKE9wqf` accepts same-owner field https://github.com/lossyrob/telex/issues/223#issuecomment-6428012639 and exact-merge push CI40403556376/Docs40403556481 at f4c58eed. Record completed/watch for bounded #223 guidance repair; earlier pending-at-source text remains complete history. No App bridge loading/fallback wake, #224 repair, #201 validation, installed upgrade, runtime/debt/hold or successor credit follows. Full field/source/method boundaries remain in the same ledger row and brief. Separate later startup-discovery/#230 evidence does not reopen or expand #223.
