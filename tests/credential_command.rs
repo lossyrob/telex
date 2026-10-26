@@ -620,8 +620,9 @@ mod delayed_writer_phases {
         }
 
         /// `cancellation` carries the drop (cancel request) and post-cancel
-        /// obligation-snapshot times, measured from the outcome, for a
-        /// timed-out operation.
+        /// obligation-query times, measured from the outcome, for a timed-out
+        /// operation. `capture_elapsed_ms` is observer cost from the outcome
+        /// through the marker read, not writer or operation duration.
         pub fn report(
             &self,
             markers: &Markers,
@@ -651,7 +652,7 @@ mod delayed_writer_phases {
             if let Some((dropped, snapshot)) = cancellation {
                 write!(
                     line,
-                    " cancel_requested_ms={} post_cancel_obligations_ms={} obligations=post_cancel_racy markers=post_cancel_racy",
+                    " cancel_requested_ms={} post_cancel_obligations_ms={} obligations=post_cancel_reaping_racy markers=post_cancel_racy",
                     ms(dropped),
                     ms(snapshot),
                 )
@@ -661,7 +662,8 @@ mod delayed_writer_phases {
                 line,
                 " capture_elapsed_ms={} limits=filetime_wall_clock_not_monotonic,\
                  writer_utcnow_resolution_unverified,writer_marker_io_observer_effect,\
-                 script_to_written_includes_configured_150ms_sleep",
+                 script_to_written_includes_configured_150ms_sleep,\
+                 capture_elapsed_is_observer_cost_after_outcome",
                 ms(finished.since()),
             )
             .unwrap();
@@ -693,8 +695,9 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
     let profile = profile(&command);
     // Boxed so a timed-out operation is dropped first. Dropping only requests
-    // cancellation in memory; the obligation query (which may join a finished
-    // owner and publish) and observer file I/O both follow it.
+    // cancellation in memory. The later obligation query reaps: it may join a
+    // finished owner, publish and remove its entry, so an empty list does not
+    // mean nothing was outstanding at the timeout. Observer file I/O follows.
     let mut operation = Box::pin(pg_connect_config(&profile));
     #[cfg(windows)]
     let clock = delayed_writer_phases::Clock::start();
