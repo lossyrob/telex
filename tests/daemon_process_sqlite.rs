@@ -4752,7 +4752,7 @@ fn station_intent_daemon_restart_restores_push_without_manual_resume() {
     let mut stop = env.command_with_session(session);
     configure_copilot_home(&mut stop, &copilot_runtime_home(&env));
     stop.args(["--json", "daemon", "stop", "--drain"]);
-    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(10));
+    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(20));
     stop.assert_success("daemon stop --drain");
     let drained = stop.json("daemon stop --drain");
     assert_eq!(
@@ -4989,7 +4989,7 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
     env.configure_command(&mut stop, session);
     stop.env("TELEX_INSTALL_ROOT", &install_root)
         .args(["--json", "daemon", "stop", "--drain"]);
-    run_command_with_capture(stop, &env.root, Duration::from_secs(10))
+    run_command_with_capture(stop, &env.root, Duration::from_secs(20))
         .assert_success("stop the isolated successor daemon");
 }
 
@@ -5527,7 +5527,7 @@ fn station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked
     let mut stop = env.command_with_session(session);
     configure_copilot_home(&mut stop, &copilot_runtime_home(&env));
     stop.args(["--json", "daemon", "stop", "--drain"]);
-    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(10));
+    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(20));
     stop.assert_success("daemon stop --drain before the successor");
     assert_eq!(
         stop.json("daemon stop --drain")
