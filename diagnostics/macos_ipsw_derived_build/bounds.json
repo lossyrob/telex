@@ -99,7 +99,7 @@
   "volume": {
     "image_name": "build.dmg",
     "mount_name": "volume",
-    "create": ["create", "-size", "12288m", "-fs", "APFS", "-volname", "TelexDerivedBuild", "-format", "UDRW", "{image}"],
+    "create": ["create", "-size", "12288m", "-fs", "APFS", "-volname", "TelexDerivedBuild", "-type", "UDIF", "{image}"],
     "attach": ["attach", "-readwrite", "-nobrowse", "-noautoopen", "-mountpoint", "{mount}", "-plist", "{image}"],
     "detach": ["detach", "{mount}"],
     "hard_cap": "Mounted volume logical capacity <=12GiB including filesystem metadata, with ENOSPC. UDRW fixed non-sparse image, not SPARSE/SPARSEBUNDLE. Source, archive/toolchain/proxy/all caches/HOME/TMP/output/signing files inside.",

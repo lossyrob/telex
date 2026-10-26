@@ -329,8 +329,10 @@ class CapacityEnvironmentTests(unittest.TestCase):
 
     def test_fixed_nonsparse_image_and_no_privileged_fallback(self):
         args = BOUNDS["volume"]["create"]
-        self.assertIn("UDRW", args)
-        self.assertNotIn("SPARSE", " ".join(args))
+        self.assertEqual(args, ["create", "-size", "12288m", "-fs", "APFS", "-volname",
+                                "TelexDerivedBuild", "-type", "UDIF", "{image}"])
+        for excluded in ("-format", "-srcfolder", "-srcdevice", "SPARSE", "SPARSEBUNDLE"):
+            self.assertNotIn(excluded, args)
         self.assertEqual(BOUNDS["volume"]["attach"][1:4], ["-readwrite", "-nobrowse", "-noautoopen"])
         self.assertEqual(BOUNDS["runner"]["label"], "macos-26")
         self.assertEqual(BOUNDS["retries"], 0)
@@ -1788,7 +1790,7 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             ["/usr/bin/git", "-C", str(b.ROOT), "rev-parse", "HEAD"], [clang, "--version"],
             ["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-version"],
             ["/usr/bin/hdiutil", "create", "-size", "12288m", "-fs", "APFS", "-volname", "TelexDerivedBuild",
-             "-format", "UDRW", str(work / "build.dmg")],
+             "-type", "UDIF", str(work / "build.dmg")],
             ["/usr/bin/hdiutil", "attach", "-readwrite", "-nobrowse", "-noautoopen", "-mountpoint",
              str(volume), "-plist", str(work / "build.dmg")],
             ["/usr/bin/git", "-C", str(source), "apply", "--check", "--whitespace=error-all", str(volume / "get-build-info.patch")],
@@ -2054,6 +2056,45 @@ class SourceSurfaceTests(unittest.TestCase):
         self.assertIn("import hashlib", source)
         self.assertIn("import http.client", source)
         self.assertIn("import urllib.request", source)
+
+
+class EmptyImageRecipeTests(unittest.TestCase):
+    def test_explicit_UDIF_recipe_keeps_hard_capacity_and_initial_reserve_before_fetch(self):
+        self.assertEqual(BOUNDS["limits"]["module_and_build_disk_bytes"], 12 * 1024**3)
+        self.assertEqual(BOUNDS["limits"]["disk_reserve_bytes"], 4 * 1024**3)
+        self.assertEqual(int(BOUNDS["volume"]["create"][2][:-1]) * 1024**2,
+                         BOUNDS["limits"]["module_and_build_disk_bytes"])
+        with FullRecipeEnvironmentTests().recipe() as result:
+            self.assertEqual(result["code"], 0)
+            create = result["sequence"][6]
+            self.assertEqual(create["label"], "image-create")
+            self.assertEqual(create["argv"][:-1], ["/usr/bin/hdiutil", "create", "-size", "12288m",
+                "-fs", "APFS", "-volname", "TelexDerivedBuild", "-type", "UDIF"])
+            self.assertTrue(create["argv"][-1].endswith("/work/build.dmg"))
+            events = result["events"]
+            self.assertLess(events.index("spawn-image-create"), events.index("spawn-image-attach"))
+            self.assertLess(events.index("spawn-image-attach"), events.index("fetch-source"))
+            reserve = result["provenance"]["volume_initial"]
+            self.assertTrue(reserve["initial_reserve_satisfied"])
+            self.assertEqual(reserve["required_initial_available"],
+                             4 * 1024**3 + max(0, reserve["backing_logical_bytes"] - reserve["backing_allocated_bytes"]))
+            self.assertTrue(reserve["not_live_floor_or_all_host_writes_bound"])
+            self.assertLessEqual(reserve["volume_logical_capacity"], 12 * 1024**3)
+            self.assertTrue(result["backing_retained"])
+
+    def test_image_create_failure_keeps_existing_stop_frontier_without_postfailure_stat(self):
+        with FullRecipeEnvironmentTests().recipe(fail_label="image-create") as result:
+            self.assertEqual(result["code"], 1)
+            self.assertEqual([item["label"] for item in result["sequence"]],
+                             FullRecipeEnvironmentTests.labels[:7])
+            self.assertFalse(result["provenance"]["attach_attempted"])
+            self.assertFalse(result["provenance"]["attached"])
+            self.assertFalse(result["provenance"]["detached"])
+            self.assertNotIn("volume_initial", result["provenance"])
+            self.assertNotIn("backing_after", result["provenance"])
+            self.assertFalse(any(event.startswith("fetch-") for event in result["events"]))
+            self.assertEqual(result["provenance"]["failure"]["message"], "command failed; no retry: image-create")
+            self.assertFalse(result["provenance"]["output_binary_accepted"])
 
 
 if __name__ == "__main__":

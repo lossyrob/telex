@@ -21,6 +21,36 @@ The first required-output failure remains the raised error and the primary
 failure-receipt error; later sink failures are recorded separately. A failed
 provenance write is never described as persisted evidence.
 
+## Explicit empty-image recipe
+
+Local correction under disposition 6424990314 changes only the image creation
+option pair from `-format UDRW` to `-type UDIF`:
+
+```text
+/usr/bin/hdiutil create -size 12288m -fs APFS -volname TelexDerivedBuild -type UDIF {image}
+```
+
+Apple's [hdiutil manual, CREATE](https://keith.github.io/xcode-man-pages/hdiutil.1.html#type)
+documents `-type` for empty read/write images and says explicit `UDIF` creates a
+`UDRW` image of the specified size. `-format` is an image-from-source option,
+not this empty-image recipe. The manual also documents `-size`, APFS via `-fs`
+and `-volname`. No default format, source folder/device or additional switch is
+used. This URL is a third-party HTML export of Apple's Xcode-bundled manual,
+as described by the [mirror project](https://github.com/keith/xcode-man-pages);
+it is not Apple-hosted documentation or attestation of the runner's tool.
+
+The fixed non-sparse read/write intent, 12 GiB logical capacity including
+metadata, ENOSPC behavior, APFS/name, existing attach/detach and initial
+provisioned reserve before fetch are unchanged. No post-failure backing stat
+or other controller/finalization behavior is added. Synthetic argv tests are
+not proof of a successful native image allocation.
+
+Whole-source readiness remains **blocked** by the separate owner's pinned Go
+output audit: `GOENV=off` reports an empty `GOENV` field, and `-trimpath` omits
+embedded `-ldflags`. The current comparisons are unchanged by this image-only
+correction. Those findings need owner/steward disposition; passing mocked
+recipe tests does not resolve them or authorize a wider fix.
+
 ## Controller inputs and trusted imports
 
 Under dispositions 6423437079 and 6423574173, the first statement of both `main`
@@ -106,6 +136,8 @@ attach failure and execute failure. No claim is made that Go opens no sockets.
 
 Synthetic tests use mocked processes, HTTP transports and filesystem metadata.
 Do not run `build.py` locally. Review `bounds.json` and the exact source packet
-before any hosted action. One BUILD attempt was consumed; retries remain zero.
+before any hosted action. BUILDs 40369808285 and 40382992497 were consumed;
+retries remain zero.
 Any future hosted work needs a fresh whole-source APPROVE, a NEW finite-attempt
-disposition and a NEW owner freeze. This local correction authorizes none.
+disposition, a NEW owner freeze and the independent actual verdict for
+40382992497. This local correction authorizes none.
