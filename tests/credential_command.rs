@@ -575,13 +575,13 @@ mod delayed_writer_phases {
     }
 
     impl Observer {
-        pub fn new() -> Self {
+        pub fn new(iteration: usize) -> Self {
             let root = std::env::current_dir()
                 .unwrap()
                 .join("target")
                 .join("credential-command-fixtures")
                 .join(format!(
-                    "telex-credential-delayed-writer-{}-{}",
+                    "telex-credential-delayed-writer-{}-{}-{iteration}",
                     std::process::id(),
                     telex::model::now_ms(),
                 ));
@@ -734,11 +734,77 @@ fn emit_uncaptured(line: &str) {
     let _ = writeln!(std::io::stderr(), "{line}");
 }
 
+/// Issue #167 diagnostic sampling (diagnostic-only head): at most ten
+/// sequential iterations per test invocation on Windows, each with the
+/// unchanged five-second budget and every assertion, stopping at the first
+/// failure. New iterations are admitted only while a full budget plus capture
+/// allowance fits inside the admission cutoff; this is an admission cutoff,
+/// not an end-to-end deadline (TEST_LOCK wait, capture and asynchronous
+/// post-cancel cleanup are outside it).
+#[cfg(windows)]
+const DELAYED_WRITER_ITERATIONS: usize = 10;
+#[cfg(unix)]
+const DELAYED_WRITER_ITERATIONS: usize = 1;
+const DELAYED_WRITER_BUDGET: Duration = Duration::from_secs(5);
+const DELAYED_WRITER_CAPTURE_ALLOWANCE: Duration = Duration::from_secs(1);
+const DELAYED_WRITER_ADMISSION_CUTOFF: Duration = Duration::from_secs(40);
+const DELAYED_WRITER_LOOP_CEILING: Duration = Duration::from_secs(600);
+
+fn test_threads() -> String {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--test-threads=") {
+            return value.to_string();
+        }
+        if arg == "--test-threads" {
+            return args.next().unwrap_or_default();
+        }
+    }
+    std::env::var("RUST_TEST_THREADS").unwrap_or_else(|_| "default".into())
+}
+
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
+    let started = Instant::now();
+    let threads = test_threads();
+    let mut completed = 0;
+    for iteration in 1..=DELAYED_WRITER_ITERATIONS {
+        let remaining = DELAYED_WRITER_ADMISSION_CUTOFF.saturating_sub(started.elapsed());
+        if remaining < DELAYED_WRITER_BUDGET + DELAYED_WRITER_CAPTURE_ALLOWANCE {
+            break;
+        }
+        let context = format!(
+            "iteration={iteration}/{DELAYED_WRITER_ITERATIONS} completed={completed} failed=1 \
+             not_started={} test_threads={threads} loop_wall_at_start_ms={} \
+             excluded=test_lock_wait,post_cancel_cleanup",
+            DELAYED_WRITER_ITERATIONS - iteration,
+            started.elapsed().as_millis(),
+        );
+        delayed_inherited_writer_once(iteration, &context).await;
+        completed += 1;
+        assert!(
+            started.elapsed() < DELAYED_WRITER_LOOP_CEILING,
+            "issue-167 sampling exceeded the ten-minute loop ceiling after {completed} completed iterations"
+        );
+    }
     #[cfg(windows)]
-    let mut phases = delayed_writer_phases::Observer::new();
+    emit_uncaptured(&format!(
+        "[issue-167 delayed-writer summary] test_threads={threads} iterations_max={DELAYED_WRITER_ITERATIONS} \
+         completed={completed} failed=0 not_started={} loop_wall_ms={} admission_cutoff_ms={} \
+         excluded=test_lock_wait,post_cancel_cleanup",
+        DELAYED_WRITER_ITERATIONS - completed,
+        started.elapsed().as_millis(),
+        DELAYED_WRITER_ADMISSION_CUTOFF.as_millis(),
+    ));
+    assert!(completed > 0, "no delayed-writer iteration was admitted");
+}
+
+async fn delayed_inherited_writer_once(iteration: usize, context: &str) {
+    #[cfg(not(windows))]
+    let _ = iteration;
+    #[cfg(windows)]
+    let mut phases = delayed_writer_phases::Observer::new(iteration);
     #[cfg(windows)]
     let command = format!(
         "start /b {}",
@@ -754,7 +820,7 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     // Same five-second budget as tokio::time::timeout (the operation is polled
     // first), but the pending operation stays alive until phase evidence and
     // owned obligations are recorded, before cancellation runs.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + DELAYED_WRITER_BUDGET;
     #[cfg(windows)]
     phases.invoked();
     let outcome = loop {
@@ -769,24 +835,31 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
         }
     };
     #[cfg(windows)]
-    let report = phases.report(if outcome.is_some() { "ok" } else { "elapsed" });
+    let report = format!(
+        "{} iteration={iteration}",
+        phases.report(if outcome.is_some() { "ok" } else { "elapsed" })
+    );
     #[cfg(unix)]
     let report = String::new();
     let Some(result) = outcome else {
         let obligations = telex::profiles::credential_command_obligations();
         panic!(
             "delayed inherited writer was not collected within the 5s budget; \
-             obligations={obligations:?} {report}"
+             obligations={obligations:?} {report} {context}"
         );
     };
     #[cfg(windows)]
     emit_uncaptured(&report);
-    let (config, _) = result.unwrap();
+    let (config, _) = result.unwrap_or_else(|error| panic!("{error:?} {report} {context}"));
     assert_eq!(
         config.get_password(),
-        Some(b"delayed-non-secret".as_slice())
+        Some(b"delayed-non-secret".as_slice()),
+        "{report} {context}"
     );
-    assert!(telex::profiles::credential_command_obligations().is_empty());
+    assert!(
+        telex::profiles::credential_command_obligations().is_empty(),
+        "{report} {context}"
+    );
 }
 
 #[tokio::test]
