@@ -28,7 +28,12 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.ownership.take();
-        std::fs::remove_dir_all(&self.root).unwrap();
+        let removed = std::fs::remove_dir_all(&self.root);
+        // A second panic while unwinding aborts the whole test harness
+        // (0xc0000409 on Windows) and discards the original failure.
+        if !std::thread::panicking() {
+            removed.unwrap();
+        }
     }
 }
 

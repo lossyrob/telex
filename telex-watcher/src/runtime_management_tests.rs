@@ -1,6 +1,13 @@
 use super::*;
 use serde_json::json;
 
+/// Hang guard, not a latency assertion. Every management command commits a
+/// `synchronous=FULL` SQLite transaction, so the elapsed time follows disk
+/// flush latency. On hosted Windows runners the five commands plus Shutdown
+/// measured p50 0.5 s, p99 3.1 s and max 7.4 s over 3,162 runs, and opening the
+/// fresh registry alone reached 14.7 s. CI exceeded the former 10 s bound (#203).
+const DURABLE_MANAGEMENT_HANG_GUARD: Duration = Duration::from_secs(60);
+
 struct Fixture {
     root: PathBuf,
 }
@@ -51,7 +58,12 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).expect("remove isolated management fixture");
+        let removed = std::fs::remove_dir_all(&self.root);
+        // A second panic while unwinding aborts the whole test harness
+        // (0xc0000409 on Windows) and discards the original failure.
+        if !std::thread::panicking() {
+            removed.expect("remove isolated management fixture");
+        }
     }
 }
 
@@ -60,6 +72,20 @@ async fn health(runtime: &mut Runtime) -> RuntimeHealth {
         Response::Health(health) => health,
         other => panic!("expected runtime health, got {other:?}"),
     }
+}
+
+#[test]
+fn fixture_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let fixture = Fixture::new();
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
 }
 
 #[tokio::test]
@@ -179,7 +205,7 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
         let (runtime, management) = fixture.open();
         let owner = tokio::spawn(runtime.run());
         let (rejected, removed, shown, reused, attempts) =
-            tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, async {
                 let registration = |id, initial_state| Command::Register {
                     json: serde_json::to_vec(&json!({
                         "schemaVersion": 2, "id": id, "command": ["not-executed"],
@@ -217,7 +243,7 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
             })
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), owner)
+        tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, owner)
             .await
             .unwrap()
             .unwrap()
