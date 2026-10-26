@@ -24,7 +24,7 @@ struct Event {
 struct Recorder {
     epoch: Instant,
     events: Vec<Event>,
-    sql_start: Option<(String, Instant)>,
+    sql_starts: Vec<(String, Instant)>,
 }
 
 thread_local! {
@@ -56,7 +56,7 @@ pub(crate) fn begin() {
             *slot = Some(Recorder {
                 epoch: Instant::now(),
                 events: Vec::new(),
-                sql_start: None,
+                sql_starts: Vec::new(),
             });
         }
     });
@@ -134,17 +134,26 @@ fn sql_started(sql: &str) {
     }
     let now = Instant::now();
     let label = label(sql);
-    with_recorder(|recorder| recorder.sql_start = Some((label, now)));
+    with_recorder(|recorder| {
+        // Bounded: starts whose profile never arrives are dropped oldest-first.
+        if recorder.sql_starts.len() >= 64 {
+            recorder.sql_starts.remove(0);
+        }
+        recorder.sql_starts.push((label, now));
+    });
 }
 
 fn sql_finished(sql: &str, reported: Duration) {
     let now = Instant::now();
     let label = label(sql);
     with_recorder(|recorder| {
-        let started = match recorder.sql_start.take() {
-            Some((started_label, started)) if started_label == label => Some(started),
-            _ => None,
-        };
+        // Profile ends can arrive late (reset/finalize), after other statements
+        // started, so match the most recent pending start with the same label.
+        let started = recorder
+            .sql_starts
+            .iter()
+            .rposition(|(started_label, _)| *started_label == label)
+            .map(|index| recorder.sql_starts.remove(index).1);
         let start_us = match started {
             Some(started) => micros(started.saturating_duration_since(recorder.epoch)),
             None => micros(

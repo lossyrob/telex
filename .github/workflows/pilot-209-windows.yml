@@ -70,6 +70,7 @@ jobs:
             cat "${files[@]}" | jq -se --arg p "$phase" 'all(.[]; any(.events[]; .phase == $p))' > /dev/null \
               || { echo "missing phase $phase"; exit 1; }
           done
+          cat "${files[@]}" | jq -c '{state_index, commits: [.events[] | select(.phase | startswith("sql:COMMIT")) | {elapsed_us, sqlite_us}], unpaired_sql: ([.events[] | select((.phase | startswith("sql:")) and .elapsed_us == null)] | length)}'
           cat "${files[@]}" | jq -se 'all(.[]; any(.events[]; (.phase | startswith("sql:COMMIT")) and .elapsed_us != null))'
 
   windows:
