@@ -788,3 +788,37 @@ Unchanged: the stall and attention-needed rules in this design, #200's scope, an
 Design steward: debt 4 disposition
 
 Debt 4 (a member with an inbox history longer than 1024 items leaves the detector degraded and quiet) moves out of retained debt into a new item, #216, upstream of #201. The decision record is on #197. The #199 owner no longer holds this debt. Debts 2, 3, 5, 6 and 7 are unchanged by this decision.
+
+
+## #216 owner and amended cost boundary (2026-10-26)
+
+Owning Watcher reports one delivered owner, session `4b60ddef-c734-453a-b95a-d8f3307daa9c`, for existing node `stall-detector-inbox-history`. Launch branch `lossyrob-cuddly-carnival`, start commit `a4b3b21fffb947e220c65267289fd758bd962cde`; the captured controller binding later names `lossyrob-stall-inbox-queries` as its current branch. This is the same owner, not a second launch. Canonical prerequisite was published as `170f83b3fe5231dd1de6298095ab271ea1b6481b`. Coordinator-reported delivery was `2026-10-26T17:03:09.499028Z`. The 15958-byte kickoff has SHA-256 `e1532d4702747474579dc6e9cd572277aba41f3f032c87538c6520b516184fc1`; its entire captured handoff prompt is byte-identical. Profile is `gpt-6.1-sol` / high / default / interactive. Preparation, profile checks, delivery and the current-branch observation are controller reports, not recipient inspection or replay.
+
+The owner posted its plan at https://github.com/lossyrob/telex/issues/216#issuecomment-6422307467. Owning Watcher later expressly reports #216 in progress (`toolu_01JGrox1HW2qtH7JyVf1zQ1v`); status becomes in-progress and attention stays watch. All dependencies and checkpoint membership remain unchanged. #199 gate debt 4 is assigned work, not resolved. No implementation, CI, readiness or runtime acceptance follows. The #200/#215 completion/debt records and #201 execution remain separate successors.
+
+The same owner later reported first draft PR https://github.com/lossyrob/telex/pull/220 at `a4424c77ef0c35d10ad9a7e42e3ace081ec44ab8` (`call_MaBD3DRT1MMun9Rg7NBPxybj`). At that report it was draft with exact-head independent review, design inspection and hosted CI pending. Implementation/local proof complete and a merged-#217 base are owner claims, not reconciler replay or acceptance; this records the initial snapshot, not later head/readiness.
+
+The steward selected option A after launch, amending the outcome without graph geometry changes. The bound original kickoff remains exact history; this later decision does not rewrite it. Bounded means result size and detector memory, not constant database work. Full public decision follows as an explicitly CRLF-to-LF-normalized display; private source bytes remain exact. https://github.com/lossyrob/telex/issues/216#issuecomment-6422351363
+
+Design steward: #216 cost boundary decision
+
+Decision: option A, with the conditions below. Option B is not authorized for this item. This amends the outcome text I wrote. "Cost does not grow with history length" asked for more than the existing stores can give without a schema change, and the owner was right to stop and return it.
+
+What #216 is for: the detector must give a correct answer for any history length, instead of going degraded and silent past 1024 items. Correctness without a size limit is the requirement. A strict bound on database work was a secondary aim. Reaching it would need a maintained per-recipient wake-state projection, with write-path changes in both backends and compatibility with older writers such as v0.2.1. That is a store change, not part of this item, and it is not easily reversed.
+
+Amended cost requirement:
+
+1. Returned data and detector memory are bounded independent of history length. Each active member gets a scalar or fixed-size answer (for example EXISTS or a single count), never a list of messages.
+2. Database work may grow linearly with that member's own retained history in the worst case. It must not grow with other addresses' history. Each query is constrained by recipient address equality so that the existing messages(to_addr, id) and dispositions(message_id, id) indexes are usable. A scan of every address's messages does not meet this.
+3. Each member gets a fixed number of queries per run, not one query per message.
+4. SELECT-only through the read-only backend, as before. No cap, no newest-N inference, no sampling, and no claim that EXISTS makes the work bounded.
+5. A slow query must surface as the existing visible run failure or timeout. It must not be converted into an absent wake source or a silent pass.
+6. docs/design/copilot-session-stalls.md states this cost characteristic plainly: bounded result and memory, worst-case work linear in the member's retained history, which grows with use because acking does not shrink it. It also names a maintained projection as the remedy if real histories make polling too slow. The PR records the SQLite EXPLAIN QUERY PLAN for each new query, showing that the address index is used. For Postgres the query only needs to be index-eligible; no plan assertion is required.
+
+Unacknowledged counts: unchanged. Keep the existing undelivered_counts semantics and every other caller as they are; its cost is in the same class this decision accepts. The detector may use it, or a scalar query with identical semantics, for the unacknowledged wake source over full history. Do not change the shared function for this item.
+
+The rest of the outcome stands: identical semantics on both backends, the #197 and #199 rules unchanged, the three test cases, and the guidance cleanup in https://github.com/lossyrob/telex/issues/216#issuecomment-6421106582.
+
+Not decided here: a wake-state projection or index. If evidence later shows polling cost matters, propose it as a separate store item through the steward. It is not discovered work for #216.
+
+I have updated the issue body to match.
