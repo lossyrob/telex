@@ -20,10 +20,11 @@ from macos_static_cache import EvidenceError, require, save
 from macos_static_ridiff import Run, ridiff_output_bound
 from cache import Output, choose_family, collect
 import gate
+import derived
 from native import NativeBinding, bind_hash
 
 BOUNDS = json.loads((HERE / "bounds.json").read_text())
-NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "native.py", "test_component.py"]
+NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "native.py", "derived.py", "test_component.py", "README.md"]
 DEPENDENCIES = ["macos_static_cache.py", "macos_static_ridiff.py", "macos_provenance_capture.py"]
 
 
@@ -95,6 +96,7 @@ class ComponentRun(Run):
         self.otool_path = None
         self.hdiutil_path = None
         self.native_binding = None
+        self.derived_artifact = None
         self.receipt.update(component=BOUNDS["component"], job=job,
                             authority_comments=BOUNDS["authority_comments"],
                             authority="https://github.com/lossyrob/telex/issues/172#issuecomment-6400716200",
@@ -103,6 +105,9 @@ class ComponentRun(Run):
                             freeze_required_before_launch=True, native_binding_verified=False)
 
     def command(self, name, args, **kwargs):
+        if args and Path(str(args[0])).name == "ipsw":
+            require(str(args[0]) == str(self.work / "ipsw"), "alternate candidate path prohibited")
+            derived.before_use(self.work, self.bounds["tools"]["ipsw"], self.derived_artifact, self.deadline)
         require(args and str(args[0]) not in ("xcrun", "otool", "llvm-otool", "hdiutil"),
                 "native components must use frozen absolute resolved paths")
         policy = self.bounds["native_binding"]
@@ -184,6 +189,19 @@ class ComponentRun(Run):
 
     def pinned_tool(self, name):
         pin = BOUNDS["tools"][name]
+        if name == "ipsw":
+            record = {}
+            self.receipt["derived_artifact_attempt"] = record
+            binary, record = derived.acquire(self.work, pin, os.environ.get("GH_TOKEN"),
+                                              min(self.deadline, time.monotonic() + BOUNDS["limits"]["download_seconds"]),
+                                              record)
+            self.output.json("derived-artifact-verification.json", record)
+            self.derived_artifact = record
+            self.receipt.setdefault("tools", {})["ipsw"] = {
+                "artifact_id": pin["artifact_id"], "archive_sha256": pin["archive_sha256"],
+                "binary_sha256": pin["binary_sha256"], "binary_bytes": pin["binary_bytes"],
+                "version": pin["version"], "build": pin["build"], "expires_at": pin["expires_at"]}
+            return binary
         binary = self.tool(name, pin["url"], pin["archive_bytes"], pin["archive_sha256"])
         observed = self.receipt["tools"][name]
         require(observed["binary_sha256"] == pin["binary_sha256"] and
@@ -221,7 +239,8 @@ def execute(run):
                  "before-any-transfer")
     ipsw, seven = run.pinned_tool("ipsw"), run.pinned_tool("7zz")
     version = run.command("ipsw-version", [ipsw, "version"])
-    require(BOUNDS["tools"]["ipsw"]["build"] in version["stdout"] and "3.1.739" in version["stdout"],
+    require(version["stdout"] == "Version: " + BOUNDS["tools"]["ipsw"]["version"] +
+            ", BuildCommit: " + BOUNDS["tools"]["ipsw"]["build"] + "\n",
             "ipsw exact version/build discrepancy")
     run.command("7zip-version", [seven, "i"])
     dmg, patch = run.work / "SharedSupport.dmg", run.work / Path(c["patch"]["member"]).name
@@ -292,6 +311,7 @@ def execute(run):
                 "pinned decoder changed before acceptance")
         pinned_after[name] = observed
     run.output.json("pinned-decoder-acceptance.json", pinned_after)
+    derived.unexpired(BOUNDS["tools"]["ipsw"])
     run.receipt["native_binding_verified"] = True
     run.receipt["disposition"] = ("decision-needed-incomplete-wrapper-evidence" if report["helper_incomplete_count"]
                                   else "offline-candidate-evidence-collected-pending-adjudication")

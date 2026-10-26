@@ -1,16 +1,17 @@
 {
-  "component": "arm24-intel25-static-v1",
-  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431, 6406617725, 6406629529, 6406665201],
+  "component": "arm24-intel25-derived-v1",
+  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431, 6406617725, 6406629529, 6406665201, 6418752165, 6419297367, 6429489865, 6429608421],
   "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
   "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
   "prelaunch_status": {
     "launch_ready": false,
     "decoder_pins": "6401453292 permits the declared provider-host observed-hash timing rule. This corrected implementation and its actual loaded-library/backing-cache binding remain unreviewed and unexecuted; any unavailable binding is decision-needed, not a nominal-path fallback.",
     "intel_family": "6401508183 admits the finite x86_64-only/no-x86_64h stop rule without proof of cache existence. Candidate paths are image-root-relative, with ancestor-symlink, access-error, raw-CPU/subtype and capability checks; the corrected packet still requires issue freeze.",
-    "required_owner_freeze_fields": ["decoder_pin_disposition", "decoder_consumer_disposition", "intel_family_disposition"]
+    "required_owner_freeze_fields": ["source_review", "source_review_body_sha256", "finite_disposition", "finite_body_sha256"],
+    "derived_stage": "Fresh exact whole-component-source APPROVE, then NEW finite component disposition, then NEW genuine freeze. Earlier BUILD/source/actual approvals never transfer. No preparation launch authority."
   },
   "runner": {
-    "label": "macos-latest",
+    "label": "macos-26",
     "architecture": "arm64",
     "product_version": "26.6.2",
     "build": "25G83",
@@ -43,17 +44,32 @@
     "image_metadata_bytes": 8388608,
     "export_trie_bytes": 2097152,
     "export_nodes": 100000,
-    "max_same_sha_infrastructure_retries_total": 1
+    "max_same_sha_infrastructure_retries_total": 0
   },
   "tools": {
     "ipsw": {
-      "version": "3.1.739",
-      "build": "1f8b657858d7510219f59bf9ba183bf4c0a59104",
-      "url": "https://github.com/blacktop/ipsw/releases/download/v3.1.739/ipsw_3.1.739_macOS_arm64.tar.gz",
-      "archive_bytes": 28498196,
-      "archive_sha256": "c09e8eba02c332f5b50d15f94383e59dd35646d70f6ea9e78d185e9afda6abc2",
-      "binary_bytes": 86263634,
-      "binary_sha256": "3a5482a6a02369ebaaf37d651131d88e7b11193408690a86fa31f96fc7f86984"
+      "version": "3.1.739-telex-swvers-b401e5777696",
+      "build": "1f8b657858d7510219f59bf9ba183bf4c0a59104+telex-b401e5777696",
+      "artifact_id": 12694487625,
+      "artifact_name": "derived-ipsw-6eeaeb5c73458ac9fd88c4792d5e95d10a6038f2-attempt1",
+      "repository_id": 1260583294,
+      "run_id": 40414940708,
+      "job_id": 121894755319,
+      "source_sha": "6eeaeb5c73458ac9fd88c4792d5e95d10a6038f2",
+      "source_tree": "21ba65ff07544135a821e78a0b972df539a81f27",
+      "workflow": ".github/workflows/macos-ipsw-derived-build.yml",
+      "branch": "lossyrob-macos-containment-proof",
+      "go_version": "go1.27.3",
+      "created_at": "2026-10-26T22:53:12Z",
+      "expires_at": "2026-11-25T22:53:07Z",
+      "archive_bytes": 27545840,
+      "archive_sha256": "7e65107b8312ea2ec79aff47431d15fc40372da82d3798a0688baef7dcbcef0c",
+      "files": 55,
+      "manifest_entries": 54,
+      "uncompressed_bytes": 86459578,
+      "binary_bytes": 83115984,
+      "binary_sha256": "89914d079265befacac4e648627a3c64c64d1bb54667b2c96c849fa9966309b2",
+      "transport": "6429608421: exact authenticated GitHub artifact ZIP API302 with exactly one Location. Any ASCII HTTPS hostname, no userinfo, explicit port only443, no fragment; fresh credential/cookie-free opener, no further redirects. Status/hostname-only/bytes/hashes recorded, never signed URL/query/token. Exact ZIP/manifest/post-sign candidate verified before any invocation; no local substitute/rebuild/fallback. Storage-host knowledge and confidentiality/availability beyond protocol rules are not claimed."
     },
     "7zz": {
       "version": "26.05",
@@ -141,13 +157,13 @@
   },
   "retry_policy": {
     "automatic_retries": 0,
-    "maximum_additional_job_attempts_total": 1,
+    "maximum_additional_job_attempts_total": 0,
     "same_sha_required": true,
-    "failed_job_only": true,
+    "failed_job_only": false,
     "successful_job_rerun_forbidden": true,
     "record_required_on_frozen_issue_comment": true,
-    "nonretryable": ["capacity", "provenance", "identity", "decoder", "semantic discrepancy", "incomplete preflight"],
-    "owner_action": "After a documented genuine infrastructure failure, amend the unique exact-SHA freeze record with infrastructure_retry and rerun only its exact failed job ID. Never rerun the workflow or all failed jobs."
+    "nonretryable": ["infrastructure", "capacity", "provenance", "identity", "decoder", "semantic discrepancy", "incomplete preflight"],
+    "owner_action": "One two-context component attempt, ZERO retries including infrastructure. Any failure or artifact expiry returns to design; no rerun, rebuild, substituted bytes or old retry marker."
   },
   "jobs": {
     "ARM24": {

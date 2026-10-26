@@ -1,8 +1,11 @@
 import copy
 from contextlib import contextmanager
+from email.message import Message
 import hashlib
 import importlib.util
+import io
 import json
+import os
 import plistlib
 from pathlib import Path
 import struct
@@ -12,6 +15,10 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import urllib.error
+import urllib.request
+import urllib.response
+import zipfile
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -19,6 +26,7 @@ sys.path.insert(1, str(HERE.parent))
 import cache
 import gate
 import native
+import derived
 
 spec = importlib.util.spec_from_file_location("component_run", HERE / "run.py")
 run = importlib.util.module_from_spec(spec)
@@ -28,35 +36,54 @@ spec.loader.exec_module(run)
 class FreezeTests(unittest.TestCase):
     def setUp(self):
         self.context = {"sha": "a" * 40, "bounds_sha256": "b" * 64, "job": "ARM24",
-                        "attempt": 1, "run_id": 12}
-        self.record = {"component": "arm24-intel25-static-v1", "sha": "a" * 40,
-                       "bounds_sha256": "b" * 64, "jobs": ["ARM24", "Intel25"],
-                       "allow_launch": True, "comment": "https://example.invalid/freeze",
-                       "decoder_pin_disposition": "https://github.com/lossyrob/telex/issues/172#issuecomment-123",
-                       "decoder_consumer_disposition": "https://github.com/lossyrob/telex/issues/172#issuecomment-125",
-                       "intel_family_disposition": "https://github.com/lossyrob/telex/issues/172#issuecomment-124"}
+                        "attempt": 1, "run_id": 12, "source_manifest_sha256": "c" * 64,
+                        "artifact_id": 12694487625, "candidate_sha256": "d" * 64, "candidate_bytes": 17,
+                        "expires_at": "2099-01-01T00:00:00Z", "run_created_at": "2026-10-27T00:00:04Z"}
+        common = {k: self.context[k] for k in ("sha", "bounds_sha256", "source_manifest_sha256",
+                  "artifact_id", "candidate_sha256", "candidate_bytes", "expires_at")}
+        common.update(component="arm24-intel25-derived-v1", workflow=gate.WORKFLOW,
+                      jobs=["ARM24", "Intel25"], attempt=1, retries=0)
+        self.comments = []
+        def append(kind, ident, fields, header):
+            body = header + "\n<!-- arm24-intel25-derived-authority-v1 " + json.dumps(
+                dict(common, kind=kind, **fields)) + " -->"
+            timestamp = f"2026-10-27T00:00:0{ident}Z"
+            row = {"id": ident, "html_url": gate.COMMENT + str(ident), "issue_url": gate.ISSUE,
+                   "user": {"login": "lossyrob", "id": 2320142}, "created_at": timestamp, "updated_at": timestamp, "body": body}
+            self.comments.append(row)
+            return row["html_url"], hashlib.sha256(body.encode()).hexdigest()
+        review, review_hash = append("review", 1, {"verdict": "APPROVE", "scope": "whole-component-source"},
+                                     "APPROVE - independent component-source review")
+        finite, finite_hash = append("finite", 2, {"source_review": review, "source_review_body_sha256": review_hash},
+                                     "Design steward finite component disposition")
+        append("freeze", 3, {"source_review": review, "source_review_body_sha256": review_hash,
+               "finite_disposition": finite, "finite_body_sha256": finite_hash, "allow_launch": True},
+               "NEW genuine owner component freeze")
+        self.records = gate.approved_records(self.comments)
+        self.record = self.records[-1]
 
     def test_missing_freeze_never_launches(self):
         with self.assertRaises(RuntimeError):
             gate.validate([], self.context)
 
     def test_exact_freeze(self):
-        self.assertFalse(gate.validate([self.record], self.context)["retry"])
+        self.assertFalse(gate.validate(self.records, self.context)["retry"])
         for key, wrong in (("sha", "c" * 40), ("bounds_sha256", "d" * 64),
                            ("jobs", ["ARM24"]), ("allow_launch", False)):
-            altered = {**self.record, key: wrong}
+            altered = copy.deepcopy(self.records)
+            altered[-1]["value"][key] = wrong
             with self.subTest(key=key), self.assertRaises(RuntimeError):
-                gate.validate([altered], self.context)
+                gate.validate(altered, self.context)
 
     def test_missing_pin_or_family_disposition_blocks(self):
-        for field in ("decoder_pin_disposition", "decoder_consumer_disposition", "intel_family_disposition"):
-            record = dict(self.record)
-            record.pop(field)
+        for field in ("source_review", "source_review_body_sha256", "finite_disposition", "finite_body_sha256"):
+            records = copy.deepcopy(self.records)
+            records[-1]["value"].pop(field)
             with self.subTest(field=field), self.assertRaises(RuntimeError):
-                gate.validate([record], self.context)
+                gate.validate(records, self.context)
 
     def test_untrusted_comment_cannot_freeze(self):
-        text = "<!-- arm24-intel25-static-v1 " + json.dumps(self.record) + " -->"
+        text = "<!-- arm24-intel25-derived-authority-v1 " + json.dumps(self.record["value"]) + " -->"
         self.assertEqual(gate.approved_records([{"user": {"login": "someone"},
                                                 "body": text, "html_url": "url"}]), [])
 
@@ -65,29 +92,15 @@ class FreezeTests(unittest.TestCase):
         prior = {"head_sha": "a" * 40, "run_attempt": 1,
                  "jobs": [{"name": "ARM24", "id": 10, "conclusion": "failure"},
                           {"name": "Intel25", "id": 11, "conclusion": "success"}]}
-        self.record["infrastructure_retry"] = {
+        self.record["value"]["infrastructure_retry"] = {
             "run_id": 12, "job": "ARM24", "failed_job_id": 10, "same_sha": "a" * 40,
             "classification": "infrastructure", "reason": "runner outage, original attempt evidence preserved"}
-        self.assertTrue(gate.validate([self.record], context, prior)["retry"])
-        for field, value in (("same_sha", "different"), ("job", "Intel25"),
-                             ("classification", "capacity"), ("run_id", 13)):
-            record = copy.deepcopy(self.record)
-            record["infrastructure_retry"][field] = value
-            with self.subTest(field=field), self.assertRaises(RuntimeError):
-                gate.validate([record], context, prior)
-        for status in ("failure", "cancelled"):
-            bad = copy.deepcopy(prior)
-            bad["jobs"][1]["conclusion"] = status
-            self.assertTrue(gate.validate([self.record], context, bad)["retry"])
-        bad = copy.deepcopy(prior)
-        bad["jobs"][1]["conclusion"] = "in_progress"
+        for job in ("ARM24", "Intel25"):
+            for attempt in (1, 2, 3):
+                with self.subTest(job=job, attempt=attempt), self.assertRaises(RuntimeError):
+                    gate.validate(self.records, {**context, "job": job, "attempt": attempt}, prior)
         with self.assertRaises(RuntimeError):
-            gate.validate([self.record], context, bad)
-        for job in ("Intel25",):
-            with self.assertRaises(RuntimeError):
-                gate.validate([self.record], {**context, "job": job}, prior)
-        with self.assertRaises(RuntimeError):
-            gate.validate([self.record], {**context, "attempt": 3}, prior)
+            gate.validate(self.records, self.context)
 
 
 class StaticReaderTests(unittest.TestCase):
@@ -1779,6 +1792,495 @@ class OtoolCompleteOperandTests(unittest.TestCase):
     def test_bad_compact_encoding_after_valid_branch_blocks_the_whole_body(self):
         self.assert_rejected_before_decoding(
             "0000000000001000\tjmpq\t0x2000\n0000000000001005\tdc\t00 faddl (%rax)\n", 0x1007)
+
+
+class MockHTTP(io.BytesIO):
+    def __init__(self, raw, url, status=200, headers=None):
+        super().__init__(raw)
+        self.url, self.status = url, status
+        self.headers = Message()
+        for key, value in (headers or {}).items():
+            self.headers[key] = value
+    def geturl(self):
+        return self.url
+
+
+def artifact_fixture(change=None):
+    candidate = b"tiny-derived-candidate"
+    files = {"ipsw": candidate, "provenance.json": b'{"test":true}\n'}
+    manifest = {name: hashlib.sha256(raw).hexdigest() for name, raw in files.items()}
+    files["sha256.json"] = json.dumps(manifest).encode()
+    members = [(name, raw, 0o100600) for name, raw in files.items()]
+    if change:
+        members = change(members)
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, raw, mode in members:
+            info = zipfile.ZipInfo(name)
+            info.external_attr = mode << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, raw)
+    raw = stream.getvalue()
+    pin = copy.deepcopy(run.BOUNDS["tools"]["ipsw"])
+    pin.update(archive_bytes=len(raw), archive_sha256=hashlib.sha256(raw).hexdigest(),
+               binary_bytes=len(candidate), binary_sha256=hashlib.sha256(candidate).hexdigest(),
+               files=3, manifest_entries=2, uncompressed_bytes=sum(len(r) for _, r, _ in members))
+    return pin, raw, candidate
+
+
+def artifact_metadata(pin):
+    meta = {"id": pin["artifact_id"], "node_id": "synthetic", "name": pin["artifact_name"],
+            "size_in_bytes": pin["archive_bytes"], "url": derived.API + f"actions/artifacts/{pin['artifact_id']}",
+            "archive_download_url": derived.API + f"actions/artifacts/{pin['artifact_id']}/zip",
+            "expired": False, "digest": "sha256:" + pin["archive_sha256"],
+            "created_at": pin["created_at"], "updated_at": pin["created_at"], "expires_at": pin["expires_at"],
+            "workflow_run": {"id": pin["run_id"], "repository_id": pin["repository_id"],
+                             "head_repository_id": pin["repository_id"], "head_branch": pin["branch"],
+                             "head_sha": pin["source_sha"]}}
+    build = {"id": pin["run_id"], "run_attempt": 1, "head_sha": pin["source_sha"], "head_branch": pin["branch"],
+             "path": pin["workflow"], "event": "push", "status": "completed", "conclusion": "success"}
+    job = {"id": pin["job_id"], "run_id": pin["run_id"], "run_attempt": 1, "head_sha": pin["source_sha"],
+           "name": "Build-derived-ipsw-arm64", "status": "completed", "conclusion": "success", "labels": ["macos-26"]}
+    return meta, build, job
+
+
+class DerivedArtifactTests(unittest.TestCase):
+    @contextmanager
+    def transport(self, pin, raw, location="https://Unrelated.example:443/a?secret=signed-test", status=302,
+                  duplicate=False, storage_status=200, storage_raw=None, length=None):
+        calls, constructions = [], []
+        def constructor(*handlers):
+            constructions.append(handlers)
+            self.assertTrue(any(isinstance(h, derived.NoRedirect) for h in handlers))
+            self.assertTrue(any(isinstance(h, urllib.request.ProxyHandler) and h.proxies == {} for h in handlers))
+            def open_request(request, timeout):
+                calls.append({"url": request.full_url, "headers": dict(request.header_items()), "timeout": timeout})
+                if request.full_url.startswith(derived.API):
+                    self.assertEqual(request.full_url, derived.API + f"actions/artifacts/{pin['artifact_id']}/zip")
+                    self.assertEqual(request.get_header("Authorization"), "Bearer TEST-TOKEN")
+                    headers = Message()
+                    if location is not None:
+                        headers.add_header("Location", location)
+                        if duplicate:
+                            headers.add_header("Location", location)
+                    if status == 200:
+                        return MockHTTP(raw, request.full_url)
+                    raise urllib.error.HTTPError(request.full_url, status, "synthetic", headers, io.BytesIO())
+                self.assertIsNone(request.get_header("Authorization"))
+                self.assertIsNone(request.get_header("Cookie"))
+                self.assertNotIn("TEST-TOKEN", repr(request.header_items()))
+                if storage_status != 200:
+                    headers = Message()
+                    headers["Location"] = "https://another.example/secret"
+                    raise urllib.error.HTTPError(request.full_url, storage_status, "synthetic", headers, io.BytesIO())
+                headers = {} if length is None else {"Content-Length": length}
+                return MockHTTP(raw if storage_raw is None else storage_raw, request.full_url, headers=headers)
+            return SimpleNamespace(open=open_request)
+        with patch.object(derived.urllib.request, "build_opener", side_effect=constructor), \
+                patch.object(derived.time, "time", return_value=1793145600), \
+                patch.object(derived.time, "monotonic", return_value=0):
+            yield calls, constructions
+
+    def test_exact_good_API_transport_ZIP_manifest_and_candidate_before_use(self):
+        pin, raw, candidate = artifact_fixture()
+        meta, build, job = artifact_metadata(pin)
+        with tempfile.TemporaryDirectory() as temp, self.transport(pin, raw) as (calls, constructors), \
+                patch.object(derived, "fetch_json", side_effect=[meta, build, job]), patch.object(Path, "chmod") as mode:
+            root = Path(temp)
+            target, record = derived.acquire(root, pin, "TEST-TOKEN", 100)
+            self.assertEqual(target.read_bytes(), candidate)
+            self.assertTrue(record["verified"])
+            self.assertEqual(record["transport"]["redirect_hostname"], "unrelated.example")
+            self.assertEqual(record["transport"]["api_status"], 302)
+            self.assertEqual(record["transport"]["storage_status"], 200)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(constructors), 2)
+            self.assertNotIn("signed-test", json.dumps(record))
+            self.assertNotIn("TEST-TOKEN", json.dumps(record))
+            mode.assert_called_once_with(0o700)
+            derived.before_use(root, pin, record, 100)
+            self.assertFalse((root / "ipsw-artifact.zip").exists())
+
+    def test_wrong_artifact_run_head_name_expiry_and_unknown_metadata_fail(self):
+        pin, _, _ = artifact_fixture()
+        for field, wrong in (("id", 1), ("name", "substitute"), ("size_in_bytes", 1), ("digest", "sha256:" + "0"*64),
+                             ("expired", True), ("expires_at", "2099-01-01T00:00:00Z"),
+                             ("archive_download_url", "https://example.invalid/"), ("created_at", None)):
+            meta, build, job = artifact_metadata(pin)
+            meta[field] = wrong
+            with self.subTest(field=field), patch.object(derived.time, "time", return_value=0), self.assertRaises(RuntimeError):
+                derived.validate_metadata(meta, build, job, pin)
+        for target, field, wrong in ((0, "workflow_run", {}), (1, "head_sha", "f"*40), (1, "run_attempt", 2),
+                                     (1, "conclusion", "failure"), (1, "path", "other.yml"), (2, "id", 0),
+                                     (2, "run_id", 9), (2, "labels", ["macos-15-intel"])):
+            rows = list(artifact_metadata(pin))
+            rows[target][field] = wrong
+            with self.subTest(target=target, field=field), patch.object(derived.time, "time", return_value=0), self.assertRaises(RuntimeError):
+                derived.validate_metadata(*rows, pin)
+        for change in ("unknown", "missing"):
+            meta, build, job = artifact_metadata(pin)
+            if change == "unknown": meta["new_schema"] = True
+            else: del meta["id"]
+            with patch.object(derived.time, "time", return_value=0), self.assertRaises(RuntimeError):
+                derived.validate_metadata(meta, build, job, pin)
+        with patch.object(derived.time, "time", return_value=derived.instant(pin["expires_at"])), self.assertRaises(RuntimeError):
+            derived.validate_metadata(*artifact_metadata(pin), pin)
+
+    def test_protocol_rejects_bad_locations_statuses_and_second_redirect_without_leaks(self):
+        pin, raw, _ = artifact_fixture()
+        cases = [{"location": value} for value in (None, "/relative", "http://host/a", "https://user@host/a",
+                 "https://host:444/a", "https://host:/a", "https:///a", "https://höst/a",
+                 "https://host/a#fragment", "https://host/a\nx", "https://host:bad/a", "https://[bad/a")]
+        cases += [{"duplicate": True}, {"status": 301}, {"status": 200}, {"status": 307}, {"storage_status": 302}]
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs), tempfile.TemporaryDirectory() as temp, self.transport(pin, raw, **kwargs) as (calls, _):
+                receipt = {}
+                with self.assertRaises((RuntimeError, ValueError)) as caught:
+                    derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100, receipt)
+                self.assertNotIn("signed-test", str(caught.exception) + json.dumps(receipt))
+                self.assertNotIn("TEST-TOKEN", str(caught.exception) + json.dumps(receipt))
+                self.assertLessEqual(len(calls), 2)
+
+    def test_arbitrary_ASCII_https_hosts_and_explicit443_are_not_host_pinned(self):
+        pin, raw, _ = artifact_fixture()
+        for location in ("https://unrelated.example/a?x=1", "https://OtherHost.invalid:443/a",
+                         "https://productionresultssa999.blob.core.windows.net/a", "https://127.0.0.1:443/a"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as temp, self.transport(pin, raw, location=location):
+                self.assertEqual(derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100)["sha256"], pin["archive_sha256"])
+
+    def test_download_length_overflow_truncation_and_hash_fail_closed(self):
+        pin, raw, _ = artifact_fixture()
+        cases = [{"storage_raw": raw + b"x"}, {"storage_raw": raw[:-1]}, {"storage_raw": b"x" * len(raw)},
+                 {"length": str(len(raw)+1)}, {"length": str(len(raw)), "storage_raw": raw[:-1]},
+                 {"length": "invalid"}]
+        for kwargs in cases:
+            with self.subTest(kwargs={k: len(v) if isinstance(v, bytes) else v for k,v in kwargs.items()}), \
+                    tempfile.TemporaryDirectory() as temp, self.transport(pin, raw, **kwargs):
+                with self.assertRaises(RuntimeError):
+                    derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100)
+
+    def test_ZIP_must_match_before_parser_or_candidate_use(self):
+        pin, raw, _ = artifact_fixture()
+        with tempfile.TemporaryDirectory() as temp, patch.object(derived.zipfile, "ZipFile") as parse:
+            archive, target = Path(temp) / "zip", Path(temp) / "ipsw"
+            archive.write_bytes(raw + b"x")
+            with self.assertRaises(RuntimeError):
+                derived.extract_candidate(archive, target, pin, float("inf"))
+            parse.assert_not_called()
+            self.assertFalse(target.exists())
+
+    def test_missing_duplicate_symlink_path_oversize_and_manifest_mismatch(self):
+        cases = {
+            "missing": lambda m: [row for row in m if row[0] != "ipsw"],
+            "duplicate": lambda m: m + [m[0]],
+            "symlink": lambda m: [(n, r, 0o120777 if n=="ipsw" else mode) for n,r,mode in m],
+            "path": lambda m: [("../ipsw" if n=="ipsw" else n,r,mode) for n,r,mode in m],
+            "oversize": lambda m: [(n,r+b"x" if n=="ipsw" else r,mode) for n,r,mode in m],
+            "wrong-candidate": lambda m: [(n,b"x"*len(r) if n=="ipsw" else r,mode) for n,r,mode in m],
+            "bad-manifest": lambda m: [(n,b'{"ipsw":"bad"}' if n=="sha256.json" else r,mode) for n,r,mode in m],
+            "duplicate-key": lambda m: [(n,b'{"ipsw":"a","ipsw":"b"}' if n=="sha256.json" else r,mode) for n,r,mode in m],
+        }
+        for name, change in cases.items():
+            pin, raw, _ = artifact_fixture(change)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp, \
+                    patch.object(derived.time, "time", return_value=0), patch.object(Path, "chmod") as mode:
+                archive, target = Path(temp) / "zip", Path(temp) / "ipsw"
+                archive.write_bytes(raw)
+                with self.assertRaises(RuntimeError):
+                    derived.extract_candidate(archive, target, pin, float("inf"))
+                self.assertFalse(target.exists())
+                mode.assert_not_called()
+
+    def test_all_manifest_members_verified_not_just_candidate(self):
+        def mutate(members):
+            return [(n, b"wrong" if n=="provenance.json" else r, mode) for n,r,mode in members]
+        pin, raw, _ = artifact_fixture(mutate)
+        with tempfile.TemporaryDirectory() as temp, patch.object(derived.time, "time", return_value=0):
+            archive, target = Path(temp) / "zip", Path(temp) / "ipsw"
+            archive.write_bytes(raw)
+            with self.assertRaisesRegex(RuntimeError, "member hash"):
+                derived.extract_candidate(archive, target, pin, float("inf"))
+            self.assertFalse(target.exists())
+
+    def test_acquisition_error_retains_only_safe_bounded_phase_evidence(self):
+        pin, raw, _ = artifact_fixture()
+        record = {}
+        with tempfile.TemporaryDirectory() as temp, self.transport(pin, raw, storage_status=302), \
+                patch.object(derived, "fetch_json", side_effect=artifact_metadata(pin)):
+            with self.assertRaises(RuntimeError):
+                derived.acquire(Path(temp), pin, "TEST-TOKEN", 100, record)
+        self.assertFalse(record["verified"])
+        self.assertEqual(record["phase"], "exact-artifact-download")
+        self.assertNotIn("signed-test", json.dumps(record))
+        self.assertNotIn("TEST-TOKEN", json.dumps(record))
+
+    def test_existing_local_candidate_or_archive_cannot_substitute(self):
+        pin, _, candidate = artifact_fixture()
+        for name in ("ipsw", "ipsw-artifact.zip"):
+            with tempfile.TemporaryDirectory() as temp, patch.object(derived.time, "time", return_value=0), \
+                    patch.object(derived, "fetch_json", side_effect=artifact_metadata(pin)), patch.object(derived, "download") as fetch:
+                (Path(temp) / name).write_bytes(candidate)
+                with self.assertRaises(RuntimeError):
+                    derived.acquire(Path(temp), pin, "TEST-TOKEN", float("inf"))
+                fetch.assert_not_called()
+
+    def test_verification_and_expiry_precede_every_candidate_command(self):
+        pin, raw, candidate = artifact_fixture()
+        bounds = copy.deepcopy(run.BOUNDS)
+        bounds["tools"]["ipsw"] = pin
+        with tempfile.TemporaryDirectory() as temp, patch.object(run, "BOUNDS", bounds), \
+                self.transport(pin, raw), patch.object(derived, "fetch_json", side_effect=artifact_metadata(pin)), \
+                patch.object(Path, "chmod"), patch.dict(os.environ, {"GH_TOKEN":"TEST-TOKEN"}), \
+                patch.object(run.Run, "command", return_value={"rc": 0}) as launch:
+            root = Path(temp)
+            (root / "evidence").mkdir()
+            controller = run.ComponentRun(root, root / "evidence", "ARM24")
+            with self.assertRaises(RuntimeError):
+                controller.command("ipsw-version", [root / "ipsw", "version"])
+            launch.assert_not_called()
+            tool = controller.pinned_tool("ipsw")
+            controller.command("ipsw-version", [tool, "version"])
+            launch.assert_called_once()
+            decode = unittest.mock.Mock(return_value={"rc": 0})
+            controller.native_binding = SimpleNamespace(before={}, decode=decode)
+            controller.command("RawImagePatch", [tool, "ota", "patch", "rsr", "--cryptex", root/"patch"],
+                               timeout=1, file_limit=1)
+            decode.assert_called_once()
+            (root / "ipsw").write_bytes(b"x" * len(candidate))
+            with self.assertRaises(RuntimeError):
+                controller.command("ipsw-version", [tool, "version"])
+            with self.assertRaises(RuntimeError):
+                controller.command("RawImagePatch", [tool], timeout=1, file_limit=1)
+            self.assertEqual(launch.call_count, 1)
+            self.assertEqual(decode.call_count, 1)
+            with patch.object(derived.time, "time", return_value=derived.instant(pin["expires_at"])), self.assertRaises(RuntimeError):
+                derived.before_use(root, pin, controller.derived_artifact, 100)
+
+    def test_both_contexts_require_arm64_before_binding_or_transfer(self):
+        for context in ("ARM24", "Intel25"):
+            with self.subTest(context=context), tempfile.TemporaryDirectory() as temp, \
+                    patch.dict(os.environ, {"GITHUB_SHA": "a"*40}), patch.object(run.platform, "machine", return_value="x86_64"), \
+                    patch.object(run, "NativeBinding") as binding:
+                root = Path(temp)
+                controller = run.ComponentRun(root, root, context)
+                def command(name, argv, **kwargs):
+                    return {"stdout": {"host-source":"a"*40, "host-build":"25G83", "host-product":"26.6.2",
+                                       "host-uname":"Darwin synthetic"}[name]}
+                with patch.object(controller, "command", side_effect=command), \
+                        patch.object(controller, "pinned_tool") as tool, patch.object(controller, "capacity") as capacity:
+                    with self.assertRaisesRegex(cache.EvidenceError, "decoder-host"):
+                        run.execute(controller)
+                    binding.return_value.resolve.assert_not_called()
+                    tool.assert_not_called()
+                    capacity.assert_not_called()
+
+    def test_exact_version_and_build_not_base_version_substrings(self):
+        pin = run.BOUNDS["tools"]["ipsw"]
+        expected = "Version: " + pin["version"] + ", BuildCommit: " + pin["build"] + "\n"
+        for text, accepted in ((expected, True), (expected.replace(pin["version"],"3.1.739"), False),
+                               (expected+"extra\n", False), (expected.replace(pin["build"],pin["source_sha"]), False),
+                               ("prefix"+expected, False), (expected.replace(pin["version"],pin["version"]+"wrong"), False)):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"GITHUB_SHA":"a"*40}), \
+                    patch.object(run.platform, "machine", return_value="arm64"), patch.object(run, "NativeBinding"):
+                root = Path(temp)
+                controller = run.ComponentRun(root, root, "Intel25")
+                def command(name, argv, **kwargs):
+                    if name == "7zip-version":
+                        raise LookupError("version accepted; stop before input")
+                    return {"stdout": {"host-source":"a"*40,"host-build":"25G83","host-product":"26.6.2",
+                                       "host-uname":"Darwin", "ipsw-version":text}[name]}
+                with patch.object(controller,"command",side_effect=command), patch.object(controller,"capacity"), \
+                        patch.object(controller,"pinned_tool",side_effect=[root/"ipsw",root/"7zz"]):
+                    with self.assertRaises(LookupError if accepted else cache.EvidenceError):
+                        run.execute(controller)
+
+    def test_metadata_transport_has_no_redirect_global_opener_or_proxy_discovery(self):
+        url = derived.API + "actions/artifacts/1"
+        for status in (301,302,307):
+            headers = Message()
+            headers["Location"] = "https://external.example/?signed-secret"
+            error = urllib.error.HTTPError(url,status,"redirect",headers,io.BytesIO())
+            with patch.object(derived.urllib.request,"build_opener", return_value=SimpleNamespace(
+                    open=unittest.mock.Mock(side_effect=error))) as constructor:
+                with self.assertRaisesRegex(RuntimeError,"no redirects"):
+                    derived.fetch_json("actions/artifacts/1","TEST-TOKEN",float("inf"))
+                self.assertEqual(constructor.call_count,1)
+                handler = constructor.call_args.args[0]
+                self.assertIsNone(handler.redirect_request(None,None,302,"",headers,headers["Location"]))
+        for raw in (b'{"id":1,"id":2}', b'{"x":NaN}'):
+            with self.assertRaises(RuntimeError):
+                derived.strict_json(raw)
+        with patch.object(derived.urllib.request,"build_opener") as constructor, self.assertRaises(RuntimeError):
+            derived.fetch_json("../external","TEST-TOKEN",float("inf"))
+        constructor.assert_not_called()
+
+
+class DerivedGateTests(unittest.TestCase):
+    def test_order_and_binding_reject_BUILD_actual_partial_and_old_retry_authority(self):
+        fixture = FreezeTests()
+        fixture.setUp()
+        for index, field, value in ((0,"scope","BUILD"),(0,"verdict","CHANGES-REQUIRED"),
+                                    (1,"source_review_body_sha256","0"*64),(2,"finite_body_sha256","0"*64),
+                                    (2,"retries",1),(2,"workflow",".github/workflows/macos-ipsw-derived-build.yml")):
+            rows = copy.deepcopy(fixture.records)
+            rows[index]["value"][field] = value
+            with self.subTest(index=index,field=field),self.assertRaises(RuntimeError):
+                gate.validate(rows,fixture.context)
+        for index, timevalue in ((0,"2026-10-27T00:00:02Z"),(1,"2026-10-27T00:00:03Z"),
+                                  (2,"2026-10-27T00:00:04Z")):
+            rows=copy.deepcopy(fixture.records)
+            rows[index]["created_at"]=rows[index]["updated_at"]=timevalue
+            with self.subTest(index=index),self.assertRaises(RuntimeError):
+                gate.validate(rows,fixture.context)
+        for rows in (fixture.records[:-1],fixture.records+[fixture.records[0]]):
+            with self.assertRaises(RuntimeError):gate.validate(rows,fixture.context)
+        old = copy.deepcopy(fixture.comments)
+        for comment in old:comment["body"]=comment["body"].replace("arm24-intel25-derived-authority-v1","arm24-intel25-static-v1")
+        self.assertEqual(gate.approved_records(old),[])
+
+    def test_future_authority_requires_unedited_canonical_comments_and_exact_closure(self):
+        fixture=FreezeTests();fixture.setUp()
+        for field,value in (("user",{"login":"untrusted"}),("issue_url",gate.ISSUE+"0"),
+                            ("html_url","https://example.invalid/")):
+            comments=copy.deepcopy(fixture.comments)
+            comments[0][field]=value
+            with self.subTest(field=field),self.assertRaises(RuntimeError):
+                gate.validate(gate.approved_records(comments),fixture.context)
+        records=copy.deepcopy(fixture.records);records[1]["updated_at"]="2026-10-28T00:00:00Z"
+        with self.assertRaises(RuntimeError):gate.validate(records,fixture.context)
+        with self.assertRaises(RuntimeError):
+            gate.validate(fixture.records,dict(fixture.context,source_manifest_sha256="e"*64))
+        rows,digest=gate.closure(HERE.parents[1])
+        self.assertEqual(len(rows),12)
+        self.assertEqual(digest,hashlib.sha256((json.dumps(rows,sort_keys=True,indent=2)+"\n").encode()).hexdigest())
+
+    def test_check_orders_fresh_authorities_rejects_second_run_and_does_not_accept_retry(self):
+        fixture=FreezeTests();fixture.setUp()
+        pin=copy.deepcopy(run.BOUNDS["tools"]["ipsw"])
+        source_hash=fixture.context["source_manifest_sha256"]
+        config=copy.deepcopy(run.BOUNDS)
+        config["tools"]["ipsw"].update(binary_bytes=17,binary_sha256="d"*64,expires_at=fixture.context["expires_at"])
+        raw=json.dumps(config).encode()
+        for row in fixture.records:row["value"]["bounds_sha256"]=hashlib.sha256(raw).hexdigest()
+        # Rebuild bodies and their links for the test's exact synthetic closure.
+        comments=copy.deepcopy(fixture.comments)
+        for i,row in enumerate(fixture.records):
+            if i:
+                row["value"]["source_review_body_sha256"]=hashlib.sha256(comments[0]["body"].encode()).hexdigest()
+            if i==2:
+                row["value"]["finite_body_sha256"]=hashlib.sha256(comments[1]["body"].encode()).hexdigest()
+            comments[i]["body"]=comments[i]["body"].split("\n")[0]+"\n<!-- arm24-intel25-derived-authority-v1 "+json.dumps(row["value"])+" -->"
+        current={"id":12,"head_sha":"a"*40,"run_attempt":1,"path":gate.WORKFLOW,"event":"push",
+                 "head_branch":gate.BRANCH,"created_at":fixture.context["run_created_at"]}
+        env={"GITHUB_EVENT_NAME":"push","GITHUB_RUN_ATTEMPT":"1","GITHUB_REPOSITORY":"lossyrob/telex",
+             "GITHUB_REF":"refs/heads/"+gate.BRANCH,"GITHUB_WORKFLOW_REF":"lossyrob/telex/"+gate.WORKFLOW+"@refs/heads/"+gate.BRANCH,
+             "GITHUB_SHA":"a"*40,"GITHUB_RUN_ID":"12","GH_TOKEN":"TEST-TOKEN"}
+        for extra in (False,True):
+            calls=[]
+            def fetch(endpoint,token,deadline):
+                calls.append(endpoint)
+                if endpoint=="actions/runs/12":return current
+                if endpoint.startswith("actions/runs?"):return {"total_count":2 if extra else 1,
+                    "workflow_runs":[current,dict(current,id=13)] if extra else [current]}
+                if endpoint.startswith("issues/172/comments"):return comments
+                return next(c for c in comments if str(c["id"])==endpoint.rsplit("/",1)[1])
+            with patch.dict(os.environ,env,clear=True),patch.object(Path,"read_bytes",return_value=raw), \
+                    patch.object(gate,"closure",return_value=([],source_hash)),patch.object(derived,"fetch_json",side_effect=fetch), \
+                    patch.object(derived.time,"time",return_value=1793145600):
+                if extra:
+                    with self.assertRaisesRegex(RuntimeError,"another run"):gate.check("ARM24")
+                else:
+                    self.assertFalse(gate.check("ARM24")["retry"])
+                    self.assertEqual(calls[-3:],["issues/comments/1","issues/comments/2","issues/comments/3"])
+        with patch.dict(os.environ,dict(env,GITHUB_RUN_ATTEMPT="2"),clear=True), \
+                patch.object(derived,"fetch_json") as fetch,patch.object(derived.time,"time",return_value=1793145600):
+            with self.assertRaises(RuntimeError):gate.check("ARM24")
+            fetch.assert_not_called()
+
+
+class TransportBoundaryTests(unittest.TestCase):
+    def test_real_opener_keeps_api_credentials_off_arbitrary_redirect_target(self):
+        pin, raw, _ = artifact_fixture()
+        calls = []
+        real_opener = urllib.request.build_opener
+        location = "https://not-github.example:443/a?secret=signed-secret"
+        class Transport(urllib.request.HTTPSHandler):
+            def __init__(self):
+                pass
+            def https_open(self, request):
+                calls.append({"url": request.full_url, "headers": dict(request.header_items())})
+                headers = Message()
+                if request.full_url.startswith(derived.API):
+                    headers["Location"] = location
+                    response = urllib.response.addinfourl(io.BytesIO(), headers, request.full_url, 302)
+                else:
+                    response = urllib.response.addinfourl(io.BytesIO(raw), headers, request.full_url, 200)
+                response.msg = "synthetic"
+                return response
+        def constructor(*handlers):
+            return real_opener(*handlers, Transport())
+        with tempfile.TemporaryDirectory() as temp, patch.object(urllib.request, "build_opener", side_effect=constructor), \
+                patch.object(urllib.request, "getproxies", side_effect=AssertionError("proxy discovery")), \
+                patch.object(derived.time, "time", return_value=0):
+            receipt = {}
+            derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", float("inf"), receipt)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["headers"]["Authorization"], "Bearer TEST-TOKEN")
+        self.assertFalse(any(k.lower() in ("authorization", "cookie") for k in calls[1]["headers"]))
+        self.assertNotIn("signed-secret", json.dumps(receipt))
+        self.assertEqual(receipt["redirect_hostname"], "not-github.example")
+
+    def test_transport_read_failures_sanitize_signed_URL_and_track_bounded_progress(self):
+        pin, raw, _ = artifact_fixture()
+        fixture = DerivedArtifactTests()
+        for error in (OSError("https://storage.example/?SECRET"), urllib.error.URLError("TOKEN SECRET")):
+            with tempfile.TemporaryDirectory() as temp, fixture.transport(pin, raw), \
+                    patch.object(MockHTTP, "read", side_effect=error):
+                receipt = {}
+                with self.assertRaises(RuntimeError) as caught:
+                    derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100, receipt)
+                self.assertNotIn("SECRET", str(caught.exception) + json.dumps(receipt))
+                self.assertIsNone(caught.exception.__cause__)
+        with tempfile.TemporaryDirectory() as temp, fixture.transport(pin, raw, storage_raw=raw+b"x"):
+            receipt = {}
+            with self.assertRaises(RuntimeError):
+                derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100, receipt)
+            self.assertEqual(receipt["observed_body_bytes"], len(raw)+1)
+            self.assertEqual(receipt["observed_body_sha256"], hashlib.sha256(raw+b"x").hexdigest())
+        with self.assertRaises(RuntimeError) as caught:
+            derived.close_error(SimpleNamespace(close=unittest.mock.Mock(side_effect=OSError("signed-SECRET"))))
+        self.assertNotIn("SECRET", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+
+    def test_deadlines_and_wrong_API_final_URL_fail_before_followup_or_use(self):
+        pin, raw, _ = artifact_fixture()
+        with patch.object(derived.time, "monotonic", return_value=10), \
+                patch.object(urllib.request, "build_opener") as constructor, self.assertRaises(RuntimeError):
+            derived.request_api("actions/artifacts/1", "TEST-TOKEN", 10)
+        constructor.assert_not_called()
+        response = MockHTTP(b"{}", "https://wrong.example/")
+        with patch.object(urllib.request, "build_opener", return_value=SimpleNamespace(open=lambda *a, **k: response)):
+            with self.assertRaises(RuntimeError):
+                derived.fetch_json("actions/artifacts/1", "TEST-TOKEN", float("inf"))
+        with tempfile.TemporaryDirectory() as temp, patch.object(derived.time, "monotonic", return_value=10):
+            archive = Path(temp)/"zip"
+            archive.write_bytes(raw)
+            with self.assertRaises(RuntimeError):
+                derived.extract_candidate(archive, Path(temp)/"ipsw", pin, 10)
+
+    def test_no_production_bypass_and_explicit_workflow_zero_retry_source(self):
+        text = (HERE / "run.py").read_text()
+        self.assertNotIn('pin["url"]', text[text.index("if name == \"ipsw\":"):text.index("binary = self.tool")])
+        self.assertIn("derived.before_use", text)
+        self.assertNotIn("3.1.739\" in version", text)
+        workflow=(HERE.parents[1]/".github"/"workflows"/"macos-cross-static.yml").read_text()
+        self.assertEqual(workflow.count("runs-on: macos-26"),2)
+        self.assertEqual(workflow.count("if: github.run_attempt == 1"),2)
+        self.assertNotIn("macos-latest",workflow)
+        self.assertNotIn("<= 2",workflow)
+        self.assertEqual(run.BOUNDS["limits"]["max_same_sha_infrastructure_retries_total"],0)
+        self.assertEqual(run.BOUNDS["retry_policy"]["maximum_additional_job_attempts_total"],0)
+        self.assertEqual(run.BOUNDS["tools"]["ipsw"]["artifact_id"],12694487625)
 
 
 if __name__ == "__main__":

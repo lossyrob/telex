@@ -16,11 +16,13 @@ permissions:
 jobs:
   ARM24:
     name: ARM24
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 55
-    if: github.run_attempt <= 2
+    if: github.run_attempt == 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Offline source tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -44,11 +46,13 @@ jobs:
           retention-days: 30
   Intel25:
     name: Intel25
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 55
-    if: github.run_attempt <= 2
+    if: github.run_attempt == 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Offline source tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
