@@ -245,6 +245,7 @@ async fn scheduled_stall_reaches_own_host_and_delivers_once_per_episode_with_lon
         "../../tests/fixtures/copilot-session-state/idle.jsonl"
     ));
     gate.assert_suppressed();
+    let removal_started_at = telex::model::now_ms();
     gate.successful(&["remove", "member-wake"]);
     let first = gate.wait_for(&["show", "scheduled-stall"], |watch| {
         watch["lastCommittedEventSequence"] == 1
@@ -283,6 +284,11 @@ async fn scheduled_stall_reaches_own_host_and_delivers_once_per_episode_with_lon
     let inbox = backend.inbox("project:gate/root", true, 10).await.unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].message.kind, "copilot.group.stalled");
+    let first_snapshot: Value = serde_json::from_str(&inbox[0].message.body).unwrap();
+    assert!(
+        first_snapshot["firstSeenAt"].as_i64().unwrap() >= removal_started_at,
+        "episode began while the member wake was still armed: {first_snapshot}"
+    );
     drop(backend);
 
     gate.set_log(b"{\"type\":\"session.error\",\"id\":\"error-1\",\"timestamp\":\"2026-10-25T20:00:00Z\",\"data\":{}}\n");
