@@ -1,0 +1,44 @@
+name: Isolated derived ipsw build
+
+on:
+  push:
+    branches: [lossyrob-macos-containment-proof]
+    paths:
+      - diagnostics/macos_ipsw_derived_build/**
+      - .github/workflows/macos-ipsw-derived-build.yml
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  build-derived:
+    name: Build-derived-ipsw-arm64
+    if: github.run_attempt == 1
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mocked build-controller tests only
+        run: python3 -I -B diagnostics/macos_ipsw_derived_build/test_build.py
+      - name: Separately frozen single build, never execute ipsw
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I -B diagnostics/macos_ipsw_derived_build/build.py \
+            "$RUNNER_TEMP/derived-ipsw-${GITHUB_RUN_ID}-work" \
+            "$RUNNER_TEMP/derived-ipsw-${GITHUB_RUN_ID}-evidence"
+      - name: Bound artifact set
+        if: always()
+        id: bound
+        run: |
+          python3 -I -B -c 'import hashlib,json,os,stat; from pathlib import Path; p=Path(os.environ["RUNNER_TEMP"])/("derived-ipsw-"+os.environ["GITHUB_RUN_ID"]+"-evidence"); f=list(p.iterdir()); assert 0<len(f)<=64 and all(stat.S_ISREG(x.lstat().st_mode) and x.stat().st_size<=(134217728 if x.name=="ipsw" else 4194304) for x in f) and sum(x.stat().st_size for x in f)<=268435456; m=json.loads((p/"sha256.json").read_bytes()); assert set(m)=={x.name for x in f if x.name!="sha256.json"} and all(hashlib.sha256((p/n).read_bytes()).hexdigest()==h for n,h in m.items())'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.bound.outcome == 'success'
+        with:
+          name: derived-ipsw-${{ github.sha }}-attempt1
+          path: ${{ runner.temp }}/derived-ipsw-${{ github.run_id }}-evidence
+          if-no-files-found: error
+          retention-days: 30

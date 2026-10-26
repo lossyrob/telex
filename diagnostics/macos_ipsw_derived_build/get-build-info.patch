@@ -1,0 +1,57 @@
+diff --git a/internal/utils/macos.go b/internal/utils/macos.go
+index 6263ebe7..0523e015 100644
+--- a/internal/utils/macos.go
++++ b/internal/utils/macos.go
+@@ -356,29 +356,40 @@ type BuildInfo struct {
+ func GetBuildInfo() (*BuildInfo, error) {
+ 	if runtime.GOOS == "darwin" {
+ 		var binfo BuildInfo
++		preview := func(data []byte) string {
++			const limit = 4096
++			if len(data) > limit {
++				return fmt.Sprintf("%q (first %d of %d bytes)", data[:limit], limit, len(data))
++			}
++			return fmt.Sprintf("%q", data)
++		}
++		query := func(flag string) ([]byte, error) {
++			cmd := exec.Command("/usr/bin/sw_vers", flag)
++			var stderr bytes.Buffer
++			cmd.Stderr = &stderr
++			out, err := cmd.Output()
++			if err != nil {
++				return nil, fmt.Errorf("%v: stdout=%s; stderr=%s", err, preview(out), preview(stderr.Bytes()))
++			}
++			return out, nil
++		}
+ 
+-		cmd := exec.Command("/usr/bin/sw_vers", "-productName")
+-		out, err := cmd.CombinedOutput()
++		out, err := query("-productName")
+ 		if err != nil {
+-			return nil, fmt.Errorf("%v: %s", err, out)
++			return nil, err
+ 		}
+-
+ 		binfo.ProductNames = strings.TrimSuffix(string(out), "\n")
+ 
+-		cmd = exec.Command("/usr/bin/sw_vers", "-productVersion")
+-		out, err = cmd.CombinedOutput()
++		out, err = query("-productVersion")
+ 		if err != nil {
+-			return nil, fmt.Errorf("%v: %s", err, out)
++			return nil, err
+ 		}
+-
+ 		binfo.ProductVersion = strings.TrimSuffix(string(out), "\n")
+ 
+-		cmd = exec.Command("/usr/bin/sw_vers", "-buildVersion")
+-		out, err = cmd.CombinedOutput()
++		out, err = query("-buildVersion")
+ 		if err != nil {
+-			return nil, fmt.Errorf("%v: %s", err, out)
++			return nil, err
+ 		}
+-
+ 		binfo.BuildVersion = strings.TrimSuffix(string(out), "\n")
+ 
+ 		return &binfo, nil
