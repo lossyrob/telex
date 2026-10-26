@@ -51,7 +51,12 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).expect("remove isolated management fixture");
+        let removed = std::fs::remove_dir_all(&self.root);
+        // A second panic while unwinding aborts the whole test harness
+        // (0xc0000409 on Windows) and discards the original failure.
+        if !std::thread::panicking() {
+            removed.expect("remove isolated management fixture");
+        }
     }
 }
 
@@ -60,6 +65,20 @@ async fn health(runtime: &mut Runtime) -> RuntimeHealth {
         Response::Health(health) => health,
         other => panic!("expected runtime health, got {other:?}"),
     }
+}
+
+#[test]
+fn fixture_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let fixture = Fixture::new();
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
 }
 
 #[tokio::test]
