@@ -970,3 +970,213 @@ to Local; Local verifies it and wakes the existing #193 owner to integrate
 main, obtain fresh CI and request the PR #194 gate. This is not a completed
 merge/wake, an automatic edge/status change or a CI/readiness waiver.
 #193/#194, accepted #181/#187, all Watcher state and debts remain separate.
+
+## 2026-10-25 - Campaign heap routing and two pending merge wakes
+
+Campaign `toolu_011HendiW3BJzkXVtPYrCfq6` routes the PR #202 / #198
+default-Windows `0xc0000374` observation to the existing #166 owner,
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`. Local reports delivery to that
+owner. This makes #166 the Campaign's top critical-path repair for
+#194 and #202 under strict CI; it creates no owner, node or automatic
+dependency/status change. Keep this heap-corruption/first-use observation
+distinct from the retained PageHeap `0xc0000005` stages. No common cause
+is established; split only if diagnosis establishes independent defects.
+
+The later retained-evidence qualification concerns the SAME run/job,
+not another occurrence. PR/event head `02d2cbbd` differs from the executed
+pull-merge checkout `0cbecafc`, merging that head into `6c7ff068`.
+Local's bounded retained-text/Git/source checks remain Local-attributed,
+not reconciler replay. Attempt-1 process-target execution and archive
+dump presence remain unestablished. The complete task/ledger preserve
+the original unknown-head routing packet, later qualification and limits.
+
+After the #166 product repair actually merges, Local must verify that
+merge and separately wake BOTH existing owners: #193 / #194 owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` and #198 / #202 owner
+`a96926b1-3e4f-4578-a197-33de51d669c7`. Each integrates main and obtains
+fresh exact-head CI/review/PR gates. Both deliveries remain pending.
+This supplements, rather than replaces, the original #193 obligation.
+An artifact landing, diagnostic green or readiness report is not the
+trigger. No retry, waiver, repair, source/CI/readiness/debt/HOLD acceptance
+or workstation-freeze exception follows.
+
+## 2026-10-25 - Later #166 identity and diagnostic-draft metadata
+
+Local's separate 19:51:53Z observation resolves both identifiers to the
+same canonical owner `d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`.
+`57bcb249-2ec6-4272-be67-31b9f0f59d7d` is the observed reply alias
+requested by that owner, not another owner or a rebind. The checkout
+remains `lossyrob-special-meme`; the observed current branch remains
+`lossyrob-windows-heap-av-repair`. Original launch history is unchanged.
+
+Local reports [PR #196](https://github.com/lossyrob/telex/pull/196)
+OPEN/draft against main at
+`b0f59d408b32d61cc4cfd9c5a5310a8c522567e1`, as of that observation.
+This is attributed diagnostic-draft metadata, not a completed repair,
+source/design approval, causal finding, CI pass or readiness. This snapshot
+supplies no actual repair merge or Local #193 wake.
+
+The later #166 heap-routing qualification and BOTH still-pending
+#193/#198 actual-repair-merge wakes remain unchanged. This older
+identity/draft snapshot supplies no delivery or current gate credit.
+
+## 2026-10-26 - Separate ForeignDaemon repair #204 already staffed
+
+Campaign authorized a separate tracker and one public-record-only owner
+for the Windows InstalledCurrent crash/reattach ForeignDaemon failure,
+with launch first and artifact recording afterward. Existing candidate
+`local-daemon-windows-installed-current-crash-reattach-foreign-daemon`
+is promoted to [#204](https://github.com/lossyrob/telex/issues/204) and
+`foreigndaemon-reattach-repair`. The actual owner is
+`8afc363c-1af3-447d-a472-336f92d57998`, on its own main-based checkout
+and branch `lossyrob-foreigndaemon-reattach-repair`. Local reports one
+launch and clean starting head `7e1bfc3a`; App identity confirms the same
+session/checkout. The requested Opus 5.5/high/default/interactive profile
+and no-idle setting are not independent effective-capacity verification.
+
+The ledger keeps both earlier Windows observations and all candidate/
+unassigned source wording as history. One later public PR #196 occurrence
+is appended: run `40250813915`, job `121342086267`, event head
+`854855f1`, executed merge `1813c432a9a43178b17dc6909f2fe272367b5e8e`
+with base `db8eaa75` and that PR head. Failure at line 508 reports
+`DaemonBootstrap(ForeignDaemon)`; target 29 passed / 1 failed / 2 ignored,
+139.79 seconds, after fixture 6 passed / 0 failed / 1 ignored.
+The complete public issue and Local's launch/evidence binding are retained
+by hash. Their log/source verification remains Local-attributed; the
+reconciler did not replay logs, source, archives or runtime.
+
+The public result does not identify an actual foreign process, failed
+authentication branch, native exception or common cause. Later successor-
+PID, marker and single-spawn assertions were not reached; configured
+delay/recovery counts are not new retry permission. Preserve authenticated
+peers, owner-private authority, non-theft, fencing, bounded recovery and
+the refusal of genuinely foreign peers. Runtime work stays on authorized
+disposable hosted Windows only. No retry/rerun, waiver, flake exception,
+budget widening, blanket-success conversion or local runtime permission.
+
+The owner coordinates overlapping daemon/bootstrap/test/CI edits with
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c` before publishing and does not
+write PR #196's branch. d7 remains #166 only. No automatic dependency or
+Watcher edge/status change is added. Both #166 actual-product-merge wakes
+remain pending and unchanged. Deliver one separately reviewed PR closing
+#204 with discriminating evidence, exact-final-head hosted coverage and
+the normal Campaign merge gate; launch is not repair, CI or readiness.
+
+## 2026-10-26 - Operator choice for the existing #166 repair
+
+Campaign confirms the operator's conditional choice of Mio 1.2.4 as the
+fix and judges its comparison-job condition met. The public Mio 1.2.4
+job `121354231722` in run `40254795271`, attempt 1, at PR #196 event
+head `b0ab5f2cf067f08afbb20bd807a89af1e0affb46` succeeded at
+`2026-10-26T01:48:20Z`; the overall run failed. d7's report of three
+clean 400,000-round configurations remains owner-attributed, not a
+reconciler archive/log finding or causal proof for the five Telex cases.
+The exact Local packet and direct Campaign confirmation are retained;
+no originating ask_user transcript, source, archive or runtime replay
+is claimed.
+
+The already-authorized sole writer remains
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c` on
+`lossyrob-windows-heap-av-repair`. Bookkeeping must not delay that work.
+Upgrade Mio to 1.2.4 with the Windows normal-dependency floor, validate
+cross-platform/features, remove diagnostic-only scaffolding except the
+retained capture, and use `Closes #166` in PR #196. Any recurrence reopens
+#166. Prior evidence and B/no-push holds remain history; only this
+implementation hold is superseded. No five-case common cause, new
+occurrence, owner or experiment extension is accepted.
+
+Hosted-only runtime and no retry/waiver/flake exception continue.
+Exact-final-head source/design review, reviewer-origin public receipt,
+strict green CI and the Campaign merge gate remain. #203 and #204 must
+clear as far as they affect #196's required jobs; a green run alone does
+not independently accept those repairs. Both pending #193/#198 wakes
+still require Local's verification of the actual #166 repair merge.
+No graph edge, status change, repair/readiness/merge, debt/HOLD or
+workstation-freeze credit follows from this decision recording.
+
+## 2026-10-26 - ForeignDaemon #204 accepted complete with debt
+
+Campaign explicitly accepts the bounded #204 repair as completed with
+debt under [gate 6407030627](
+https://github.com/lossyrob/telex/pull/205#issuecomment-6407030627),
+`MERGE + debt`, high confidence. PR #205 merged as
+`faf4f883631c7aaec057dde4beca36daa29d29dd`, tree
+`1b754b186622b384bc9adaf3a835be7c6faa4df7`, with ordered parents
+`7e91a233` and reviewed `e11c56ce`; #204 closed completed.
+The same owner `8afc363c-1af3-447d-a472-336f92d57998` retains follow-through.
+The ledger/node are completed; pending main observation and field work
+must not keep this accepted repair artificially in progress.
+
+All four debts remain: the missing PR-body consequence/no-discoveries
+statements; the contrived same-user squatter's worse diagnostic class
+while still refused; unforced `ERROR_INVALID_PARAMETER`/handle-rundown
+branches; and pre-fix failure evidence from diagnostic rather than final
+head. The owner must add the body statements and post the field report
+after main's Windows InstalledCurrent runs. Debt-3 recurrence creates a
+new item, not a retry or automatic #204 reopening. No debt is cleared here.
+
+The complete 8,019-byte Local acceptance packet and full 1,930-byte public
+gate are retained and projected by hash. Merge/closure/Git geometry/gate
+were independently read; pre-merge 21/21 CI and source/design findings
+remain Local/gate-attributed, not new product review or main CI proof.
+The packet's exact-merge CI/Docs waits share one existing scheduler;
+their captured states are historical, with terminal results uncredited.
+
+d7 must integrate main into PR #196, obtain fresh full CI and confirm
+its Windows required job clears. That remains follow-through, not #196
+readiness or merge authority; #203 remains separate. All prior #204
+evidence/launch history, the entire #166 record and both pending #193/#198
+wakes stay exact. Only Local-verified actual #166 repair merge triggers
+those wakes. No new owner, occurrence, graph edge, runtime/retry, broader
+acceptance, debt/HOLD reversal or workstation-freeze clearance follows.
+
+## 2026-10-26 - Credential-writer repair #167 already staffed
+
+Campaign authorized one public-record-only owner for existing
+[#167](https://github.com/lossyrob/telex/issues/167), with launch first
+and artifact recording afterward. The same
+`local-daemon-windows-credential-writer-timeout` record is promoted to
+the `credential-writer-timeout-repair` task. The actual owner is
+`9a868a31-2c8d-429a-aee3-7e195076a4dd`, coordinated by Local, in checkout
+`lossyrob-curly-potato` on current branch
+`lossyrob-fix-167-delayed-writer-timeout`. Local reports the actual launch;
+the reconciler's read-only App observation confirms the same session,
+creator/coordinator, checkout, current branch and observed busy state.
+No exact starting checkout head or cleanliness report was received in
+this frozen launch snapshot. Public-main `be8b9910` is preflight evidence,
+not a verified owner checkout. Requested Opus 5.5/high/default/interactive
+settings are not independent effective-capacity proof.
+
+Original Campaign source `toolu_014vkRgy6ysjNiGD88kQeR6L` and direct
+confirmation `toolu_01Jw6FHd8GL21QG41ruVtEnr` authorize this separate
+repair, not a new tracker or second launch. The complete 5,274-byte Local
+launch packet is retained by SHA-256
+`ff74705a9428f38b9276eed956ba21cc50ecacbffa24232e26ea0ce887910ad9`.
+Only the private machine path is replaced by its checkout name in the
+canonical packet projection. All earlier candidate/unassigned fields and
+all evidence, including the four existing successor entries, remain exact
+history; promotion adds no occurrence. Campaign's "four times" is its
+record-based count, not a new independent census.
+
+The owner must diagnose lifecycle, test-budget and hosted-scheduling
+possibilities without guessing, preserve delayed inherited-writer output
+after shell exit, output/error semantics, effective negative assertions
+and owned-process cleanup, and deliver a separate PR using `Closes #167`.
+Product/test/daemon runtime is hosted-only. No retry, rerun, cosmetic-head
+retry, waiver, flake exception, unbounded experiment or workstation/
+installed-state change is authorized.
+
+Coordinate overlapping credential/daemon/CI/dependency edits with d7
+before publishing; do not write PR #196's branch or absorb #166's repair.
+Use the existing sole external wait coordinator, not another scheduler.
+Exact-final-head independent source review with reviewer-origin public
+receipt, design inspection as applicable, strict required hosted CI and
+Campaign gate remain separate. No autonomous merge.
+
+The Local ledger remains 48 records; one new repair node makes 29 Local
+nodes with no dependency edges or edits to existing nodes, attention,
+status or design links. All other records, Watcher and both pending
+#193/#198 wakes remain exact. Only Local-verified actual #166 repair merge
+triggers those wakes. Staffing/recording supplies no cause, source/runtime,
+CI/readiness, repair/accepted-delivery, debt/HOLD or freeze credit and does
+not delay the already-authorized implementation.

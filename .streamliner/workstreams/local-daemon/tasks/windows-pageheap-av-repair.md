@@ -256,3 +256,200 @@ rerun/waiver, debt/HOLD/release or workstation-freeze clearance.
 All original distinct AV observations and hosted-only exact-head review,
 public reviewer receipt, diagnostic coverage and non-theft/fencing/480ms
 requirements remain controlling.
+
+## 2026-10-25 - Default-Windows heap observation and dual merge wake
+
+### Same owner and investigation, distinct exception and job stage
+
+Campaign `toolu_011HendiW3BJzkXVtPYrCfq6` assigns the PR #202 / #198
+heap-corruption observation to existing owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, not a new owner or issue.
+Local reports immediate delivery and later executed-merge correction to
+that owner. Campaign makes #166 its top critical-path repair for #194 and
+#202 under unchanged strict CI. This is routing/priority qualification,
+not an automatic graph edge, status change, waiver or causal diagnosis.
+
+The initial 4,095-byte Local packet remains immutable, SHA-256:
+`c224ad7464e3a66adda6bd451ba2c83b03e45ab67bdfb12911488d1cce0330b2`.
+It did not establish the exact head/source/custody. The later 6,801-byte
+Local qualification concerns the SAME observation, not a new occurrence:
+`4a33013e497ff7ac024f517cafa7ce2f1ff55f618668acb795ca5f1ba27ebe6f`.
+The ledger retains both packets and their attribution/chronology.
+
+### Retained checkout, command and failure qualification
+
+The complete [Watcher public record](
+https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431),
+updated `2026-10-25T20:51:48Z`, reports run `40230509989`, historical
+attempt 2, ordinary `Build and test (windows-latest)` job `121284088689`.
+This is not the PageHeap diagnostics job. That already-taken failed-jobs
+rerun gives no permission for another retry.
+
+PR/event head:
+`02d2cbbdb93af264d46763c6d86b0b8ea5691f14`.
+Executed ref: `refs/remotes/pull/202/merge`.
+Executed commit:
+`0cbecafc3b944bf920aad34e5fa8764ac683653c`.
+Ordered parents:
+`6c7ff0680dd428af2cc765aa13d827bc140943f0`, then the PR head above.
+Executed tree:
+`488493820fd72455807cdad8e2ddd4957da52fec`.
+Artifact names refer to the PR head; binaries/symbols refer to the
+executed merge, not a direct PR-head checkout.
+
+Local reports matching 465,915 bytes of retained, job/step-labeled
+`gh run view --job --log` UTF-8 text, SHA-256:
+`73a58636fce10cf603034fcdae9ce9f64670e02ab2e1d3cf0e3a4c469b4a798d`.
+These are not raw API log or archive bytes. Local read bounded checkout,
+command, exception/backtrace and complete target-result excerpts, not the
+entire log. Checkout lines 93/111/114 and immutable Git API checks identify
+the merge/tree/parents above. Local reports source blob
+`b1f708c5e8948884c49207fe4aba4e051dc7f23a` (196,727 bytes), equal to
+the inspected PR-head test source. Equality of that test blob does not
+prove all production dependencies/runtime inputs unchanged or PR causality.
+These checks remain Local-attributed; the reconciler did not replay them.
+
+Recorded commands are `cargo build --workspace --verbose`,
+`cargo test --workspace --no-run --verbose` and
+`cargo test --workspace --verbose`, without `--all-features`.
+The failing `real_process_01_concurrent_first_use` has eight synchronized
+attach workers. One command child reported `0xc0000374`
+(`STATUS_HEAP_CORRUPTION`), empty stdout/stderr, at the abnormal-exit guard
+line 518 through capture line 793; its worker join propagated at line 800
+in test line 746. Target result: 48 passed, 1 failed, 25.34 seconds.
+The configured eight-second capture budget is not the fault duration or
+a timeout diagnosis. Rust harness frames are not a native child stack.
+The exact worker/child PID, corrupting operation and fault site are unknown.
+
+Keep this default-Windows status/stage distinct from earlier PageHeap
+`0xc0000005` cases. A common cause is not established. Attempt 1 failed
+earlier in the separate #167 credential-command case; whether it reached
+this process target is unestablished. The public record corrected its
+earlier passed-target and no-retained-artifact claims. Two same-name
+archive IDs, digests and timing associations are metadata only; neither
+Local nor Watcher downloaded/inspected them or established dump presence.
+Use immutable IDs, not name selection. No new runtime/archive/log fetch
+or source/native replay is authorized by this artifact.
+
+### Supplement the original future wake; neither delivery has occurred
+
+After the actual #166 product repair merges, its owner immediately reports
+that merge to Local. Local verifies it and separately wakes BOTH:
+#193 / PR #194 owner `519693a5-0607-4aba-a968-345f3b1cd1b5`, and
+#198 / PR #202 owner `a96926b1-3e4f-4578-a197-33de51d669c7`.
+Each integrates main, obtains fresh exact-head CI/review and requests its
+own PR gate. Record each delivery separately; both remain pending.
+Keep the original #193 launch/kickoff obligation as history and current
+obligation, not a replaced or completed wake. Artifact publication,
+diagnostic green and readiness are not this trigger.
+
+No owner replacement, automatic dependency/status change, common cause,
+retry, flake exception, waived/ignored abnormal exit, repair, review/CI/
+readiness, debt/HOLD or workstation-permission credit follows. #198 remains
+in progress; its CI-blocked stage on external #166/#167 is attributed
+metadata, not readiness. All original launch history, distinct AV evidence,
+strict exact-head hosted gates and workstation restrictions remain.
+
+## 2026-10-25 - Later observed reply alias and diagnostic draft
+
+In a separate observation at `2026-10-25T19:51:53.4869007Z`, Local
+queried both identifiers and reports that each resolves to canonical owner
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`, the same creation/parent,
+checkout `lossyrob-special-meme`, current branch
+`lossyrob-windows-heap-av-repair` and draft PR association.
+The owner requests replies via observed alias
+`57bcb249-2ec6-4272-be67-31b9f0f59d7d`.
+This records observed resolution equivalence, not internal namespace
+implementation, replacement, a second owner or preparation.
+
+Local's direct provider metadata then showed
+[PR #196](https://github.com/lossyrob/telex/pull/196) OPEN/draft,
+base main, head
+`b0f59d408b32d61cc4cfd9c5a5310a8c522567e1`.
+The described capture instrumentation and unproved source candidate remain
+owner-reported, not source/design/CI acceptance or a diagnosed cause.
+The reconciler read/captured the complete Local packet, not the live App,
+provider inventory, source, archive, native execution or hosted result.
+
+The complete original launch qualification, 4,407-byte binding,
+15,666-byte kickoff and earlier branch observations remain unchanged.
+No actual repair merge or Local #193 wake is evidenced by this metadata.
+Fresh exact-head review, CI, Campaign and post-merge obligations continue;
+no retry, readiness, dependency/status, debt/HOLD/release/freeze credit.
+
+The later #166 heap-routing qualification and BOTH still-pending
+#193/#198 actual-repair-merge wakes remain unchanged. This older
+identity/draft snapshot supplies no delivery or current gate credit.
+
+## 2026-10-26 - Operator-authorized Mio 1.2.4 repair choice
+
+This later operator decision qualifies the earlier diagnosis-only and
+B/no-push holds for this bounded implementation. Those statements remain
+history, not a current bar to work already authorized and forwarded to
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`. The same owner remains the sole
+#166 / PR #196 writer on `lossyrob-windows-heap-av-repair`. This recording
+is neither a new launch nor an implementation prerequisite.
+
+Campaign directly confirms the operator's choice via ask_user:
+
+> B: authorize the Mio 1.2.4 upgrade as the fix, only if the 1.2.4 comparison job finishes without the panic; the PR closes #166, and a repeat crash reopens it (Recommended)
+
+The quote and condition judgment are Campaign-attributed. The reconciler
+has not independently read the originating ask_user transcript. Campaign
+judged the condition met using the public successful job status and d7's
+report of three clean 400,000-round configurations. Run `40254795271`,
+attempt 1, at event head
+`b0ab5f2cf067f08afbb20bd807a89af1e0affb46` failed overall; comparison
+job `121354231722` succeeded and completed at `2026-10-26T01:48:20Z`.
+The comparison job is not an all-green PR run or final-head validation.
+
+The complete 5,876-byte Local decision packet is retained unchanged:
+`70cb77fcf0a4b19f1b99fdca2377520daa7448f5fb13085ad87158bab6422f1e`.
+Its comparison outcomes, rounds and artifact contents remain attributed
+to the owner; Local independently verified public run/job metadata.
+The reconciler separately reads only that complete packet, the direct
+Campaign confirmation and public run/job identity/status metadata.
+No log, source, archive, dump or runtime replay is claimed. Artifact IDs,
+lengths and digests in the packet are retained reports, not verification
+against downloaded bytes.
+
+### Authorized implementation and unchanged causal limits
+
+Upgrade Mio to 1.2.4 and add the Windows normal-dependency floor. Perform
+cross-platform and feature validation within the existing hosted-only
+runtime restrictions. Remove diagnostic-only experiment scaffolding
+except the retained capture, preserving the evidence and its capture gaps.
+Use `Closes #166` in PR #196; any recurrence reopens #166.
+
+Describe this as the authorized repair of the reached Mio defect, not
+proof that it explains the five retained Telex observations. One reached
+failure and a clean comparison are not statistical proof; seeds do not
+fix thread scheduling. The submitted-I/O/Arc explanation and mapping to
+the five cases remain unestablished. The separately reported 40 clean
+real-daemon iterations are not evidence of absence. No new native-crash
+occurrence or candidate is added by recording the comparison.
+
+Preserve owner-private locks, non-theft, generation fencing, late-guard
+disposal and the production 480ms budget. Existing owners coordinate
+overlapping edits. Hosted-only runtime, the workstation freeze, no retry,
+waiver or flake exception, and all other restrictions continue. This
+choice authorizes no fresh experiment extension or broader runtime scope.
+
+### Remaining gates and event-driven wakes
+
+Fresh exact-final-head source review with its reviewer-origin public
+receipt, design inspection and strict green CI without waiver remain
+required. #203 and #204 must be cleared as far as they affect PR #196's
+required jobs, as Campaign directly confirms. A green run alone is not
+independent acceptance of either separately required repair. Request the
+Campaign merge gate when the required evidence is ready; this decision
+accepts no implementation, repair, CI/readiness or merge now.
+
+Only the actual #166 product-repair merge, independently verified by
+Local, triggers the existing two wakes. The owner reports the merge to
+Local immediately; Local separately wakes #193 / PR #194 owner
+`519693a5-0607-4aba-a968-345f3b1cd1b5` and #198 / PR #202 owner
+`a96926b1-3e4f-4578-a197-33de51d669c7`. Both remain pending.
+Authorization, comparison success, artifact publication and readiness
+are not the trigger. No automatic graph edge or status/dependency change,
+owner replacement, accepted debt/HOLD reversal or freeze clearance follows.

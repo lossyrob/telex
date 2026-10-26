@@ -341,6 +341,47 @@
         {
           "source": "coordinator-report",
           "details": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 reports that the #177 owner took one failed-job retry of run 39978847760 at unchanged head 439eeb6c329591fcab6ace1ea1ee9c81f381d1fc. Attempt 2 was independently observed in progress at that same head. The owner posted the linked retention records for both complete first-attempt artifacts and raw logs, retained before that retry; downloaded executables were not run. A green retry is CI evidence only, not a causal fix. The external Local Daemon disposition and ledger status remain unchanged; no Watcher graph or status change is made."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/167#issuecomment-6402916045",
+          "createdAt": "2026-10-25T20:36:34Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40230509989",
+          "job": "121280997219",
+          "head": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
+          "issue": "https://github.com/lossyrob/telex/issues/167",
+          "details": "Recurrence for #167, with no new disposition. Owning Watcher's complete public comment records the PR #202 (#198 classifier) owner's report: run 40230509989 attempt 1 at head 02d2cbbdb93af264d46763c6d86b0b8ea5691f14 failed only in credential_command_shell_exit_preserves_delayed_inherited_writer, tests/credential_command.rs:516 Elapsed(()), job 121280997219. The claims that #202 does not touch credential code and that classifier tests passed remain owner-reported, not a reconciler source or CI inspection. The comment also reports one failed-job rerun at the same head; this is a reported owner action, not a new retry authorization, repair, waiver or readiness credit, and does not erase the first failed attempt. The reconciler captured and read the complete public comment, not the raw job log, source or retry outcome. Existing Local Daemon ownership, routing and all prior observations remain unchanged; no new issue, node, owner, dependency, status, disposition or debt/HOLD clearance follows."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6403052431",
+          "createdAt": "2026-10-25T20:47:15Z",
+          "updatedAt": "2026-10-25T20:51:48Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40230509989",
+          "job": "121284088689",
+          "pullRequest": 202,
+          "workflowAttempt": 2,
+          "prHead": "02d2cbbdb93af264d46763c6d86b0b8ea5691f14",
+          "executedRef": "refs/remotes/pull/202/merge",
+          "executedMerge": "0cbecafc3b944bf920aad34e5fa8764ac683653c",
+          "details": "Watcher reports a heap-corruption observation from PR #202 (#198), ordinary Build and test (windows-latest), attempt 2. Campaign routes it to existing #166 owner d7a17cd2, not another owner or Watcher dependency. PR/event head 02d2cbbd and the artifact labels differ from the executed refs/remotes/pull/202/merge checkout at 0cbecafc, a merge of 02d2cbbd into 6c7ff068. Binaries and symbols derive from that merge. The real_process_01_concurrent_first_use child exited with 0xc0000374 (STATUS_HEAP_CORRUPTION) at tests/daemon_process_sqlite.rs:518 (via :793); the test then panicked at :800 (via :746). Stdout and stderr were empty; the target reported 48 passed, 1 failed. Keep this distinct from earlier PageHeap 0xc0000005 stages. No common cause or PR #202 fix is established. Local separately reports bounded retained job-labeled UTF-8 text, Git metadata and test-source checks, preserved in the existing #166 same-observation qualification. These are not reconciler replay or raw API/archive verification. Whether attempt 1 reached daemon_process_sqlite is unestablished. The earlier public passed-target and no-artifact assertions were corrected and remain historical. The archive entries below are Watcher-reported API metadata and timing associations, not downloaded-byte digests or inspected dump evidence. Their shared name does not identify contents. The historical failed-jobs rerun authorizes no further retry. #198 remains in progress, CI-blocked on external #166/#167 under strict CI, not ready. After a verified actual #166 product repair merge, Local must separately wake #193 owner 519693a5 and #198 owner a96926b1. Both deliveries remain pending; the original #193 obligation is preserved. The two source qualifications describe one observation, not duplicate occurrences or a new candidate/disposition. No source/native/runtime replay, diagnosis, repair, review/CI/readiness/merge/debt/HOLD acceptance or workstation-freeze exception follows.",
+          "archiveMetadataReportedByWatcher": [
+            {
+              "id": "12613228369",
+              "bytes": 73218796,
+              "createdAt": "2026-10-25T20:44:11Z",
+              "timingAssociation": "attempt2",
+              "apiDigest": "sha256:846ce5575569c883eade197bd3fea7dfa1c668776f89a291b545180bf005f87d"
+            },
+            {
+              "id": "12613716010",
+              "bytes": 73235080,
+              "createdAt": "2026-10-25T20:33:14Z",
+              "timingAssociation": "attempt1, same name",
+              "apiDigest": "sha256:75e656b3c72276edf6edd7249389b7a245a8b371807b79bdee3ff3292898f81b"
+            }
+          ],
+          "archiveLimits": "IDs/digests and timing association are Watcher-reported API metadata. Local did not download or inspect archives, verify their digests against downloaded bytes, or establish dump presence. Use immutable IDs, not same-name selection."
         }
       ]
     },
@@ -542,6 +583,30 @@
           "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6401453292",
           "createdAt": "2026-10-25T18:26:23Z",
           "details": "Design steward 88943d7d dispositions the native-decoder tool-pinning question in owner update https://github.com/lossyrob/telex/issues/172#issuecomment-6401426671. The reconciler read both complete public bodies and retained them exactly: steward 4,158 bytes/SHA-256 5a7e9c63796d20082a6704518186b351052bfdd8fc3501cf26eb0c8d3cc24c2c and owner 1,921 bytes/SHA-256 d123cf1dd7ca2933014d1710c50b1427e7139369711d5e064b0ad730960ccafb. This separately recorded disposition is an explicit, narrow amendment to the PRELAUNCH native-hash timing in 6400716200/6401198510. It does not rewrite historical prelaunch-hash receipts, silently revise a frozen pending packet or establish that a current packet satisfies the amendment. The exception covers only declared Apple-supplied hdiutil, xcrun-selected otool and libParallelCompression used by this static component; ipsw, 7zz and other downloaded/added tools retain their preknown version/binary pins. Before launch, a later exact-SHA packet must freeze the exact decoder-host gate26.6.2/25G83, allowed native-component paths/resolution rules, xcrun/developer-directory/SDK selection policy and manifest/check sequence. No search-path substitution, alternate toolchain/library, host-build fallback or on-failure upgrade is allowed. Record actual host architecture, runner image/build and developer/SDK identities without confusing decoder-host and offline-target architectures. Inside each of the same two permitted jobs, verify the host gate and resolve/record the actual native components before transfers or selected-input processing. Retain actual paths, versions where available, Mach-O identities where applicable and SHA-256s before invoking them on selected data; bind the manifest to the exact workflow SHA and job/attempt. Use those same resolved components throughout processing and check their bound identities remain stable before accepting the result. Changed or missing identities/hashes, wrong host or unresolved resolution means explicit decision-needed, not success, substitution, a discovery job or an infrastructure-retry workaround. An actually loaded shared-cache native library must be bound to its image identity and relevant backing cache/subcache identities and hashes before decoder use. A nominal pathname, SDK stub or unrelated on-disk copy cannot substitute; inability to establish binding within the fixed bounds is decision-needed. This is not an exhaustive audit of every transitive OS dependency. The provider decoder host and declared Apple-native toolchain selection are explicit trust assumptions. An observed hash identifies that job's concrete component, not independent pre-run authentication of an already-approved binary or proof that another nominally identical host has the same bytes. Authenticated input ancestry, independent nested checks and exact output identities remain required. The amended rule and trust boundary must appear in the issue-frozen later packet, not be inferred afterward from a hash log. The full committed two-job packet remains unreviewed and launch-incomplete in this source snapshot. The Intel x86_64 versus x86_64h finite-family question is explicitly unadjudicated by this source; a later separate disposition must not be silently carried backward. All other exact-SHA, two-job, tool-pin, input, time/resource/output, cleanup and single failed-job-only same-SHA infrastructure-retry conditions remain unchanged. No push/run, pin-discovery job, reconstruction, selected-image execution, extra retry, completed ARM25 rerun or native capture is authorized. Physical coverage, actual wrapper/admission synthesis, callback scope and operator authority remain unchanged. No task, graph, dependency, status, owner, admission, implementation, merge or debt clearance follows. Final #172 product HOLD remains unchanged."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6401508183",
+          "createdAt": "2026-10-25T18:31:28Z",
+          "details": "Design steward 88943d7d accepts the finite x86_64-only/no-fallback cache-selection and stop rule for a later corrected exact-SHA static packet. The reconciler read the complete public comment and retained its exact body: 3,617 bytes/SHA-256 7495e5f9b1d26ce70cb0af5d193f01e52ac6179afad0bd1de5ea83052ab9a6fa. The steward reports checking only the Intel25 family-rule and launch-incomplete portions of local preparation packet SHA-256 daf3ae42c33099f2be6e5e8db9d884ab4f7957974ee13f3d94638810b5d4dc0d. These are attributed component findings, not a reconciler replay of that packet or cache contents. Candidate commit71071004251df0e97e6e7c85159a6f9bfbc4fb76, bounds8d4334cbbd047ddf157e3288b174d503526c0bdcf332f792fc6e3979270ffc97 and the full preflight are not approved. No prior demonstration that a matching cache exists is required for this bounded attempt. Within the authenticated reconstructed image root, accept exactly one regular nonsymlink dyld_shared_cache_x86_64 primary at either image-relative System/Library/dyld or System/Library/Caches/com.apple.dyld. These locations are not a search of the decoder host's /System. Reject duplicates even when bytes/UUIDs match; never choose the first. Check both corresponding dyld_shared_cache_x86_64h locations and stop on any competing family entry. Symlinked, inaccessible or otherwise unclassifiable candidate locations cannot be silently treated as absence. Do not follow aliases outside the selected image or broaden the finite search on failure. Require exact x86_64 cache-family magic and selected-image CPU type/subtype, not a prefix also matching x86_64h. Preserve raw Mach-O CPU fields and explicitly define subtype-3 comparison and capability-bit handling in the corrected packet; no implicit masking or normalization of a different subtype. Existing cache/subcache identity, layout and selected-library checks remain required before semantic decoding. Absence, duplicates, x86_64h/mixed-family content, wrong magic/type/subtype or unresolved evidence yields an explicit incomplete/decision-needed result with a failure/completeness receipt. No substitution, family-discovery job or semantic retry is allowed; a proposed x86_64h/location/family expansion returns for disposition. A positive selection establishes only an offline candidate, not actual loaded-image correspondence, physical Intel coverage, equivalence or shipping policy. This is a conservative evidence-selection policy, not an inference from the RIDIFF x86_64 patch tag. The owner still owes actual-image correspondence, the finite physical coverage argument and the actual query-wrapper/admission synthesis; an uncovered desired class is not removed from operator scope. Native-component binding under6401453292, owner-reported CFG/indirect-classification findings, corrected source, a new exact-SHA packet and complete issue freeze remain separate and unapproved by this inspection. This is a later separate qualification, not a rewrite of the historical Intel-ambiguity source or a revision of any already-frozen packet. All other6400716200/6401198510/6401453292 conditions remain. No push/run, reconstruction, new job/native capture, selected-image execution, product action, task, graph, dependency, status, owner, policy, implementation, merge or debt clearance follows. Final #172 product HOLD remains unchanged."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6401765206",
+          "createdAt": "2026-10-25T18:55:06Z",
+          "details": "The then-design steward's issued bounded mechanical query-slice verdict approves exact code extents, instruction-byte reproduction, function-local type associations and 50 selected static direct-call identities in owner packet https://github.com/lossyrob/telex/issues/172#issuecomment-6401722727. This separate historical successor does not rewrite earlier static-pointer or typed-record limits. The reconciler read both complete public bodies; all replay, raw-byte, symbol, type and command results remain steward/owner-attributed, not a reconciler kernel/tool replay. The steward reports a separate verifier importing/running none of the owner collector/extractor/replay scripts, rehashing all 1,011 manifested files / 7,698,292 bytes across three collections: query-code 301 files / 1,606,754 bytes, dispatch-code 383 / 3,978,980 and dispatch-types 327 / 2,112,558. It rehashed each original authenticated kernel/DWARF pair, checked CPU/UUID and executable file/VM mappings and tied each selected extent to its actual dSYM range/symbol. All 227 pinned LLVM code commands (50 selection queries plus 177 disassemblies) and 150 exact function/type DIE queries reportedly reproduced complete stdout with successful status and empty stderr. All 177 standalone bodies contain 147,916 bytes / 36,751 instructions: 75 handler/host_info bodies contribute 81,046 bytes, and 102 entry/dispatch/name/output bodies contribute 66,870. Instructions match original bytes and exact contiguous ranges without gaps or invented tails. The selected handler starts equal prior registration-pointer targets. Additional standalone bodies are sys_sysctlbyname, sysctl_root, name2oid and sysctl_old_user per image, plus two userland_sysctl bodies. All 50 userland_sysctl inline instances, 50 sysctl_create_user_req inline instances and host_info inlined-caller obligations remain open. All 75 local-type links follow the actual selected function DIE and its immediate named parameter/local: sys_sysctlbyname.uap, its req and sysctl_root.req, not a similarly named type from another CU. Per image, entry and dispatcher req refer to the same 80-byte sysctl_req DIE; newptr/newlen are at 0x30/0x38, oldfunc at 0x28, with all ten offsets reproduced. The 48-byte sysctlbyname_args has new/newlen at 0x20/0x28; all 18 ordinary/padding members and type references remain retained. These are compiled layout links, not runtime values. Raw instruction decoding at 50 in-range instruction boundaries reproduces two static direct calls per image, sys_sysctlbyname -> sysctl_root and sysctl_root -> name2oid, using ARM BL or Intel E8 displacement. The KPI aliases _sysctlbyname/_kernel_sysctlbyname remain distinct from the selected _sys_sysctlbyname public-entry symbol. All prior 3,725 production-index, 316 pointer, 351 typed-record and 27 ARM24 nested-input entries reportedly rehash unchanged. Steward checker SHA-256 is 16a7875bff1b47aec009ae990c4676802dd511bc4108c59e25be31d696d98090; its receipt is 7e7d315f2b78c64cd52b32d2c3dcbd136427ec509b22edeb340d938626e5d4b1. This does not promote two reference-image request/write-gate observations to all-variant semantics. Active syscall/public-registry mapping, registration/init/mutation, backing-string boot lifetime, conditional CPU view, mapped userspace wrappers and physical/translation equivalence remain open. Domain remains 23 physical-production candidates plus two VMAPPLE references, not 25 admitted classes. No selected image execution, Mac workflow/capture/transfer/reconstruction, extra seven-root static-job query, source/full-preflight approval, task/graph/dependency/status/owner, product, launch, debt, admission or final #172 HOLD clearance follows. Existing callback/operator scope and separate route/source obligations remain; later sysent and timing components stay separate."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6401764977",
+          "createdAt": "2026-10-25T18:55:05Z",
+          "details": "The then-design steward's issued clarification explicitly qualifies actual-consumer native-library observation timing under comment 6401453292. It says a pre-use controller binding, justified trusted-loader relation and mandatory post-use confirmation in the actual ipsw process are potentially admissible for this bounded data-only component, subject to exact-source review. It does not additionally require interception or pause proving that consumer mapping before RawImagePatch, and does not claim the controller observation alone satisfies the earlier wording. The reconciler read the complete public clarification; this records its conditions, not an implementation, component observation or source pass. Before transfers or selected-input processing, bind the provider-native libParallelCompression image actually loaded into the controller: LC_UUID, architecture, header, slide and applicable backing cache/subcache identities/hashes, plus the unchanged host/tool/developer/SDK manifest. Nominal paths or SDK stubs are not concrete provider binding. Before decoder launch, frozen source and effective configuration must justify why unchanged pinned ipsw resolves to the same bound provider image/cache, including architecture, resolution route and environment. Exclude inconsistent library-search/insertion overrides and alternate routes. A shared pathname is insufficient; DYLD_PRINT_LIBRARIES observes loading, not library-selection pinning or a function call. After the decoder command, before accepting or advancing its result to semantic processing, retain and verify that exact child's actual loader trace against the pre-use binding and recheck unchanged components. Distinguish relevant images from unrelated children. Missing, suppressed, truncated, ambiguous or mismatching evidence returns decision-needed; never substitute a controller log for unavailable consumer evidence. Assert only established fields: UUID/path tracing alone supplies no slide, backing-cache hash, function-call observation or live PAC check. Any identity bridge must be justified in the exact-source packet, which must show diagnostic sufficiency under the pinned host/architecture and fail closed otherwise. No extra probe/discovery job, component substitution or infrastructure-retry workaround repairs missing evidence. The declared provider-native-loader trust boundary remains explicit: this is not interception or independent pre-first-selected-byte attestation of the actual consumer mapping. A later mismatch invalidates reconstruction as evidence; preserve its failed receipt, reject its output and do not silently substitute or continue. The permitted operation processes data, not product/helper admission or execution of selected image/library bytes. This clarification approves no proposed source. The corrected exact-SHA two-job source/full packet, native-binding implementation, findings and freeze still require review. Named Apple-component exception, downloaded-tool pins, finite Intel-member rule, resource/input/output/cleanup limits and retry conditions stay unchanged. No run, push, new job, task/graph/status, owner, product admission, physical equivalence, debt or final #172 HOLD clearance follows. Stopped unadjudicated native.py notes are not a verdict."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/172#issuecomment-6401937749",
+          "createdAt": "2026-10-25T19:10:41Z",
+          "details": "The then-design steward's issued APPROVE covers only bounded mechanical compiled-table/type/raw-pointer association in owner packet https://github.com/lossyrob/telex/issues/172#issuecomment-6401892866. The reconciler read both complete public comments; all collection, kernel/DWARF, LLVM, raw-page and decoder replay results remain attributed to the steward/owner, not a new reconciler execution. This is a separate successor, not a frozen earlier-packet revision or an active-dispatch, semantic, physical-equivalence or admission verdict. The steward reports independently rehashing all 423 files / 2,432,949 bytes, the 25 original authenticated kernel/DWARF pairs and pinned LLVM, then reproducing all 125 exact queries including complete stdout, empty stderr and successful status. Its separate checker executes neither the owner collector nor verifier/helper adapter; Mach-O/format7 definitions reuse its earlier independent pointer checker. Per image, actual sysent variable DW_OP_addr equals bound _sysent. Following that variable's concrete array -> const -> structure chain gives 558 elements of 24 bytes and sy_call offset 0; all five member offsets/type references were checked, not a similarly named type in another CU. The selected original 24-byte record is at base + 274 * 24. Actual sy_call pointer DIEs omit DW_AT_byte_size on all 25 images. Walking original raw __debug_info unit headers identifies each exact owning DWARF5 CU with address_size=8; retained raw header, boundaries and offsets match, and variable/type chain/pointer are within that same unit. This accepts that concrete owning-unit default, not an architecture guess or general unresolved-type waiver. For 23 ARM fields, the steward independently located declared format7 metadata, matched whole raw pages to original kernels and walked 7,033 entries across 23 pages. Selected fields are chain members and authenticated-format rebases; raw target/authentication metadata and preferred-base arithmetic match under the unchanged narrow zero-tail __CTF selected-prefix accommodation. Two Intel literals match preferred VM addresses directly. All 25 targets equal _sys_sysctlbyname and the low_pc of its already-approved public-entry range, whose original bytes and hashes also match. The first strict omitted-width rejection, zero completed images, original reader source and all 14 indexed failed-attempt files remain intact. All prior 1,011 query-slice, 3,725 production, 316 pointer, 351 typed-record and 27 nested-input entries reportedly rehash unchanged. Owner collection index SHA-256 is 50a6345897ba3615ba5dda6990564d1f7e0aed08e105d0157e4d6c38194991c2; first-failure index is 9704d252218cd146434ea70c24a60c2cc9600a85fff25dd887f74f9feabc8822; steward checker is 493c510211e707e3a96ff168536bfe849396c89bc8d2da2ccfda96f04007d17e; steward receipt is 129051dd8c880197e85e412f9625b400f0df4f63d42c9e15afc87464f5ce7622. Generic syscalls.master number 274 remains a lookup candidate, not exact patched-production-source correspondence. The compiled record supplies the bounded association independently. Raw auth metadata is not live PAC validation, relocation or invocation. Active table/index selection, dispatcher use, initialization/mutation/boot policy, active OID registry, CPU-view predicate, actual mapped userspace wrappers/syscall numbering, physical loaded-image/translation equivalence and admission remain open. Domain remains 23 physical-production candidates plus two VMAPPLE references, not 25 admitted classes. No selected-image execution, Mac job/transfer/reconstruction/probe, extra capture/static root, product/task/graph/dependency/status/owner/debt completion, launch freeze/push/run/retry relaxation or final #172 HOLD clearance follows. Seven static-job roots, callback boundary, exact-source/preflight requirements and operator four-class scope stay unchanged."
         }
       ]
     },
@@ -681,6 +746,355 @@
         "mergeGate": "https://github.com/lossyrob/telex/pull/178#issuecomment-6369444587",
         "mainCi": "https://github.com/lossyrob/telex/actions/runs/39985513856 attempt 1: success, 18 of 18 jobs at the exact merge, with no retry.",
         "completionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 sent completion for watcher-host-containment-doc-alignment on 2026-10-23 and explicitly completed this debt terminal path. The interim macOS fail-closed statement is delivered. The existing later #172 rewrite duty, implementation HOLD, and final authorization gate remain unchanged."
+      }
+    },
+    {
+      "id": "watcher-windows-lib-harness-abnormal-exit-0xc0000409",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "not-required-for-source-items",
+      "description": "On direct main cbbff03b, the ordinary Windows workspace job reported abnormal exit 0xc0000409 of the telex-watcher library test harness. The cause is unknown.",
+      "disposition": "external",
+      "target": {
+        "tracker": "https://github.com/lossyrob/telex/issues/203",
+        "owners": [
+          "Watcher #203 owner session b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+        ],
+        "routing": "Campaign directed immediate staffing instead of waiting for operator check-in; the Watcher coordinator launched the existing #203 owner."
+      },
+      "status": "in-progress",
+      "decisionState": "accepted",
+      "rationale": "Cargo identifies the affected Watcher library harness, not a culprit component or test. sourceNodeId watcher-runtime-core marks crate scope only; it is not causal attribution or a new dependency. This is separate from #166 command-child exits and the external Local signatures record.",
+      "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. No retry, waiver or flake exception. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203.",
+      "dispositionAuthority": "Campaign original direction toolu_01YYygb1QTgk6ahpmW3XrMxw is confirmed by Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c in actual correction toolu_01JVjJSa3b4msyzxVzPYAHQU, which supplies the canonical register text and identifies the earlier confirmation as a reconstruction. It authorized one immediate #203 owner. Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports actual launch and directs this owner/status recording in toolu_011KH1FEA1Js2QGRAao8jtL6. The original unassigned evidence-routing disposition remains historical below.",
+      "evidence": [
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/203",
+          "createdAt": "2026-10-25T22:45:18Z",
+          "details": "Issue #203 is open, labeled bug and unassigned at capture. It records one main push-attempt-1 occurrence. Cargo reported telex-watcher --lib executable telex_watcher-adb209575102230f.exe exiting 0xc0000409, labeled STATUS_STACK_BUFFER_OVERRUN, in cargo test --workspace --verbose; the step exited 1. The harness announced 60 tests, printed 36 ok and 1 ignored, then terminated without an aggregate result or named failing test. The last printed runtime_tests::postgres_watcher_runtime_matrix result was ok; its output position identifies neither culprit nor teardown phase. These are progress counts, not a completed 36-pass/23-fail result.",
+          "triageHypothesis": "Issue #203 notes that Rust abort paths using __fastfail can also surface as 0xc0000409, including process abort, a panic while already panicking (for example in Drop during unwinding), or an abort-on-panic path. This is an issue-attributed hypothesis to check, not an observed abort path, proof of a stack-buffer overrun, exploitability, native fault location or root cause.",
+          "capture": {
+            "rawFile": "watch203-issue-raw.json",
+            "bodyFile": "watch203-issue-body.txt",
+            "updatedAt": "2026-10-25T22:45:18Z",
+            "bodySha256": "f2f02f3c92d899a4e1b7c9e916436c7cc72450f99f1ef01c71d9921f9bb7f693"
+          }
+        },
+        {
+          "source": "ci-job",
+          "url": "https://github.com/lossyrob/telex/actions/runs/40240112300/job/121309895502",
+          "head": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40240112300",
+          "job": "121309895502",
+          "details": "Main push event, attempt 1, ordinary Windows default workspace. Head cbbff03b only adds the Local #174 evidence record. Local matched the retained checkout output and bounded harness progress/exit excerpts. No reconciler CI refetch or execution occurred; the exited process is the library harness, not an established daemon crash."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6404410898",
+          "createdAt": "2026-10-25T22:41:06Z",
+          "details": "The sentinel reports 20/21 for the run, passing boundary jobs, timing samples and a 70-run cohort. Those aggregates remain sentinel-attributed, not an independent inventory, failure-rate trial or causal comparison. Local read an earlier body whose recorded updatedAt is 22:41:06Z; the reconciler separately captured the current complete public body. Its historical pending-routing and no-new-issue statements do not override later issue #203 creation or the owning Watcher routing decision.",
+          "capture": {
+            "rawFile": "watch203-report-raw.json",
+            "bodyFile": "watch203-report-body.txt",
+            "updatedAt": "2026-10-25T22:45:02Z",
+            "bodySha256": "1e344b1438308fd5c1f643e39b956514a7b07216d92201c210cba6c0d1c514e3"
+          }
+        },
+        {
+          "source": "local-classification",
+          "classificationPacket": {
+            "file": "watch203-local-intake.json",
+            "bytes": 7516,
+            "sha256": "680f59a9a2e0080a246f137f52a3ea45a96b9b882013752cefd8db63db4b646c",
+            "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "watcherRoutingSource": "toolu_01MJApt8eW5Xi5tWXkaExKJE",
+            "captureReceipt": "watch203-source-capture.json"
+          },
+          "details": "The complete 7,516-byte Local packet projects exactly below, without redaction. Local reports hash/byte matching of retained custody, log, source-boundary and run receipt, bounded progress counting, public-report reading and 74 immutable target-identity lines. Those checks remain Local-attributed. The reconciler read only the complete classification packet and public issue/report, not raw logs, underlying source excerpts, archives, executables or runtime state.",
+          "retainedLocalClassification": {
+            "kind": "bounded-watcher-library-harness-exit-classification",
+            "sourceMessage": "call_y12ceJ0y3xV5HRzL7FdyYYwh",
+            "reporterSessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "classification": {
+              "decision": "New observed signature: abnormal termination of the telex-watcher library test harness with exit0xc0000409 in the ordinary Windows default-workspace job.",
+              "triageBoundary": "Route to the owning Watcher coordinator for evidence-only intake and disposition, because Cargo identifies the Watcher library harness as the terminated process. This identifies the affected target, not which component contains a defect.",
+              "distinctFrom166": "The retained166 observations concern0xc0000005 and0xc0000374 exits of invoked Telex command children in daemon_process_sqlite. This observation names the telex-watcher library harness itself and a different status. No common cause, additional166 occurrence or expansion of166 repair scope is established.",
+              "statusMeaning": "Cargo labels0xc0000409 as STATUS_STACK_BUFFER_OVERRUN. The label alone does not establish an actual stack-buffer overrun, exploitability, fault site, corrupting operation or root cause.",
+              "testAttribution": "No named failing test or aggregate target result was printed. Concurrent progress and the last printed test do not identify the culpable test, teardown phase or a daemon crash."
+            },
+            "observation": {
+              "head": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+              "runId": "40240112300",
+              "event": "push",
+              "attempt": 1,
+              "jobId": "121309895502",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40240112300/job/121309895502",
+              "command": "cargo test --workspace --verbose",
+              "target": "telex-watcher --lib",
+              "executable": "telex_watcher-adb209575102230f.exe",
+              "harnessExitCode": "0xc0000409",
+              "reportedStatus": "STATUS_STACK_BUFFER_OVERRUN",
+              "stepExitCode": 1,
+              "progress": {
+                "announcedTests": 60,
+                "printedOk": 36,
+                "printedIgnored": 1,
+                "aggregateResult": null,
+                "namedFailingTest": null,
+                "qualification": "These are printed progress counts, not a completed36-pass/23-fail result or proof that every other test started. No per-test failure count is inferred."
+              },
+              "lastPrintedTestQualification": "runtime_tests::postgres_watcher_runtime_matrix printed ok before Cargo reported abnormal termination. Its position in the output does not establish that it caused the termination or that failure occurred during its teardown."
+            },
+            "retainedEvidence": {
+              "custodyFile": "main-40240112300-evidence-custody.json",
+              "custodyBytes": 13278,
+              "custodySha256": "b195587ed805182f8eb0f1960fd44f3060d30dfbae20484d6a8a37a7d2cdd818",
+              "logFile": "main-40240112300-job-121309895502.log",
+              "logBytes": 358561,
+              "logSha256": "4c7ae4165f7d3e3c0291013c44615f86557117509248479d919d15235a2e7ac9",
+              "sourceBoundaryFile": "main-40240112300-source-boundary.json",
+              "sourceBoundaryBytes": 7962,
+              "sourceBoundarySha256": "02a6c25c521e63b8682c9b1a021a2f0632c110f8e85bb25426a429fa09937ef9",
+              "runReceiptFile": "main-40240112300-ci.json",
+              "runReceiptBytes": 45687,
+              "runReceiptSha256": "e79d44cc8f916867ba7991717f2d3be123a0563f7f4981017923e8498c4acd7a",
+              "logRanges": [
+                "94-99",
+                "1229-1232",
+                "2482-2527",
+                "2626-2630"
+              ],
+              "localVerification": "Read complete custody and source-boundary JSON; matched custody, retained log, source-boundary and run-receipt byte counts and SHA256. Matched every supplied log excerpt and mechanically counted36 ok plus1 ignored in the bounded harness output, without an aggregate result or named failure. Read the complete public health report. No full-log-read or complete-run-inventory audit is claimed.",
+              "checkout": "Retained git log -1 output at line98 identifies direct main cbbff03b2eeee7178ed3f9f33cf2314ee27899f8.",
+              "formatQualification": "Hashes identify the sentinel-retained capture bytes. They are not a downloaded artifact ZIP digest or proof of archive contents."
+            },
+            "immutableTargetIdentity": {
+              "matchedLines": 74,
+              "files": [
+                {
+                  "path": "telex-watcher/Cargo.toml",
+                  "blob": "1139b0176e06357c557307bddc8480950c8a6e42",
+                  "bytes": 1505,
+                  "sha256": "23bd7af2c8eaa56585f51284a258bc475acc7ea52c5c537a1e71d0374ff58548",
+                  "lines": "1-45"
+                },
+                {
+                  "path": "telex-watcher/src/lib.rs",
+                  "blob": "d7f56b05547e0f717315406240fa65ca1eb3e336",
+                  "bytes": 833,
+                  "sha256": "4d6dacb975a06078638ed7e99d7e80f7c2b1195a019f5bbc2ab87a4e1c839d60",
+                  "lines": "1-29"
+                }
+              ],
+              "verification": "Local matched all74 numbered lines and both complete immutable blob byte counts/hashes to the tested head. These identify the package, default features and library modules, not a fault-location trace or complete executed feature/dependency graph.",
+              "sourceComparison": "The cbb commit changes only the Local174 evidence record. An independent Git comparison from actual Watcher180 merge0d5347a6e1b8a1716b524c537c4886d3f4d49b65 to cbb shows nine changed paths, all under .streamliner.",
+              "comparisonLimit": "Equal committed nonplanning source does not establish identical executable/build identity, dependency resolution, runner state or runtime inputs. No controlled before/after or PR174/180/192/193/198/202 causal attribution follows."
+            },
+            "uploadMetadata": {
+              "artifactId": "12617062276",
+              "reportedBytes": 73044878,
+              "reportedZipSha256": "79e20a5d2311a67e8b09d89580222f5bfe60855d8a536b40f57f4a03fda36a65",
+              "qualification": "Matched upload lines2626-2630 in the retained log. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
+            },
+            "publicReport": {
+              "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6404410898",
+              "updatedAt": "2026-10-25T22:41:06Z",
+              "read": "Complete body read by Local.",
+              "attribution": "The20/21 aggregate, passing boundary jobs, timing samples and70-run cohort remain sentinel-reported; no independent full-run or failure-rate inference."
+            },
+            "deduplication": {
+              "base": "cbbff03b2eeee7178ed3f9f33cf2314ee27899f8",
+              "scope": "Exact strings40240112300,121309895502,0xc0000409 and STATUS_STACK_BUFFER_OVERRUN searched in all canonical workstream discovery ledgers.",
+              "result": "No exact match found. This is a bounded signature check, not exhaustive history or authority to create an issue or record."
+            },
+            "disposition": {
+              "recipient": "Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407",
+              "request": "Owning Watcher evidence-only intake and record-placement decision for the affected library harness, preserving unknown cause and exact progress/exit evidence.",
+              "implementationOwner": "Unassigned by this classification.",
+              "newIssueOrNodeOrOwner": false,
+              "retryOrProbeOrObserver": false,
+              "canonicalMutation": false,
+              "gateOrReadinessChange": false,
+              "repairScopeExpansion": false,
+              "conservation": "Do not append to the Local166 native-command-child record or watcher-ci-local-daemon-signatures as a confirmed Local defect solely from the exit code. Keep existing ownership,166 recovery state, both pending193/198 product-repair-merge wakes and all prior deliveries/debts unchanged. Any canonical projection needs the owning role's consent and fresh review."
+            }
+          }
+        },
+        {
+          "source": "artifact-upload-metadata",
+          "id": "12617062276",
+          "bytes": 73044878,
+          "reportedZipSha256": "79e20a5d2311a67e8b09d89580222f5bfe60855d8a536b40f57f4a03fda36a65",
+          "details": "Artifact 12617062276 reports 73,044,878 bytes. The ZIP digest and ID are upload metadata only, not verification against downloaded bytes. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
+        },
+        {
+          "source": "later-public-harness-occurrence",
+          "url": "https://github.com/lossyrob/telex/issues/203#issuecomment-6406469417",
+          "createdAt": "2026-10-26T01:52:41Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40254795271",
+          "job": "https://github.com/lossyrob/telex/actions/runs/40254795271/job/121354231596",
+          "details": "Second reported #203 occurrence: PR #196 event head b0ab5f2cf067f08afbb20bd807a89af1e0affb46, attempt 1, ordinary Windows job 121354231596, executed merge c95bfa63e7a540d86bf095b71c8102ba3a2e109e with ordered parents 77fdf504a994b993e449c02c10ccb19a56e3fc01 and b0ab5f2cf067f08afbb20bd807a89af1e0affb46. The event head is not the executed commit. The telex-watcher --lib harness telex_watcher-adb209575102230f.exe announced 60 tests, printed 37 ok and 1 ignored, then exited 0xc0000409 without an aggregate result or named failing test. These are progress counts, not a completed result or a classification of unprinted tests. The last printed startup_health_waits_for_the_first_membership_reconciliation test was ok; output position does not locate the culprit or failing phase.",
+          "classificationPacket": {
+            "file": "watch203second-local-intake.json",
+            "bytes": 4258,
+            "sha256": "0ab975c5cd3ff8f341a01090326a9d4077c0de1cee31999f200f3dbac4374a93",
+            "originalFile": "pr196-run40254795271-watcher-harness-intake-20261025.json",
+            "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "captureReceipt": "watch203second-source-capture.json"
+          },
+          "retainedLocalClassification": {
+            "kind": "local-public-evidence-handoff-to-owning-watcher",
+            "issue": "https://github.com/lossyrob/telex/issues/203",
+            "recipient": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "sourceReport": {
+              "session": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+              "toolCall": "toolu_017b3ums6VtfQzPUjxHqf3xb",
+              "qualification": "Initial report said 59/60 and called this a sixth observation. Those statements are not adopted: direct public-log inspection finds 37 printed ok and 1 ignored, and this is separate Watcher intake, not a sixth #166 native-child case."
+            },
+            "publicIdentity": {
+              "pullRequest": "https://github.com/lossyrob/telex/pull/196",
+              "eventHead": "b0ab5f2cf067f08afbb20bd807a89af1e0affb46",
+              "runId": 40254795271,
+              "attempt": 1,
+              "jobId": 121354231596,
+              "jobName": "Build and test (windows-latest)",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40254795271/job/121354231596",
+              "jobStatus": "completed",
+              "jobConclusion": "failure",
+              "jobStartedAt": "2026-10-26T01:34:13Z",
+              "jobCompletedAt": "2026-10-26T01:43:54Z",
+              "executedMerge": "c95bfa63e7a540d86bf095b71c8102ba3a2e109e",
+              "executedTree": "e639fcc58e02d5357e9366dc7ea3569f08f84375",
+              "orderedParents": [
+                "77fdf504a994b993e449c02c10ccb19a56e3fc01",
+                "b0ab5f2cf067f08afbb20bd807a89af1e0affb46"
+              ],
+              "geometryVerification": "Completed-job log lines 111 and 114 identify the executed merge; the public GitHub git/commits endpoint independently confirms its full SHA, tree and ordered parents. The event head is not the executed commit."
+            },
+            "localPublicCapture": {
+              "file": "run40254795271-job121354231596-public.log",
+              "bytes": 374442,
+              "sha256": "8a7e6dd564640502ba7797c08d3a13667ccca368856564f54411e1be17626cf0",
+              "source": "gh api repos/lossyrob/telex/actions/jobs/121354231596/logs --allow-escape-sequences",
+              "custody": "Independently retrieved completed-job response bytes; not copied from d7. Bytes match the owner's reported length and hash. The raw capture contains 1637 NUL bytes elsewhere. The inspected harness segment, original lines 2598-2644, contains no NULs and was counted without normalization. The retained raw file is unchanged."
+            },
+            "harness": {
+              "target": "telex-watcher --lib",
+              "executable": "telex_watcher-adb209575102230f.exe",
+              "startLine": 2598,
+              "announcedTests": 60,
+              "printedOk": 37,
+              "printedIgnored": 1,
+              "printedFailed": 0,
+              "aggregateResultPresent": false,
+              "namedFailingTestPresent": false,
+              "lastPrintedTest": "runtime::tests::startup_health_waits_for_the_first_membership_reconciliation",
+              "lastPrintedTestResult": "ok",
+              "lastPrintedTestLine": 2638,
+              "abnormalExitLine": 2642,
+              "abnormalExitAt": "2026-10-26T01:43:38.8718701Z",
+              "exitCode": "0xc0000409",
+              "cargoStatusLabel": "STATUS_STACK_BUFFER_OVERRUN",
+              "stepExitCode": 1,
+              "limits": "No named failing test or aggregate outcome was printed. Output order does not locate the failing test or phase; unprinted tests cannot be classified as passed or failed. The status label alone proves neither stack-buffer corruption nor panic/abort mechanism."
+            },
+            "archive": {
+              "artifactId": 12622441529,
+              "ownerReport": "Only probe dumps were present; no failing-process dump was captured.",
+              "localInspection": "Not downloaded or inspected by Local. Dump absence is owner-attributed, not an independent Local archive finding."
+            },
+            "routing": {
+              "requestedDisposition": "Owning Watcher should deduplicate this run/job and retain it under existing #203, coordinating any further work with its current owner and canonical reconciler.",
+              "classification": "Another Windows Watcher library-harness abnormal-exit signature, separate from #166's five native Telex child observations and from the named-pipe race job's reached Mio panic.",
+              "commonCause": "Unknown. Matching 0xc0000409 or temporal proximity does not connect the two jobs or identify the upstream submitted-I/O defect.",
+              "authority": "Evidence handoff only: no new tracker, owner, graph edge, retry, runtime, repair, waiver, hedge, merge or readiness authority. No canonical artifact edits by Local."
+            }
+          },
+          "publicCommentCapture": {
+            "rawFile": "watch203second-comment-raw.json",
+            "bodyFile": "watch203second-comment-body.txt",
+            "bodyBytes": 1359,
+            "bodySha256": "4fd65fffded0257861f53d098bd9bf8dc334731949119c6c60e9f9ada89e8243",
+            "updatedAt": "2026-10-26T01:52:41Z"
+          },
+          "owningWatcherDirection": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01EmuDKphKs1gs1v7zSWVPX9",
+            "receipt": "watch203second-watcher-request.json",
+            "verification": "Watcher reports independently matching the Local packet and retained log hashes and checking the counts and lines. The reconciler matches only the complete packet bytes/hash, reads the complete public comment and independently verifies public merge SHA/tree/ordered parents; it does not read or recount the raw log."
+          },
+          "limits": "Artifact 12622441529 remains uninspected here and by Local. The claim that it contains only probe dumps and no failing-process dump is owner-attributed, not an independent archive finding. Cargo labels the exit STATUS_STACK_BUFFER_OVERRUN; that label proves neither actual stack-buffer corruption nor a panic/abort mechanism. Matching status or temporal proximity establishes no common cause with the separate Mio race-job panic or the #166 native command-child observations, and no PR source causality. The initial 59/60 and sixth-observation wording is explicitly not adopted in the exact Local packet. The current #203 owner and hosted-only/no-retry scope remain unchanged; this append grants no new authority.",
+          "conservation": "Evidence-only second occurrence on existing #203. Existing owner b8e0a6cc and in-progress status, all original evidence and owner-launch qualification, all other records, both graphs and the entire Local tree remain exact. No culprit, actual stack-buffer-overrun, panic/abort mechanism, common cause, PR source causality, new owner or #166 case, retry/waiver/flake exception, graph/dependency/spec/outcome/boundary change, runtime, repair/review/CI/readiness/merge, wake, debt/HOLD or freeze credit."
+        }
+      ],
+      "limits": "This update records the existing Campaign-authorized owner launch and hosted-only repair scope, not a new reconciler launch, diagnosis, culprit, overrun finding, common cause, PR attribution, retry/waiver/flake exception, workstation machine-state change, repair/review/CI/readiness/merge, debt/HOLD or freeze credit. All original observations, exact Local packet and artifact-metadata limits remain unchanged. Historical no-owner/no-probe intake statements describe the original capture; the later single-owner authority supersedes only that staffing deferral and authorizes hosted diagnosis/repair as specified. Keep #166 command-child cases distinct, all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes exact. No graph node/edge or automatic #198/#202 relationship is created.",
+      "laterOwnerLaunchQualification": {
+        "historicalIntakeFields": {
+          "target": {
+            "tracker": "https://github.com/lossyrob/telex/issues/203",
+            "owners": [],
+            "routing": "No owner is assigned. The operator routes existing issue #203 at check-in."
+          },
+          "status": "routed",
+          "terminalPath": "Watcher closes nothing and adds no dependency, gate or change to any existing item status. Further occurrences belong on existing issue #203 with run, job, head and printed progress. No implementation owner, retry, runtime probe or automatic edge to #198/#202 is created.",
+          "dispositionAuthority": "Owning Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 routed this evidence-only external record for existing issue #203 in actual message toolu_01MJApt8eW5Xi5tWXkaExKJE. The record accepts evidence routing only, not a repair, culprit, overrun finding, staffing or gate change.",
+          "limits": "One evidence-only external record for existing #203. No culprit, actual-overrun finding, common cause, PR attribution, implementation owner, observer, retry, probe, graph edge, source/review/CI/readiness, waiver, debt/HOLD or freeze credit. Equal committed nonplanning source to Watcher #180 does not establish identical executable/build/dependency/runner/input state or a controlled comparison. Keep #166 native command-child observations and watcher-ci-local-daemon-signatures distinct; preserve all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes. No automatic edge or disposition change to #198/#202."
+        },
+        "historicalBoundary": "Original routed/unassigned intake, operator-check-in deferral and no-implementation/probe statements are preserved verbatim here and in the untouched original evidence. They are historical, not current claims that no owner exists. The new authority is one Campaign-directed hosted-only owner launch; it does not retroactively validate the original observations or imply a repair.",
+        "campaignDirection": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "originalSource": "toolu_01YYygb1QTgk6ahpmW3XrMxw",
+          "directConfirmationSource": "toolu_01JVjJSa3b4msyzxVzPYAHQU",
+          "receipt": "campaign-staffing-correction-20261026.json",
+          "canonicalRegisterTextAttributedToCampaign": "Campaign: main at cbbff03b is red: the Watcher library harness exits 0xc0000409 (run 40240112300, job 121309895502), recorded as #203, which is unassigned. Under strict CI this blocks every PR, so don't hold it for operator routing: staff one #203 owner now on claude-opus-5.5 (high). Scope: hosted-only diagnosis and repair from the public CI log. No retry, waiver or flake exception. Coordinate with Local if it is the same defect as #166. Report the session ID.",
+          "attributionBoundary": "The complete actual correction is retained. This is the canonical register quote supplied by Campaign, not a reconciler claim to have independently read the original sent message or register.",
+          "earlierReconstructionHistory": {
+            "source": "toolu_01KCqfP4XKCCZ153wxA8pSaS",
+            "receipt": "owner203-campaign-confirmation.json",
+            "boundary": "Campaign initially labeled its reconstructed direction verbatim, then corrected that provenance. The reconstruction remains immutable history, not a copy of the exact sent direction or current canonical quote. Its scope was confirmed unchanged."
+          }
+        },
+        "watcherLaunch": {
+          "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "source": "toolu_011KH1FEA1Js2QGRAao8jtL6",
+          "receipt": "owner203-watcher-direction.json"
+        },
+        "launchBinding": {
+          "file": "watcher-lib-harness-0xc0000409-20261025.json",
+          "retainedCopy": "owner203-launch-binding.json",
+          "bytes": 1988,
+          "sha256": "0b872700afa04bb6697c7b9b2049bf372092242ae03172f285157a944e1597b0",
+          "nodeId": null,
+          "ledgerRecordId": "watcher-windows-lib-harness-abnormal-exit-0xc0000409",
+          "issue": 203,
+          "sessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+          "status": "launched",
+          "updatedAt": "2026-10-26T00:36:51.0940542Z",
+          "canonicalBase": "db8eaa75b019ab143b527fb93005bab45e2ca96e",
+          "branchAtLaunch": "lossyrob-special-train",
+          "profileReportedByBinding": {
+            "model": "claude-opus-5.5",
+            "reasoningEffort": "high",
+            "contextTier": "default",
+            "mode": "interactive"
+          }
+        },
+        "kickoff": {
+          "file": "kickoff.md",
+          "retainedCopy": "owner203-kickoff.txt",
+          "bytes": 16581,
+          "sha256": "1667aaec4e52cd77bb3a47b7767e847f217f84585a6b6d09611ce785430119dc",
+          "boundary": "Full kickoff read and byte-bound, not executed by the reconciler. Its hosted-only/no-retry override applies to this owner; general role-guide retry wording does not override it."
+        },
+        "ownerSession": {
+          "sessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+          "creatorSessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "observedBranch": "lossyrob-fix-watcher-lib-harness-0xc0000409",
+          "branchBoundary": "The launch binding records the initial branch; read-only App identity subsequently reports the renamed branch. This is the same session/worktree, not a second owner, namespace rebind or replacement.",
+          "publicOwnerPostBoundary": "The coordinator said the owner would post its Owner line. This record does not claim that post has been observed; the launch is bound to the actual directions, binding, kickoff and App identity."
+        },
+        "scope": "Hosted-only diagnosis and repair of the #203 Watcher library-test 0xc0000409 failure, beginning with public CI evidence. No retry, waiver or flake exception; PR closes #203. Coordinate with Local rather than duplicate only if evidence establishes the same defect as #166. No workstation PageHeap, WER, debugger or system-state changes.",
+        "conservation": "11 records/21 Watcher nodes and all ten other records remain exact. Entire Local tree, 48 records/27 nodes, both graphs, all #166 qualifications and both pending #193/#198 product-repair-merge wakes remain exact. No graph node, edge or #198/#202 relationship is added."
       }
     }
   ]
