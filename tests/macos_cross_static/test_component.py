@@ -1093,5 +1093,178 @@ class SDKResolutionTests(unittest.TestCase):
         self.assertIn("NOT a new alias or SDK-version observation", policy["final_sdk_precision"])
 
 
+class NativeToolResolutionTests(unittest.TestCase):
+    sdk_case = SDKResolutionTests.sdk_case
+    names = ("hdiutil", "xcrun", "otool")
+    guard_message = "native executable resolves outside its allowed absolute path"
+
+    @contextmanager
+    def tool_case(self, targets=None, errors=None):
+        targets, errors = targets or {}, errors or {}
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case() as (binding, events, snapshot):
+            original_resolve, original_require = Path.resolve, native.require
+            def resolve(path, strict=False):
+                for name in self.names:
+                    if str(path) == policy[name]:
+                        events.append(("resolve", str(path), strict))
+                        self.assertTrue(strict)
+                        if name in errors:
+                            raise errors[name]
+                        return Path(targets.get(name, policy[name]))
+                return original_resolve(path, strict=strict)
+            def guarded(condition, reason):
+                if reason == self.guard_message:
+                    events.append(("tool-guard", condition, reason))
+                return original_require(condition, reason)
+            with patch.object(Path, "resolve", resolve), patch.object(native, "require", side_effect=guarded):
+                yield binding, events, snapshot
+
+    def tool_events(self, events):
+        paths = [run.BOUNDS["native_binding"][name] for name in self.names]
+        return [e for e in events if (e[0] == "resolve" and e[1] in paths) or
+                (e[0] == "output" and e[1].startswith("resolve-native-")) or e[0] == "tool-guard"]
+
+    def assert_stopped_before_binding(self, binding, events, snapshot):
+        snapshot.assert_not_called()
+        self.assertIsNone(binding.before)
+        self.assertIsNone(binding.resolution)
+        self.assertFalse(binding.decoder_confirmed)
+        self.assertFalse(any(e[:2] == ("command", "native-xcrun-version") for e in events))
+
+    def test_success_resolves_each_tool_once_in_order_before_same_guard_and_binding(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.tool_case() as (binding, events, snapshot):
+            result = binding.resolve()
+            self.assertIs(result, snapshot.return_value)
+            snapshot.assert_called_once_with()
+            expected = []
+            for name in self.names:
+                expected.extend([
+                    ("resolve", policy[name], True),
+                    ("output", f"resolve-native-{name}.json", {
+                        "tool": name, "declared_path": policy[name], "expected_path": policy[name],
+                        "strict": True, "resolved_path": policy[name]}),
+                    ("tool-guard", True, self.guard_message)])
+            self.assertEqual(self.tool_events(events), expected)
+            last_guard = max(i for i, e in enumerate(events) if e[0] == "tool-guard")
+            version = next(i for i, e in enumerate(events) if e[:2] == ("command", "native-xcrun-version"))
+            self.assertLess(last_guard, version)
+            self.assertEqual(binding.run.otool_path, policy["otool"])
+            self.assertEqual(binding.run.hdiutil_path, policy["hdiutil"])
+            self.assertEqual(binding.resolution["xcrun_version"], "synthetic-version")
+            self.assertEqual([e[1] for e in events if e[0] == "lstat"],
+                             [policy["sdk_canonical_path"], policy["sdk_versioned_path"]])
+
+    def test_each_tool_mismatch_records_exact_operand_then_same_failure_and_stops(self):
+        policy = run.BOUNDS["native_binding"]
+        for index, name in enumerate(self.names):
+            target = "/synthetic/unaccepted-" + name
+            with self.subTest(tool=name), self.tool_case(targets={name: target}) as (binding, events, snapshot):
+                with self.assertRaises(cache.EvidenceError) as raised:
+                    binding.resolve()
+                self.assertEqual(str(raised.exception), self.guard_message)
+                self.assert_stopped_before_binding(binding, events, snapshot)
+                observed = self.tool_events(events)
+                self.assertEqual([e for e in observed if e[0] == "resolve"],
+                                 [("resolve", policy[n], True) for n in self.names[:index + 1]])
+                self.assertEqual(observed[-2:], [
+                    ("output", f"resolve-native-{name}.json", {
+                        "tool": name, "declared_path": policy[name], "expected_path": policy[name],
+                        "strict": True, "resolved_path": target}),
+                    ("tool-guard", False, self.guard_message)])
+                self.assertFalse(any(e[:2] == ("resolve", target) for e in events))
+
+    def test_each_tool_resolution_error_is_recorded_without_value_and_reraised(self):
+        policy = run.BOUNDS["native_binding"]
+        for index, name in enumerate(self.names):
+            for error in (FileNotFoundError("synthetic missing"), PermissionError("synthetic denied"),
+                          OSError("synthetic I/O failure"), RuntimeError("synthetic alias loop")):
+                with self.subTest(tool=name, error=type(error).__name__), self.tool_case(
+                        errors={name: error}) as (binding, events, snapshot):
+                    with self.assertRaises(type(error)) as raised:
+                        binding.resolve()
+                    self.assertIs(raised.exception, error)
+                    self.assert_stopped_before_binding(binding, events, snapshot)
+                    observed = self.tool_events(events)
+                    self.assertEqual([e for e in observed if e[0] == "resolve"],
+                                     [("resolve", policy[n], True) for n in self.names[:index + 1]])
+                    self.assertEqual(observed[-1], ("output", f"resolve-native-{name}.json", {
+                        "tool": name, "declared_path": policy[name], "expected_path": policy[name],
+                        "strict": True, "error_type": type(error).__name__, "error": str(error)}))
+                    self.assertEqual(len([e for e in observed if e[0] == "tool-guard"]), index)
+
+    def test_sink_failure_on_each_tool_stops_before_guard_or_later_queries(self):
+        policy = run.BOUNDS["native_binding"]
+        for index, name in enumerate(self.names):
+            for outcome in ("success", "mismatch", "resolve-error"):
+                targets = {name: "/synthetic/mismatch"} if outcome == "mismatch" else {}
+                errors = {name: PermissionError("synthetic denied")} if outcome == "resolve-error" else {}
+                with self.subTest(tool=name, outcome=outcome), self.tool_case(
+                        targets=targets, errors=errors) as (binding, events, snapshot):
+                    output = binding.run.output.json
+                    failure = cache.EvidenceError("synthetic sink failure")
+                    def reject(filename, receipt):
+                        if filename == f"resolve-native-{name}.json":
+                            events.append(("sink-failure", filename))
+                            raise failure
+                        return output(filename, receipt)
+                    with patch.object(binding.run.output, "json", side_effect=reject), \
+                            self.assertRaises(cache.EvidenceError) as raised:
+                        binding.resolve()
+                    self.assertIs(raised.exception, failure)
+                    self.assert_stopped_before_binding(binding, events, snapshot)
+                    observed = self.tool_events(events)
+                    self.assertEqual([e for e in observed if e[0] == "resolve"],
+                                     [("resolve", policy[n], True) for n in self.names[:index + 1]])
+                    self.assertEqual(len([e for e in observed if e[0] == "tool-guard"]), index)
+                    self.assertEqual(events[-1], ("sink-failure", f"resolve-native-{name}.json"))
+
+    def test_receipt_mutation_or_sink_return_value_cannot_supply_guard_operand(self):
+        policy = run.BOUNDS["native_binding"]
+        for accepted in (True, False):
+            targets = {} if accepted else {"hdiutil": "/synthetic/mismatch"}
+            with self.subTest(accepted=accepted), self.tool_case(targets=targets) as (binding, events, snapshot):
+                output = binding.run.output.json
+                def mutate(filename, receipt):
+                    if filename.startswith("resolve-native-"):
+                        receipt["resolved_path"] = "/synthetic/mismatch" if accepted else policy["hdiutil"]
+                    output(filename, receipt)
+                    return policy["hdiutil"]
+                with patch.object(binding.run.output, "json", side_effect=mutate):
+                    if accepted:
+                        binding.resolve()
+                        snapshot.assert_called_once_with()
+                    else:
+                        with self.assertRaisesRegex(cache.EvidenceError, self.guard_message):
+                            binding.resolve()
+                        self.assert_stopped_before_binding(binding, events, snapshot)
+
+    def test_success_receipts_fit_unchanged_flat_output_limits(self):
+        with tempfile.TemporaryDirectory() as temp, self.tool_case() as (binding, _, snapshot):
+            output = Path(temp)
+            binding.run.output = cache.Output(output, run.BOUNDS["limits"])
+            binding.resolve()
+            snapshot.assert_called_once_with()
+            files = sorted(output.glob("resolve-native-*.json"))
+            self.assertEqual([f.name for f in files], sorted(f"resolve-native-{name}.json" for name in self.names))
+            for file in files:
+                self.assertLess(file.stat().st_size, 1024)
+                receipt = json.loads(file.read_text())
+                self.assertEqual(receipt["resolved_path"], receipt["expected_path"])
+
+    def test_oversized_error_receipt_fails_existing_cap_without_truncation_or_advance(self):
+        error = OSError("x" * run.BOUNDS["limits"]["per_file_bytes"])
+        with tempfile.TemporaryDirectory() as temp, self.tool_case(errors={"hdiutil": error}) as (
+                binding, events, snapshot):
+            output = Path(temp)
+            binding.run.output = cache.Output(output, run.BOUNDS["limits"])
+            with self.assertRaisesRegex(cache.EvidenceError, "per-file evidence cap"):
+                binding.resolve()
+            self.assert_stopped_before_binding(binding, events, snapshot)
+            self.assertFalse(list(output.glob("resolve-native-*.json")))
+            self.assertFalse(any(e[0] == "tool-guard" for e in events))
+
+
 if __name__ == "__main__":
     unittest.main()

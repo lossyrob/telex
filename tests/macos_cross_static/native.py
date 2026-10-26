@@ -358,7 +358,17 @@ class NativeBinding:
                 "xcrun selected an unfrozen SDK")
         sdk_version = self.check_sdk_identity("prebinding")
         for name in ("hdiutil", "xcrun", "otool"):
-            require(str(Path(policy[name]).resolve(strict=True)) == policy[name],
+            filename = "resolve-native-" + name + ".json"
+            receipt = {"tool": name, "declared_path": policy[name],
+                       "expected_path": policy[name], "strict": True}
+            try:
+                resolved_path = str(Path(policy[name]).resolve(strict=True))
+            except (OSError, RuntimeError) as error:
+                receipt.update(error_type=type(error).__name__, error=str(error))
+                self.run.output.json(filename, receipt)
+                raise
+            self.run.output.json(filename, {**receipt, "resolved_path": resolved_path})
+            require(resolved_path == policy[name],
                     "native executable resolves outside its allowed absolute path")
         xcrun_version = self.run.command("native-xcrun-version", [policy["xcrun"], "--version"])
         self.resolution = {"otool": result["stdout"].strip(), "sdk": sdk["stdout"].strip(),
