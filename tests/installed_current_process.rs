@@ -474,38 +474,15 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     let iso = Isolation::new("ic-crash");
     let mut restore = iso.apply_env();
     let db = iso.root.join("crash.db");
-    let diagnostics = iso.root.join("bootstrap-diagnostics.log");
-    restore.set("TELEX_TEST_BOOTSTRAP_DIAGNOSTIC_LOG", &diagnostics);
-    let read_diagnostics = || {
-        std::fs::read_to_string(&diagnostics)
-            .unwrap_or_else(|error| format!("<unreadable: {error}>"))
-    };
 
     let client = connect(&iso, "proof", &db).await;
     let station = spec("ic:crash:station", ApplicationCapability::Bidirectional);
     assert!(client.attach(std::slice::from_ref(&station)).await.ready);
     let pid = iso.daemon_pid().expect("daemon pid");
-    let note = |event: String| {
-        use std::io::Write;
-        let millis = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_millis())
-            .unwrap_or_default();
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&diagnostics)
-        {
-            let _ = writeln!(file, "{millis} test {event}");
-        }
-    };
-    note(format!("predecessor pid={pid}"));
 
     // Hard-kill the daemon: no drain, no graceful release.
     terminate_pid(pid);
-    note(format!("terminated pid={pid}"));
     wait_until_gone(&iso, pid, Duration::from_secs(15));
-    note(format!("gone pid={pid}"));
 
     // Force the successor endpoint to become connectable while the stale
     // predecessor capability record is still present. The client must
@@ -519,7 +496,6 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
         &publication_marker,
     );
     restore.set("TELEX_TEST_BOOTSTRAP_SPAWN_COUNTER", &spawn_counter);
-    note("reconcile start".to_string());
 
     // The next spawning call restarts the daemon, and bounded repair recovers
     // the membership.
@@ -531,15 +507,13 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
         .await;
     assert!(
         outcome.ready,
-        "reattach after a crash must recover: {outcome:?}\nbootstrap diagnostics:\n{}",
-        read_diagnostics()
+        "reattach after a crash must recover: {outcome:?}"
     );
     let restarted = iso.daemon_pid().expect("restarted daemon pid");
     assert_ne!(restarted, pid, "a crashed daemon must be replaced");
     assert!(
         publication_marker.is_file(),
-        "the restart proof must exercise the endpoint-before-cap publication window\nbootstrap diagnostics:\n{}",
-        read_diagnostics()
+        "the restart proof must exercise the endpoint-before-cap publication window"
     );
     assert_eq!(
         std::fs::read_to_string(&spawn_counter)
@@ -547,8 +521,7 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
             .lines()
             .count(),
         1,
-        "the operation must remember its authenticated pending peer and suppress a second spawn\nbootstrap diagnostics:\n{}",
-        read_diagnostics()
+        "the operation must remember its authenticated pending peer and suppress a second spawn"
     );
 }
 
