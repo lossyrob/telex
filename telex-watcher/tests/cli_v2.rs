@@ -15,6 +15,7 @@ const SECRET: &str = "opaque-password=do-not-print-793183";
 
 struct Fixture {
     root: PathBuf,
+    user_home: Option<PathBuf>,
 }
 
 impl Fixture {
@@ -26,6 +27,7 @@ impl Fixture {
         std::fs::create_dir_all(root.join("install")).unwrap();
         Self {
             root: std::fs::canonicalize(root).unwrap(),
+            user_home: None,
         }
     }
 
@@ -46,6 +48,9 @@ impl Fixture {
             .env("TELEX_WATCHER_REGISTRY", self.root.join("registry.sqlite"))
             .env("CLI_FIXTURE_TOKEN", SECRET)
             .current_dir(&self.root);
+        if let Some(home) = &self.user_home {
+            command.env("HOME", home).env("USERPROFILE", home);
+        }
         command
     }
 
@@ -100,8 +105,12 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        let home_removed = self.user_home.as_ref().map(std::fs::remove_dir_all);
         let removed = std::fs::remove_dir_all(&self.root);
         if !std::thread::panicking() {
+            if let Some(home_removed) = home_removed {
+                home_removed.expect("remove isolated user home");
+            }
             removed.expect("remove isolated CLI fixture");
         }
     }
@@ -146,6 +155,27 @@ fn fixture_cleanup_failure_without_unwinding_still_fails() {
     assert!(std::panic::catch_unwind(|| drop(fixture)).is_err());
 }
 
+#[test]
+fn isolated_home_cleanup_failure_preserves_unwinding_but_fails_normally() {
+    for panicking in [true, false] {
+        let unwound = std::panic::catch_unwind(|| {
+            let mut fixture = Fixture::new();
+            fixture.user_home = Some(fixture.root.join("missing-home"));
+            if panicking {
+                panic!("original home test failure");
+            }
+            drop(fixture);
+        })
+        .unwrap_err();
+        if panicking {
+            assert_eq!(
+                unwound.downcast_ref::<&str>(),
+                Some(&"original home test failure")
+            );
+        }
+    }
+}
+
 fn parse(arguments: &[&str]) -> Cli {
     Cli::try_parse_from(
         ["telex-watcher", "--registry", "fixture.sqlite"]
@@ -153,6 +183,169 @@ fn parse(arguments: &[&str]) -> Cli {
             .chain(arguments.iter().copied()),
     )
     .unwrap()
+}
+
+#[cfg(feature = "sqlite")]
+#[tokio::test]
+async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() {
+    use std::io::Write;
+    use telex::backend::{sqlite::SqliteBackend, Backend};
+    let mut fixture = Fixture::new();
+    // Unix management sockets use HOME and need a short, non-world-writable ancestry.
+    let home = dirs::home_dir().unwrap().join(format!(
+        ".{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::create_dir(&home).unwrap();
+    fixture.user_home = Some(home.clone());
+    let telex = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(if cfg!(windows) { "telex.exe" } else { "telex" });
+    assert!(
+        telex.is_absolute() && telex.is_file(),
+        "run this test with cargo test --workspace"
+    );
+    let store = fixture.root.join("source.sqlite");
+    let backend = SqliteBackend::open(store.to_str().unwrap()).unwrap();
+    backend.init_schema().await.unwrap();
+    drop(backend);
+    let config = fixture.file("profiles.toml", format!(
+        "[backends.fixture]\nkind = \"sqlite\"\npath = {}\n[backends.alias]\nkind = \"sqlite\"\npath = {}\n",
+        serde_json::to_string(&store).unwrap(), serde_json::to_string(&store).unwrap()
+    ));
+    let group = fixture.root.join("group");
+    std::fs::create_dir(&group).unwrap();
+    fixture.file(
+        "group/member.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":1,"sessionId":"member","address":"member:a","state":"active"
+        }))
+        .unwrap(),
+    );
+    let log_dir = home.join(".copilot").join("session-state").join("member");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join("events.jsonl"),
+        include_bytes!("../../tests/fixtures/copilot-session-state/idle.jsonl"),
+    )
+    .unwrap();
+    let mut host = fixture.start_host();
+    // The root is active at member:a; its own monitoring watch must not suppress detection.
+    let own_watch = fixture.file(
+        "own-watch.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":2,"id":"group-stall","command":[&telex,"copilot","stall-detect"],
+            "intervalSeconds":86400,"timeoutSeconds":1,"backendProfile":"fixture",
+            "sender":"service:fixture","target":"member:a"
+        }))
+        .unwrap(),
+    );
+    let (_, own_registered) = fixture.execute(&["register", own_watch.to_str().unwrap()]);
+    assert_eq!(own_registered["ok"], true);
+    let parameters = json!({
+        "groupDirectory":group,"backendProfile":"fixture","watcherExecutable":env!("CARGO_BIN_EXE_telex-watcher"),
+        "watcherRegistry":fixture.root.join("registry.sqlite"),"graceSeconds":60
+    });
+    let invoke = |seconds: i64, state: Value| {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z").unwrap()
+            + chrono::Duration::seconds(seconds);
+        let request = json!({
+            "schemaVersion":2,"attempt":{"id":"fixture","now":now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)},
+            "watch":{"id":"group-stall","activatedAt":"2026-10-26T11:00:00Z","lastSuccessAt":null,
+                "parameters":parameters}, "state":state
+        });
+        let mut child = ProcessCommand::new(&telex)
+            .args(["copilot", "stall-detect"])
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("LOCALAPPDATA", fixture.root.join("local"))
+            .env("TELEX_HOME", fixture.root.join("home"))
+            .env("TELEX_DB", &store)
+            .env("TELEX_CONFIG", &config)
+            .env("TELEX_INSTALL_ROOT", fixture.root.join("install"))
+            .env_remove("TELEX_BACKEND")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&request).unwrap())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        telex::watcher_protocol::parse_result(&output.stdout).unwrap();
+        (result, output)
+    };
+    let before_store = std::fs::read(&store).unwrap();
+    let before_log = std::fs::read(log_dir.join("events.jsonl")).unwrap();
+    let mut state = Value::Null;
+    for seconds in [0, 30, 60] {
+        let (result, output) = invoke(seconds, state);
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(result["outcome"], "idle");
+        state = result["nextState"].clone();
+    }
+    let (event, _) = invoke(61, state);
+    assert_eq!(event["event"]["kind"], "copilot.group.stalled");
+    assert_eq!(invoke(62, event["nextState"].clone()).0["outcome"], "idle");
+    assert_eq!(std::fs::read(&store).unwrap(), before_store);
+    assert_eq!(
+        std::fs::read(log_dir.join("events.jsonl")).unwrap(),
+        before_log
+    );
+    std::fs::write(
+        log_dir.join("events.jsonl"),
+        concat!(
+            "{\"type\":\"session.error\",\"id\":\"error-1\",",
+            "\"timestamp\":\"2026-10-25T20:00:00Z\",\"data\":{}}\n"
+        ),
+    )
+    .unwrap();
+    let (advisory, _) = invoke(90, event["nextState"].clone());
+    assert_eq!(advisory["event"]["kind"], "copilot.group.attention-needed");
+    assert_eq!(advisory["event"]["metadata"]["degraded"], true);
+    assert_eq!(
+        invoke(100, advisory["nextState"].clone()).0["outcome"],
+        "degraded"
+    );
+    std::fs::write(log_dir.join("events.jsonl"), before_log).unwrap();
+    // The same physical store under a different profile still arms a member's wake source.
+    let registration = fixture.file(
+        "wake.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":2,"id":"member-wake","command":[&telex,"copilot","stall-detect"],
+            "intervalSeconds":86400,"timeoutSeconds":1,"backendProfile":"alias",
+            "sender":"service:fixture","target":"member:a"
+        }))
+        .unwrap(),
+    );
+    let (_, registered) = fixture.execute(&["register", registration.to_str().unwrap()]);
+    assert_eq!(registered["ok"], true);
+    let (result, _) = invoke(120, Value::Null);
+    assert_eq!(result["outcome"], "idle");
+    assert_eq!(result["nextState"], Value::Null);
+    fixture.stop_host(&mut host);
+    let (result, output) = invoke(180, Value::Null);
+    assert_eq!(result["outcome"], "degraded");
+    assert!(!output.stderr.is_empty());
+    assert!(result.get("nextState").is_none());
 }
 
 #[test]

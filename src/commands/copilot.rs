@@ -1,4 +1,4 @@
-//! Hidden Copilot CLI plugin adapter commands.
+//! Copilot CLI integration and same-user observational commands.
 //!
 //! This module is the harness boundary: it reads Copilot hook payloads and `COPILOT_*`
 //! environment variables, then maps them to generic telex session/watch-pid inputs. Core daemon
@@ -25,6 +25,7 @@ use crate::output::emit;
 use crate::station_intent::ProducerIdentity;
 
 pub mod session_state;
+pub mod stall_detect;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
 const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
@@ -94,6 +95,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
             });
             Ok(0)
         }
+        CopilotCmd::StallDetect => stall_detect::run().await,
         CopilotCmd::Push(args) => push(ctx, args).await,
         CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,

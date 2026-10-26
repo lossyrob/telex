@@ -49,6 +49,8 @@ pub mod registry;
 pub mod session_watch;
 /// Durable, host-local, owner-private station-intent records (ADR 0052).
 pub mod station_intent;
+/// Strict provider-neutral Watcher v2 envelopes, shared with binary-owned detectors.
+pub mod watcher_protocol;
 
 #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
 compile_error!("enable at least one backend feature: `sqlite` and/or `postgres`");

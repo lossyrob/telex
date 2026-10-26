@@ -35,6 +35,8 @@ dirs = "5"
 getrandom = "0.2"
 sha2 = "0.11"
 fs2 = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde_json_canonicalizer = "0.3"
 
 # SQLite backend (feature: sqlite)
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
