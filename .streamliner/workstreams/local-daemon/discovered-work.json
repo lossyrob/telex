@@ -1851,10 +1851,10 @@
       "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
       "target": "local-daemon/windows-pageheap-av-repair / https://github.com/lossyrob/telex/issues/166",
       "owner": "Actual single owner d7a17cd2-08c2-4760-b1a6-1209c2d0f80c; checkout/launch branch lossyrob-special-meme, later Local-observed branch lossyrob-windows-heap-av-repair. Original promotion owner text retained as history: Local aeae4fa9 coordinates one Campaign-authorized166 v2 owner; actual owner identity pending canonical preparation/launch.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Campaign toolu_01RiD7o4ZxQLma9dbVQPkPSx authorizes the separate priority #166 repair owner; Local coordinates one v2 launch after actual canonical receipt. Source/design/hosted CI and the Campaign merge gate still control the closing PR. Earlier candidate/no-owner authority below is historical: Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
-      "terminalPath": "Existing sole writer d7 implements the operator-authorized Mio 1.2.4 upgrade and Windows normal-dependency floor in PR #196, validates cross-platform/features within existing hosted-only restrictions, removes diagnostic-only scaffolding except retained capture, and uses Closes #166. Any recurrence reopens #166. Fresh exact-final-head reviewer-origin source receipt, design inspection, strict green CI without waiver, #203/#204 clearance insofar as they affect #196 required jobs, and the Campaign merge gate remain. A green run alone does not independently accept either separate repair. The authorized repair of the reached Mio defect does not prove a causal explanation of the five Telex observations. Only the actual product-repair merge verified by Local triggers both existing pending wakes.",
+      "dispositionAuthority": "Campaign direct toolu_01LZnnNNdNrKTw4NLAmyyBgg explicitly accepts existing #166 repair node completed with retained debt following gate6416830413 MERGE+debt, actual PR196 product merge8d7815a8, closed-completed166 and field6416863991. Debts1-8 remain retained and open; main observation is pending follow-through, not completion hold. Original Campaign fire-now toolu_01VsA55QAZu6tR6v4erTrbHu and Local call_KJ9o75TDv2ney9ayl9e8tZyM establish bounded recording of already-sent/admitted193198wakes only. Older launch/hold/precondition authority remains history.",
+      "terminalPath": "Completed bounded operator-authorized Mio 1.2.4 repair at actual PR196 merge8d7815a8d0fb8c6f465d441904044bd20f7dcc7b, reviewed9b538e4f, with eight gate debts retained/open and same d7 owner. No causal mapping to six native observations. Recurring native crash reopens166; retain exact evidence, no retry. Local independently verified actual merge and reports both existing193/198wakes each sent once immediate/no-mode, App accepted; this is admission only, no downstream execution/integration/CI/readiness/merge success. Old delivered:false snapshots stay history. Gate rules203separate, superseding former precondition; no203/207/167acceptance. MainCI40328433964/Docs40328433981 are registered pending follow-through through sole coordinator, not terminal acceptance or debt clearance. No resend, new owner/edge/runtime or freeze credit.",
       "promotionQualification": {
         "date": "2026-10-25",
         "historicalFields": "The original candidate/proposed status, target, unassigned owner, hardening requiredness, terminal path and disposition authority remain in historicalCandidateSnapshot. Every original evidence field is unchanged. This promotion does not repeat the deferred prior-main receipt as a new discovered-work item.",
@@ -2521,6 +2521,368 @@
         },
         "existingOwnerAndWakes": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c remains sole writer on lossyrob-windows-heap-av-repair. Entire original launch and later owner/alias qualifications remain exact. Both #193/#198 wakes remain pending in their original structures; Local must verify the actual #166 product-repair merge before separately delivering either wake. Authorization, comparison success, artifact recording and readiness are not the trigger.",
         "conservation": "Record the operator-authorized Mio 1.2.4 repair choice and Campaign-attributed met-condition judgment only. Existing d7 sole-writer binding, native observations, all earlier evidence and holds as history, both pending actual-product-merge wakes and all other records remain exact. No new owner, candidate, occurrence, graph edge/status/dependency/design-link change, runtime expansion, retry/waiver/flake exception, five-case causal explanation, product-source/design acceptance, repair, CI/readiness/merge, debt/HOLD or freeze credit. Artifact recording must not delay already-authorized implementation."
+      },
+      "actualProductMergeCompletionAndSentWakesQualification": {
+        "kind": "campaign-accepted166-completion-with-eight-open-debts-and-sent-wakes",
+        "historicalCurrentFields": {
+          "status": "routed",
+          "dispositionAuthority": "Campaign toolu_01RiD7o4ZxQLma9dbVQPkPSx authorizes the separate priority #166 repair owner; Local coordinates one v2 launch after actual canonical receipt. Source/design/hosted CI and the Campaign merge gate still control the closing PR. Earlier candidate/no-owner authority below is historical: Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+          "terminalPath": "Existing sole writer d7 implements the operator-authorized Mio 1.2.4 upgrade and Windows normal-dependency floor in PR #196, validates cross-platform/features within existing hosted-only restrictions, removes diagnostic-only scaffolding except retained capture, and uses Closes #166. Any recurrence reopens #166. Fresh exact-final-head reviewer-origin source receipt, design inspection, strict green CI without waiver, #203/#204 clearance insofar as they affect #196 required jobs, and the Campaign merge gate remain. A green run alone does not independently accept either separate repair. The authorized repair of the reached Mio defect does not prove a causal explanation of the five Telex observations. Only the actual product-repair merge verified by Local triggers both existing pending wakes."
+        },
+        "historicalNodeFields": {
+          "status": "in-progress",
+          "summary": "Operator-authorized current implementation: upgrade Mio to 1.2.4 with the Windows normal-dependency floor, validate cross-platform/features, remove diagnostic-only scaffolding except retained capture, and use Closes #166; any recurrence reopens it. Campaign judged the comparison condition met, not the five-case causal explanation. d7 remains sole #166 / PR #196 writer; bookkeeping does not delay implementation. Exact-head strict CI, source/design review, #203/#204 clearance insofar as they affect required jobs and the Campaign gate remain. No repair/readiness or wake credit follows; actual merge alone triggers both pending wakes. Earlier diagnosis and launch framing remains history: Actual single owner d7a17cd2-08c2-4760-b1a6-1209c2d0f80c launched in lossyrob-special-meme; Local later observed same checkout on lossyrob-windows-heap-av-repair. Earlier promotion snapshot follows as history. Campaign activates existing issue166 for one independent Local owner to diagnose and repair required Windows process-diagnostics native access violations. Preserve distinct status-hint, concurrent-first-use, destructor stop/drain and busy-station status observations without assuming one common cause. Obtain a native fault stack or bounded reproducible diagnosis, fix the confirmed defect and validate full hosted diagnostics at the final head. No retry, flake exception, abnormal-exit suppression or PR194 scope expansion. Separate demonstrably independent defects through Local/Campaign rather than silently combining or discarding them."
+        },
+        "historicalDualWakeSnapshot": {
+          "trigger": "Verified actual166 product repair merge, not its metadata landing, diagnostic green or readiness.",
+          "coordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "recipients": [
+            {
+              "issue": 193,
+              "pullRequest": 194,
+              "sessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+              "delivered": false
+            },
+            {
+              "issue": 198,
+              "pullRequest": 202,
+              "sessionId": "a96926b1-3e4f-4578-a197-33de51d669c7",
+              "delivered": false
+            }
+          ],
+          "action": "Local rings both existing owners to integrate main, obtain fresh exact-head CI/review gates and request their respective PR gates. Record each delivery separately. The166 owner has been told to report its actual merge immediately to Local."
+        },
+        "historyBoundary": "Every earlier observation/evidence/owner/launch/qualification remains exact. Saved prior current/node fields and both delivered:false structures are historical snapshots, not present claims that no product merge or send occurred. Completion accepts the bounded operator-selected reached-Mio repair, not six-case attribution or blanket hardening/debt/freeze clearance. No new native observation or candidate is appended.",
+        "sourcePacket": {
+          "file": "merge166v2-local-decision.json",
+          "bytes": 8198,
+          "sha256": "120cbfef8cc384662e0b0aff688d68d14e18f751e36089835d09253f9448b2ea",
+          "originalFile": "issue166-verified-merge-and-wakes-20261026.json",
+          "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "actualLocalRequest": "call_KJ9o75TDv2ney9ayl9e8tZyM",
+          "captureReceipt": "merge166v2-source-capture.json"
+        },
+        "retainedLocalDecision": {
+          "kind": "verified-product-repair-merge-and-two-delivered-wakes",
+          "issue": 166,
+          "pullRequest": 196,
+          "owner": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+          "campaignDirection": {
+            "session": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01VsA55QAZu6tR6v4erTrbHu",
+            "receivedAt": "2026-10-26T13:11:52.757Z",
+            "verbatim": "Campaign: PR #196 is merged as 8d7815a8 (record issuecomment-6416830413), and #166 is closed. The #166 merge has happened, so fire both waiting wakes now:\n- #193 owner 519693a5 (PR #194);\n- #198 owner a96926b1 (PR #202).\nEach merges main and runs fresh exact-head CI.\n\nFor #207, the gate result is changes-required, for a floor gap only: there is no published independent R17 receipt, and the PR body is missing the consequence line, deferred work and discovery dispositions. The owner has been told. The local runtime work is process debt, not a blocker; the evidence the PR depends on is hosted.\n\n#167 is still on hold."
+          },
+          "verifiedMerge": {
+            "verifiedAt": "2026-10-26T13:12:18.821Z",
+            "prUrl": "https://github.com/lossyrob/telex/pull/196",
+            "mergedAt": "2026-10-26T13:11:20Z",
+            "reviewedHead": "9b538e4fc2047bf7b2e4940a334cfff673643cc9",
+            "reviewedTree": "220cdcfac22060f8da648a995b842e55456121c3",
+            "mergeCommit": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "mergeTree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+            "orderedParents": [
+              "a0bf2cf0f03bcb59502ee3a747e44076877cf323",
+              "9b538e4fc2047bf7b2e4940a334cfff673643cc9"
+            ],
+            "mainAtVerification": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "issueUrl": "https://github.com/lossyrob/telex/issues/166",
+            "issueState": "closed",
+            "issueStateReason": "completed",
+            "issueClosedAt": "2026-10-26T13:11:21Z",
+            "verification": "Local independently read GitHub PR, issue, merge commit/tree/ordered parents, main ref and the full Campaign gate before either wake. This is the actual product merge, not an artifact landing, diagnostic success or readiness report."
+          },
+          "gate": {
+            "url": "https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413",
+            "file": "pr196-merge-gate-6416830413-20261026.txt",
+            "bytes": 2885,
+            "sha256": "2fe6536fc3cf433dbb0c34dce20625a01c0ac26dc20fa71de49f46567779b053",
+            "createdAt": "2026-10-26T13:11:16Z",
+            "verdict": "merge + debt",
+            "confidence": "high",
+            "qualification": "Full public body captured byte-exact. Gate accepts the operator-authorized reached-Mio repair; it does not establish that this defect caused the six native observations. The recurrence-reopens-#166 policy remains.",
+            "separate203": "The gate expressly rules #203 separate and defers it to PR #207. This supersedes earlier #203-before-#196 framing without rewriting that history.",
+            "debts": [
+              "ProcDump availability dependency and signature verification without hash pin.",
+              "SDK and public-symbol download cost when dumps exist.",
+              "Live crates.io and Cargo diagnostic-wording dependency in the fail-closed negative test.",
+              "Text-only capture tests and exact-1.2.4 floor assertion requiring a future test edit.",
+              "Windows-only floor by design.",
+              "Dump capture for 0xc0000409 and 0xc0000374 remains unproven.",
+              "Stale #203/#204 gate requirement and omitted test-isolation environment additions in the PR body.",
+              "Windows Tokio 1.39.1+ requirement belongs in next release notes."
+            ],
+            "debtLimit": "These summaries do not replace the full gate. No blanket debt clearance is claimed."
+          },
+          "wakes": [
+            {
+              "issue": 193,
+              "pullRequest": 194,
+              "recipient": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+              "deliveryMode": "immediate",
+              "modeOverride": false,
+              "sentOnce": true,
+              "appAccepted": true,
+              "action": "Resume existing work, merge current main into PR194, obtain fresh full hosted CI at the resulting exact head, refresh source/design coverage as needed and request Campaign gate. Use the sole wait coordinator; no retry or waiver.",
+              "receipt": "App returned: Message accepted for priority delivery to session '[Intent Seed Preconditions] Separate proof-fixture setup from elapsed lock admission'.",
+              "executionConfirmed": false
+            },
+            {
+              "issue": 198,
+              "pullRequest": 202,
+              "recipient": "a96926b1-3e4f-4578-a197-33de51d669c7",
+              "deliveryMode": "immediate",
+              "modeOverride": false,
+              "sentOnce": true,
+              "appAccepted": true,
+              "action": "Resume existing work, merge current main into PR202, obtain fresh full hosted CI at the resulting exact head, refresh source/design coverage as needed and request owning Watcher/Campaign gate. Use the sole wait coordinator; no retry or waiver.",
+              "receipt": "App returned: Message accepted for priority delivery to session '[Copilot Session-State Classifier] Add bounded local session observation'.",
+              "executionConfirmed": false
+            }
+          ],
+          "wakeLimits": "Both sends followed independent merge verification and a check that each wake was still pending. Admission is not execution, integration, CI success or downstream merge authority. Preserve old delivered:false snapshots as history and add these later sent/accepted receipts; do not resend or replace the trigger.",
+          "sequencingHistory": {
+            "watcherProposalSource": "toolu_01HcA9XDifLoywKtXKbmz5Ra",
+            "proposal": "Watcher proposed delaying #198 until #207 merged after the Campaign-directed wake had already been sent.",
+            "localDisposition": "Local did not revoke or duplicate either wake; it retained Campaign's fire-now direction and referred the conflicting proposal to Campaign.",
+            "watcherCorrectionSource": "toolu_01M28ZyLx2jwHgBap9xsrHG8",
+            "reportedCampaignSource": "toolu_01EvBAwXcE6sUHULkaiv42vQ",
+            "correction": "Watcher subsequently reports Campaign ruled the original wake stands, and Watcher will not undo or duplicate it.",
+            "conditionalLaterRouting": "Watcher reports that if PR202 fresh CI fails only on the #203 harness abort, its owner records the occurrence on #203 without rerun, then integrates main again after #207 lands.",
+            "limits": "The correction and later routing are Watcher-reported Campaign direction. No PR202 failure, new integration or later wake is inferred."
+          },
+          "postMergeFollowThrough": {
+            "fieldReport": {
+              "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991",
+              "file": "issue166-field-6416863991-20261026.txt",
+              "bytes": 6675,
+              "sha256": "797c16f1f8cc3bdd42aecf9023ba2ef5f0e7b851cb11900bc46d44776c2bf186",
+              "createdAt": "2026-10-26T13:12:50Z",
+              "verification": "Local read and retained the full public field report. Owner explanations and discovery inventories remain attributed, not a new Local source/archive audit."
+            },
+            "observations": {
+              "coordinator": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+              "source": "call_3vTCW56LZJrucPHEdBdpBXvx",
+              "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+              "ciRun": 40328433964,
+              "ciAttempt": 1,
+              "docsRun": 40328433981,
+              "docsAttempt": 1,
+              "state": "Sole coordinator reports registered under one verified armed scheduler; no terminal result accepted here."
+            },
+            "limits": "Post-merge CI and debt routing do not delay the already-due wakes. Downstream owner execution remains pending. #167 is still held; #207's separate gate disposition grants neither its merge nor a retroactive block on the #166 merge."
+          },
+          "canonicalRequest": "Add a bounded actual-merge/closure/gate-debt qualification and the two once-sent wake receipts on the existing #166 record and relevant task/summary surfaces. Preserve all original evidence, owner and prior approval/hold/wake snapshots as history. Record the Campaign #203-separate supersession and actual product-merge boundary accurately. Do not claim post-merge CI success, all debt closure, six-case causal mapping, downstream integration/readiness or #207/#167 acceptance. Fresh exact artifact review is required; bookkeeping must not delay either awakened owner."
+        },
+        "directCampaignConfirmation": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01LZnnNNdNrKTw4NLAmyyBgg",
+          "receipt": "merge166v2-campaign-confirmation.json",
+          "verbatim": "Campaign: your scope is confirmed, with one change. Mark the existing #166 repair node completed with retained debt; don't leave it untouched. That follows the #204 precedent (72c2a093):\n- the gate merged it as merge + debt (issuecomment-6416830413);\n- #166 is closed;\n- the owner posted its field report (6416863991).\n\nRecord that debts 1-8 are retained and open. Post-merge main CI at 8d7815a8 is a pending follow-through for Local to observe. A recurring native crash reopens #166.\n\nEverything else stands as you scoped it:\n- Record both wakes as sent and accepted only.\n- Don't infer CI or success.\n- Don't map #196 to the six native cases as their cause.\n- Don't accept #203 or #207 yet: #207 has passed the gate on its merits but is waiting on an integration merge of main 8d7815a8 and fresh CI.\n- Don't accept #167."
+        },
+        "publicVerification": {
+          "identity": {
+            "pr": {
+              "number": 196,
+              "url": "https://github.com/lossyrob/telex/pull/196",
+              "state": "closed",
+              "merged": true,
+              "mergedAt": "2026-10-26T13:11:20Z",
+              "mergeCommit": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+              "head": "9b538e4fc2047bf7b2e4940a334cfff673643cc9",
+              "baseRef": "main"
+            },
+            "issue": {
+              "id": 5987599708,
+              "number": 166,
+              "state": "closed",
+              "stateReason": "completed",
+              "closedAt": "2026-10-26T13:11:21Z",
+              "url": "https://github.com/lossyrob/telex/issues/166"
+            },
+            "merge": {
+              "sha": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+              "tree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+              "parents": [
+                "a0bf2cf0f03bcb59502ee3a747e44076877cf323",
+                "9b538e4fc2047bf7b2e4940a334cfff673643cc9"
+              ]
+            },
+            "reviewedHead": {
+              "sha": "9b538e4fc2047bf7b2e4940a334cfff673643cc9",
+              "tree": "220cdcfac22060f8da648a995b842e55456121c3"
+            }
+          },
+          "gate": {
+            "body": "## Campaign merge gate: merge + debt (high confidence)\n\nGated head `9b538e4fc2047bf7b2e4940a334cfff673643cc9`, tree `220cdcfa`, merge base `38f3f54f`. Main is `a0bf2cf0`, and the drift since the merge base is `.streamliner/` only (verified).\n\n**Floor checks**\n- CI: run 40264045091, attempt 1, 21/21 success at the exact head, with no retry.\n- PR state: open, non-draft, MERGEABLE/CLEAN.\n- `git merge-tree` against main is clean, and there are 0 unresolved threads.\n- Receipts:\n  - Design: issuecomment-6407447525. DI-196-01 (Tokio floor) and DI-196-02 (fail-closed negative check) are both resolved at this head.\n  - Source review: issuecomment-6407834239. PASS with zero findings. Its base, faf4f883, differs from 38f3f54 only in `.streamliner` artifacts.\n  - Owner summary: issuecomment-6408361923.\n\n**Scope**\n- Operator-authorized: upgrade to Mio 1.2.4 as the repair for the reached `write_done` `State::None` panic (named_pipe.rs:969, Mio 1.2.1).\n- The condition that the comparison job pass was met (job 121354231722).\n- The PR closes #166, and a recurrence reopens it. It makes no claim about the six native observations.\n\n**Findings**\n- The Windows floor `mio ^1.2.4` plus `tokio ^1.39.1` holds: CI shows a single Mio 1.2.4 resolved in both the repository and the consumer fixture. The negative step rejects Tokio 1.38.2 with the exact resolver conflict.\n- The retained capture runs only on hosted runners.\n  - Downloaded tools must carry a valid Authenticode signature.\n  - Registry changes stay on the runner and are cleaned up.\n  - It adds about 3-18s per green run.\n- No diagnostic loops remain, and no production Rust code changed.\n- No hard stop applies: the version is unchanged. Narrowing Windows Tokio to 1.39.1 or later follows from the authorized upgrade, which DI-196-01 required.\n\n**Debt (non-blocking)**\n1. ProcDump is downloaded each run and checked only by signature, with no hash pin, so required jobs depend on Sysinternals being available.\n2. When dumps exist, analysis downloads the SDK and public symbols. That adds cost only on failing runs.\n3. The negative Tokio step depends on the live crates.io index and on Cargo's resolver wording. It fails closed, but it may be noisy.\n4. The capture tests only check text, and the floor test pins exactly 1.2.4, so a future bump also needs a test edit.\n5. The floor applies only on Windows (by design).\n6. Dump capture is proven for 0xc0000005 only. Capture of 0xc0000409 and 0xc0000374 is unproven (disclosed).\n7. Two PR-body issues:\n   - The body says #203/#204 must be cleared before the gate. That is stale: Campaign ruled #203 separate.\n   - The test-isolation env additions are not described in the body.\n8. Record the Windows Tokio 1.39.1+ requirement in the next release notes.\n\n**Deferred:** #203 is tracked separately (PR #207). If a native crash recurs, #166 reopens.\n\nCampaign merges at the exact head.",
+            "metadata": {
+              "id": 6416830413,
+              "url": "https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413",
+              "createdAt": "2026-10-26T13:11:16Z",
+              "updatedAt": "2026-10-26T13:11:16Z",
+              "user": "lossyrob"
+            },
+            "binding": {
+              "file": "merge166v2-gate-body.txt",
+              "bytes": 2885,
+              "sha256": "2fe6536fc3cf433dbb0c34dce20625a01c0ac26dc20fa71de49f46567779b053"
+            },
+            "rawFile": "merge166v2-gate-raw.json"
+          },
+          "field": {
+            "body": "## Field report: #166 repair merged (PR #196, main 8d7815a8)\r\n\r\nPR #196 merged at 8d7815a8d0fb8c6f465d441904044bd20f7dcc7b (gated head 9b538e4f, tree 220cdcfa, CI run 40264045091 attempt 1, 21/21 success, no retry or waiver). Gate record: https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413\r\n\r\n### Consequence\r\n\r\n- The repair is a dependency floor, not a Telex code change. Cargo.lock moves Mio 1.2.1 to 1.2.4 (only the mio package changed, plus the direct mio edge). The Windows target table in Cargo.toml now requires `mio ^1.2.4` and `tokio ^1.39.1` (both default-features = false), so downstream consumers cannot resolve the older Tokio route that wraps Mio 0.8 beside the fixed Mio. No production Rust source changed.\r\n- What was fixed: the Mio defect that hosted evidence reached directly (Mio 1.2.1 `write_done` panic, `State::None => unreachable!()`, named_pipe.rs:969, run 40254795271, locked job 121354231731). Upstream tokio-rs/mio#2014 (in 1.2.4) keeps a submitted overlapped read/write from reporting Err, which otherwise leaves the completion without its reserved Arc. The same workload on 1.2.4 ran 3 x 400,000 rounds clean (job 121354231722, artifact 12622392155).\r\n- What is NOT claimed: no native stack maps any of the six observed Telex failures to this defect. A clean run is not proof of absence; the upstream race tests include randomized loops. The operator authorized this as the repair with the condition that a repeat native crash reopens #166. It does.\r\n- CI changes: the diagnostic experiment jobs (named-pipe race, targeted stress) were removed. Retained: ordinary-job postmortem dump capture and `windows-heap-diagnostics`. Added in Feature combinations: a step that checks a single Mio 1.2.4 resolves for the repo and the defaults-disabled consumer fixture, and a step that requires Tokio 1.38.2 to be rejected with the specific Tokio floor conflict.\r\n- Corrections to the PR body (it was the source of truth at merge, so recording them here): the line saying #203 and #204 must be cleared before the gate is stale. Campaign ruled #203 separate (it is tracked on its own, PR #207); #204 was closed via PR #205 before this gate. The test-isolation environment additions in the retained capture are also not described in the body.\r\n\r\n### Deferred work (gate debts 1-8 from the gate record)\r\n\r\nThese are deferred, non-blocking, and I have not filed separate issues for them; they are listed so Campaign can route them.\r\n\r\n1. ProcDump is downloaded on every hosted run and verified only by Authenticode signature, with no hash pin; required Windows jobs depend on Sysinternals being available.\r\n2. When dumps exist, analysis downloads the Windows SDK and public symbols. Cost only on failing runs.\r\n3. The negative Tokio step depends on the live crates.io index and Cargo's resolver wording. It fails closed, so the failure mode is noise, not a silent pass.\r\n4. The capture tests check text only, and the floor test pins exactly 1.2.4, so a future Mio bump also needs a test edit.\r\n5. The floor applies only on Windows (by design).\r\n6. Dump capture is proven for 0xc0000005 only. Capture of 0xc0000409 and 0xc0000374 is unproven: those aborts produced no dump through AeDebug or WER LocalDumps.\r\n7. The two PR-body issues described above (stale #203/#204 line; undocumented test-isolation env additions).\r\n8. Record the Windows Tokio 1.39.1+ requirement in the next release notes.\r\n\r\n### Discoveries and dispositions\r\n\r\n| Discovery | Disposition |\r\n|---|---|\r\n| Four original 0xc0000005 failing artifacts (status hint, concurrent first use, destructor drain, PR194 busy-station status child) | Preserved by immutable artifact ID with a manifest; kept as history, not re-run. |\r\n| Observation 5 (PR202 first use, run 40230509989 attempt 2, 0xc0000374, artifact 12613228369) and observation 6 (main faf4f883, run 40260369255, job 121371242766, 0xc0000374, artifact 12624059243; failed in the selected predecessor's initial attach, before intent seeding or the upgrade) | Retained as history under #166, deduplicated by run/job. Observation 6 ran on a lock still at Mio 1.2.1. No common cause or fault location established; artifact 12624059243 contents not inspected. |\r\n| Mio 1.2.1 `write_done` State::None panic reached on a hosted runner | Repaired by the Mio 1.2.4 floor and lock (this PR). Submitted-I/O/Arc explanation remains a hypothesis for the Telex observations. |\r\n| Clean experiments (targeted stress 40/40 under full PageHeap, artifact 12622123576; 3 x 400k on 1.2.1 and 1.2.4) | Kept as history; explicitly not evidence of absence. |\r\n| Tokio before 1.39.1 wraps Mio ^0.8.9, so a defaults-disabled consumer could carry that route beside the new Mio floor (design finding DI-196-01) | Fixed: Windows `tokio ^1.39.1` floor, release-contract assertion, and a CI step requiring Tokio 1.38.2 to be rejected. Evidence is crates.io dependency metadata (1.38.2: Mio ^0.8.9; 1.39.1 onward: Mio ^1.0.1; 1.39.0 yanked), not a compiled reproducer. |\r\n| The first negative check passed on any resolver failure (DI-196-02) | Fixed: it now requires all three expected Tokio conflict fragments and fails on success or any other error. |\r\n| Watcher library-harness 0xc0000409 (run 40254795271, job 121354231596; log shows 60 announced, 37 ok, 1 ignored, no named failing test) | Routed to #203, not a #166 case. #203 owner reports a double panic during unwinding in watcher test fixtures, not Mio; fix is PR #207. |\r\n| ForeignDaemon job failure | Routed to #204; closed via PR #205 before this gate. |\r\n| #203 owner's hosted shard on Mio 1.2.1 hit the mio#2014 symptom in the watcher harness (`client::reconcile` -> `read_json_line`, BROKEN_PIPE, then 0xc0000005) | Recorded as reported evidence only. It shows the defect is reachable from a Telex-adjacent harness on 1.2.1; it does not map any of the six observations. Mio 1.2.4 addresses it; #207 does not. |\r\n| Capture gap for 0xc0000409 and 0xc0000374 | Disclosed in the PR; not solved (debt 6). |\r\n| Mio 1.2.1 to 1.2.4 also includes non-Windows changes (poll, UDS, kqueue, FreeBSD, Haiku) | Not treated as zero-risk; Linux/macOS and feature-profile CI jobs all passed at the gated head. |\r\n| Full-repo `clippy -D warnings` fails on the local Rust 1.98 toolchain in untouched files (tests/copilot_plugin.rs, tests/release_upgrade.rs, a lib test) | Out of scope; untouched and not filed. CI at the gated head was green. |\r\n\r\n### Next\r\n\r\n- Main CI for 8d7815a8 is running (CI run 40328433964, Docs run 40328433981); I will post the result as a follow-up.\r\n- If any native crash recurs, #166 reopens. Preserve the run, job, artifact ID and any dump, and do not retry past the failure.\r\n",
+            "metadata": {
+              "id": 6416863991,
+              "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991",
+              "createdAt": "2026-10-26T13:12:50Z",
+              "updatedAt": "2026-10-26T13:12:50Z",
+              "user": "lossyrob"
+            },
+            "binding": {
+              "file": "merge166v2-field-body.txt",
+              "bytes": 6675,
+              "sha256": "797c16f1f8cc3bdd42aecf9023ba2ef5f0e7b851cb11900bc46d44776c2bf186"
+            },
+            "rawFile": "merge166v2-field-raw.json"
+          },
+          "boundary": "Full public gate and field report bytes matched to Local retained copies. Public product merge/closure and reviewed tree identity independently checked. Gate prior source/design/21checks/diagnostic findings and field discovery inventories remain attributed, not new reviews or runtime/native/measurement/archive validation. No main terminal result is accepted."
+        },
+        "productMergeBoundary": {
+          "priorArtifactHead": "a0bf2cf0f03bcb59502ee3a747e44076877cf323",
+          "productMerge": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+          "productTree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+          "orderedParents": [
+            "a0bf2cf0f03bcb59502ee3a747e44076877cf323",
+            "9b538e4fc2047bf7b2e4940a334cfff673643cc9"
+          ],
+          "changedPaths": [
+            ".github/workflows/ci.yml",
+            "Cargo.lock",
+            "Cargo.toml",
+            "tests/analyze_windows_crash_evidence.ps1",
+            "tests/configure_windows_postmortem.ps1",
+            "tests/daemon_process_sqlite.rs",
+            "tests/fixtures/windows_crash_probe.rs",
+            "tests/release_contract.rs"
+          ],
+          "oldStreamlinerTree": "987ac7a2497ebcc07785f2f2d9357822c55ab5e8",
+          "newStreamlinerTree": "987ac7a2497ebcc07785f2f2d9357822c55ab5e8",
+          "limit": "External reviewed product merge, not artifact commit or independent source/CI/runtime review. Path/tree/parent identity only; preceding nineteen-artifact segmented proof stays immutable, with prior PR205 boundary retained."
+        },
+        "retainedDebts": [
+          {
+            "number": 1,
+            "gateText": "1. ProcDump is downloaded each run and checked only by signature, with no hash pin, so required jobs depend on Sysinternals being available.",
+            "state": "retained-open"
+          },
+          {
+            "number": 2,
+            "gateText": "2. When dumps exist, analysis downloads the SDK and public symbols. That adds cost only on failing runs.",
+            "state": "retained-open"
+          },
+          {
+            "number": 3,
+            "gateText": "3. The negative Tokio step depends on the live crates.io index and on Cargo's resolver wording. It fails closed, but it may be noisy.",
+            "state": "retained-open"
+          },
+          {
+            "number": 4,
+            "gateText": "4. The capture tests only check text, and the floor test pins exactly 1.2.4, so a future bump also needs a test edit.",
+            "state": "retained-open"
+          },
+          {
+            "number": 5,
+            "gateText": "5. The floor applies only on Windows (by design).",
+            "state": "retained-open"
+          },
+          {
+            "number": 6,
+            "gateText": "6. Dump capture is proven for 0xc0000005 only. Capture of 0xc0000409 and 0xc0000374 is unproven (disclosed).",
+            "state": "retained-open"
+          },
+          {
+            "number": 7,
+            "gateText": "7. Two PR-body issues:\n   - The body says #203/#204 must be cleared before the gate. That is stale: Campaign ruled #203 separate.\n   - The test-isolation env additions are not described in the body.",
+            "state": "retained-open"
+          },
+          {
+            "number": 8,
+            "gateText": "8. Record the Windows Tokio 1.39.1+ requirement in the next release notes.",
+            "state": "retained-open"
+          }
+        ],
+        "currentWakeDispositions": [
+          {
+            "issue": 193,
+            "pullRequest": 194,
+            "recipient": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+            "deliveryMode": "immediate",
+            "modeOverride": false,
+            "sentOnce": true,
+            "appAccepted": true,
+            "action": "Resume existing work, merge current main into PR194, obtain fresh full hosted CI at the resulting exact head, refresh source/design coverage as needed and request Campaign gate. Use the sole wait coordinator; no retry or waiver.",
+            "receipt": "App returned: Message accepted for priority delivery to session '[Intent Seed Preconditions] Separate proof-fixture setup from elapsed lock admission'.",
+            "executionConfirmed": false,
+            "currentDisposition": "sent-once-and-app-admitted-only",
+            "verificationAttribution": "Local reports independent actual-product-merge/pending-wake verification followed by this one immediate/no-mode send and successful App admission. Reconciler retains the complete packet, not a replay, resend, recipient query or audit of transport internals.",
+            "limit": "Queue admission is not execution, main integration, CI/review/gate/merge success, readiness or new permission. Earlier delivered:false snapshots remain exact history; no resend follows."
+          },
+          {
+            "issue": 198,
+            "pullRequest": 202,
+            "recipient": "a96926b1-3e4f-4578-a197-33de51d669c7",
+            "deliveryMode": "immediate",
+            "modeOverride": false,
+            "sentOnce": true,
+            "appAccepted": true,
+            "action": "Resume existing work, merge current main into PR202, obtain fresh full hosted CI at the resulting exact head, refresh source/design coverage as needed and request owning Watcher/Campaign gate. Use the sole wait coordinator; no retry or waiver.",
+            "receipt": "App returned: Message accepted for priority delivery to session '[Copilot Session-State Classifier] Add bounded local session observation'.",
+            "executionConfirmed": false,
+            "currentDisposition": "sent-once-and-app-admitted-only",
+            "verificationAttribution": "Local reports independent actual-product-merge/pending-wake verification followed by this one immediate/no-mode send and successful App admission. Reconciler retains the complete packet, not a replay, resend, recipient query or audit of transport internals.",
+            "limit": "Queue admission is not execution, main integration, CI/review/gate/merge success, readiness or new permission. Earlier delivered:false snapshots remain exact history; no resend follows."
+          }
+        ],
+        "sequencingSupersession": {
+          "oldPrecondition": "Earlier #203/#204 clearance wording remains exact history.",
+          "currentAuthority": "Full gate6416830413 explicitly rules203separate and defers to207; Campaign direct confirmation accepts166withdebt. #204 completed earlier. No203/207acceptance follows.",
+          "watcherHistory": {
+            "watcherProposalSource": "toolu_01HcA9XDifLoywKtXKbmz5Ra",
+            "proposal": "Watcher proposed delaying #198 until #207 merged after the Campaign-directed wake had already been sent.",
+            "localDisposition": "Local did not revoke or duplicate either wake; it retained Campaign's fire-now direction and referred the conflicting proposal to Campaign.",
+            "watcherCorrectionSource": "toolu_01M28ZyLx2jwHgBap9xsrHG8",
+            "reportedCampaignSource": "toolu_01EvBAwXcE6sUHULkaiv42vQ",
+            "correction": "Watcher subsequently reports Campaign ruled the original wake stands, and Watcher will not undo or duplicate it.",
+            "conditionalLaterRouting": "Watcher reports that if PR202 fresh CI fails only on the #203 harness abort, its owner records the occurrence on #203 without rerun, then integrates main again after #207 lands.",
+            "limits": "The correction and later routing are Watcher-reported Campaign direction. No PR202 failure, new integration or later wake is inferred."
+          },
+          "laterCampaign207Qualification": "Direct Campaign confirmation reports207passed its merits gate but awaits main8d7815a8integration and freshCI. This qualifies the earlier packet changes-required snapshot chronologically; neither is a reconciler #207 acceptance or retroactive block on166/wakes."
+        },
+        "pendingFollowThrough": {
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991",
+            "file": "issue166-field-6416863991-20261026.txt",
+            "bytes": 6675,
+            "sha256": "797c16f1f8cc3bdd42aecf9023ba2ef5f0e7b851cb11900bc46d44776c2bf186",
+            "createdAt": "2026-10-26T13:12:50Z",
+            "verification": "Local read and retained the full public field report. Owner explanations and discovery inventories remain attributed, not a new Local source/archive audit."
+          },
+          "observations": {
+            "coordinator": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+            "source": "call_3vTCW56LZJrucPHEdBdpBXvx",
+            "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "ciRun": 40328433964,
+            "ciAttempt": 1,
+            "docsRun": 40328433981,
+            "docsAttempt": 1,
+            "state": "Sole coordinator reports registered under one verified armed scheduler; no terminal result accepted here."
+          },
+          "limits": "Post-merge CI and debt routing do not delay the already-due wakes. Downstream owner execution remains pending. #167 is still held; #207's separate gate disposition grants neither its merge nor a retroactive block on the #166 merge.",
+          "currentState": "All eight debts remain open. MainCI/Docs registration remains reported/pending follow-through for Local through the sole coordinator, not a terminal result, scheduler audit or completion hold.",
+          "recurrence": "Recurring native crash reopens166; preserve exact evidence, no retry past failure.",
+          "downstream": "Both existing owners are awakened only; no execution/integration/freshCI/source/design/readiness/merge outcome is accepted. Do not wait for bookkeeping or resend."
+        },
+        "conservation": "Campaign explicitly accepts the existing #166 bounded repair node completed with all eight gate debts retained and open after actual PR196 product merge, issue closure and owner field report. Same d7 owner and all original evidence/observations/authorities/history remain exact, including earlier delivered:false wake snapshots. Add current once-sent/App-accepted dispositions for the two existing193/198recipients; no resend, recipient inspection, execution/integration/CI/merge-success or downstream readiness claim. Actual product merge is a separate external boundary after nineteen artifacts, not an artifact commit. No six-case causal mapping, source/native/runtime replay, postmergeCI/debt clearance, #203/#207/#167 acceptance, new owner/candidate/occurrence/node/edge/observer/scheduler, retry/waiver/flake, broader runtime, hardening/release or workstation-freeze credit. Gate makes #203 separate, superseding older preconditions without erasing history. Recurring native crash reopens166. Existing awakened owners and pending main follow-through do not wait on this recording."
       }
     },
     {
