@@ -9,8 +9,15 @@
 
 Describes the **load-on-bind push delivery** path in
 `docs/design/copilot-bridge-push.md` (issue #53). It lets the telex daemon push
-a message into a live Copilot CLI or Copilot App session as a real turn, with no agent-managed
+a message through an already-loaded, live bridge in Copilot CLI or Copilot App as a real turn, with no agent-managed
 `telex wait` waiter and no `--ui-server` flag.
+
+First-time loading depends on the host exposing a supported live bridge loader.
+For an App session without one, follow `telex copilot skill` and
+`copilot fallback prepare` for the Telex-owned single-shot pull path. Keep push
+when the bridge is already live; host identity alone does not select pull.
+Provisioning files is not loading proof, and fallback preparation is not wakeup
+proof.
 
 ## Files
 
@@ -45,8 +52,9 @@ reloads.
 
 ## Reproduce the proofs
 
-These proofs require Copilot Extensions to be enabled under `/experimental`; otherwise
-the `extensions_reload` tool is not exposed.
+These CLI proof recipes require the `extensions_reload` tool. On Copilot CLI,
+enable Copilot Extensions under `/experimental` if needed to expose it. They are
+not first-time App setup instructions when that host has no supported loader.
 
 Self-push (inject into your own session):
 
@@ -71,7 +79,7 @@ node .\push.mjs --latest --prompt "Write BRIDGE-PUSH-OK to .\peer-proof.txt" --d
 
 ## Findings from the live runs
 
-- **Runtime self-load works.** Dropping `extension.mjs` into the session
+- **Runtime self-load works on the tested loader-capable CLI host.** Dropping `extension.mjs` into the session
   extension dir and calling `extensions_reload` forks the bridge live, same
   turn; non-telex sessions never load it.
 - **The same session-scoped extension supports Copilot App.** A separate
@@ -80,7 +88,8 @@ node .\push.mjs --latest --prompt "Write BRIDGE-PUSH-OK to .\peer-proof.txt" --d
   at the hook boundary: `sessionEnd(reason=complete)` preserves attendance while
   this extension's heartbeat remains live, then binds daemon membership to the
   extension host PID. The host remains stable across extension reloads and dies
-  on a true App or one-shot CLI exit.
+  on a true App or one-shot CLI exit. These lifecycle semantics assume a loaded
+  bridge; they do not establish that every App session can load one.
 - **Push delivers as a queued turn**, non-interrupting (enqueue mode).
 - **A client-side push timeout does NOT imply non-delivery.** In an early run the
   push client timed out waiting for a response (a framing bug) yet the message

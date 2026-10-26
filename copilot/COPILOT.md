@@ -1,4 +1,4 @@
-# Telex for Copilot CLI and Copilot App: push delivery
+# Telex for Copilot CLI and Copilot App: delivery
 
 This is the Copilot-specific Telex workflow, printed by `telex copilot skill` so it
 always matches the installed binary. The plugin skill is only a bootstrap; **this
@@ -6,13 +6,27 @@ document (from your installed `telex`) is the source of truth** for the Copilot 
 For exact flags, run the `--help` commands listed at the end rather than trusting any
 static copy of the syntax.
 
-## What changes for Copilot
+## Choose delivery by host capability
 
-In Copilot CLI, telex delivers messages to you as **turns**. You do **not** run,
-re-arm, or babysit a `telex wait` waiter. You bind once, load an in-session bridge
-once, then read messages as they arrive and record disposition by id. The bridge is a
-liveness path only -- it never acks for you, so the durable consumed mark is still
-yours to make.
+Check the current session's capabilities before provisioning a bridge:
+
+- **Already-loaded, live bridge:** keep push, including in Copilot App. App hosting
+  alone is not a reason to downgrade to pull.
+- **Supported live bridge loader available:** use the bridge path below. On
+  Copilot CLI, enable **Copilot Extensions** under `/experimental` if needed to
+  expose `extensions_reload`. That CLI setting is not an App prerequisite.
+- **No supported live bridge loader:** for first-time setup in Copilot App, use
+  the supported pull fallback below, starting with `copilot fallback prepare`.
+  Do not require an absent `extensions_reload` tool or CLI-only `/experimental`.
+
+Bridge files and push registration do not prove the bridge loaded. Restarting or
+clearing a session is not a substitute for an unavailable loader or evidence of
+first-time loading. Check bridge liveness and actual delivery separately.
+
+With a live bridge, messages arrive as **turns** without a waiter to re-arm. With
+pull fallback, you launch one prepared wait, process its completion artifacts, and
+explicitly re-arm when needed. Neither path acks for you; record consumption and
+workflow disposition by message id.
 
 ## The bridge path
 
@@ -22,9 +36,9 @@ yours to make.
    telex --address <addr> copilot attach --copilot-bridge --description "<what this session is doing>"
    ```
 
-   **Prerequisite:** Enable **Copilot Extensions** under `/experimental`. Copilot exposes
-   the `extensions_reload` tool only when that experimental feature is enabled; without it,
-   Telex can provision and register the bridge files but cannot load them into the live session.
+   **Prerequisite:** a supported live bridge loader, or an already-loaded, live
+   bridge. Telex can provision files and register push without loading the bridge;
+   successful attach alone is not evidence of live delivery.
 
    This registers your session/address with the per-user local exchange and writes the
    telex bridge extension into this session's extension dir. The plugin adapter maps
@@ -40,9 +54,9 @@ yours to make.
    CC push is opt-in, live-only, and notification-only: historical CC backlog is not
    replayed, and CC messages still do not require a terminal disposition from the observer.
 
-   On normal Copilot close/resume, Telex keeps these session-scoped bridge files
-   so Copilot can discover and load the extension during session startup. After
-   startup, re-arm daemon attendance and rescan unacked backlog with:
+   On hosts with startup extension discovery, normal close/resume can load the
+   preserved session-scoped bridge files. Once the bridge is live, re-arm daemon
+   attendance and rescan unacked backlog with:
 
    ```sh
    telex --address <addr> copilot resume --description "<what this session is doing>"
@@ -61,23 +75,21 @@ yours to make.
 
 2. **Load the bridge into the live session (one agent tool call).**
 
-   Run the `extensions_reload` tool after first-time bridge provisioning into an
-   already-running Copilot session. telex cannot trigger a reload, so you do this
-   once. Normal close/resume uses startup extension discovery instead and does not
-   depend on an in-session reload.
+   Use the host's supported loader after first-time provisioning. Where available,
+   run `extensions_reload`; Telex cannot invoke it for you. Verify bridge liveness
+   rather than inferring it from provisioning or a reload request.
 
-   If `extensions_reload` is unavailable during first-time or recovery
-   provisioning:
+   If the bridge is not live, select recovery by the same host capability:
+   on a loader-capable host, re-provision with
+   `telex --address <addr> copilot resume --description "<what this session is doing>"`
+   and use the supported loader. On Copilot CLI only, enabling Copilot Extensions
+   under `/experimental` may expose `extensions_reload`. An App session without
+   a supported live loader uses the supported pull fallback below, or detaches
+   with `telex --address <addr> copilot detach`. Do not repeat unavailable-tool
+   calls or claim push is live.
 
-   1. Enable Copilot Extensions under `/experimental`.
-   2. Re-provision the station with
-      `telex --address <addr> copilot resume --description "<what this session is doing>"`.
-   3. Run `extensions_reload`.
-
-   If Copilot Extensions cannot be enabled, push is unavailable. Use the supported pull
-   fallback below or detach the station with `telex --address <addr> copilot detach`.
-
-   After `/clear` (which reloads extensions and clears the conversation), **re-provision first** --
+   On CLI hosts supporting `/clear` and `extensions_reload`, after `/clear`
+   (which clears the conversation), **re-provision first** --
    re-run `telex --address <addr> copilot attach --copilot-bridge` and then `extensions_reload` --
    so the daemon re-delivers any message that was queued but not yet acked when you cleared. A
    re-attach (or a new session taking over the address) is what re-delivers unacked messages; while
@@ -86,14 +98,14 @@ yours to make.
 
    Troubleshooting CC observer turns: if CC traffic is visible in `telex inbox` but is not arriving
    as Copilot turns, the bridge was probably bound without CC wake or the extension was not reloaded.
-   Re-run the bind with the CC flag, then run `extensions_reload`:
+   On a loader-capable host, re-run the bind with the CC flag, then load the bridge:
 
    ```sh
    telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<what this session is doing>"
    ```
 
-   Do not start `telex wait --wake-on-cc` for a Copilot plugin session; the bridge registration above
-   is how the agent asks the daemon to watch live CC traffic.
+   Do not start `telex wait --wake-on-cc` alongside push; the bridge registration
+   above enables live CC turns. In pull fallback, use `prepare --wake-on-cc` instead.
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
@@ -138,10 +150,10 @@ yours to make.
 
    This detaches the address and, when it was the last binding, removes the bridge files so
    it will not reload on a later resume. The already-loaded bridge stays live until the next
-   `extensions_reload` or session end; run `extensions_reload` once after detach if you want
-   it unloaded immediately. Ordinary session end is resumable: it marks daemon membership idle
-   and clears transient turn-guard state, but preserves the session bridge files for startup
-   discovery on resume.
+   supported reload or session end; if `extensions_reload` is available, run it
+   once after detach to unload immediately. Ordinary session end is resumable: it
+   marks daemon membership idle and clears transient turn-guard state, but preserves
+   the session bridge files for startup discovery on hosts that support it.
 
    To inspect or clean orphaned bridge files from sessions that closed without detach:
 
@@ -155,9 +167,10 @@ yours to make.
 
 ## Sending and replying
 
-Receiving is push; **sending is not**. To start or continue a conversation, `telex send` and
-`telex reply` need your session id -- exactly like `ack`/`handle`, they do **not** read Copilot
-env vars, and fail closed with `no session id available` without it.
+Whether receiving through push or pull, **sending is explicit**. To start or
+continue a conversation, `telex send` and `telex reply` need your session id --
+exactly like `ack`/`handle`, they do **not** read Copilot env vars, and fail closed
+with `no session id available` without it.
 
 For every agent-authored operational `send` or new conversation, include a concise,
 non-empty `--subject`. The subject is the human/operator scan surface in timelines,
@@ -184,9 +197,10 @@ telex --address <addr> reply --to-message <id> --subject "CI failure needs repai
 
 ## Fallback: no bridge (pull mode)
 
-If the bridge cannot be loaded (extensions disabled), telex push is unavailable.
-**Surface that plainly** rather than pretending push is live. Telex can prepare one
-cross-platform, single-shot pull fallback without requiring an agent-authored script:
+For first-time App setup without a supported live bridge loader, or recovery when
+the bridge cannot be loaded, use this path. **Surface that push is unavailable**
+rather than pretending the bridge is live. Telex can prepare one cross-platform,
+single-shot pull fallback without requiring an agent-authored script:
 
 ```sh
 telex --address <addr> copilot fallback prepare --description "<what this session is doing>"
@@ -223,6 +237,12 @@ Use `--timeout-ms`, `--min-attention`, and `--wake-on-cc` on `prepare` to config
 that wait. `--force` is not a recovery default; use it only when deliberately
 leaving a bridge whose heartbeat is still live.
 
+Preparation is not evidence that the waiter started or that a completion wakes
+this host. If detached launch is unavailable or refused, report that limitation;
+do not substitute a custom polling loop. If wait setup or backend access fails,
+report the failure and inspect the terminal artifacts below. Documentation and
+source-contract tests prove neither real App wakeup nor bridge loading.
+
 ### Process a fallback completion
 
 The task completion notification is only a wakeup. Read `run_dir/exit.code` first;
@@ -253,6 +273,18 @@ task's reported process exit code.
   only if the station should still be attended. If no active member/mode is
   reported, the station is stopped; leave it stopped unless the workflow still
   requires attendance.
+- **`6` (delivery-quarantined):** read and preserve `status.json.quarantine`,
+  not `message.json`/`delivery.json`. The historical delivery could not fit the
+  frame limit; do not ack the undelivered message. If `may_continue` is true and
+  attendance is still required, explicitly call `fallback prepare` for the next
+  single-shot run so later deliveries can progress. Otherwise report the
+  quarantine condition before continuing.
+- **`7` (backend-unavailable):** inspect and report `status.json.detail`; backend
+  recovery was exhausted. This is not delivery, idle timeout or daemon death.
+  Re-arm only after recovery, using `fallback prepare`. Older peers may report
+  the backend failure as exit `1`; inspect the error detail rather than treating
+  it as success. See the [exit-code reference](https://lossyrob.github.io/telex/reference/exit-codes.html)
+  for recovery-capability compatibility.
 
 If a task completion arrives but `exit.code` is absent, inspect status before
 launching anything: a live waiter means the original run is still active. Otherwise
@@ -271,14 +303,17 @@ Status separates configured delivery from health:
   continuing.
 
 The daemon rejects a waiter while push is registered and rejects push registration
-while a waiter is live. To return from fallback to push, stop pull first:
+while a waiter is live. To return from fallback to push, first confirm a supported
+loader is available or a bridge is already loaded and live, then stop pull:
 
 ```sh
 telex --address <addr> station stop --session "$COPILOT_AGENT_SESSION_ID"
 telex --address <addr> copilot attach --copilot-bridge --description "<work>"
 ```
 
-Then run `extensions_reload`. To end fallback without returning to push, run
+Use the supported loader (`extensions_reload` where available) if needed and
+verify bridge liveness. Do not leave working pull for a loader the host lacks.
+To end fallback without returning to push, run
 `station stop` and do not prepare another run. Never wrap fallback launchers or
 `telex wait` in an infinite shell loop.
 

@@ -13,16 +13,16 @@
 
 ## TL;DR
 
-A telex-aware Copilot session receives pushed messages as real turns without
+A telex-aware Copilot session with a live bridge receives pushed messages as real turns without
 running, re-arming, or babysitting a `telex wait` waiter. The transport is an
-**in-session extension bridge** (Namra's mechanism), but **loaded on bind**
+**in-session extension bridge** (Namra's mechanism), but **provisioned on bind**
 rather than auto-loaded everywhere, **provisioned and addressed by telex**
 rather than by a separate install, and fed by a **generic, Copilot-agnostic
 on-deliver exec primitive** in the daemon. The daemon never learns what Copilot,
 a session, or a port is; all Copilot specifics stay in the existing `copilot.rs`
 harness-boundary module plus a small embedded bridge script.
 
-The agent's entire setup is two one-time calls at bind:
+On a host exposing `extensions_reload`, setup is two one-time calls at bind:
 
 ```
 telex --address <addr> copilot attach --copilot-bridge   # telex writes the bridge + registers the handler
@@ -36,6 +36,34 @@ After that, delivery is push: daemon -> exec `telex copilot push` -> bridge ->
 No loop. No re-arm. That removes the #45 "deaf station" and per-turn coordination
 tax at its root, because the fragile thing (the agent-managed waiter) is gone.
 
+## Host capability boundary
+
+Push requires an already-loaded, live bridge or a supported host loader. Copilot
+CLI can expose `extensions_reload` when Copilot Extensions is enabled under
+`/experimental`; that setting and tool are not universal Copilot App capabilities.
+An App session with an already-live bridge keeps push. For first-time App setup
+without a supported live bridge loader, use the existing Telex-owned
+`copilot fallback prepare` path described in the
+[operator guide](../guide/src/guides/copilot-push.md#fallback) and binary-owned
+`telex copilot skill`. This selects the existing pull path; it adds no host API or
+transport and does not change the issue #53 push contract.
+
+Provisioning bridge files and registering the handler do not prove the bridge
+loaded. Startup discovery is usable only on hosts that support it; restarting or
+clearing a session cannot substitute for an unavailable loader or prove first-time
+load. Live-bridge evidence, pushed-turn evidence, and pull-completion evidence
+must remain distinct.
+
+Fallback preparation leaves push unchanged until its generated launcher starts.
+The task runner launches exactly one detached wait; the agent reads `exit.code`
+and the run's completion artifacts, dedupes/acks by message id, records disposition,
+and explicitly prepares the next run. Live push refuses downgrade unless
+`prepare --force` was intentional. Returning to push requires stopping pull first
+and a supported loader or an already-live bridge. Stop without re-arming when
+attendance ends. No shell polling loop or replacement launcher is required.
+Preparing fallback or passing source-text tests does not demonstrate real App
+wakeup; wait-setup/backend failures remain failures requiring separate repair.
+
 ## How it works (data flow)
 
 1. **Bind (once).** `telex --address <addr> copilot attach --copilot-bridge` does two things:
@@ -45,8 +73,8 @@ tax at its root, because the fragile thing (the agent-managed waiter) is gone.
    needs the bridge to be running yet. `--wake-on-cc` is an additional per-bind opt-in:
    the daemon records a CC lower bound and pushes only live CC observer messages after
    that point.
-2. **Load (once).** The agent calls `extensions_reload` (a first-party Copilot
-   CLI tool available to every agent). Copilot forks the bridge as a child
+2. **Load (once, on a loader-capable host).** The agent uses the supported loader,
+   such as `extensions_reload` when exposed. Copilot forks the bridge as a child
    process; it calls `joinSession()` to attach to the live foreground session,
    opens a private local endpoint, and writes a registry entry keyed by the
    Copilot session id.
@@ -77,14 +105,14 @@ response to a concrete constraint, not a stylistic preference.
 - **Namra:** install the extension at user scope so it loads in every Copilot
   session automatically.
 - **Change:** telex writes the bridge into the *session* discovery dir at bind
-  time, and the agent loads it with `extensions_reload`.
+  time, and the agent loads it through the host's supported loader.
 - **Why:** memory pressure on sessions that never use telex. An extension is a
   forked Node child process. Measured here (Node v24): a bridge-shaped extension
   is roughly 50-65 MB RSS / ~25 MB private per session. Auto-loading it at user
   scope makes *every* Copilot session -- including the large majority that never
   touch telex -- pay that cost for nothing. Loading on bind means non-telex
   sessions pay zero and there is no always-on resident process for them.
-- **Proven:** a session can load an extension into itself at runtime. Verified
+- **Proven on a loader-capable CLI host:** a session can load an extension into itself at runtime. Verified
   empirically: scaffolding `extension.mjs` into
   `session-state/<id>/extensions/<name>/` (a dir absent at session start) and
   calling `extensions_reload` forks it live, same turn, and its registered tool
@@ -99,7 +127,7 @@ response to a concrete constraint, not a stylistic preference.
   in the extension and reloads.
 - **Change:** rejected the MCP server. telex materializes the bridge bytes
   (embedded in the binary via `include_str!`) and the agent does the reload.
-- **Why, decisively:** extensions have exactly two reload triggers -- `/clear`
+- **Why, in the tested CLI host:** extensions have two reload triggers -- `/clear`
   (or foreground-session replacement) and the `extensions_reload` agent tool.
   There is no filesystem-watch and no external/programmatic reload trigger. An
   MCP server runs in a subprocess and **cannot** call `extensions_reload`; that
@@ -195,14 +223,15 @@ extension is durable. The bridge `extension.mjs` lives in
 the session is resumed -- not just for the run that bound it. Without an unbind
 step, a session that used telex once keeps forking the bridge forever.
 
-The full lifecycle:
+The full push lifecycle, on a host supporting extension loading:
 
 - **Bind** -- `telex --address <addr> copilot attach --copilot-bridge` writes the embedded
   `extension.mjs` into the session extension dir and registers the daemon
-  on-deliver handler. The agent calls `extensions_reload` to load it.
+  on-deliver handler. The agent uses the supported loader to load it.
 - **Unbind** -- `telex --address <addr> copilot detach` deregisters the handler and **removes the
-  `extension.mjs`** (so it will not reload on a later resume); the agent calls
-  `extensions_reload` to unload the live process now. Removal is **ref-counted
+  `extension.mjs`** (so it will not reload on a later resume); the agent uses
+  a supported reload to unload the live process now, or it ends with the session.
+  Removal is **ref-counted
   to the session's last telex binding**: one bridge serves all of a session's
   addresses, so it is removed only when the final binding for that session goes
   away. Both steps live in the `copilot.rs` boundary, so the daemon stays
@@ -234,7 +263,7 @@ The full lifecycle:
   change its behavior. `--ui-server` remains a viable lighter-weight transport
   for flag-launched sessions (in-process, no extra process), and an agent that
   detects it was started with `--ui-server` could choose that path instead. The
-  bridge is the general answer that works without the flag; `--ui-server` is an
+  bridge works without the flag on hosts supporting extension loading; `--ui-server` is an
   optional optimization for sessions that happen to have it. Both feed the same
   generic daemon on-deliver exec; only the handler differs.
 
@@ -248,8 +277,9 @@ The full lifecycle:
   `sessionId`, `send(...)` (returns a message id), and a raw `rpc` surface.
 - **`session.send` enqueue mode is non-interrupting:** it queues behind the
   current turn rather than interrupting in-flight work.
-- **Runtime self-load** of an extension into a running session works (change #1
-  above).
+- **Runtime self-load** of an extension into a running loader-capable CLI session
+  works (change #1 above). This is not first-time loading proof for an App host
+  without that capability.
 - **Memory** numbers above are measured, not estimated.
 - **Namra's bridge** is published and working; we are forking its transport, not
   reinventing it.
