@@ -15,6 +15,7 @@ const SECRET: &str = "opaque-password=do-not-print-793183";
 
 struct Fixture {
     root: PathBuf,
+    user_home: Option<PathBuf>,
 }
 
 impl Fixture {
@@ -26,6 +27,7 @@ impl Fixture {
         std::fs::create_dir_all(root.join("install")).unwrap();
         Self {
             root: std::fs::canonicalize(root).unwrap(),
+            user_home: None,
         }
     }
 
@@ -46,6 +48,9 @@ impl Fixture {
             .env("TELEX_WATCHER_REGISTRY", self.root.join("registry.sqlite"))
             .env("CLI_FIXTURE_TOKEN", SECRET)
             .current_dir(&self.root);
+        if let Some(home) = &self.user_home {
+            command.env("HOME", home).env("USERPROFILE", home);
+        }
         command
     }
 
@@ -100,6 +105,9 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if let Some(home) = &self.user_home {
+            std::fs::remove_dir_all(home).expect("remove isolated user home");
+        }
         std::fs::remove_dir_all(&self.root).expect("remove isolated CLI fixture");
     }
 }
@@ -129,7 +137,14 @@ fn parse(arguments: &[&str]) -> Cli {
 async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() {
     use std::io::Write;
     use telex::backend::{sqlite::SqliteBackend, Backend};
-    let fixture = Fixture::new();
+    let mut fixture = Fixture::new();
+    // Unix management sockets use HOME and need a short, non-world-writable ancestry.
+    let home = dirs::home_dir().unwrap().join(format!(
+        ".{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::create_dir(&home).unwrap();
+    fixture.user_home = Some(home.clone());
     let telex = std::env::current_exe()
         .unwrap()
         .parent()
@@ -158,11 +173,7 @@ async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() 
         }))
         .unwrap(),
     );
-    let log_dir = fixture
-        .root
-        .join(".copilot")
-        .join("session-state")
-        .join("member");
+    let log_dir = home.join(".copilot").join("session-state").join("member");
     std::fs::create_dir_all(&log_dir).unwrap();
     std::fs::write(
         log_dir.join("events.jsonl"),
@@ -196,8 +207,8 @@ async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() 
         });
         let mut child = ProcessCommand::new(&telex)
             .args(["copilot", "stall-detect"])
-            .env("HOME", &fixture.root)
-            .env("USERPROFILE", &fixture.root)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("LOCALAPPDATA", fixture.root.join("local"))
             .env("TELEX_HOME", fixture.root.join("home"))
             .env("TELEX_DB", &store)
