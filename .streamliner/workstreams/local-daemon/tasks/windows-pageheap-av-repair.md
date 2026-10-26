@@ -3,10 +3,10 @@
 - **Workstream:** `local-daemon`
 - **Node:** `windows-pageheap-av-repair`
 - **Type:** implementation
-- **Status/attention:** in progress / focus; one authorized owner pending
-  canonical preparation and launch
-- **Tracker:** [#166](https://github.com/lossyrob/telex/issues/166),
-  existing open issue; no duplicate issue or discovered-work record
+- **Status/attention:** completed with retained gate debt / focus;
+  main follow-through pending
+- **Tracker:** [#166](https://github.com/lossyrob/telex/issues/166), closed completed
+- **PR:** [#196](https://github.com/lossyrob/telex/pull/196), merged at 8d7815a8
 - **Dependencies:** none; no automatic #193 or Watcher edge
 - **Coordinator:** Local `aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57`
 
@@ -453,3 +453,92 @@ Local immediately; Local separately wakes #193 / PR #194 owner
 Authorization, comparison success, artifact publication and readiness
 are not the trigger. No automatic graph edge or status/dependency change,
 owner replacement, accepted debt/HOLD reversal or freeze clearance follows.
+
+## 2026-10-26 - Completed bounded repair; debts and follow-through retained
+
+This later disposition supersedes the old in-progress and pending-wake
+framing above, preserving it as history. Campaign direct confirmation
+`toolu_01LZnnNNdNrKTw4NLAmyyBgg` explicitly accepts completion with
+retained debt, following the #204 precedent. Same owner:
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c`. No second launch or replacement.
+
+[PR #196](https://github.com/lossyrob/telex/pull/196) merged at
+`8d7815a8d0fb8c6f465d441904044bd20f7dcc7b`, tree
+`30aac58eb2f76fab2800308fa68a1c22658a2a05`, on `2026-10-26T13:11:20Z`.
+Ordered parents are `a0bf2cf0f03bcb59502ee3a747e44076877cf323` then
+reviewed head `9b538e4fc2047bf7b2e4940a334cfff673643cc9`, reviewed tree
+`220cdcfac22060f8da648a995b842e55456121c3`. #166 closed completed at
+`13:11:21Z`. The reconciler independently checks these public identities,
+Git parent/tree/path geometry and the full gate/field report, not product
+source, archives, native stacks or runtime. The product merge preserves
+the first parent's entire `.streamliner` tree.
+
+The [Campaign gate](https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413)
+is `merge + debt`, high confidence. It accepts the operator-authorized
+Mio 1.2.4 repair for the reached Mio defect, not a six-case causal mapping.
+The [field report](https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991)
+preserves the original observations and discovery dispositions; its
+source, diagnostic, dump and experiment findings remain owner-attributed.
+Neither a clean comparison nor this accepted completion proves absence.
+A recurring native crash reopens #166: retain run/job/artifact and any
+dump and do not retry past it.
+
+### All eight gate debts remain retained and open
+
+1. ProcDump is downloaded each run with signature verification but no
+   hash pin; required jobs depend on Sysinternals availability.
+2. SDK and public-symbol downloads add cost when dumps exist.
+3. The fail-closed negative test depends on live crates.io and Cargo's
+   resolver wording.
+4. Capture tests are text-only and the exact-1.2.4 floor assertion needs
+   editing on a future bump.
+5. The dependency floor is Windows-only by design.
+6. Capture of `0xc0000409` and `0xc0000374` is unproved.
+7. The PR body's #203/#204 precondition is stale and its isolation-env
+   additions are omitted.
+8. Record Windows Tokio 1.39.1+ in the next release notes.
+
+The complete gate and field report remain bound in the ledger. These
+summaries and field explanations are not debt clearance. The gate rules
+#203 separate and defers it to PR #207, superseding earlier precondition
+wording without rewriting it. #204's prior completion stays unchanged.
+
+### Both existing wakes have been sent and admitted
+
+Campaign `toolu_01VsA55QAZu6tR6v4erTrbHu` expressly directed fire-now
+after the product merge. Local verified the merge and that both wakes
+were pending, then reports one immediate no-mode-override send per
+existing recipient:
+
+- #193 / PR #194: `519693a5-0607-4aba-a968-345f3b1cd1b5`.
+- #198 / PR #202: `a96926b1-3e4f-4578-a197-33de51d669c7`.
+
+The App accepted each send. That proves queue admission only, not owner
+execution, main integration, exact-head CI success, readiness or a merge.
+The old `delivered:false` structures remain exact historical snapshots;
+current sent/accepted receipts are additive. The reconciler sends no
+wake, probes neither recipient and creates no observer or scheduler.
+
+Each owner resumes existing work, merges main, obtains fresh full hosted
+CI at its resulting exact head, refreshes source/design coverage as
+needed and requests its own gate. Use the existing sole wait coordinator;
+no retry or waiver. Watcher's proposed #198 delay was not adopted. Its
+later report of Campaign confirmation that the original wake stands
+remains attributed; no duplicate or revocation follows. Conditional
+later routing is history, not a claimed PR #202 failure or new wake.
+
+### Pending follow-through is not a completion hold
+
+Local observes main CI `40328433964` and Docs `40328433981`, attempt 1,
+at actual product merge `8d7815a8` through sole coordinator
+`2a4bc4c8-1211-49d4-ba68-9d05d5d7530d`. Registration is reported, not an
+independent scheduler audit or accepted terminal result. No post-merge CI
+or debt clearance is inferred, and owners do not wait for this recording.
+
+Campaign's later confirmation reports #207 passed its gate on the merits
+but still requires main `8d7815a8` integration and fresh CI. This accepts
+neither #203/#207 nor #167. No six-case common cause, other owner/status,
+dependency edge, downstream readiness, release or freeze clearance,
+broader runtime or retry/waiver authority follows. Owner-private locks,
+non-theft, generation fencing, late-guard disposal and the production
+480ms budget remain unchanged.

@@ -366,3 +366,33 @@ Continue parking bounded detector-template, diagnostics, CLI, and polling-policy
 improvements here during dogfooding. Any expansion into general automation,
 remote executable registration, hosted event ingestion, or cross-principal
 script trust belongs in its own issue, candidate, or follow-on workstream.
+
+## 2026-10-26: Same-head CI reruns supersede #203's launch prohibition
+
+Campaign `toolu_01BAMphx5UxVR6KEHAWxh5Ud` records the operator's
+09:25 ET directive: "Reruns are fine." The previous #203 and #167
+no-retry/flake-exception clauses are superseded for same-head CI reruns.
+Record run, job and test on the existing tracker or discovered-work record
+before rerunning failed CI jobs at the unchanged head. Green exact-head
+reruns satisfy CI; red merges remain forbidden. Repeated failure of the
+same test is a finding, not noise. No check waiver, skip or weakening,
+cosmetic-head retry, local runtime or product retry weakening follows.
+
+Existing test sentinel `fc772c8f-2a38-40de-a868-69a5397dbbc5` owns the
+cross-family Windows flake/environment investigation and approach decision,
+amending R15 for this purpose. #167 B/C and #175/LockFileEx-33 staffing
+are deferred to its recommendation; #167 remains held/no merge and those
+candidates stay unstaffed. This is not a new owner launch, implementation
+assignment, investigation result or recommendation.
+
+Campaign's private planning process-document commit
+`74721a829f1dda93d1d2acc869a60fa2266c45f1` updates the owner guide and gate
+charter; it does not change telex main. Private document content is not
+copied here. The directive and rule summary are the canonical projection.
+
+All existing #203 observations, owner, launch and historical scope remain
+exact, with the old no-rerun clause explicitly historical in this respect.
+#203 stays outside the graph; no node or dependency is added. No #203/#207
+acceptance, CI result, causal finding, #166 debt clearance, new wake,
+release, hardening or freeze credit follows. Existing owners, reruns and
+Sentinel do not wait for this recording.

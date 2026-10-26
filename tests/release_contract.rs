@@ -272,6 +272,109 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
 }
 
 #[test]
+fn hosted_native_capture_preserves_abnormal_child_status_and_invocation() {
+    let ci = read(".github/workflows/ci.yml");
+    let setup = read("tests/configure_windows_postmortem.ps1");
+    let process = read("tests/daemon_process_sqlite.rs");
+    assert!(
+        ci.contains("configure_windows_postmortem.ps1")
+            && ci.contains("Unregister disposable postmortem debugger")
+            && setup.contains("github-hosted")
+            && setup.contains("Get-AuthenticodeSignature")
+            && setup.contains("postmortem preflight produced no native dump")
+            && setup.contains("capture changed the probe exit status")
+            && setup.contains("[Convert]::ToUInt32(\"c0000005\", 16)")
+            && setup.contains("LocalDumps\\telex-capture-probe.exe")
+            && setup.contains("-Path $probeWer -Name DumpFolder -Value $probe")
+            && setup.contains("0xc0000005"),
+        "hosted postmortem capture must verify a dump and the original native status"
+    );
+    assert!(
+        ci.contains("TELEX_PROCESS_EVIDENCE")
+            && process.contains("cmd.get_program()")
+            && process.contains("cmd.get_args()")
+            && process.contains("invocation[\"pid\"]")
+            && process.contains("preserve child stdout")
+            && process.contains("preserve child stderr"),
+        "native failures must retain the child PID, argv and captures"
+    );
+}
+
+#[test]
+fn ordinary_windows_job_keeps_postmortem_dump_capture_wired() {
+    let ci = read(".github/workflows/ci.yml");
+    let setup = read("tests/configure_windows_postmortem.ps1");
+    assert!(
+        ci.contains("telex-crash-postmortem")
+            && ci.contains("-DumpDirectory (Join-Path $env:RUNNER_TEMP \"telex-crash-dumps\")")
+            && setup.contains("[string]$DumpDirectory"),
+        "the ordinary Windows job must keep its native postmortem dump capture"
+    );
+}
+
+fn version_triple(version: &str) -> (u64, u64, u64) {
+    let mut parts = version
+        .split(['.', '-', '+'])
+        .map(|part| part.parse::<u64>().expect("numeric version component"));
+    let mut next = || parts.next().unwrap_or(0);
+    (next(), next(), next())
+}
+
+/// Mio < 1.2.4 can report an error after a named-pipe read or write was submitted, which leaves
+/// the completion without its reserved reference (tokio-rs/mio#2014, issue #166). The lock pins
+/// this repository's build graph; the Windows normal-dependency floor protects consumers that
+/// resolve telex with their own lock file.
+#[test]
+fn windows_named_pipe_transport_requires_fixed_mio() {
+    const FIXED: (u64, u64, u64) = (1, 2, 4);
+    let manifest: toml::Value = toml::from_str(&read("Cargo.toml")).unwrap();
+    let mio = &manifest["target"]["cfg(windows)"]["dependencies"]["mio"];
+    let requirement = mio["version"].as_str().expect("mio floor version");
+    assert!(
+        requirement
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && version_triple(requirement) == FIXED,
+        "the Windows mio floor must be the caret requirement 1.2.4, found {requirement}"
+    );
+    assert_eq!(
+        mio["default-features"].as_bool(),
+        Some(false),
+        "the floor must not enable Mio default features"
+    );
+    // Tokio 1.38.x wraps Mio 0.8, which would sit beside the Mio floor above.
+    let tokio = &manifest["target"]["cfg(windows)"]["dependencies"]["tokio"];
+    let tokio_requirement = tokio["version"].as_str().expect("windows tokio floor");
+    assert!(
+        tokio_requirement
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && version_triple(tokio_requirement) >= (1, 39, 1),
+        "the Windows tokio floor must be a caret requirement of at least 1.39.1, found {tokio_requirement}"
+    );
+    let lock: toml::Value = toml::from_str(&read("Cargo.lock")).unwrap();
+    let versions: Vec<&str> = lock["package"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|package| package["name"].as_str() == Some("mio"))
+        .map(|package| package["version"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        versions.len(),
+        1,
+        "exactly one Mio must be locked: {versions:?}"
+    );
+    assert!(
+        version_triple(versions[0]) >= FIXED && version_triple(versions[0]).0 == 1,
+        "the locked Mio must be 1.2.4 or a later 1.x release, found {}",
+        versions[0]
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version

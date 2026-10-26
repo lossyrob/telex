@@ -1129,3 +1129,149 @@ evidence/launch history, the entire #166 record and both pending #193/#198
 wakes stay exact. Only Local-verified actual #166 repair merge triggers
 those wakes. No new owner, occurrence, graph edge, runtime/retry, broader
 acceptance, debt/HOLD reversal or workstation-freeze clearance follows.
+
+## 2026-10-26 - Credential-writer repair #167 already staffed
+
+Campaign authorized one public-record-only owner for existing
+[#167](https://github.com/lossyrob/telex/issues/167), with launch first
+and artifact recording afterward. The same
+`local-daemon-windows-credential-writer-timeout` record is promoted to
+the `credential-writer-timeout-repair` task. The actual owner is
+`9a868a31-2c8d-429a-aee3-7e195076a4dd`, coordinated by Local, in checkout
+`lossyrob-curly-potato` on current branch
+`lossyrob-fix-167-delayed-writer-timeout`. Local reports the actual launch;
+the reconciler's read-only App observation confirms the same session,
+creator/coordinator, checkout, current branch and observed busy state.
+No exact starting checkout head or cleanliness report was received in
+this frozen launch snapshot. Public-main `be8b9910` is preflight evidence,
+not a verified owner checkout. Requested Opus 5.5/high/default/interactive
+settings are not independent effective-capacity proof.
+
+Original Campaign source `toolu_014vkRgy6ysjNiGD88kQeR6L` and direct
+confirmation `toolu_01Jw6FHd8GL21QG41ruVtEnr` authorize this separate
+repair, not a new tracker or second launch. The complete 5,274-byte Local
+launch packet is retained by SHA-256
+`ff74705a9428f38b9276eed956ba21cc50ecacbffa24232e26ea0ce887910ad9`.
+Only the private machine path is replaced by its checkout name in the
+canonical packet projection. All earlier candidate/unassigned fields and
+all evidence, including the four existing successor entries, remain exact
+history; promotion adds no occurrence. Campaign's "four times" is its
+record-based count, not a new independent census.
+
+The owner must diagnose lifecycle, test-budget and hosted-scheduling
+possibilities without guessing, preserve delayed inherited-writer output
+after shell exit, output/error semantics, effective negative assertions
+and owned-process cleanup, and deliver a separate PR using `Closes #167`.
+Product/test/daemon runtime is hosted-only. No retry, rerun, cosmetic-head
+retry, waiver, flake exception, unbounded experiment or workstation/
+installed-state change is authorized.
+
+Coordinate overlapping credential/daemon/CI/dependency edits with d7
+before publishing; do not write PR #196's branch or absorb #166's repair.
+Use the existing sole external wait coordinator, not another scheduler.
+Exact-final-head independent source review with reviewer-origin public
+receipt, design inspection as applicable, strict required hosted CI and
+Campaign gate remain separate. No autonomous merge.
+
+The Local ledger remains 48 records; one new repair node makes 29 Local
+nodes with no dependency edges or edits to existing nodes, attention,
+status or design links. All other records, Watcher and both pending
+#193/#198 wakes remain exact. Only Local-verified actual #166 repair merge
+triggers those wakes. Staffing/recording supplies no cause, source/runtime,
+CI/readiness, repair/accepted-delivery, debt/HOLD or freeze credit and does
+not delay the already-authorized implementation.
+
+## 2026-10-26 - Accepted #166 completion with debt and both wakes sent
+
+Campaign accepts the bounded #166 repair as completed with retained debt,
+following [PR #196](https://github.com/lossyrob/telex/pull/196)'s actual
+product merge `8d7815a8d0fb8c6f465d441904044bd20f7dcc7b`, issue closure,
+the [merge + debt gate](https://github.com/lossyrob/telex/pull/196#issuecomment-6416830413)
+and the owner's [field report](https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991).
+Direct Campaign confirmation `toolu_01LZnnNNdNrKTw4NLAmyyBgg` expressly
+requires the existing repair node to be completed with retained debt,
+following the #204 precedent. The same owner d7 remains recorded. This
+is not a new owner, node or causal finding.
+
+The reviewed head is `9b538e4fc2047bf7b2e4940a334cfff673643cc9`;
+the product merge's ordered parents are prior artifact main `a0bf2cf0`
+then that reviewed head. The merge tree is
+`30aac58eb2f76fab2800308fa68a1c22658a2a05`. Its `.streamliner` tree is
+unchanged from the first parent. This artifact successor is separate
+from the product merge; it does not count that merge as artifact work.
+All original observations, owner/launch/authority history and prior
+pending-wake snapshots remain intact.
+
+The accepted repair is the operator-authorized Mio 1.2.4 upgrade and
+Windows dependency floor for the reached Mio defect. Neither the gate
+nor this recording maps it causally to the six retained native
+observations. A recurring native crash reopens #166; preserve exact
+run/job/artifact and any dump, without retrying past the failure.
+
+All eight gate debts remain **retained and open**: ProcDump availability
+and signature-only verification; conditional SDK/symbol downloads;
+live-index/resolver-wording dependence in the fail-closed negative test;
+text-only capture coverage and the exact-1.2.4 assertion; Windows-only
+floor scope; unproved capture for `0xc0000409`/`0xc0000374`; stale
+#203/#204 gate wording and omitted isolation-env description; and the
+Windows Tokio 1.39.1+ next-release-note requirement. The full gate and
+field report are retained; these summaries clear none of the debts.
+The gate expressly makes #203 separate, superseding the earlier
+precondition without rewriting its history. #204's prior completion
+remains unchanged.
+
+After Local independently verified the actual product merge, Campaign
+`toolu_01VsA55QAZu6tR6v4erTrbHu` directed both waiting wakes immediately.
+Local reports exactly one immediate, no-mode-override send to each
+existing recipient: #193 / PR #194 owner `519693a5-0607-4aba-a968-345f3b1cd1b5`
+and #198 / PR #202 owner `a96926b1-3e4f-4578-a197-33de51d669c7`.
+The App accepted both. These are sent/admitted dispositions only, not
+owner execution, main integration, CI success, readiness or merge
+authority. Earlier `delivered:false` snapshots remain history; no wake
+is resent by recording.
+
+Each awakened owner integrates main and obtains fresh exact-head hosted
+CI/review and its own gate through the existing sole wait coordinator.
+Watcher's intervening delay proposal was not adopted; its later report
+that Campaign upheld the original wake remains attributed. No duplicate,
+revocation, PR #202 failure or conditional later wake is inferred.
+
+Main CI `40328433964` and Docs `40328433981` at `8d7815a8` are registered
+follow-through for Local and the sole coordinator; no terminal result or
+debt clearance is accepted here. Campaign's later confirmation reports
+#207 passed its merits gate but still awaits main integration and fresh
+CI; this records no #203/#207 or #167 acceptance. Counts stay 48 Local
+records and 29 nodes, with no edge, other status, owner, runtime or
+workstation-freeze change. Recording does not delay either awakened owner.
+
+## 2026-10-26: Same-head CI reruns and Sentinel investigation
+
+Campaign `toolu_01BAMphx5UxVR6KEHAWxh5Ud` records the operator's
+09:25 ET directive: "Reruns are fine." The prior #167 and #203
+no-retry/flake-exception clauses are superseded for same-head CI reruns.
+Record each failure's run, job and test on its existing tracker or
+discovered-work record before rerunning failed jobs at the unchanged head.
+A green rerun at that exact head satisfies CI; merging red is still
+forbidden. Repeated failure of the same test is a finding, not noise.
+Do not waive, skip or weaken a required check or manufacture a new head.
+This changes neither local-runtime restrictions nor product retry behavior.
+
+Existing test sentinel `fc772c8f-2a38-40de-a868-69a5397dbbc5` now owns the
+cross-family Windows flake/environment investigation and approach decision;
+R15 is amended for that purpose. #167's B/C decision and #175/LockFileEx-33
+staffing are deferred to its recommendation. #167 remains held with no
+merge; the two candidates stay unstaffed. This records an assignment, not
+a new session launch, implementation owner, recommendation or result.
+
+Campaign's `74721a829f1dda93d1d2acc869a60fa2266c45f1` is an owner-guide
+and merge-gate process-document commit in the private planning repository,
+not a telex main commit or product merge. Only this directive/rule summary
+is projected; private planning-document content stays private.
+
+All earlier failures and policy statements remain history, not current
+no-rerun authority. A green rerun is not a causal fix, repair acceptance
+or debt clearance. Existing repair owners, statuses, attention, graph
+geometry and all evidence remain unchanged. No CI result, #166 debt
+clearance/causality, #167/#203/#207 acceptance, new wake, release,
+hardening or freeze credit follows. Owners, reruns and Sentinel do not
+wait on this recording.

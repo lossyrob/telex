@@ -1,0 +1,3 @@
+{"type":"session.resume","id":"resume-1","timestamp":"2026-10-25T20:00:00Z","data":{}}
+{"type":"session.shutdown","id":"shutdown-1","timestamp":"2026-10-25T20:00:01Z","data":{}}
+{"type":"session.usage_checkpoint","id":"usage-2","timestamp":"2026-10-25T20:00:02Z","data":{}}

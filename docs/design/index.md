@@ -74,6 +74,11 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   nested under `copilot/`) is
   [DECISIONS.md ADR 0044](DECISIONS.md#0044--harness-neutral-root-skill-per-harness-content-nested-under-harness);
   see also [copilot-plugin-validation.md](copilot-plugin-validation.md).
+- **[copilot-session-stalls.md](copilot-session-stalls.md)** - the accepted
+  Copilot session-group stall design: bounded same-user local classification,
+  activity markers, conservative unknown handling, root-owned membership,
+  detector policy and App confirmation. The classifier ships under
+  `telex copilot session-state`; detector and guidance remain separate items.
 - **[proposals/](proposals/)** — forward-looking design proposals not yet part of the
   normative spec: [DISPATCH.md](proposals/DISPATCH.md) (discovery and dispatch: broadcast,
   Contract-Net) and [EXTENSIONS.md](proposals/EXTENSIONS.md) (extensions and capability
