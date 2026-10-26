@@ -134,6 +134,9 @@ impl Fixture {
 fn unix_fixture_home(root: &std::path::Path) -> PathBuf {
     use std::os::unix::fs::MetadataExt;
 
+    // A trailing separator or dot must not make metadata follow the final symlink.
+    let root: PathBuf = root.components().collect();
+    let root = root.as_path();
     assert!(root.is_absolute(), "TELEX_TEST_HOME_ROOT must be absolute");
     let metadata = std::fs::symlink_metadata(root).expect("inspect TELEX_TEST_HOME_ROOT");
     assert!(
@@ -280,7 +283,18 @@ fn unix_user_home_root_validation_rejects_unsafe_paths_without_repair() {
     );
     let link = fixture.root.join("linked-home");
     symlink(home, &link).unwrap();
-    assert!(std::panic::catch_unwind(|| unix_fixture_home(&link)).is_err());
+    for spelling in [link.clone(), link.join(""), link.join(".")] {
+        let rejected = std::panic::catch_unwind(|| unix_fixture_home(&spelling)).unwrap_err();
+        let message = rejected
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| rejected.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert_eq!(
+            message,
+            "TELEX_TEST_HOME_ROOT must be a directory, not a symlink"
+        );
+    }
     assert!(std::fs::symlink_metadata(link)
         .unwrap()
         .file_type()
