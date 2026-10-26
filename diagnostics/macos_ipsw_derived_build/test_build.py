@@ -1074,5 +1074,168 @@ class MainFinalizationTests(unittest.TestCase):
             self.assertFalse((evidence / "sha256.json").exists())
 
 
+class LateRetentionTests(unittest.TestCase):
+    image_bytes = b"synthetic-completed-image-with-inputs"
+
+    @contextmanager
+    def prepared_case(self, mode=None, finish_after_write=False, interruption=False, failure_receipt_error=False):
+        with tempfile.TemporaryDirectory() as directory:
+            work, evidence = Path(directory) / "work", Path(directory) / "evidence"
+            image = work / "build.dmg"
+            clock, events, observed = [0.0], [], {}
+            original_json, original_finish, original_unlink = b.Evidence.json, b.Evidence.finish, Path.unlink
+            failure_type = KeyboardInterrupt if interruption else OSError
+            failure = failure_type("synthetic late " + str(mode) + " failure")
+
+            def prepared(bounds, output, root, provenance, runner, ledger):
+                image.write_bytes(self.image_bytes)
+                provenance.update(image=str(image), mount=str(root / "volume"), attach_attempted=True,
+                    disposition="built-and-signed-not-executed-pending-independent-review", artifact_deadline=100.0)
+                events.append("prepared-success")
+
+            def detached(*args, **kwargs):
+                self.assertEqual(args[0], "image-detach")
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                events.append("detach")
+                return b"", b""
+
+            def volume_stat(path):
+                if mode == "acceptance":
+                    clock[0] = 100.0
+                return SimpleNamespace(f_bavail=20, f_frsize=1024)
+
+            def json_sink(target, name, value):
+                events.append(name)
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                if name == "provenance.json":
+                    observed["attempted_provenance"] = copy.deepcopy(value)
+                if name == mode:
+                    raise failure
+                if failure_receipt_error and name == "finalization-error.json":
+                    raise OSError("synthetic secondary failure receipt error")
+                return original_json(target, name, value)
+
+            def finish(target):
+                events.append("finish-enter")
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                persisted = json.loads((evidence / "provenance.json").read_bytes())
+                self.assertFalse(persisted["output_binary_accepted"])
+                if mode == "finish" and not finish_after_write:
+                    raise failure
+                result = original_finish(target)
+                events.append("finish-written")
+                self.assertEqual(image.read_bytes(), self.image_bytes)
+                if mode == "finish":
+                    raise failure
+                events.append("finish-return")
+                return result
+
+            def unlink(file, *args, **kwargs):
+                if file == image:
+                    events.append("backing-unlink")
+                    self.fail("Backing retention must not depend on a provisional success flag")
+                return original_unlink(file, *args, **kwargs)
+
+            with patch.object(b.sys, "argv", ["build.py", str(work), str(evidence)]), \
+                    patch.object(b, "execute", side_effect=prepared), \
+                    patch.object(b.Runner, "command", side_effect=detached) as detach, \
+                    patch.object(b.os, "statvfs", side_effect=volume_stat), \
+                    patch.object(b.time, "monotonic", side_effect=lambda: clock[0]), \
+                    patch.object(Path, "unlink", unlink), patch.object(b.Evidence, "json", json_sink), \
+                    patch.object(b.Evidence, "finish", finish):
+                code, caught = None, None
+                try:
+                    code = b.main()
+                    events.append("main-return")
+                except BaseException as error:
+                    caught = error
+                    events.append("main-raise")
+            self.assertEqual(image.read_bytes(), self.image_bytes)
+            self.assertEqual(detach.call_count, 1)
+            self.assertNotIn("backing-unlink", events)
+            yield {"work": work, "evidence": evidence, "image": image, "events": events,
+                   "code": code, "caught": caught, "injected": failure, **observed}
+
+    def manifest_valid(self, root):
+        file = root / "sha256.json"
+        if not file.is_file():
+            return False
+        hashes = json.loads(file.read_bytes())
+        names = {p.name for p in root.iterdir() if p.name != "sha256.json"}
+        return set(hashes) == names and all(b.digest((root / name).read_bytes()) == sha for name, sha in hashes.items())
+
+    def test_all_five_late_failures_keep_exact_backing_and_truthful_failed_outcomes(self):
+        for mode in ("acceptance", "commands.json", "fetches.json", "provenance.json", "finish"):
+            with self.subTest(mode=mode), self.prepared_case(mode) as case:
+                root = case["evidence"]
+                if mode == "acceptance":
+                    self.assertEqual(case["code"], 1)
+                    self.assertIsNone(case["caught"])
+                    self.assertTrue(self.manifest_valid(root))
+                else:
+                    self.assertIs(case["caught"], case["injected"])
+                    self.assertIsNone(case["code"])
+                    self.assertFalse(self.manifest_valid(root))
+                    failure = json.loads((root / "finalization-error.json").read_bytes())
+                    self.assertFalse(failure["output_binary_accepted"])
+                    self.assertFalse(failure["controller_unlinks_backing"])
+                    self.assertTrue(failure["detached"])
+                    self.assertEqual(failure["backing_image_retained_on_runner"], str(case["image"]))
+                provenance = root / "provenance.json"
+                if provenance.exists():
+                    record = json.loads(provenance.read_bytes())
+                    self.assertFalse(record["output_binary_accepted"])
+                    self.assertEqual(record["backing_image_retained_on_runner"], str(case["image"]))
+                    self.assertTrue(record["detached"])
+                    self.assertNotIn("only_known_backing_image_deleted", record)
+                    self.assertIn("never unlinks", record["retention_precision"])
+                if mode in ("commands.json", "fetches.json"):
+                    self.assertIn("commands.json", case["events"])
+                    self.assertIn("fetches.json", case["events"])
+                    self.assertIn("provenance.json", case["events"])
+
+    def test_success_retains_backing_and_returns_zero_only_after_manifest_finish(self):
+        with self.prepared_case() as case:
+            self.assertEqual(case["code"], 0)
+            self.assertIsNone(case["caught"])
+            self.assertTrue(self.manifest_valid(case["evidence"]))
+            self.assertLess(case["events"].index("finish-return"), case["events"].index("main-return"))
+            self.assertFalse((case["evidence"] / "finalization-error.json").exists())
+            record = json.loads((case["evidence"] / "provenance.json").read_bytes())
+            self.assertTrue(record["finalization_candidate"])
+            self.assertFalse(record["output_binary_accepted"])
+            self.assertIn("main returns 0 after finish", record["finalization_contract"])
+            self.assertEqual(record["backing_after"]["logical"], len(self.image_bytes))
+            self.assertEqual(record["backing_image_retained_on_runner"], str(case["image"]))
+
+    def test_failure_after_manifest_was_written_still_keeps_image_and_is_not_accepted(self):
+        with self.prepared_case("finish", finish_after_write=True) as case:
+            self.assertIs(case["caught"], case["injected"])
+            self.assertTrue((case["evidence"] / "sha256.json").exists())
+            self.assertFalse(self.manifest_valid(case["evidence"]))
+            self.assertFalse(json.loads((case["evidence"] / "provenance.json").read_bytes())["output_binary_accepted"])
+            failure = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+            self.assertEqual(failure["error"]["phase"], "manifest-finish")
+            self.assertTrue(failure["manifest_not_acceptance"])
+
+    def test_each_late_interruption_keeps_image_and_original_exception(self):
+        for mode in ("commands.json", "fetches.json", "provenance.json", "finish"):
+            with self.subTest(mode=mode), self.prepared_case(mode, interruption=True) as case:
+                self.assertIs(case["caught"], case["injected"])
+                self.assertFalse(self.manifest_valid(case["evidence"]))
+                failure = json.loads((case["evidence"] / "finalization-error.json").read_bytes())
+                self.assertEqual(failure["error"]["type"], "KeyboardInterrupt")
+                self.assertTrue(failure["error"]["interruption"])
+
+    def test_finalization_error_sink_failure_never_discards_backing_or_masks_primary(self):
+        for mode in ("provenance.json", "finish"):
+            with self.subTest(mode=mode), self.prepared_case(mode, failure_receipt_error=True) as case:
+                self.assertIs(case["caught"], case["injected"])
+                self.assertFalse(self.manifest_valid(case["evidence"]))
+                self.assertFalse((case["evidence"] / "finalization-error.json").exists())
+                self.assertTrue(any("receipt also failed" in note for note in case["caught"].__notes__))
+                self.assertNotEqual(case["code"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

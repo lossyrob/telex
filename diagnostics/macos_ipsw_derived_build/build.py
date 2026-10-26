@@ -908,18 +908,19 @@ def main():
                 code = 1
         if provenance.get("detached"):
             image = Path(provenance["image"])
+            provenance["backing_image_retained_on_runner"] = str(image)
+            provenance["retention_precision"] = (
+                "The controller never unlinks the detached backing image, on success or failure. "
+                "Inputs/logs remain on the runner until runner teardown; no bulk image is uploaded. "
+                "This retention survives acceptance, required-record and manifest-finalization failures.")
             try:
                 provenance["backing_after"] = {"logical": image.stat().st_size, "allocated_blocks": image.stat().st_blocks,
                     "user_available_sample_only": os.statvfs(work).f_bavail * os.statvfs(work).f_frsize}
-                if code == 0:
-                    image.unlink()
-                    provenance["only_known_backing_image_deleted"] = True
             except BaseException as error:
                 provenance["backing_finalization_error"] = failure_record(error, "backing-finalization")
                 code = 1
             if code != 0:
                 provenance["failed_backing_image_retained_on_runner"] = str(image)
-                provenance["retention_precision"] = "Partial inputs/logs remain on this detached image until runner teardown; not uploaded as a bulk artifact. Bounded failure records are uploaded."
         if code == 0:
             try:
                 require(time.monotonic() < artifact_stop and time.monotonic() < runner.cleanup_deadline,
@@ -939,11 +940,33 @@ def main():
                     output_error = error
         if code != 0:
             provenance["disposition"] = "failed-return-to-design"
-        provenance["output_binary_accepted"] = code == 0
-        output.json("provenance.json", provenance)
-        if output_error is not None:
-            raise output_error
-        output.finish()
+        provenance["output_binary_accepted"] = False
+        provenance["finalization_candidate"] = code == 0
+        provenance["finalization_contract"] = (
+            "This immutable provenance precedes manifest finalization and does not certify success. "
+            "Collection succeeds only if main returns 0 after finish and the exact artifact manifest verifies; "
+            "the output binary still requires independent review.")
+        finalization_phase = "provenance-write"
+        try:
+            output.json("provenance.json", provenance)
+            finalization_phase = "required-records"
+            if output_error is not None:
+                raise output_error
+            finalization_phase = "manifest-finish"
+            output.finish()
+        except BaseException as error:
+            failure = {"disposition": "failed-return-to-design",
+                       "output_binary_accepted": False,
+                       "error": failure_record(error, finalization_phase),
+                       "backing_image_retained_on_runner": provenance.get("backing_image_retained_on_runner"),
+                       "detached": provenance.get("detached", False),
+                       "controller_unlinks_backing": False,
+                       "manifest_not_acceptance": True}
+            try:
+                output.json("finalization-error.json", failure)
+            except BaseException as receipt_error:
+                error.add_note("Finalization failure receipt also failed: " + repr(receipt_error))
+            raise
     return code
 
 
