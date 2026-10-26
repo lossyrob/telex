@@ -31,6 +31,33 @@ impl Fixture {
         }
     }
 
+    #[cfg(feature = "sqlite")]
+    fn with_isolated_user_home() -> Self {
+        let mut fixture = Self::new();
+        #[cfg(unix)]
+        let home = {
+            let root = std::env::var_os("TELEX_TEST_HOME_ROOT").expect(
+                "set TELEX_TEST_HOME_ROOT to a short private directory outside HOME; \
+                 see CONTRIBUTING.md, Stall-detector fixture isolation",
+            );
+            let home = unix_fixture_home(std::path::Path::new(&root));
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&home)
+                .unwrap();
+            home
+        };
+        #[cfg(windows)]
+        let home = {
+            let home = fixture.root.join("user-home");
+            std::fs::create_dir(&home).unwrap();
+            home
+        };
+        fixture.user_home = Some(home);
+        fixture
+    }
+
     fn file(&self, name: &str, bytes: impl AsRef<[u8]>) -> PathBuf {
         let path = self.root.join(name);
         std::fs::write(&path, bytes).unwrap();
@@ -101,6 +128,51 @@ impl Fixture {
         let (_, stopped) = self.execute(&["status"]);
         assert_eq!(stopped["error"]["code"], "runtime-not-running");
     }
+}
+
+#[cfg(all(unix, feature = "sqlite"))]
+fn unix_fixture_home(root: &std::path::Path) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+
+    assert!(root.is_absolute(), "TELEX_TEST_HOME_ROOT must be absolute");
+    let metadata = std::fs::symlink_metadata(root).expect("inspect TELEX_TEST_HOME_ROOT");
+    assert!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "TELEX_TEST_HOME_ROOT must be a directory, not a symlink"
+    );
+    let uid = unsafe { libc::geteuid() };
+    assert_eq!(
+        metadata.uid(),
+        uid,
+        "TELEX_TEST_HOME_ROOT must be user-owned"
+    );
+    assert_eq!(
+        metadata.mode() & 0o7777,
+        0o700,
+        "TELEX_TEST_HOME_ROOT must have mode 0700"
+    );
+    for ancestor in root.ancestors().skip(1) {
+        let metadata = std::fs::symlink_metadata(ancestor).expect("inspect test home ancestor");
+        assert!(
+            metadata.is_dir()
+                && !metadata.file_type().is_symlink()
+                && matches!(metadata.uid(), owner if owner == 0 || owner == uid)
+                && metadata.mode() & 0o022 == 0,
+            "TELEX_TEST_HOME_ROOT ancestors must satisfy management socket privacy"
+        );
+    }
+    let real_home =
+        std::fs::canonicalize(dirs::home_dir().expect("locate real user home")).unwrap();
+    let canonical_root = std::fs::canonicalize(root).unwrap();
+    assert!(
+        !canonical_root.starts_with(real_home),
+        "TELEX_TEST_HOME_ROOT must be outside the real user home"
+    );
+    let home = root.join(&uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let endpoint = home.join(".telex-watcher").join("0".repeat(64));
+    std::os::unix::net::SocketAddr::from_pathname(endpoint)
+        .expect("TELEX_TEST_HOME_ROOT is too long for the complete management socket path");
+    home
 }
 
 impl Drop for Fixture {
@@ -176,6 +248,100 @@ fn isolated_home_cleanup_failure_preserves_unwinding_but_fails_normally() {
     }
 }
 
+#[cfg(feature = "sqlite")]
+#[test]
+fn isolated_user_home_is_removed_during_unwind_and_normal_return() {
+    for panicking in [true, false] {
+        let fixture = Fixture::with_isolated_user_home();
+        let root = fixture.root.clone();
+        let home = fixture.user_home.clone().unwrap();
+        assert!(home.is_dir());
+        let result = std::panic::catch_unwind(|| {
+            let _fixture = fixture;
+            if panicking {
+                panic!("original home test failure");
+            }
+        });
+        assert_eq!(result.is_err(), panicking);
+        assert!(!home.exists());
+        assert!(!root.exists());
+    }
+}
+
+#[cfg(all(unix, feature = "sqlite"))]
+#[test]
+fn unix_user_home_root_validation_rejects_unsafe_paths_without_repair() {
+    use std::os::unix::fs::{symlink, DirBuilderExt, PermissionsExt};
+
+    let fixture = Fixture::with_isolated_user_home();
+    let home = fixture.user_home.as_ref().unwrap();
+    assert!(
+        std::panic::catch_unwind(|| unix_fixture_home(std::path::Path::new("relative"))).is_err()
+    );
+    let link = fixture.root.join("linked-home");
+    symlink(home, &link).unwrap();
+    assert!(std::panic::catch_unwind(|| unix_fixture_home(&link)).is_err());
+    assert!(std::fs::symlink_metadata(link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+
+    let long_root = home.join("x".repeat(104));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&long_root)
+        .unwrap();
+    assert!(std::panic::catch_unwind(|| unix_fixture_home(&long_root)).is_err());
+
+    std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o750)).unwrap();
+    assert!(std::panic::catch_unwind(|| unix_fixture_home(home)).is_err());
+    assert_eq!(
+        std::fs::metadata(home).unwrap().permissions().mode() & 0o7777,
+        0o750
+    );
+}
+
+#[cfg(all(unix, feature = "sqlite"))]
+#[test]
+fn isolated_user_home_stays_outside_real_home_without_destructors() {
+    let mut fixture = Fixture::new();
+    let marker = fixture.root.join("exited-home.json");
+    let output = ProcessCommand::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "isolated_user_home_exit_without_destructors",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("TELEX_STALL_HOME_EXIT_MARKER", &marker)
+        .current_dir(&fixture.root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(23), "{output:?}");
+    let home: PathBuf = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
+    fixture.user_home = Some(home.clone());
+    let real_home = std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap();
+    assert!(!std::fs::canonicalize(&home).unwrap().starts_with(real_home));
+    assert!(home.is_dir());
+    drop(fixture);
+    assert!(!home.exists());
+}
+
+#[cfg(all(unix, feature = "sqlite"))]
+#[test]
+#[ignore = "subprocess entrypoint for teardown-bypass coverage"]
+fn isolated_user_home_exit_without_destructors() {
+    let fixture = Fixture::with_isolated_user_home();
+    let marker = std::env::var_os("TELEX_STALL_HOME_EXIT_MARKER").unwrap();
+    std::fs::write(
+        marker,
+        serde_json::to_vec(fixture.user_home.as_ref().unwrap()).unwrap(),
+    )
+    .unwrap();
+    // Exit bypasses Drop without producing an intentional crash dump in CI.
+    std::process::exit(23);
+}
+
 fn parse(arguments: &[&str]) -> Cli {
     Cli::try_parse_from(
         ["telex-watcher", "--registry", "fixture.sqlite"]
@@ -190,14 +356,8 @@ fn parse(arguments: &[&str]) -> Cli {
 async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() {
     use std::io::Write;
     use telex::backend::{sqlite::SqliteBackend, Backend};
-    let mut fixture = Fixture::new();
-    // Unix management sockets use HOME and need a short, non-world-writable ancestry.
-    let home = dirs::home_dir().unwrap().join(format!(
-        ".{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..8]
-    ));
-    std::fs::create_dir(&home).unwrap();
-    fixture.user_home = Some(home.clone());
+    let fixture = Fixture::with_isolated_user_home();
+    let home = fixture.user_home.clone().unwrap();
     let telex = std::env::current_exe()
         .unwrap()
         .parent()

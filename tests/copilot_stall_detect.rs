@@ -74,8 +74,48 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).unwrap();
+        let removed = std::fs::remove_dir_all(&self.0);
+        if !std::thread::panicking() {
+            removed.expect("remove isolated stall detector CLI fixture");
+        }
     }
+}
+
+#[test]
+fn fixture_cleanup_is_attempted_during_unwind_and_normal_return() {
+    for panicking in [true, false] {
+        let fixture = Fixture::new();
+        let path = fixture.0.clone();
+        let result = std::panic::catch_unwind(|| {
+            let _fixture = fixture;
+            if panicking {
+                panic!("original test failure");
+            }
+        });
+        assert_eq!(result.is_err(), panicking);
+        assert!(!path.exists());
+    }
+}
+
+#[test]
+fn fixture_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let fixture = Fixture::new();
+        std::fs::remove_dir_all(&fixture.0).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
+}
+
+#[test]
+fn fixture_cleanup_failure_without_unwinding_still_fails() {
+    let fixture = Fixture::new();
+    std::fs::remove_dir_all(&fixture.0).unwrap();
+    assert!(std::panic::catch_unwind(|| drop(fixture)).is_err());
 }
 
 #[test]
