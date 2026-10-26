@@ -474,6 +474,12 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     let iso = Isolation::new("ic-crash");
     let mut restore = iso.apply_env();
     let db = iso.root.join("crash.db");
+    let diagnostics = iso.root.join("bootstrap-diagnostics.log");
+    restore.set("TELEX_TEST_BOOTSTRAP_DIAGNOSTIC_LOG", &diagnostics);
+    let read_diagnostics = || {
+        std::fs::read_to_string(&diagnostics)
+            .unwrap_or_else(|error| format!("<unreadable: {error}>"))
+    };
 
     let client = connect(&iso, "proof", &db).await;
     let station = spec("ic:crash:station", ApplicationCapability::Bidirectional);
@@ -507,13 +513,15 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
         .await;
     assert!(
         outcome.ready,
-        "reattach after a crash must recover: {outcome:?}"
+        "reattach after a crash must recover: {outcome:?}\nbootstrap diagnostics:\n{}",
+        read_diagnostics()
     );
     let restarted = iso.daemon_pid().expect("restarted daemon pid");
     assert_ne!(restarted, pid, "a crashed daemon must be replaced");
     assert!(
         publication_marker.is_file(),
-        "the restart proof must exercise the endpoint-before-cap publication window"
+        "the restart proof must exercise the endpoint-before-cap publication window\nbootstrap diagnostics:\n{}",
+        read_diagnostics()
     );
     assert_eq!(
         std::fs::read_to_string(&spawn_counter)
@@ -521,7 +529,8 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
             .lines()
             .count(),
         1,
-        "the operation must remember its authenticated pending peer and suppress a second spawn"
+        "the operation must remember its authenticated pending peer and suppress a second spawn\nbootstrap diagnostics:\n{}",
+        read_diagnostics()
     );
 }
 
