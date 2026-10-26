@@ -374,7 +374,8 @@
       ],
       "dependsOn": [
         "five-minute-custom-watch-gate",
-        "examples-accelerate-gate"
+        "examples-accelerate-gate",
+        "watcher-installation-bootstrap"
       ]
     },
     {
@@ -489,6 +490,27 @@
       },
       "dependsOn": [
         "copilot-group-stall-detector"
+      ]
+    },
+    {
+      "id": "watcher-installation-bootstrap",
+      "type": "task",
+      "title": "Supported Watcher installation and bootstrap path",
+      "summary": "Provide a supported, discoverable Watcher installation/launch record (trusted telex and telex-watcher paths, registry, backend profile, send-only sender) and a documented bootstrap path with runtime environment, shutdown, rollback and handling of existing older installations, never silently modifying one. Stall guide and telex copilot skill point to it and name both supported root delivery modes (bridge push, or documented pull fallback where the host cannot load the bridge), kept distinct. Uses existing backend profiles/auth; Telex binary install/upgrade, App bridge loading (#223) and macOS are out of scope. Found by #201; not a dependency of #201.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 222
+      },
+      "dependsOn": [
+        "watcher-cli-ux",
+        "stall-detection-agent-guidance"
       ]
     }
   ],

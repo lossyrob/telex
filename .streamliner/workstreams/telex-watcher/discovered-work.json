@@ -2255,6 +2255,177 @@
         },
         "boundary": "No #198/#203 linked debt clearance, no #210 debts 1 and 2 clearance, no other #199 debt clearance, #208 repair, #216 completion, #201 validation, #172 authorization or new staffing."
       }
+    },
+    {
+      "id": "watcher-installation-bootstrap-gap",
+      "sourceNodeId": "stall-detection-workstream-gate",
+      "requiredness": "Required for runtime-hardening and transitive closure; not a #201, five-minute-custom-watch-gate or macOS-containment graph dependency.",
+      "description": "The shipped stall guidance assumes a discoverable existing Watcher installation/launch record; #201 found that no supported bootstrap/record supplies those values. Dogfood-specific operator setup is not a reusable installation recipe.",
+      "disposition": "new-item",
+      "target": {
+        "id": "watcher-installation-bootstrap",
+        "tracker": "https://github.com/lossyrob/telex/issues/222"
+      },
+      "status": "planned",
+      "decisionState": "accepted",
+      "rationale": "The Watcher design steward accepts this separate Windows/Linux outcome using existing backend profiles/auth, with explicit lifecycle/rollback and no silent existing-install changes.",
+      "terminalPath": "A future #222 owner delivers the accepted installation/launch record/bootstrap and guidance outcome through its own review/design/hosted/Campaign gates. This planned shape supplies only the canonical node/tracker needed for one later Watcher launch, not product delivery or gate completion.",
+      "dispositionAuthority": "Watcher design toolu_015RDXAXUBTBpbRkmXBYyDxu and public6425261263; owning readiness toolu_01596kTy4zSBeUtdxZib8VwJ. No owner or launch recorded.",
+      "evidence": {
+        "publicIssue": {
+          "number": 222,
+          "url": "https://github.com/lossyrob/telex/issues/222",
+          "title": "Provide a bootstrap path for the stall guide's existing Watcher installation prerequisite",
+          "body": {
+            "file": "watcher201-discovered-222-issue-body.txt",
+            "bytes": 1184,
+            "sha256": "7229f32713a3f1bbd3dc7dd699bc2f4858c3ed8a550741bf03aeee25b1fd2a3e"
+          }
+        },
+        "publicDecision": {
+          "id": 6425261263,
+          "url": "https://github.com/lossyrob/telex/issues/222#issuecomment-6425261263",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T19:23:31Z",
+          "updatedAt": "2026-10-26T19:23:31Z",
+          "body": {
+            "file": "watcher-bootstrap-222-disposition-body.txt",
+            "bytes": 2101,
+            "sha256": "15990c6d76bf591556868af4e5630334ea4e804e540ee4e715af77edd66e42bf"
+          }
+        },
+        "design": {
+          "source": "toolu_015RDXAXUBTBpbRkmXBYyDxu",
+          "receipt": {
+            "file": "watcher-bootstrap-routing-intake.json",
+            "bytes": 1919,
+            "sha256": "f89bb537681544d65553f8db9ba28a22192ebac2a97a2afe9d62c866d4bb9995"
+          }
+        },
+        "readiness": {
+          "source": "toolu_01596kTy4zSBeUtdxZib8VwJ",
+          "receipt": {
+            "file": "watcher-bootstrap-readiness-intake.json",
+            "bytes": 1072,
+            "sha256": "8fc4d90fd5e2da68bd48f144b33d8378bbc25bebc0907d24be3302c297a32c7d"
+          }
+        },
+        "priority": {
+          "source": "toolu_01HCzYW79vQL9tMEhErXwssY",
+          "receipt": {
+            "file": "watcher-bootstrap-five-minute-priority-intake.json",
+            "bytes": 1190,
+            "sha256": "e10958f8cc9996be1f889314ab54a44a81d02914d35fb3bd7f6777a5540fb9cb"
+          },
+          "campaignSourceReported": "toolu_019JXfDVGr4mW1LwPYYa7NBw",
+          "boundary": "Owning Watcher reports Campaign priority hold of five-minute-custom-watch-gate until #222 product delivery. Not a graph dependency; shape publication is not product delivery or release of that hold."
+        },
+        "coordination": {
+          "source": "call_kUHJSXbVmnRG8PJlpwsuplKL",
+          "receipt": {
+            "file": "local223-authorized-node-intake.json",
+            "bytes": 1993,
+            "sha256": "6c6f8f4f6708f3698428dafb8dc80acf69bf928bbe72446867e79f80d97eaa31"
+          },
+          "boundary": "Owning Local requires open-PR/named-section overlap coordination: #222 installation/root-mode wording and #223 host-capability/first-load/fallback/recovery text. No new dependency or Local launch is recorded by this Watcher shape."
+        },
+        "allFieldDedup": [
+          {
+            "path": ".streamliner/workstreams/application-client/discovered-work.json",
+            "items": 5,
+            "matches": [],
+            "boundary": "Search all fields; foreign #222/#223 cross-references and Local ownership are not additional Watcher nodes or implementation ownership."
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+            "items": 50,
+            "matches": [
+              {
+                "id": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+                "status": "planned",
+                "decisionState": "accepted"
+              },
+              {
+                "id": "local-daemon-copilot-app-first-time-delivery-path",
+                "status": "planned",
+                "decisionState": "accepted"
+              }
+            ],
+            "boundary": "Search all fields; foreign #222/#223 cross-references and Local ownership are not additional Watcher nodes or implementation ownership."
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/discovered-work.json",
+            "items": 1,
+            "matches": [],
+            "boundary": "Search all fields; foreign #222/#223 cross-references and Local ownership are not additional Watcher nodes or implementation ownership."
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+            "items": 15,
+            "matches": [],
+            "boundary": "Search all fields; foreign #222/#223 cross-references and Local ownership are not additional Watcher nodes or implementation ownership."
+          }
+        ],
+        "methodBoundary": "Public bodies and actual supplied design/coordinator receipts only. App loading/fallback/installation observations remain #201-owner/Watcher reports, not independent runtime or recipient checks. A supported fallback decision is not proof that a real fallback stays armed or wakes; unresolved #224 and blocked #201 stay separate."
+      },
+      "scopeBoundary": "Existing backend/auth capabilities only; new auth capability is separate. Telex binary install/upgrade remains its existing surface. #223 bridge/host loading is separate. Windows/Linux; macOS containment remains debt. No #201 validation, current install/runtime/ACL permission or supported-wake proof."
+    },
+    {
+      "id": "watcher-copilot-app-first-time-delivery-routing",
+      "sourceNodeId": "stall-detection-workstream-gate",
+      "requiredness": "Not a Watcher geometry or dependency item; no #201/#222 prerequisite.",
+      "description": "First-time Copilot bridge loading and capability-based push/pull delivery routing belong to Local Daemon push-delivery design; Watcher push-only stall-guide wording stays in #222.",
+      "disposition": "external",
+      "target": {
+        "workstream": "local-daemon",
+        "tracker": "https://github.com/lossyrob/telex/issues/223",
+        "owners": [
+          "Local Daemon routing orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "rationale": "Public Watcher steward6425261961 routes the existing issue without adding a Watcher node or dependency; normative delivery scope is Local, not a new Watcher transport.",
+      "terminalPath": "Local owns its own accepted routing/node/implementation and gates. This Watcher outbound record grants no Local owner, launch, host API, transport, repair or fallback-wake proof.",
+      "dispositionAuthority": "Watcher design toolu_015RDXAXUBTBpbRkmXBYyDxu / public6425261961.",
+      "evidence": {
+        "publicIssue": {
+          "number": 223,
+          "url": "https://github.com/lossyrob/telex/issues/223",
+          "title": "Copilot App sessions cannot load a first-time Telex bridge through extensions_reload",
+          "body": {
+            "file": "watcher201-discovered-223-issue-body.txt",
+            "bytes": 953,
+            "sha256": "3a9f0606a4fa8ba88c91efefce4cc2056ecc08d49273dd7acf41d6793f9a56ab"
+          }
+        },
+        "publicDecision": {
+          "id": 6425261961,
+          "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T19:23:33Z",
+          "updatedAt": "2026-10-26T19:23:33Z",
+          "body": {
+            "file": "watcher-bridge223-local-routing-body.txt",
+            "bytes": 881,
+            "sha256": "e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad"
+          }
+        },
+        "fallbackDecision": {
+          "id": 6425143128,
+          "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425143128",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T19:17:34Z",
+          "updatedAt": "2026-10-26T19:17:34Z",
+          "body": {
+            "file": "watcher201-pull-fallback-steward-body.txt",
+            "bytes": 3150,
+            "sha256": "b09087f984619ca0593731a907ab1d68bc421ab60e4a3b3b10480658dea6ed14"
+          }
+        },
+        "methodBoundary": "Public bodies and actual supplied design/coordinator receipts only. App loading/fallback/installation observations remain #201-owner/Watcher reports, not independent runtime or recipient checks. A supported fallback decision is not proof that a real fallback stays armed or wakes; unresolved #224 and blocked #201 stay separate."
+      },
+      "boundary": "The earlier accepted supported-pull decision is channel semantics, not a runtime observation; #224 and the actual blocked #201 remain separate. Local discovery provenance/implementation ownership is not rewritten here."
     }
   ]
 }

@@ -1008,3 +1008,90 @@ Main CI attempt 1 failed the Windows E2E test `station_intent_a_busy_station_def
 - Local and one-registry observation limits and existing-installation prerequisites remain explicit. The Windows E2E observation remains under #182 for requested local adjudication; no product defect or repair owner is inferred.
 
 The post-merge observer has completed and exited. No merged #200 guidance-outcome failure was found.
+
+
+## #222 Watcher bootstrap shape and #223 outbound routing (2026-10-26)
+
+Watcher design `toolu_015RDXAXUBTBpbRkmXBYyDxu` / public6425261263 adds exactly planned/watch task node `watcher-installation-bootstrap` tracked by [#222](https://github.com/lossyrob/telex/issues/222). Its only dependencies are completed watcher-cli-ux and stall-detection-agent-guidance. runtime-hardening gains only this dependency; closure already reaches it transitively. All 22 old node objects remain exact except that one appended hardening edge. Existing statuses, summaries, geometry, root fields, checkpoints, design links and ordering remain exact. No #201/five-minute/macOS edge is added.
+
+The coordinator `toolu_01596kTy4zSBeUtdxZib8VwJ` requires this canonical node and GitHub tracker before launching its ready single owner. This records no owner, requested/effective profile, launch, implementation, installed state or readiness/validation result. The coordinator receives a doorbell only after verified publication.
+
+Owning Watcher `toolu_01HCzYW79vQL9tMEhErXwssY` reports Campaign `toolu_019JXfDVGr4mW1LwPYYa7NBw` priority hold of five-minute-custom-watch-gate until #222 product delivery. This is NOT a graph dependency and planned-node publication does not lift it. The gate stays planned/unowned; no status change is made here.
+
+### Complete #222 shape/outcome/boundaries
+
+https://github.com/lossyrob/telex/issues/222#issuecomment-6425261263
+
+Raw 2101 bytes / SHA-256 `15990c6d76bf591556868af4e5630334ea4e804e540ee4e715af77edd66e42bf`; LF display 2100 bytes / SHA-256 `7d98e6b9d6dbda31ac6ce60f9d7682b6d5abd261aa607245c360356958d3841e`.
+
+```text
+Design steward decision: this joins the Watcher geometry as a new item.
+
+Node: `watcher-installation-bootstrap`, a task tracked by this issue, with attention watch.
+- Depends on `watcher-cli-ux` and `stall-detection-agent-guidance`, both completed.
+- `runtime-hardening` gains a dependency on it, so `closure-gate` depends on it transitively.
+- It is not a dependency of #201, `five-minute-custom-watch-gate` or `watcher-macos-containment-runtime`.
+
+Why it is Watcher work: the Watcher guidance (stall guide, `telex copilot skill`) starts from a running Watcher installation whose trusted executable, registry, profile and sender values the root can look up. No supported way exists to create or record one. Runtime-hardening exercises packaging and upgrade but does not provide this, and the #201 dogfood setup was operator-authorized for that run only.
+
+Outcome:
+1. A supported, discoverable Watcher installation and launch record holds the trusted `telex` and `telex-watcher` paths, the registry, the backend profile and the send-only sender, for an agent to read instead of guess.
+2. A documented bootstrap path creates that record and starts the runtime with its required environment. It has explicit shutdown, rollback, and handling for an existing older installation. It never silently modifies an existing installation.
+3. The stall guide (and `telex copilot skill` where it carries the same text) points to that path. It names the supported root delivery modes: Copilot bridge push, or the documented pull fallback (`telex copilot fallback prepare`) where the host cannot load the bridge. It keeps the two modes distinct, as #201 recorded in 6425143128.
+
+Boundaries:
+- It uses existing backend profiles and authentication. If a new backend authentication capability is needed, that is a separate item.
+- Telex binary installation and upgrade stay with the existing release-upgrade surface.
+- The App bridge loading gap is #223 and is not part of this item.
+- Platforms are Windows and Linux. macOS follows the containment item and remains debt here.
+
+The reconciler writes the graph change.
+
+```
+
+### #223 routes to Local, no Watcher geometry/dependency
+
+https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961
+
+Raw 881 bytes / SHA-256 `e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad`; LF display 880 bytes / SHA-256 `5f1fdfedef777735ef422fd4de32f9a8a1a75f2cc4b6cf7343673a4d56bc81c2`.
+
+```text
+Design steward decision: this does not join the Watcher geometry. It routes to the Local Daemon workstream.
+
+Why: first-time Copilot bridge loading (`telex copilot attach --copilot-bridge`, then `extensions_reload`) and the push/pull delivery contract belong to Local Daemon's `push-delivery` design (docs/design/copilot-bridge-push.md, guides/copilot-push.md). Whether App-hosted sessions get a supported first-time bridge path, or the guide states pull fallback as the App path, is that workstream's decision.
+
+Watcher dependencies: none. #201 uses the supported pull fallback (6425143128). The Watcher stall guide naming push as the only root delivery mode is Watcher's own wording; the fix moves into #222's outcome, item 3, and does not wait on this issue.
+
+The Watcher coordinator hands this off to Local Daemon routing. The outcome text in this issue body stands as filed.
+
+```
+
+### Earlier supported-pull semantics and conditions, not runtime proof
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6425143128
+
+Raw 3150 bytes / SHA-256 `b09087f984619ca0593731a907ab1d68bc421ab60e4a3b3b10480658dea6ed14`; LF display 3149 bytes / SHA-256 `74778ede2fc6291ba2232145258ade22023255305573f13e1357bf2f4df0ba7d`.
+
+```text
+Design steward answer for the #201 owner: root wake path when the App session cannot reload extensions.
+
+Decision: Telex's supported pull fallback satisfies the real-root criterion. This is not an upstream blocker, and #201 keeps its outcome and scope. The operator-chosen root, Campaign, stays the root.
+
+Why: the #197 criterion, as copilot-session-stalls.md records it, is that Telex delivers the detector event to the root as a turn, the root confirms the stall with the App's get_sessions_status, and then rings the affected members. It does not name a delivery channel. copilot-push.md documents the pull fallback (`telex copilot fallback prepare` plus exactly one pull-mode wait) as the supported Copilot delivery path when `extensions_reload` is unavailable. A turn produced by that path is Telex delivery. The stall guide's sentence "already receive turns through Copilot push delivery" is a guidance gap: it names one channel where the design needs any supported one. That gap does not change what the gate proves.
+
+Conditions:
+1. Use the documented fallback as written: Telex-owned `copilot fallback prepare` and a single pull-mode wait whose completion wakes the App session. Do not use a custom polling loop, a scripted inbox read, or the operator relaying messages.
+2. The event the root acts on is the real detector event, delivered by the real Watcher registration on the real backend, to the root's real address. "Exactly one event per episode" is counted where the event is emitted and stored in Telex, not by what the wait surfaced. The report states how it was counted.
+3. Re-arming: a pull wait completes once. If the run spans more than one episode, or also receives the staged attention-needed case, the root re-prepares or re-arms per the guide before the next episode. Report any event that arrived while no wait was armed, and when it was read. Do not count it as a missed or duplicate emission.
+4. The report says plainly that root delivery used the pull fallback and that bridge push delivery to an App root was not exercised. It names the delivery mode station_health reported (`pull`). Do not claim push and do not imply the guide was followed as written.
+5. Confirm and ring are unchanged: the root confirms with get_sessions_status before acting and rings members through its normal channel. The report names the channel the members' replies came back on.
+6. File the App bridge / stall-guide prerequisite gap as a separate discovered-work issue, per the owner guide. It covers both the missing extensions_reload in App-hosted sessions and the stall guide naming push only. It is not a dependency of #201, and #201 does not amend the shipped guidance (no guidance or product change in this item).
+7. If the fallback itself fails, for example no wake on completion or a lost or duplicated event, that is a product failure: file it. If it prevents confirm/ring, bring it back to me; the answer is an upstream item, as in 6424158582 item 5.
+
+The alternative, an external CLI root, would change the operator's chosen arrangement and is not needed. No graph or outcome change. Earlier conditions in 6424158582 still apply.
+
+```
+
+Two new Watcher records retain #222 disposition and #223 outbound routing, with all 15 old rows/root/order exact. No Local ledger/node/owner is changed. #222 owns Watcher bootstrap and stall-group installation/root-mode wording, not host loading, new backend authentication, Telex binary install/upgrade or macOS containment. Owning Local `call_kUHJSXbVmnRG8PJlpwsuplKL` separately assigns #223 host-capability/first-load/fallback/recovery text; shared copilot/COPILOT.md changes require open-PR plus named-section coordination, not a dependency. #224 and the actual blocked #201/external edge remain their separate packets and receive no runtime, cause or acceptance credit here.
+
+No new task markdown file or launch packet is invented. Only graph, ledger and this append change: one new task node, exactly the declared runtime-hardening edge and two rows; Watcher17/23. All other workstreams/product/canonical design, Local debts/observations, #166 eight debts/two sent wakes and existing Watcher debt/notification state remain exact. No new observer, root re-arm, runtime/install/ACL action, wake, repair, gate waiver or debt clearance follows.
