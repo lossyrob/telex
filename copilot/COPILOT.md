@@ -447,7 +447,7 @@ someone is busy. Default management output hides detector diagnostic text.
 
 Check membership limits/format, local session ids, backend/environment access
 and the running Watcher management endpoint. Inspect the member's inbox using
-the same backend, including consumed history (`inbox --all`); use
+the same backend, including consumed history (`inbox --all`, newest 50 by default); use
 `export --address <addr>` to review older disposition history.
 
 While observations are unavailable, show monitoring coverage as incomplete and

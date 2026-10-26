@@ -245,8 +245,9 @@ Inspect each active member's history using the same configured backend:
 & $telex --backend $backendProfile export --address '<member address>'
 ```
 
-The first command includes consumed history. Export includes older messages with
-disposition history. Review outstanding/deferred work, including older messages.
+The first command lists the newest 50 messages by default, including consumed
+messages. Export includes older messages with disposition history. Review
+outstanding/deferred work, including older messages.
 
 While observations are unavailable, mark monitoring coverage incomplete in the
 root's view and use App inspection. Keep the existing routing identity and
