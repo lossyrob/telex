@@ -132,9 +132,10 @@ Ordinary `/tmp` roots are rejected because their ancestry is world-writable.
 
 The hosted Linux workspace job creates a short `/t.XXXXXXXX` root. Only setup
 uses sudo, to create the new directory and transfer its ownership to the runner;
-the runner applies mode 0700 and all tests run unprivileged. The job removes the
-empty setup root after tests. Windows uses a home inside the existing isolated
-fixture root and needs no additional setup.
+the runner applies mode 0700 and all tests run unprivileged. The job checks that
+the setup root is empty after tests; the root itself is discarded with the
+hosted runner. Windows uses a home inside the existing isolated fixture root
+and needs no additional setup.
 
 ## Windows CI bounds and execution evidence
 

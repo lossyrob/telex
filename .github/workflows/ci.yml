@@ -173,10 +173,15 @@ jobs:
         timeout-minutes: ${{ runner.os == 'Windows' && 30 || 360 }}
         run: cargo test --workspace --verbose
 
-      - name: Remove empty Unix test home root
+      - name: Assert Unix test home root is empty
         if: always() && runner.os == 'Linux' && env.TELEX_TEST_HOME_ROOT != ''
         shell: bash
-        run: rmdir -- "$TELEX_TEST_HOME_ROOT"
+        run: |
+          entry="$(find "$TELEX_TEST_HOME_ROOT" -mindepth 1 -maxdepth 1 -print -quit)"
+          if [ -n "$entry" ]; then
+            printf 'Leaked test home: %s\n' "$entry" >&2
+            exit 1
+          fi
 
       - name: Check Windows crashes after workspace tests
         if: always() && runner.os == 'Windows'
