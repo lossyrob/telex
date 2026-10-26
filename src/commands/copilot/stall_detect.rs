@@ -20,7 +20,6 @@ use crate::watcher_protocol::{
 
 const MAX_MEMBERS: usize = 32;
 const MAX_MEMBER_BYTES: usize = 4096;
-const MAX_INBOX_ITEMS: usize = 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -276,32 +275,14 @@ fn parse_watches(bytes: &[u8]) -> Result<Vec<Watch>> {
     Ok(list.value)
 }
 
-async fn message_wakes(
-    backend: &dyn Backend,
-    member: &Member,
-    pending: &[(String, i64)],
-) -> Result<WakeSources> {
-    let unacknowledged_messages = pending
-        .iter()
-        .find(|(address, _)| address == &member.address)
-        .map_or(0, |(_, count)| *count);
+async fn message_wakes(backend: &dyn Backend, member: &Member) -> Result<WakeSources> {
+    let (unacknowledged_messages, deferred_messages) =
+        backend.message_wake_counts(&member.address).await?;
     if unacknowledged_messages < 0 {
         bail!("invalid unacknowledged message count");
     }
-    let inbox = backend
-        .inbox(&member.address, true, i64::try_from(MAX_INBOX_ITEMS + 1)?)
-        .await?;
-    let deferred_messages = inbox
-        .iter()
-        .filter(|item| {
-            item.primary_to == member.address
-                && item.latest_disposition.as_deref() == Some("deferred")
-        })
-        .count();
-    // A full suffix cannot prove the absence of an older deferred message.
-    if inbox.len() > MAX_INBOX_ITEMS && deferred_messages == 0 && unacknowledged_messages == 0 {
-        bail!("inbox history exceeds observation limit; deferred absence is unobserved");
-    }
+    let deferred_messages =
+        usize::try_from(deferred_messages).context("invalid deferred message count")?;
     Ok(WakeSources {
         unacknowledged_messages,
         deferred_messages,
@@ -329,12 +310,11 @@ async fn observe(parameters: &Parameters, requesting_watch_id: &str) -> Result<V
     let (_, profile) = crate::profiles::resolve(Some(&parameters.backend_profile), None)?;
     let store_key = crate::profiles::store_key(&profile, None);
     let backend = crate::profiles::build_readonly(&profile, None).await?;
-    let pending = backend.undelivered_counts().await?;
     let watches = read_watches(parameters).await?;
     for member in &members {
         let (session, wake_sources) = if member.state == MemberState::Active {
             let session = classify_local(&member.session_id)?;
-            let mut wakes = message_wakes(backend.as_ref(), member, &pending).await?;
+            let mut wakes = message_wakes(backend.as_ref(), member).await?;
             for watch in watches.iter().filter(|watch| {
                 watch.id != requesting_watch_id && watch.registration.target == member.address
             }) {

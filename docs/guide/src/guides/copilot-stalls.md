@@ -238,30 +238,19 @@ detector's diagnostic text. Check membership limits/format, local session ids,
 backend/environment access and the running Watcher management endpoint. An
 unchanged already-advised unknown episode can also remain degraded.
 
-The current bounded-inbox implementation has a known limitation: it reads at most
-1025 recent inbox entries per active member. With **more than 1024 retained entries**
-and no known unacknowledged/recent deferred message, it cannot rule out older
-deferred work and stays degraded. It may send neither a stall nor an advisory,
-and there is no dedicated operator-facing hint identifying the member.
-This limit applies until a release includes
-[issue #216](https://github.com/lossyrob/telex/issues/216).
-
 Inspect each active member's history using the same configured backend:
 
 ```powershell
-& $telex --backend $backendProfile --address '<member address>' --json inbox --all --limit 1025
+& $telex --backend $backendProfile --address '<member address>' --json inbox --all
 & $telex --backend $backendProfile export --address '<member address>'
 ```
 
-The first command includes consumed history; a full 1025-entry result signals the
-observation bound. Export includes older messages with disposition history.
-Review outstanding/deferred work, including work outside the recent suffix.
-Acking or terminally dispositioning recent messages does **not** shrink retained
-history, so it does not remove this bound.
+The first command lists the newest 50 messages by default, including consumed
+messages. Export includes older messages with disposition history. Review
+outstanding/deferred work, including older messages.
 
-While the limit prevents observation, mark monitoring coverage incomplete in the
+While observations are unavailable, mark monitoring coverage incomplete in the
 root's view and use App inspection. Keep the existing routing identity and
-message history; the product repair belongs to #216. Do not delete the store/logs
-or bulk-ack work to make the watch green. A real planned wait may be parked, but
-do not park or finish active work merely to bypass degradation. A missing event
-is not a clean bill of health.
+message history. Do not delete the store/logs or bulk-ack work to make the watch
+green. A real planned wait may be parked, but do not park or finish active work
+merely to bypass degradation. A missing event is not a clean bill of health.

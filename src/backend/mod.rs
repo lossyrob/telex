@@ -81,6 +81,26 @@ pub(crate) fn application_compound_state_delta(
     )
 }
 
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+pub(crate) fn message_wake_counts_sql() -> String {
+    format!(
+        "SELECT COUNT(CASE WHEN \
+            NOT EXISTS (SELECT 1 FROM deliveries d \
+                        WHERE d.message_id=m.id AND d.recipient=$1 \
+                          AND d.consumed_at_ms IS NOT NULL) \
+            AND COALESCE((SELECT disp.state FROM dispositions disp \
+                          WHERE disp.message_id=m.id AND disp.recipient=$1 \
+                          ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
+            THEN 1 END), \
+            COUNT(CASE WHEN (SELECT disp.state FROM dispositions disp \
+                             WHERE disp.message_id=m.id AND disp.recipient=$1 \
+                             ORDER BY disp.id DESC LIMIT 1) = 'deferred' \
+                  THEN 1 END) \
+         FROM messages m WHERE m.to_addr=$1",
+        terminal_dispositions_sql_list()
+    )
+}
+
 /// What a backend can do, so the core can adapt behavior honestly.
 #[derive(Clone, Copy, Debug)]
 pub struct Capabilities {
@@ -634,6 +654,15 @@ pub trait Backend: Send + Sync {
     /// as the console can poll it without mutating the store. Addresses with no backlog are omitted.
     async fn undelivered_counts(&self) -> Result<Vec<(String, i64)>> {
         bail!("undelivered_counts: not supported by this backend")
+    }
+
+    /// Read-only `(unacknowledged, deferred)` message counts for one primary recipient.
+    /// Unacknowledged uses the same semantics as `undelivered_counts`; deferred counts the
+    /// recipient's latest disposition even after transport consumption. Returns two scalars
+    /// without reading message bodies or limiting history. Database work may grow with this
+    /// recipient's history; implementations must use address-constrained, index-eligible SELECTs.
+    async fn message_wake_counts(&self, _address: &str) -> Result<(i64, i64)> {
+        bail!("message_wake_counts: not supported by this backend")
     }
 
     /// A bounded page of the global feed: up to `limit` messages with `id > after_id`, ordered by

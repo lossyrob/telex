@@ -3643,6 +3643,13 @@ impl Backend for PgBackend {
             .collect())
     }
 
+    async fn message_wake_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let sql = super::message_wake_counts_sql();
+        let client = self.client().await?;
+        let row = client.query_one(&sql, &[&address]).await?;
+        Ok((row.get(0), row.get(1)))
+    }
+
     async fn feed_page(&self, after_id: i64, limit: i64) -> Result<Vec<MessageRow>> {
         let client = self.client().await?;
         let sql = format!("SELECT {MSG_COLS} FROM messages WHERE id>$1 ORDER BY id LIMIT $2");

@@ -4277,6 +4277,16 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn message_wake_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let address = address.to_string();
+        self.run(move |c| {
+            let sql = super::message_wake_counts_sql();
+            c.query_row(&sql, params![address], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(Into::into)
+        })
+        .await
+    }
+
     async fn feed_page(&self, after_id: i64, limit: i64) -> Result<Vec<MessageRow>> {
         self.run(move |c| {
             let sql = format!("SELECT {MSG_COLS} FROM messages WHERE id>?1 ORDER BY id LIMIT ?2");
@@ -4300,6 +4310,27 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SEQ: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn message_wake_query_uses_recipient_index() {
+        let connection = Connection::open_in_memory().unwrap();
+        init_schema_inner(&connection).unwrap();
+        let sql = format!(
+            "EXPLAIN QUERY PLAN {}",
+            super::super::message_wake_counts_sql()
+        );
+        let mut statement = connection.prepare(&sql).unwrap();
+        let plan = statement
+            .query_map(params!["member:a"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        println!("SQLite {}:\n{}", rusqlite::version(), plan.join("\n"));
+        assert!(plan.iter().any(|detail| {
+            detail.contains("SEARCH m USING COVERING INDEX messages_to_id_idx (to_addr=?)")
+        }));
+        assert!(!plan.iter().any(|detail| detail.contains("SCAN m")));
+    }
 
     fn test_db_path(label: &str) -> std::path::PathBuf {
         let seq = TEST_SEQ.fetch_add(1, Ordering::SeqCst);

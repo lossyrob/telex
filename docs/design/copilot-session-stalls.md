@@ -220,14 +220,27 @@ ambient `TELEX_DB` or global CLI database overrides to this explicit profile.
 Profiles naming the same effective store also match watches targeting a member.
 
 The detector opens Telex using `build_readonly`, which skips schema
-initialization and uses a read-only SQLite connection. It reads aggregate
-unconsumed primary-recipient counts and at most 1025 recent inbox entries per
-active member to find deferred dispositions, including messages already
-transport-consumed. If the suffix is full and contains no known message wake
-source, the absence of older deferred work cannot be established and the run
-is degraded. Message bodies and tool result text never enter the event snapshot.
-Postgres uses the existing read-only consumer connection path with SELECT
-queries; a SELECT-only database role is needed for a credential-level guarantee.
+initialization and uses a read-only SQLite connection. One address-constrained
+SELECT per active member returns two counts over the member's full retained
+primary-recipient history: unconsumed messages whose latest disposition is
+nonterminal (or missing), and messages whose latest disposition is `deferred`,
+including messages already transport-consumed. Dispositions for other recipients
+and CC-only messages do not count. There is no inbox-history size limit or
+newest-items inference. Message bodies and tool result text are not read by
+these queries and never enter the event snapshot.
+
+The result size and detector memory are bounded independently of history
+length. Database work can grow linearly with that member's retained history;
+acking does not shrink that history. Recipient address equality makes the
+existing `messages(to_addr, id)` index eligible, and latest-disposition lookups
+use `dispositions(message_id, id)`. Other addresses' message histories are not
+scanned. A slow or failed query remains a visible run failure or timeout,
+never an absent wake source. If real histories make polling too slow, the
+future remedy is a maintained per-recipient wake-state projection, requiring
+separate store/write-path and older-writer compatibility design. No projection
+or schema change is introduced here. Postgres uses the existing read-only
+consumer connection path with SELECT queries; a SELECT-only database role is
+needed for a credential-level guarantee.
 
 Watcher observations use only its public
 `--json --registry <path> list --active` management command. Active watches
