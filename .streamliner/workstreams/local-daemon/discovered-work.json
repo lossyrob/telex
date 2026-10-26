@@ -2794,16 +2794,141 @@
           }
         ]
       },
-      "description": "Diagnose the intermittent Windows timeout in the delayed inherited credential-writer test.",
+      "description": "Diagnose and repair the Windows delayed inherited credential-writer timeout under separately authorized issue #167 without presuming lifecycle, test-budget or hosted-scheduling cause.",
       "affectedOutcome": "Windows required checks stay reliable and abnormal native exits and lost delayed writers keep failing. Watcher is affected only as CI flake risk on Windows required checks for PR #164.",
-      "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
-      "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
-      "target": "hardening-gate (candidate scope)",
-      "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
-      "status": "candidate",
-      "decisionState": "proposed",
-      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
-      "terminalPath": "Distinguish a delayed inherited-writer lifecycle defect from an outer test budget or hosted-runner delay. Keep the semantic assertion; do not skip the test or accept a timeout. Justify any harness-bound change against production behavior, and fix a confirmed defect in a separate PR with exact-head Windows evidence."
+      "requiredness": "Campaign-authorized separate #167 repair supporting strict required CI reliability. This accepts bounded repair scope, not a hardening-gate transition, existing failure waiver or inferred graph dependency.",
+      "sequencing": "One already-launched public-record-only owner works independently in its own checkout/branch. Coordinate overlapping credential/daemon/CI/dependency edits with d7 before publishing, without writing PR #196 branch or absorbing its repair. Launch first, record after; no retry, rerun, waiver or flake exception.",
+      "target": "local-daemon/credential-writer-timeout-repair / https://github.com/lossyrob/telex/issues/167",
+      "owner": "Actual #167 owner 9a868a31-2c8d-429a-aee3-7e195076a4dd, coordinated by Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, in lossyrob-curly-potato on current branch lossyrob-fix-167-delayed-writer-timeout. Exact starting head/tree and cleanliness are not verified by the frozen launch snapshot. d7 remains #166 / PR #196 only.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign original direction toolu_014vkRgy6ysjNiGD88kQeR6L and direct confirmation toolu_01Jw6FHd8GL21QG41ruVtEnr authorize one Opus 5.5/high public-record-only owner for hosted-only #167 diagnosis/repair, Closes #167, overlap coordination and launch first/record after. Owning Local call_d9NxdDsCntpTp9O4amIuuF1e reports the actual completed launch. Earlier candidate/unassigned wording remains saved history, not a new launch prerequisite. Campaign four-times wording is attributed, not a new census.",
+      "terminalPath": "One separate PR uses Closes #167 after an evidence-backed bounded diagnosis/correction that preserves delayed inherited-writer output after shell exit, output/error semantics, effective negative assertions and owned-process cleanup. Require independent exact-final-head source review with reviewer-origin public receipt, design inspection as applicable, strict required hosted CI and Campaign gate; no autonomous merge. No retry/rerun, cosmetic-head retry, waiver, flake exception, unbounded experiment or workstation/installed-state change. Starting-checkout identity/cleanliness remains unverified, requested profile is not effective capacity, and launch alone is not implementation, runtime, repair, CI/readiness or accepted delivery.",
+      "separate167RepairPromotionAndActualLaunch": {
+        "kind": "additive-existing167-promotion-and-actual-public-only-owner-launch",
+        "historicalCandidateFields": {
+          "description": "Diagnose the intermittent Windows timeout in the delayed inherited credential-writer test.",
+          "requiredness": "Candidate scope for the Local Daemon hardening gate. The gate has not accepted or rejected it.",
+          "sequencing": "Investigate and fix independently of PR #164. Any confirmed shared defect lands in its own PR; it is not folded into watcher-runtime-core.",
+          "target": "hardening-gate (candidate scope)",
+          "owner": "Unassigned. No owner is launched; the Local Daemon workstream orchestrator decides routing.",
+          "status": "candidate",
+          "decisionState": "proposed",
+          "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
+          "terminalPath": "Distinguish a delayed inherited-writer lifecycle defect from an outer test budget or hosted-runner delay. Keep the semantic assertion; do not skip the test or accept a timeout. Justify any harness-bound change against production behavior, and fix a confirmed defect in a separate PR with exact-head Windows evidence."
+        },
+        "historicalBoundary": "All original sourceNode/source/cross-reference/evidence, original native-independent uncertainty, four successor occurrences and historical candidate/unassigned/retry statements remain exact. These nine saved former current fields are history. Explicit later Campaign authority activates the same tracked repair and records its actual launch; it does not fabricate an unlaunched owner or require implementation to wait for recording. No new occurrence, tracker, replacement or second owner.",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "originalSource": "toolu_014vkRgy6ysjNiGD88kQeR6L",
+          "originalDirection": "Campaign: #167 (the credential-writer timeout) has now recurred four times, once on PR #202 and now on main, and it has no owner. Under strict CI it will keep blocking gates, so staff it now, as we did with #204:\n- One owner on claude-opus-5.5 (high), working from the public record only.\n- Hosted-only diagnosis and repair, with no retry, waiver or flake exception.\n- Closes #167.\n- Coordinate with d7 if the work touches #166 code.\n\nLaunch first, record after. Report the session ID.",
+          "directConfirmationSource": "toolu_01Jw6FHd8GL21QG41ruVtEnr",
+          "directConfirmationVerbatim": "Campaign: confirmed. Exact text as sent to Local and recorded in the instruction register (23:37 ET entry): \"#167 (the credential-writer timeout) has now recurred four times, once on PR #202 and now on main, and it has no owner. Under strict CI it will keep blocking gates, so staff it now, as we did with #204: one owner on claude-opus-5.5 (high), working from the public record only; hosted-only diagnosis and repair, with no retry, waiver or flake exception; Closes #167; coordinate with d7 if the work touches #166 code. Launch first, record after. Report the session ID.\" \"Four times\" is Campaign's count from the recorded occurrences, not an independent census. Your recording scope is right.",
+          "receipt": "owner167-campaign-confirmation.json",
+          "countBoundary": "Both quoted directions preserve Campaign wording. Four-times is Campaign-attributed recorded-count language, not an independently verified census; no retained observation is erased or duplicated to fit it."
+        },
+        "localDirection": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_d9NxdDsCntpTp9O4amIuuF1e",
+          "receipt": "owner167-local-request.json"
+        },
+        "launchBinding": {
+          "file": "owner167-launch-binding.json",
+          "bytes": 5274,
+          "sha256": "ff74705a9428f38b9276eed956ba21cc50ecacbffa24232e26ea0ce887910ad9",
+          "originalFile": "issue167-public-owner-launch-20261025.json",
+          "projection": {
+            "kind": "actual-public-only-owner-launch-before-canonical-recording",
+            "issue": 167,
+            "issueUrl": "https://github.com/lossyrob/telex/issues/167",
+            "existingRecord": "local-daemon-windows-credential-writer-timeout",
+            "proposedNode": "credential-writer-timeout-repair",
+            "campaignAuthority": {
+              "session": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "source": "toolu_014vkRgy6ysjNiGD88kQeR6L",
+              "verbatim": "Campaign: #167 (the credential-writer timeout) has now recurred four times, once on PR #202 and now on main, and it has no owner. Under strict CI it will keep blocking gates, so staff it now, as we did with #204:\n- One owner on claude-opus-5.5 (high), working from the public record only.\n- Hosted-only diagnosis and repair, with no retry, waiver or flake exception.\n- Closes #167.\n- Coordinate with d7 if the work touches #166 code.\n\nLaunch first, record after. Report the session ID.",
+              "countQualification": "The four-times phrasing is Campaign's statement, not an independently established recurrence census. Preserve every existing occurrence; do not use it to truncate history."
+            },
+            "launch": {
+              "sessionId": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+              "name": "Repair credential-writer timeout",
+              "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+              "createdAt": "2026-10-26T03:38:15.595Z",
+              "creatorAndCoordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "requestedProfile": {
+                "model": "claude-opus-5.5",
+                "reasoningEffort": "high",
+                "contextTier": "default",
+                "mode": "interactive"
+              },
+              "baseBranchOverride": false,
+              "notifyOnIdle": false,
+              "kickoffProvidedAtCreation": true,
+              "profileLimit": "These are requested launch settings, not independent effective-capacity verification.",
+              "appObservation": {
+                "sessionId": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+                "sessionType": "worktree",
+                "branch": "lossyrob-fix-167-delayed-writer-timeout",
+                "activity": "busy",
+                "busyForSeconds": 1,
+                "awaitingUserInput": false,
+                "interrupted": false,
+                "source": "Local get_session after create_session; current observed branch is not a claim about the initial generated branch.",
+                "checkoutName": "lossyrob-curly-potato"
+              },
+              "workingHeadAtLaunch": null,
+              "headQualification": "Local has not inspected the owner's checkout or received its starting-head report. The kickoff requires the owner to verify and report that identity; no clean checkout or exact working-head claim is inferred here."
+            },
+            "publicPreflight": {
+              "issueState": "open",
+              "issueAssignees": [],
+              "issueComments": 3,
+              "publicMain": "be8b991027fec095812338286c61feb1799310f1",
+              "duplicateCheck": "Local refreshed the App session inventory before creating the owner and found no existing #167/credential-writer owner session.",
+              "scope": "Public issue #167 body/comments and public main/job identities only. No private owner context, prior launch packet, .paw content or checkout was copied."
+            },
+            "authorizedWork": {
+              "outcome": "Diagnose and repair the credential-writer timeout in a separate PR using Closes #167.",
+              "invariants": "Preserve delayed inherited-writer output after shell exit, output/error semantics, effective negative assertions and owned-process cleanup. Distinguish lifecycle, test-budget and hosted-scheduling causes without guessing.",
+              "runtime": "Hosted-only product/test/daemon runtime. No retry, rerun, waiver, flake exception, cosmetic-head retry or unbounded experiment.",
+              "privateState": "No other session's private transcript, packets, .paw files, checkout or diagnostic files; no installed-state, registry/ACL, I161-1 or workstation-freeze changes.",
+              "overlap": "Coordinate overlapping credential/daemon/CI/dependency edits with d7a17cd2-08c2-4760-b1a6-1209c2d0f80c. Do not write PR #196's branch or absorb its repair.",
+              "reviewAndGate": "Independent exact-final-head source review with reviewer-origin public receipt, design inspection as applicable, strict required hosted CI and Campaign gate. No autonomous merge.",
+              "waits": "Use sole external coordinator 2a4bc4c8-1211-49d4-ba68-9d05d5d7530d for exact-head/run observation; no second scheduler.",
+              "wakes": "This staffing does not trigger #193/#198. Their existing trigger remains Local-verified actual #166 repair merge."
+            },
+            "reporting": {
+              "campaign": "Local reported the new session ID, requested profile and observed busy state.",
+              "d7": "Local informed the existing #166 owner of the separate owner and overlap requirement.",
+              "ownerInitialReport": "Requested actual starting checkout/head and a public-record-based diagnosis plan; not yet received in this launch snapshot."
+            },
+            "canonicalRecording": "Promote the same existing candidate to an active #167 repair and record this already-completed launch with one node/task, retaining prior candidate/unassigned fields and all occurrences as history. No new tracker, second owner or inferred dependency edge. Preserve #166/#203/#204 and both pending wakes. Canonical review/recording follows launch and must not delay the authorized work."
+          },
+          "redaction": "Only launch.appObservation.path is replaced by launch.appObservation.checkoutName. All other parsed fields are exact; the complete original 5,274 bytes remain in private custody. This redaction is reversible against the retained binding and not a source/evidence rewrite."
+        },
+        "independentAppIdentity": {
+          "sessionId": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+          "name": "Repair credential-writer timeout",
+          "sessionType": "worktree",
+          "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+          "repo": "lossyrob/telex",
+          "creatorSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "coordinatorSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "createdAt": "2026-10-26T03:38:15.595Z",
+          "checkoutName": "lossyrob-curly-potato",
+          "currentBranch": "lossyrob-fix-167-delayed-writer-timeout",
+          "observedActivity": "busy",
+          "observedBusyForSeconds": 2,
+          "awaitingInput": false,
+          "interrupted": false,
+          "receipt": "owner167-app-owner-observation.json",
+          "limit": "Read-only identity observation, not owner checkout inspection. Busy is temporal, not implementation progress. Kickoff at creation, no private-input transfer and Campaign/d7 notification delivery remain Local-reported. Exact starting head/tree/cleanliness remains unknown; requested profile is not independently verified effective capacity."
+        },
+        "publicPreflightBoundary": "The packet records public main be8b9910, issue state/comments/assignees and Local duplicate-owner inventory as launch-time preflight. The reconciler independently reads current issue identity/open state only. This is not a verified owner starting checkout or an independent census/complete private-input audit.",
+        "remainingGates": "Independent exact-final-head source review with reviewer-origin public verdict/scope/limits receipt, design inspection as applicable, strict required hosted CI and Campaign gate. No autonomous merge, inherited source/CI acceptance or new scheduler. Existing sole external coordinator remains; no canonical artifact review grants product/runtime/readiness acceptance.",
+        "coordination": "Existing d7a17cd2-08c2-4760-b1a6-1209c2d0f80c remains #166/PR #196 sole writer. The #167 owner coordinates overlapping credential/daemon/CI/dependency edits before publishing, does not write #196 branch or absorb its repair. No inferred graph edge or unrelated-analysis serialization. Both #193/#198 wakes remain exact and pending until Local verifies actual #166 product-repair merge.",
+        "conservation": "Record Campaign-authorized promotion of the same existing #167 candidate and the already-completed launch of owner 9a868a31, with one repair node/task and no occurrence append. Preserve all prior candidate/unassigned fields as history and all evidence, including four successor entries. Exact starting owner checkout/head/tree/cleanliness remains unverified; public-main preflight is not checkout proof, requested profile is not effective-capacity proof, and Campaign four-times wording is not an independent census. No new launch, owner, tracker, private-context transfer, inferred edge, existing-node status/attention/dependency/design-link change, #166/#203/#204 or wake change, source/runtime/design/CI/readiness/repair acceptance, autonomous merge, retry/waiver/flake, debt/HOLD or freeze credit. Runtime remains hosted-only under the already-given authority; implementation does not wait on recording."
+      }
     },
     {
       "id": "local-daemon-windows-station-intent-restoration-counter",

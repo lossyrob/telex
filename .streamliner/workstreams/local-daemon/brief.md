@@ -1129,3 +1129,54 @@ evidence/launch history, the entire #166 record and both pending #193/#198
 wakes stay exact. Only Local-verified actual #166 repair merge triggers
 those wakes. No new owner, occurrence, graph edge, runtime/retry, broader
 acceptance, debt/HOLD reversal or workstation-freeze clearance follows.
+
+## 2026-10-26 - Credential-writer repair #167 already staffed
+
+Campaign authorized one public-record-only owner for existing
+[#167](https://github.com/lossyrob/telex/issues/167), with launch first
+and artifact recording afterward. The same
+`local-daemon-windows-credential-writer-timeout` record is promoted to
+the `credential-writer-timeout-repair` task. The actual owner is
+`9a868a31-2c8d-429a-aee3-7e195076a4dd`, coordinated by Local, in checkout
+`lossyrob-curly-potato` on current branch
+`lossyrob-fix-167-delayed-writer-timeout`. Local reports the actual launch;
+the reconciler's read-only App observation confirms the same session,
+creator/coordinator, checkout, current branch and observed busy state.
+No exact starting checkout head or cleanliness report was received in
+this frozen launch snapshot. Public-main `be8b9910` is preflight evidence,
+not a verified owner checkout. Requested Opus 5.5/high/default/interactive
+settings are not independent effective-capacity proof.
+
+Original Campaign source `toolu_014vkRgy6ysjNiGD88kQeR6L` and direct
+confirmation `toolu_01Jw6FHd8GL21QG41ruVtEnr` authorize this separate
+repair, not a new tracker or second launch. The complete 5,274-byte Local
+launch packet is retained by SHA-256
+`ff74705a9428f38b9276eed956ba21cc50ecacbffa24232e26ea0ce887910ad9`.
+Only the private machine path is replaced by its checkout name in the
+canonical packet projection. All earlier candidate/unassigned fields and
+all evidence, including the four existing successor entries, remain exact
+history; promotion adds no occurrence. Campaign's "four times" is its
+record-based count, not a new independent census.
+
+The owner must diagnose lifecycle, test-budget and hosted-scheduling
+possibilities without guessing, preserve delayed inherited-writer output
+after shell exit, output/error semantics, effective negative assertions
+and owned-process cleanup, and deliver a separate PR using `Closes #167`.
+Product/test/daemon runtime is hosted-only. No retry, rerun, cosmetic-head
+retry, waiver, flake exception, unbounded experiment or workstation/
+installed-state change is authorized.
+
+Coordinate overlapping credential/daemon/CI/dependency edits with d7
+before publishing; do not write PR #196's branch or absorb #166's repair.
+Use the existing sole external wait coordinator, not another scheduler.
+Exact-final-head independent source review with reviewer-origin public
+receipt, design inspection as applicable, strict required hosted CI and
+Campaign gate remain separate. No autonomous merge.
+
+The Local ledger remains 48 records; one new repair node makes 29 Local
+nodes with no dependency edges or edits to existing nodes, attention,
+status or design links. All other records, Watcher and both pending
+#193/#198 wakes remain exact. Only Local-verified actual #166 repair merge
+triggers those wakes. Staffing/recording supplies no cause, source/runtime,
+CI/readiness, repair/accepted-delivery, debt/HOLD or freeze credit and does
+not delay the already-authorized implementation.
