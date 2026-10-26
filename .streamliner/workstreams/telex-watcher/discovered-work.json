@@ -761,11 +761,11 @@
         ],
         "routing": "Campaign directed immediate staffing instead of waiting for operator check-in; the Watcher coordinator launched the existing #203 owner."
       },
-      "status": "in-progress",
+      "status": "completed",
       "decisionState": "accepted",
       "rationale": "Cargo identifies the affected Watcher library harness, not a culprit component or test. sourceNodeId watcher-runtime-core marks crate scope only; it is not causal attribution or a new dependency. This is separate from #166 command-child exits and the external Local signatures record.",
-      "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. Same-head failed-job CI reruns are allowed after existing-tracker run/job/test retention; green exact-head reruns satisfy CI, red merges remain forbidden, and repeated same-test failure is a finding. This supersedes only the earlier no-retry/flake-exception clause for CI reruns, not hosted-only runtime or required checks. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203.",
-      "dispositionAuthority": "Campaign original direction toolu_01YYygb1QTgk6ahpmW3XrMxw is confirmed by Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c in actual correction toolu_01JVjJSa3b4msyzxVzPYAHQU, which supplies the canonical register text and identifies the earlier confirmation as a reconstruction. It authorized one immediate #203 owner. Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports actual launch and directs this owner/status recording in toolu_011KH1FEA1Js2QGRAao8jtL6. The original unassigned evidence-routing disposition remains historical below.",
+      "terminalPath": "The bounded #203 test-harness repair is completed at PR #207 product merge ee398fcf34b6031e8daaa10b2efdaf6f05db7d72, reviewed head 712eb6d3, under Campaign merge-with-debt gate 6417405039. All five numbered debts and the local-run process debt remain open with the existing owner b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f. Local runs receive no gate credit or new runtime authority. Original observations, owner and launch scope, and same-head CI rerun history remain exact. The record stays external and outside the graph; no node or edge is added. Completion was not held for the field report. Field report 6417840481 and main push run 40332382383 at the exact merge (attempt 1; all 21 jobs succeeded) are additive follow-through under Campaign direction toolu_01X24xWTf2B7HV1v6ZRfgs8r. Field and gate diagnostic findings remain attributed, not independently replayed source, dump or runtime proof. The owner reports that another Watcher lib-harness exit 0xc0000409 reopens #203. No #166 causal equivalence or debt clearance, #167 acceptance, new staffing or wake, or broader hardening, release or freeze credit follows.",
+      "dispositionAuthority": "Campaign direction toolu_01HDSNCtTXA8Xp833gAu323W explicitly accepts completion of the existing external #203 repair with all five gate debts retained and open, and the same owner b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f. Acceptance follows PR #207 merge ee398fcf under gate 6417405039. The local-run process debt is retained with no gate credit. Watcher direction toolu_01NcjaCpMWJPym6znkDaWbnJ requests this existing-record status update. Completion does not wait for the field report; later field evidence is additive. This is express Campaign acceptance, not an inference from GitHub closure.",
       "evidence": [
         {
           "source": "issue",
@@ -1127,6 +1127,537 @@
           "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
         },
         "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
+      },
+      "productMergeCompletionWithRetainedDebtQualification": {
+        "kind": "campaign-accepted203-product-merge-completion-with-retained-debt",
+        "historicalCurrentFields": {
+          "status": "in-progress",
+          "dispositionAuthority": "Campaign original direction toolu_01YYygb1QTgk6ahpmW3XrMxw is confirmed by Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c in actual correction toolu_01JVjJSa3b4msyzxVzPYAHQU, which supplies the canonical register text and identifies the earlier confirmation as a reconstruction. It authorized one immediate #203 owner. Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports actual launch and directs this owner/status recording in toolu_011KH1FEA1Js2QGRAao8jtL6. The original unassigned evidence-routing disposition remains historical below.",
+          "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. Same-head failed-job CI reruns are allowed after existing-tracker run/job/test retention; green exact-head reruns satisfy CI, red merges remain forbidden, and repeated same-test failure is a finding. This supersedes only the earlier no-retry/flake-exception clause for CI reruns, not hosted-only runtime or required checks. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203."
+        },
+        "campaignDirection": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01HDSNCtTXA8Xp833gAu323W",
+          "verbatim": "Campaign: treat #203 the same way you treated #166. Record the #203 node as completed with retained debt, using the merge verdict on PR #207 (ee398fcf, record issuecomment-6417405039). Keep all 5 listed debts open and with the same owner, and record the local-run process debt. Don't wait for the owner's field report before completing the node. When the report lands, record it additively as follow-through. Your sequencing for the policy successor is fine."
+        },
+        "owningWatcherRequest": {
+          "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "source": "toolu_01NcjaCpMWJPym6znkDaWbnJ",
+          "verbatim": "Watcher status change, #203 (record watcher-windows-lib-harness-abnormal-exit-0xc0000409): in-progress -> completed. PR #207 merged as ee398fcf34b6031e8daaa10b2efdaf6f05db7d72 at 2026-10-26T13:38:36Z. Issue #203 closed COMPLETED at 13:38:38Z. Campaign gate record: https://github.com/lossyrob/telex/pull/207#issuecomment-6417405039. Owner b8e0a6cc's post-merge field report is still pending, per Campaign. The graph is unchanged: #203 is out-of-graph, external."
+        },
+        "publicVerification": {
+          "discovery": {
+            "issue208": {
+              "number": 208,
+              "url": "https://github.com/lossyrob/telex/issues/208",
+              "bodySha256": "27b2b206384ff8b641fd7b10d57af7c5d82bb97978189562be156f8328ae2c10"
+            },
+            "pr194": {
+              "number": 194,
+              "url": "https://github.com/lossyrob/telex/pull/194",
+              "publicBodyExcerpt": "[Issue #208](https://github.com/lossyrob/telex/issues/208) tracks the distinct Windows scoped-scan Live-fixture seed failure in `a_scoped_scan_spends_its_budget_on_its_own_store_not_on_unrelated_pages` (PR #207, run 40328958226 attempt 1, job 121592958733). It is **NOT repaired by PR194** and remains unresolved under that separate tracker. This fixture uses `write_atomic` and production-clock locking, not the pending-proof seed helper. The shared refusal text does not establish a common cause; the green same-head rerun does not erase the failed attempt. Closing #193 through this PR does not close #208."
+            }
+          },
+          "pr": {
+            "number": 207,
+            "url": "https://github.com/lossyrob/telex/pull/207",
+            "state": "closed",
+            "merged": true,
+            "mergedAt": "2026-10-26T13:38:36Z",
+            "mergeCommit": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+            "reviewedHead": "712eb6d3ad72baa76766753cac7f6db6a6162f07"
+          },
+          "issue": {
+            "number": 203,
+            "url": "https://github.com/lossyrob/telex/issues/203",
+            "state": "closed",
+            "stateReason": "completed",
+            "closedAt": "2026-10-26T13:38:38Z"
+          },
+          "gate": {
+            "id": 6417405039,
+            "url": "https://github.com/lossyrob/telex/pull/207#issuecomment-6417405039",
+            "createdAt": "2026-10-26T13:38:34Z",
+            "updatedAt": "2026-10-26T13:38:34Z",
+            "user": "lossyrob",
+            "bodyBytes": 2469,
+            "bodySha256": "642ddecadb876d0fcbc487f9cf89f62ddfa07366de50b0967199683fe22e0734"
+          },
+          "field": {
+            "id": 6417840481,
+            "url": "https://github.com/lossyrob/telex/issues/203#issuecomment-6417840481",
+            "createdAt": "2026-10-26T13:58:32Z",
+            "updatedAt": "2026-10-26T13:58:32Z",
+            "user": "lossyrob",
+            "bodyBytes": 3853,
+            "bodySha256": "bda1a6ea33d256f0a27db3629b64cf3e368c2d0e0fa651b0a32b3e8112c09a9a"
+          },
+          "mainCi": {
+            "id": 40332382383,
+            "url": "https://github.com/lossyrob/telex/actions/runs/40332382383",
+            "event": "push",
+            "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "allEntriesActualAttempt1": true,
+            "jobs": [
+              {
+                "id": 121604860649,
+                "name": "Live Postgres parity tests",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860813,
+                "name": "Build and test (ubuntu-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860836,
+                "name": "Windows heap diagnostics",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860841,
+                "name": "Build and test (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860962,
+                "name": "Copilot fallback E2E (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860964,
+                "name": "Released v0.2.1 upgrade proof (Windows)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860971,
+                "name": "Credential invocation lifecycle (macOS)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861016,
+                "name": "Windows token-user alignment (default)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861042,
+                "name": "Windows token-user alignment (postgres)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861065,
+                "name": "InstalledCurrent Postgres process proofs (Windows)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861077,
+                "name": "Feature combinations build",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861082,
+                "name": "Windows token-user alignment (sqlite)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861109,
+                "name": "Windows token-user alignment (entra)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861149,
+                "name": "Windows token-user alignment (all)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861164,
+                "name": "Station-intent lock boundary (macos-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861194,
+                "name": "Station-intent lock boundary (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861216,
+                "name": "Windows token-user alignment (sqlite-postgres)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861250,
+                "name": "Station-intent lock boundary (ubuntu-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861309,
+                "name": "Windows token-user alignment (sqlite-entra)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861451,
+                "name": "Windows token-user alignment (sqlite-self-update)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861476,
+                "name": "Copilot fallback E2E (macos-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        },
+        "fullGate": {
+          "file": "complete203v4-gate-body.txt",
+          "bytes": 2469,
+          "sha256": "642ddecadb876d0fcbc487f9cf89f62ddfa07366de50b0967199683fe22e0734",
+          "body": "## Campaign merge gate: merge + debt (high confidence)\n\nGated head `712eb6d3ad72baa76766753cac7f6db6a6162f07`. It merges main `8d7815a8` into the previously reviewed head `776d65d6`, without rebasing. Main is now `9283aa42`; the drift since `8d7815a8` is `.streamliner/` only (verified).\n\n**Floor checks**\n- **CI:** run 40328958226, 21/21 success at the exact head on attempt 2.\n  - Attempt 1 failed in one unrelated job: Station-intent lock boundary (windows-latest), test `a_scoped_scan_spends_its_budget_on_its_own_store_not_on_unrelated_pages`, an intent-seed lock-admission error.\n  - That failure was recorded on #193 before the rerun (issuecomment-6417280525 and 6417339228).\n  - The same-head rerun is allowed under the operator's 2026-10-26 directive.\n- **Integration:** the diff from `776d65d6` to `712eb6d3` matches main's `a0bf2cf0..8d7815a8` diff exactly. The net PR patch is unchanged: 3 files, +41/-5.\n- **Independent exact-head source review:** issuecomment-6416957121 (at `712eb6d3`), plus 6416881499 (at `776d65d6`). No blocking findings.\n- **PR body:** has Consequence, Discoveries and disposition, and Deferred work.\n- **State:** MERGEABLE/CLEAN, with 0 review threads.\n\n**Findings (from the gate review at `776d65d6`; the merits are unchanged)**\n- The three `Fixture` drops skip their cleanup assertion while the thread is already panicking, so the double panic no longer aborts the harness with 0xc0000409. The hosted dump (run 40280833707) confirms the mechanism, and the regression test runs on hosted Windows.\n- The trigger timeout now shows up as a named test failure.\n- The 60s hang guard is about 8x the hosted maximum (7.4s over 3,162 runs).\n- Only test files changed; there is no production risk.\n\n**Process debt:** the owner ran a local reproduction and reruns despite the hosted-only scope. The evidence the PR depends on is hosted, so the local runs get no gate credit.\n\n**Debt (non-blocking, also listed in the PR body)**\n1. The reverted-fix failing check ran locally only.\n2. The original 10s overrun is unexplained: slow `synchronous=FULL` I/O, with registry open reaching 14.7s.\n3. `telex-watcher/tests/cli_v2.rs` has the same drop hazard.\n4. Transport tests use 3s timeouts that weren't sized against hosted latency.\n5. A failed test now leaves its fixture root on disk.\n\nDiscoveries: the fail-fast capture gap is routed to Local and the test sentinel. The mio#2014 hits are recorded under #166.\n\nCampaign merges at the exact head."
+        },
+        "retainedDebts": [
+          {
+            "number": 1,
+            "gateText": "1. The reverted-fix failing check ran locally only.",
+            "state": "retained-open",
+            "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+          },
+          {
+            "number": 2,
+            "gateText": "2. The original 10s overrun is unexplained: slow `synchronous=FULL` I/O, with registry open reaching 14.7s.",
+            "state": "retained-open",
+            "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+          },
+          {
+            "number": 3,
+            "gateText": "3. `telex-watcher/tests/cli_v2.rs` has the same drop hazard.",
+            "state": "retained-open",
+            "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+          },
+          {
+            "number": 4,
+            "gateText": "4. Transport tests use 3s timeouts that weren't sized against hosted latency.",
+            "state": "retained-open",
+            "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+          },
+          {
+            "number": 5,
+            "gateText": "5. A failed test now leaves its fixture root on disk.",
+            "state": "retained-open",
+            "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+          }
+        ],
+        "processDebt": {
+          "gateText": "the owner ran a local reproduction and reruns despite the hosted-only scope. The evidence the PR depends on is hosted, so the local runs get no gate credit.",
+          "state": "retained-open",
+          "ownerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+          "creditBoundary": "Local reproduction and reruns violated hosted-only scope and receive no gate credit. No new local runtime is authorized."
+        },
+        "laterDiscoveryRouting": {
+          "campaignDirection": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01XptNJYT2dvk1dQoWUgG4VP",
+            "verbatim": "Campaign: PR #202 is merged as d8a382a4 (record issuecomment-6418110367), and #198 is closed. Record the #198 node as completed with retained debt, the same way you recorded #203:\n- keep all 7 debts open with the same owner, plus the local-run process debt;\n- add discovered-work rows for the async-shell limitation and for session.start/session.error returning unknown, which the steward routed to #199/#200/#201 (6402758809, 6402777694);\n- don't wait for the field report.\n\nAlso record two #203 facts: the sentinel filed #208 for the scoped-scan Live-fixture seed failure, and #194's PR body states #194 does not repair it."
+          },
+          "projection": {
+            "campaignSource": "toolu_01XptNJYT2dvk1dQoWUgG4VP",
+            "issue208": {
+              "number": 208,
+              "url": "https://github.com/lossyrob/telex/issues/208",
+              "title": "[test-sentinel] Resolve scoped-scan Live-fixture lock-admission failure on Windows",
+              "bodyBytes": 3441,
+              "bodySha256": "27b2b206384ff8b641fd7b10d57af7c5d82bb97978189562be156f8328ae2c10",
+              "meaning": "Campaign reports that the existing Sentinel filed #208 for the distinct scoped-scan Live-fixture seed failure. The public issue identity/body supports the separate tracker. Its source assessment, failure, incidence and causal limits remain attributed, not a new source/log/cohort audit."
+            },
+            "pr194": {
+              "number": 194,
+              "url": "https://github.com/lossyrob/telex/pull/194",
+              "publicBodyExcerpt": "[Issue #208](https://github.com/lossyrob/telex/issues/208) tracks the distinct Windows scoped-scan Live-fixture seed failure in `a_scoped_scan_spends_its_budget_on_its_own_store_not_on_unrelated_pages` (PR #207, run 40328958226 attempt 1, job 121592958733). It is **NOT repaired by PR194** and remains unresolved under that separate tracker. This fixture uses `write_atomic` and production-clock locking, not the pending-proof seed helper. The shared refusal text does not establish a common cause; the green same-head rerun does not erase the failed attempt. Closing #193 through this PR does not close #208.",
+              "capturedBodyBytes": 2438,
+              "capturedBodySha256": "3310939f068ba695291f66992b43b750cc52e6202cf63d535d922886630d9fc3",
+              "meaning": "The public PR body expressly excludes repair of #208. This is a scope statement, not PR #194 approval, readiness, merge or causal evidence."
+            },
+            "boundary": "No #208 owner, staffing, node, edge, runtime, experiment, repair or closure is created or accepted. No automatic widening of #193/#194, common-cause inference, erasure of the failed attempt or green-rerun causal credit. The separate #198 completion request remains for its own successor."
+          }
+        },
+        "existingOwnerSessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+        "graphDisposition": "Existing external record remains out-of-graph. Both complete graphs, every node/status/attention/dependency/design link and all other workstream paths stay exact.",
+        "productBoundary": "PR #207 product merge precedes policy artifact ad76fc86. The prior 21-artifact segmented proof retains the PR #205, #196 and #207 product boundaries. PR #202 then advanced main to d8a382a4 with the entire Streamliner tree unchanged; it is a fourth explicit product boundary. This #203 artifact does not accept #198 completion, debt clearance, readiness or execution.",
+        "additiveFollowThrough": {
+          "campaignDirection": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01X24xWTf2B7HV1v6ZRfgs8r",
+            "verbatim": "Campaign: two more facts for the #203 follow-through. The owner's field report is posted at issuecomment-6417840481. Main CI at ee398fcf is green 21/21 on the first attempt (run 40332382383). Record both alongside your #203 entry, as additions."
+          },
+          "watcherDirection": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01X39eUUxFMnrCFuZ8g4XmtP",
+            "verbatim": "Watcher: #203 is now fully delivered.\n- Main push CI 40332382383 passed at ee398fcf (PR #207 merge).\n- The owner b8e0a6cc posted its field report: https://github.com/lossyrob/telex/issues/203#issuecomment-6417840481\nThis is for the #203 completion successor you are preparing."
+          },
+          "actualOwnerDoorbell": {
+            "sessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+            "source": "toolu_018YhdihDHpTy2sw3XYsG1pw",
+            "verbatim": "Doorbell: #203 is closed. PR #207 merged as ee398fcf, and main CI is green, 21/21. Field report: https://github.com/lossyrob/telex/issues/203#issuecomment-6417840481"
+          },
+          "field": {
+            "file": "complete203v4-field-body.txt",
+            "bytes": 3853,
+            "sha256": "bda1a6ea33d256f0a27db3629b64cf3e368c2d0e0fa651b0a32b3e8112c09a9a",
+            "body": "## Field report: #203 closed by PR #207 (merged as ee398fcf)\n\n**Consequence.** On Windows, a slow opaque management test is now reported as an ordinary named test failure, still red. It no longer aborts the whole `telex_watcher` lib harness with 0xc0000409 and hides the failure. The test's hang guard is now 60 s (`DURABLE_MANAGEMENT_HANG_GUARD`), sized to the measured hosted durations, so the known 10 s overrun no longer fails it.\n\n**What held**\n- The root cause was proven on a hosted runner. Stress run 40280833707, shard 5, reproduced the crash, and an attached `procdump -e` dump showed the mechanism:\n  1. The opaque test's `timeout(10s).unwrap()` panicked.\n  2. `Fixture::drop` then ran `remove_dir_all().expect()`, which failed because the detached owner task still held `registry.sqlite` open.\n  3. That second panic during unwinding led to an abort and `__fastfail(7)`, which is 0xc0000409.\n  Full write-up: https://github.com/lossyrob/telex/issues/203#issuecomment-6411706945\n- Hosted timing run 40293264090 (8 shards, 1,054 iterations, 3,162 measured runs) had 0 crashes and 0 failures. The guarded section took p50 0.5 s, p99 3.1 s, max 7.4 s. Registry open alone reached 14.7 s. There were no lock waits.\n- Exact-head CI at 712eb6d3 (run 40328958226): 21/21 after one rerun of an unrelated failure, recorded on #193 (https://github.com/lossyrob/telex/issues/193#issuecomment-6417280525). The Windows watcher lib harness passed 60, failed 0, ignored 1.\n- Main CI at merge ee398fcf (run 40332382383): 21/21 on the first attempt. The Windows watcher lib harness passed 60, failed 0, ignored 1.\n- Independent exact-head source-review receipts:\n  - https://github.com/lossyrob/telex/pull/207#issuecomment-6416881499 (776d65d6)\n  - https://github.com/lossyrob/telex/pull/207#issuecomment-6416957121 (712eb6d3)\n\n**What changed**\n- The `Fixture` Drop in three watcher test modules (runtime_management_tests, registry_tests, transport/tests) now skips its cleanup `expect` while the thread is already panicking.\n- A new regression test, `fixture_cleanup_failure_while_unwinding_preserves_the_original_panic`, checks that the original panic survives a failed cleanup.\n- Both opaque-test timeouts were raised from 10 s to the 60 s `DURABLE_MANAGEMENT_HANG_GUARD`.\n- The Mio 1.2.4 bump (#196) is not the #203 cause, and #203 was not closed on its account.\n\n**Discoveries and disposition**\n- **Fail-fast capture on hosted runners.** Only an attached `procdump -e` captured this `__fastfail` abort; WER LocalDumps and AeDebug captured nothing. Routed to Local Daemon / test sentinel. The recipe is at commit 51ab3c6f, `.github/diag-203/setup-capture.ps1`.\n- **tokio-rs/mio#2014 defect state** was hit in the CLI and InstalledCurrent harnesses. This is not the #203 cause. Recorded under #166: https://github.com/lossyrob/telex/issues/166#issuecomment-6416861305\n\n**Deferred work**\n1. The reverted-fix reproduction (the regression test exits 0xc0000409 without the guard) ran locally only, not on a hosted runner.\n2. Why CI exceeded the 10 s bound is unexplained. Hosted timing shows slow `synchronous=FULL` SQLite I/O with no lock waits. The underlying disk or fsync latency source has not been isolated.\n3. `telex-watcher/tests/cli_v2.rs:101-103`: its `Fixture` Drop has the same `remove_dir_all(...).expect(...)` hazard while unwinding.\n4. `telex-watcher/src/transport/tests.rs` uses 3 s `timeout(...)` bounds that were not sized against hosted latency.\n5. When a test fails, its fixture root is now left in the temp directory, because cleanup is best effort while unwinding.\n\n**Process note.** Local runs got no gate credit. Diagnosis and clearance rest only on hosted evidence; the local reverted-fix reproduction is recorded as process debt (item 1).\n\n**Reopen condition.** If the `telex_watcher` lib harness exits 0xc0000409 again, reopen #203.",
+            "boundary": "Complete owner field report retained as owner-attributed source/native/dump/timing, discovery and diagnostic context. Not replayed or promoted into independent causal/capture/measurement proof; no debt cleared.",
+            "ownerReportedReopenCondition": "If the telex_watcher lib harness exits 0xc0000409 again, reopen #203."
+          },
+          "mainCi": {
+            "id": 40332382383,
+            "url": "https://github.com/lossyrob/telex/actions/runs/40332382383",
+            "event": "push",
+            "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "allEntriesActualAttempt1": true,
+            "jobs": [
+              {
+                "id": 121604860649,
+                "name": "Live Postgres parity tests",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860813,
+                "name": "Build and test (ubuntu-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860836,
+                "name": "Windows heap diagnostics",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860841,
+                "name": "Build and test (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860962,
+                "name": "Copilot fallback E2E (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860964,
+                "name": "Released v0.2.1 upgrade proof (Windows)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604860971,
+                "name": "Credential invocation lifecycle (macOS)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861016,
+                "name": "Windows token-user alignment (default)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861042,
+                "name": "Windows token-user alignment (postgres)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861065,
+                "name": "InstalledCurrent Postgres process proofs (Windows)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861077,
+                "name": "Feature combinations build",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861082,
+                "name": "Windows token-user alignment (sqlite)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861109,
+                "name": "Windows token-user alignment (entra)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861149,
+                "name": "Windows token-user alignment (all)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861164,
+                "name": "Station-intent lock boundary (macos-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861194,
+                "name": "Station-intent lock boundary (windows-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861216,
+                "name": "Windows token-user alignment (sqlite-postgres)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861250,
+                "name": "Station-intent lock boundary (ubuntu-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861309,
+                "name": "Windows token-user alignment (sqlite-entra)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861451,
+                "name": "Windows token-user alignment (sqlite-self-update)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "id": 121604861476,
+                "name": "Copilot fallback E2E (macos-latest)",
+                "head": "ee398fcf34b6031e8daaa10b2efdaf6f05db7d72",
+                "runAttempt": 1,
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          "mainCiBoundary": "Independently checked public run metadata and the complete set of 21 attempt-1 jobs at the exact product merge. Every job is explicitly attempt 1, completed and successful. No logs, artifacts, runtime, scheduler or rerun were inspected or executed. This clears no gate debt, process debt or other repair obligation."
+        },
+        "fieldReportBoundary": "The original Watcher request reported the field report pending and is retained verbatim. Campaign expressly accepted completion without waiting. The field report and first-attempt main CI arrived before this proposal was frozen and are additive follow-through, not completion prerequisites or changes to the original gate and debt authority.",
+        "attributionBoundary": "The full public gate and field bodies, merge and closure identity, and bounded main run/job terminal metadata were checked. Gate source-review, PR CI, hosted dump, regression and timing conclusions, and field source, native-crash, capture and discovery conclusions remain attributed. They are not a new source, log, dump, archive or runtime replay. Original observations and same-head rerun authority remain exact history.",
+        "conservation": "Only the existing #203 status, dispositionAuthority and terminalPath fields and this qualification change; all three prior values are saved. The owner is unchanged, and all five gate debts and the process debt remain open. The other 10 records, ledger root and order, full Local workstream, both graphs, #166 debts and wakes, and all prior evidence remain exact. No other repair or debt acceptance, scheduler, staffing, wake, release, hardening or freeze credit follows. Recording does not delay active owners."
       }
     }
   ]

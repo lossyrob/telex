@@ -396,3 +396,54 @@ exact, with the old no-rerun clause explicitly historical in this respect.
 acceptance, CI result, causal finding, #166 debt clearance, new wake,
 release, hardening or freeze credit follows. Existing owners, reruns and
 Sentinel do not wait for this recording.
+
+## 2026-10-26: #203 completed with retained debt
+
+Campaign `toolu_01HDSNCtTXA8Xp833gAu323W` explicitly accepts the existing
+external #203 repair as completed with retained debt after PR #207 merged
+at `ee398fcf34b6031e8daaa10b2efdaf6f05db7d72`. The merge verdict is
+[gate 6417405039](https://github.com/lossyrob/telex/pull/207#issuecomment-6417405039).
+Watcher `toolu_01NcjaCpMWJPym6znkDaWbnJ` requests the existing ledger
+record's in-progress-to-completed update. #203 remains out of the graph:
+no node or dependency is created, and both graphs stay exact.
+Existing owner `b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f` is unchanged.
+
+All five numbered gate debts remain open with that same owner: the
+reverted-fix failing check was local-only; the original 10-second overrun
+is unexplained; `cli_v2.rs` has the same drop hazard; transport tests have
+unsized three-second timeouts; and a failed test leaves its fixture root.
+The full gate text and each numbered block are retained verbatim in the
+qualification. The local-reproduction/rerun process debt is also retained:
+those runs violated the hosted-only scope and receive no gate credit.
+This recording authorizes no additional local reproduction or rerun.
+
+The gate's hosted dump, regression, source-review, timing and exact-head
+CI findings remain Campaign-attributed, not independently replayed by
+the reconciler. The actual product merge is a separate external boundary
+already present in the retained artifact history, not an artifact commit.
+No causal equivalence to #166, #167 acceptance, #166 debt clearance,
+new staffing or wake follows.
+
+Campaign explicitly says not to wait for the owner's field report before
+recording completion. The pending state in the original Watcher request
+remains history. Before this proposal was frozen, Campaign
+`toolu_01X24xWTf2B7HV1v6ZRfgs8r` and Watcher
+`toolu_01X39eUUxFMnrCFuZ8g4XmtP` directed two additive follow-through
+entries: the full [owner field report](https://github.com/lossyrob/telex/issues/203#issuecomment-6417840481)
+and main push CI `40332382383` at the actual merge `ee398fcf`.
+The report is retained in full as owner-attributed source/native/timing
+and discovery context, not replayed diagnostics. Its recurrence condition
+is to reopen #203 if the Watcher lib harness exits `0xc0000409` again.
+The reconciler independently verified the main run completed successfully
+on attempt 1 and all 21 jobs are actual successful attempt-1 entries at
+that exact merge. No logs, archives, dumps or test runtime were replayed.
+This bounded main-CI follow-through does not clear any of the five debts,
+the process debt, #166 debts or other repair/acceptance obligations.
+
+All original observations, launch/scope history and the later same-head
+CI rerun qualification remain exact. Completion grants no blanket
+hardening, release or workstation-freeze credit and does not delay work.
+
+### Later discovery routing: #208 is outside PR #194
+
+Campaign direction toolu_01XptNJYT2dvk1dQoWUgG4VP adds the Sentinel-filed [#208](https://github.com/lossyrob/telex/issues/208) scoped-scan Live-fixture seed failure as separate tracking. [PR #194](https://github.com/lossyrob/telex/pull/194) explicitly states that it does not repair #208. The public issue and PR scope statement were checked; source, failure-path and incidence claims remain attributed. No common cause, new owner or runtime authority, automatic PR expansion, #194 approval or #208 closure follows. The failed attempt remains evidence despite its green rerun. PR #202 is a separate verified product boundary; its #198 completion and debts will be recorded separately.
