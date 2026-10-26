@@ -404,8 +404,20 @@ impl Isolation {
     fn stop_daemon_with_executable_within(&self, executable: &Path, timeout: Duration) -> bool {
         let identity = self.daemon_identity();
         let mut command = self.command_for(executable);
-        command.args(["--json", "daemon", "stop", "--drain"]);
-        let _ = run_with_timeout(command, timeout);
+        // Every executable here is a branch-binary copy, so the bounded stop
+        // flag exists. The caller's budget becomes the CLI's single drain
+        // deadline (fixtures may delay HelloAck past the 10s default), and the
+        // outer watchdog keeps margin so the CLI's own result is returned.
+        let drain_timeout_ms = timeout.as_millis().to_string();
+        command.args([
+            "--json",
+            "daemon",
+            "stop",
+            "--drain",
+            "--drain-timeout-ms",
+            &drain_timeout_ms,
+        ]);
+        let _ = run_with_timeout(command, timeout + Duration::from_secs(10));
         self.wait_until_stopped(identity, timeout)
     }
 
