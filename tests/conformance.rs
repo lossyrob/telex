@@ -100,6 +100,7 @@ where
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
+    //   message_wake_counts / undelivered_counts . message_wake_observation
     //   pending_unconsumed_count / inbound_actionable_count /
     //     pending_and_actionable_counts ......... actionable_and_pending_counts
     //   claim_epoch_lease / heartbeat_epoch /
@@ -122,6 +123,7 @@ where
     application_detach_intents(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
+    message_wake_observation(make_store().await).await;
     actionable_and_pending_counts(make_store().await).await;
     dispositions(make_store().await).await;
     export_filters(make_store().await).await;
@@ -936,6 +938,78 @@ async fn actionable_and_pending_counts(store: Store) {
     let (pending, actionable) = b.pending_and_actionable_counts(addr).await.unwrap();
     assert_eq!(pending, b.pending_unconsumed_count(addr).await.unwrap());
     assert_eq!(actionable, b.inbound_actionable_count(addr).await.unwrap());
+}
+
+async fn assert_message_wakes(backend: &dyn Backend, address: &str, expected: (i64, i64)) {
+    assert_eq!(
+        backend.message_wake_counts(address).await.unwrap(),
+        expected
+    );
+    let existing_count = backend
+        .undelivered_counts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(recipient, _)| recipient == address)
+        .map_or(0, |(_, count)| count);
+    assert_eq!(expected.0, existing_count);
+}
+
+async fn message_wake_observation(store: Store) {
+    let b = store.connect().await;
+    let addr = "wake:1";
+    assert_message_wakes(b.as_ref(), addr, (0, 0)).await;
+
+    let old = b.insert_message(&new_msg(addr)).await.unwrap();
+    assert_message_wakes(b.as_ref(), addr, (1, 0)).await;
+    b.insert_disposition(old.id, addr, "deferred", None, None)
+        .await
+        .unwrap();
+    assert_message_wakes(b.as_ref(), addr, (1, 1)).await;
+    b.mark_delivered(old.id, addr, None).await.unwrap();
+    assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+    b.insert_disposition(old.id, "wake:other", "handled", None, None)
+        .await
+        .unwrap();
+    assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+
+    let mut cc = new_msg("wake:other");
+    cc.cc = Some(addr.into());
+    let cc = b.insert_message(&cc).await.unwrap();
+    b.insert_disposition(cc.id, addr, "deferred", None, None)
+        .await
+        .unwrap();
+    assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+    assert_message_wakes(b.as_ref(), "wake:other", (1, 0)).await;
+
+    // The oldest deferred message remains visible beyond the former inbox suffix.
+    for _ in 0..1100 {
+        let message = b.insert_message(&new_msg(addr)).await.unwrap();
+        b.mark_delivered(message.id, addr, None).await.unwrap();
+    }
+    assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+    for state in ["handled", "acknowledged", "rejected", "escalated", "closed"] {
+        b.insert_disposition(old.id, addr, state, None, None)
+            .await
+            .unwrap();
+        assert_message_wakes(b.as_ref(), addr, (0, 0)).await;
+    }
+    b.insert_disposition(old.id, addr, "deferred", None, None)
+        .await
+        .unwrap();
+    assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+
+    let pending = b.insert_message(&new_msg(addr)).await.unwrap();
+    b.insert_disposition(pending.id, "wake:other", "deferred", None, None)
+        .await
+        .unwrap();
+    assert_message_wakes(b.as_ref(), addr, (1, 1)).await;
+    for state in telex::model::TERMINAL_DISPOSITIONS {
+        b.insert_disposition(pending.id, addr, state, None, None)
+            .await
+            .unwrap();
+        assert_message_wakes(b.as_ref(), addr, (0, 1)).await;
+    }
 }
 
 /// Export: address (to or from), thread, and since-cursor filters.

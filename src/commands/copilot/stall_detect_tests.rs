@@ -538,9 +538,8 @@ async fn read_only_sources_detect_unacknowledged_and_consumed_but_deferred_messa
         .unwrap();
     drop(backend);
     let readonly = SqliteBackend::open_readonly(path.to_str().unwrap()).unwrap();
-    let pending = readonly.undelivered_counts().await.unwrap();
     assert_eq!(
-        message_wakes(&readonly, &member("a"), &pending)
+        message_wakes(&readonly, &member("a"))
             .await
             .unwrap()
             .unacknowledged_messages,
@@ -559,10 +558,7 @@ async fn read_only_sources_detect_unacknowledged_and_consumed_but_deferred_messa
     drop(backend);
     let before = std::fs::read(&path).unwrap();
     let readonly = SqliteBackend::open_readonly(path.to_str().unwrap()).unwrap();
-    let pending = readonly.undelivered_counts().await.unwrap();
-    let wakes = message_wakes(&readonly, &member("a"), &pending)
-        .await
-        .unwrap();
+    let wakes = message_wakes(&readonly, &member("a")).await.unwrap();
     assert_eq!(wakes.unacknowledged_messages, 0);
     assert_eq!(wakes.deferred_messages, 1);
     assert!(wakes.present());
@@ -572,14 +568,15 @@ async fn read_only_sources_detect_unacknowledged_and_consumed_but_deferred_messa
 
 #[cfg(feature = "sqlite")]
 #[tokio::test]
-async fn inbox_suffix_limit_never_hides_older_deferred_work_as_confirmed_absence() {
+async fn long_inbox_history_observes_old_deferred_work_and_evaluates_normally_without_it() {
     use crate::backend::sqlite::SqliteBackend;
     use crate::model::NewMessage;
     let directory = Directory::new();
     let path = directory.0.join("store.sqlite");
     let backend = SqliteBackend::open(path.to_str().unwrap()).unwrap();
     backend.init_schema().await.unwrap();
-    for index in 0..=MAX_INBOX_ITEMS + 1 {
+    let mut deferred_ids = Vec::new();
+    for index in 0..1100 {
         let message = backend
             .insert_message(&NewMessage {
                 to_addr: "member:a".into(),
@@ -597,17 +594,58 @@ async fn inbox_suffix_limit_never_hides_older_deferred_work_as_confirmed_absence
             .insert_disposition(
                 message.id,
                 "member:a",
-                if index == 0 { "deferred" } else { "handled" },
+                if index < 2 { "deferred" } else { "handled" },
                 None,
                 None,
             )
             .await
             .unwrap();
+        if index < 2 {
+            deferred_ids.push(message.id);
+        }
     }
     drop(backend);
+    let before = std::fs::read(&path).unwrap();
     let readonly = SqliteBackend::open_readonly(path.to_str().unwrap()).unwrap();
-    let pending = readonly.undelivered_counts().await.unwrap();
-    assert!(message_wakes(&readonly, &member("a"), &pending)
-        .await
-        .is_err());
+    let wakes = message_wakes(&readonly, &member("a")).await.unwrap();
+    assert_eq!(wakes.unacknowledged_messages, 0);
+    assert_eq!(wakes.deferred_messages, 2);
+    let mut observations = [observation("a", SessionState::Idle)];
+    observations[0].wake_sources = Some(wakes);
+    let result = run(600, Value::Null, &observations);
+    assert_eq!(result.outcome, Outcome::Idle);
+    assert_eq!(result.next_state, Some(Value::Null));
+    drop(readonly);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+
+    let backend = SqliteBackend::open(path.to_str().unwrap()).unwrap();
+    for id in deferred_ids {
+        backend
+            .insert_disposition(id, "member:a", "handled", None, None)
+            .await
+            .unwrap();
+    }
+    drop(backend);
+    let before = std::fs::read(&path).unwrap();
+    let readonly = SqliteBackend::open_readonly(path.to_str().unwrap()).unwrap();
+    let wakes = message_wakes(&readonly, &member("a")).await.unwrap();
+    assert_eq!(wakes.unacknowledged_messages, 0);
+    assert_eq!(wakes.deferred_messages, 0);
+    assert!(!wakes.present());
+    observations[0].wake_sources = Some(wakes);
+    let state = quiet_state(&observations);
+    assert_eq!(run(61, state, &observations).outcome, Outcome::Event);
+    drop(readonly);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[cfg(feature = "sqlite")]
+#[tokio::test]
+async fn read_only_message_query_failure_is_not_an_absent_wake_source() {
+    use crate::backend::sqlite::SqliteBackend;
+    let directory = Directory::new();
+    let path = directory.0.join("empty.sqlite");
+    std::fs::File::create(&path).unwrap();
+    let readonly = SqliteBackend::open_readonly(path.to_str().unwrap()).unwrap();
+    assert!(message_wakes(&readonly, &member("a")).await.is_err());
 }
