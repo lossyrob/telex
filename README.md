@@ -89,22 +89,31 @@ message peers. To hand an agent a specific assignment in one command:
 telex skill --address workstream:proj/node:issue-215
 ```
 
-In Copilot CLI or Copilot App, install/use the telex plugin and bind with push delivery so
-messages arrive as turns (no waiter to run or re-arm):
+In Copilot CLI or Copilot App, choose delivery by the current host's capabilities.
+An already-loaded, live bridge keeps push; a host with a supported live loader can
+provision and load one. For example, on Copilot CLI:
 
 ```sh
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
-# enable Copilot Extensions under `/experimental` so `extensions_reload` is available,
-# then run that tool once; delivered telex messages arrive as turns.
+# on CLI, enable Copilot Extensions under `/experimental` if needed,
+# then run extensions_reload once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
+
+For first-time App setup without a supported live bridge loader, use
+`telex --address <addr> copilot fallback prepare` and launch exactly one returned
+command as a detached task. Follow its completion-artifact and explicit re-arm
+procedure in `telex copilot skill`; do not write a polling loop. Provisioning
+bridge files does not prove they loaded, and preparing fallback does not prove
+the host was woken. CLI-only `/experimental` and an absent `extensions_reload`
+tool are not App requirements.
 
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
 harnesses. Marketplace install is the supported plugin channel (the plugin lives
 under `copilot/plugin`). See the
-[Copilot CLI push delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
+[Copilot delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
 for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
 compatibility notes.
 

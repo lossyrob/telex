@@ -36,13 +36,20 @@ the owner can attend it again.
 
 ## Copilot: messages do not arrive as turns
 
-The push bridge may not be loaded. If `extensions_reload` is unavailable, enable
-Copilot Extensions under `/experimental`. Then re-provision with
-`telex --address <addr> copilot resume` and run `extensions_reload`. If Copilot
-Extensions cannot be enabled, push is unavailable; use the supported
+The push bridge may not be loaded; provisioning files and registering push do not
+prove it is live. On a host with a supported live loader, re-provision with
+`telex --address <addr> copilot resume` and load the bridge (`extensions_reload`
+where available). On Copilot CLI only, enabling Copilot Extensions under
+`/experimental` may expose that tool. For an App session without a supported live
+loader, use the supported
 [Copilot pull fallback](copilot-push.md#fallback) with
 `telex --address <addr> copilot fallback prepare`, or detach with
 `telex --address <addr> copilot detach`.
+Keep an already-loaded, live bridge in push mode regardless of host. Restarting
+or clearing the session is not proof of first-time loading. Preparing fallback
+also does not prove a waiter started or woke the App: follow the generated
+single-shot launch and completion-artifact procedure, and report any setup/backend
+failure rather than treating it as successful delivery.
 
 ## Backend authentication failures (Postgres / Entra)
 
@@ -77,8 +84,8 @@ Look at the `station_intent` line:
 |---|---|---|
 | `deferred_lease` | Waiting for a crashed predecessor's lease to go stale. **Not an error.** | Wait; `next_attempt_ms` says when it retries. |
 | `deferred_pull_waiter` | A live `telex wait` owns the address; pull wins. | Stop the waiter (`telex station stop`) if you want push back. |
-| `legacy_producer` | The bridge predates the liveness probe, so it cannot be proved alive. | `telex --address <addr> copilot resume`, then `extensions_reload`. |
-| `unverifiable` | The producer or its credential could not be resolved (bridge gone, registry stale). | `telex --address <addr> copilot resume`, then `extensions_reload`. |
+| `legacy_producer` | The bridge predates the liveness probe, so it cannot be proved alive. | Resume and load on a loader-capable host; otherwise use [pull fallback](copilot-push.md#fallback). |
+| `unverifiable` | The producer or its credential could not be resolved (bridge gone, registry stale). | Resume and load on a loader-capable host; otherwise use [pull fallback](copilot-push.md#fallback). |
 | `insecure` | A permissions check failed on the bridge directory or credential file. | Fix the permissions (owner-only), then resume. |
 | `incompatible` | This daemon cannot reconcile the recorded intent (version skew). | `telex --address <addr> copilot resume`. |
 | `quarantined` | Ten consecutive genuine failures; now retrying hourly. | Fix the underlying cause, then resume to reset it. |
@@ -111,13 +118,14 @@ degrading.
 restored, and telex refused to create a **pull-only** member over it rather than silently
 downgrading your delivery mode.
 
-Either restore push:
+Either restore push on a host with a supported loader or an already-live bridge:
 
 ```bash
-telex --address <addr> copilot resume   # then run extensions_reload in the session
+telex --address <addr> copilot resume   # use the supported loader if needed
 ```
 
-or give up push for this station explicitly:
+or use the [prepared pull fallback](copilot-push.md#fallback) when no loader is
+available. To give up attendance explicitly:
 
 ```bash
 telex --address <addr> copilot detach

@@ -459,6 +459,111 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
             "Copilot skill must not require the old agent-authored wrapper {removed_manual_wrapper:?}"
         );
     }
+    let fallback = copilot_skill
+        .split_once("## Fallback: no bridge (pull mode)")
+        .expect("fallback section")
+        .1
+        .split_once("## Watch a local session group for stalls")
+        .expect("fallback ends before Watcher instructions")
+        .0
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for required in [
+        "first-time App setup without a supported live bridge loader",
+        "Preparation does **not** change delivery mode",
+        "Repeating `prepare` before `exit.code` exists returns the same run",
+        "exactly one `telex wait`",
+        "`--force` is not a recovery default",
+        "task completion notification is only a wakeup",
+        "`run_dir/exit.code` first",
+        "written last",
+        "**`0` (message):**",
+        "**`1` (setup/error):**",
+        "**`2` (idle timeout):**",
+        "**`3` / `4` (daemon gone/hung):**",
+        "**`5` (presence ended):**",
+        "status.json.detail",
+        "dedupe by message id",
+        "then ack and disposition",
+        "For `delivery_role: \"cc\"`",
+        "call `fallback prepare` again",
+        "If `delivery_mode` is `push`, do not re-arm pull",
+        "a live waiter means the original run is still active",
+        "Duplicate launcher starts are rejected",
+        "`delivery_mode: conflict`",
+        "rejects a waiter while push is registered",
+        "rejects push registration while a waiter is live",
+        "run `station stop` and do not prepare another run",
+        "Never wrap fallback launchers or `telex wait` in an infinite shell loop",
+        "source-contract tests prove neither real App wakeup nor bridge loading",
+    ] {
+        assert!(
+            fallback.contains(required),
+            "Copilot fallback must preserve {required:?}"
+        );
+    }
+}
+
+#[test]
+fn copilot_delivery_overviews_keep_host_capabilities_and_evidence_distinct() {
+    // Source contracts protect routing text, not actual host loading or completion wakeups.
+    for (name, text, evidence_limit) in [
+        (
+            "skill",
+            include_str!("../copilot/COPILOT.md"),
+            "Bridge files and push registration do not prove the bridge loaded",
+        ),
+        (
+            "guide",
+            include_str!("../docs/guide/src/guides/copilot-push.md"),
+            "Bridge files and push registration do not prove the bridge loaded",
+        ),
+        (
+            "design",
+            include_str!("../docs/design/copilot-bridge-push.md"),
+            "Provisioning bridge files and registering the handler do not prove the bridge loaded",
+        ),
+        (
+            "bridge overview",
+            include_str!("../copilot/bridge/README.md"),
+            "Provisioning files is not loading proof",
+        ),
+        (
+            "README",
+            include_str!("../README.md"),
+            "Provisioning bridge files does not prove they loaded",
+        ),
+        (
+            "troubleshooting",
+            include_str!("../docs/guide/src/guides/troubleshooting.md"),
+            "provisioning files and registering push do not prove it is live",
+        ),
+    ] {
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for required in [
+            "App",
+            "supported live",
+            "loader",
+            "live bridge",
+            "copilot fallback prepare",
+            evidence_limit,
+        ] {
+            assert!(
+                normalized.contains(required),
+                "{name} must preserve capability/evidence guidance {required:?}"
+            );
+        }
+        for obsolete in [
+            "CLI tool available to every agent",
+            "If `extensions_reload` is unavailable, enable",
+        ] {
+            assert!(
+                !normalized.contains(obsolete),
+                "{name} must not require an unavailable App loader: {obsolete:?}"
+            );
+        }
+    }
 }
 
 #[test]
