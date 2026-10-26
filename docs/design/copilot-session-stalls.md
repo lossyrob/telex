@@ -74,6 +74,12 @@ events. Unsupported activity invalidates prior idle evidence. Later explicit
 activity or a successful allowing stop can establish a new state, but a
 malformed retained record makes the observation unknown.
 
+If a retained root stop start is followed by newer root user activity, turn
+start or a lifecycle transition, its invocation id is invalidated. A later
+completion of that attempt returns `unknown` (`agent-stop-invalidated`) and
+cannot establish idle. A distinct subsequent allowing stop can establish idle.
+Tracking is limited to the same suffix; it adds no historical scan.
+
 The reader seeks to at most the final **256 KiB** at a snapshotted file
 length. When truncated at the front it discards the first potentially
 partial record. It never retries farther back. A partial final record,
@@ -88,6 +94,17 @@ The event log is a private Copilot CLI format with no documented compatibility
 contract. Fixtures are synthetic and pin the observed control fields, not
 private message contents. Changes in log shape can increase unknown results
 and require one binary update, rather than changes to every agent's script.
+
+An explicitly allowing successful root stop is assumed to end the agent loop;
+this producer guarantee is **unverified**. Overlapping root hooks and their
+scheduling relative to newer messages were not observed. As confirmed by the
+[design steward](https://github.com/lossyrob/telex/pull/202#issuecomment-6403276332),
+the stop remains decisive evidence when its start or other pending starts are
+outside the bounded suffix. Front clipping can therefore change a retained
+pending-tool/hook observation to idle when an allowing stop remains in view.
+Boundary regressions pin that heuristic at 262144 and 262145 total bytes; they
+prove classifier behavior, not producer scheduling. Explicit invalidation
+handles contrary ordering only when that ordering is retained in the suffix.
 
 A same-user, read-only sample of the 20 most recently modified local logs on
 2026-10-25 produced 8 idle, 2 busy, 1 waiting-on-operator, 2 not-loaded and

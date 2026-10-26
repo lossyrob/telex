@@ -2736,3 +2736,13 @@ were not observed in the sample. No tool-result-text heuristic is introduced.
 Detector wake-source completeness requires separate evidence, and roots
 confirm through the App before acting. This observation path is read-only,
 same-machine/same-user, and excludes remote/cloud sessions.
+
+The successful allowing root stop is assumed to end the agent loop; that
+producer guarantee is unverified, and overlapping hooks and producer scheduling
+were not observed. The
+[review clarification](https://github.com/lossyrob/telex/pull/202#issuecomment-6403276332)
+retains decisive allowing-stop evidence even in front-clipped suffixes. A
+retained stop start explicitly invalidated by newer root activity or a
+lifecycle transition cannot later establish idle. This bounded hardening
+does not reconstruct pending starts outside the suffix or claim verified
+producer ordering.

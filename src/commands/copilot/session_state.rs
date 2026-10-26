@@ -150,6 +150,7 @@ fn classify_tail(session_id: &str, tail: &[u8]) -> Classification {
     };
     let mut tools = HashMap::new();
     let mut stop_hooks = HashSet::new();
+    let mut invalidated_stops = HashSet::new();
     let mut stop_blocked = false;
     for line in text.lines() {
         let event: Event = match serde_json::from_str(line) {
@@ -173,7 +174,7 @@ fn classify_tail(session_id: &str, tail: &[u8]) -> Classification {
             "user.message" | "assistant.turn_start" => {
                 if event.agent_id.is_none() {
                     stop_blocked = false;
-                    stop_hooks.clear();
+                    invalidated_stops.extend(stop_hooks.drain());
                 }
                 (SessionState::Busy, "activity-started")
             }
@@ -204,12 +205,12 @@ fn classify_tail(session_id: &str, tail: &[u8]) -> Classification {
             }
             "session.shutdown" if event.agent_id.is_none() => {
                 tools.clear();
-                stop_hooks.clear();
+                invalidated_stops.extend(stop_hooks.drain());
                 (SessionState::NotLoaded, "session-shutdown")
             }
             "session.resume" if event.agent_id.is_none() => {
                 tools.clear();
-                stop_hooks.clear();
+                invalidated_stops.extend(stop_hooks.drain());
                 stop_blocked = false;
                 (SessionState::Unknown, "session-resumed")
             }
@@ -220,7 +221,7 @@ fn classify_tail(session_id: &str, tail: &[u8]) -> Classification {
                 let Some(id) = field(&event.data, "hookInvocationId") else {
                     return Classification::unknown(session_id, "malformed-stop-hook");
                 };
-                if !stop_hooks.insert(id.to_owned()) {
+                if invalidated_stops.contains(id) || !stop_hooks.insert(id.to_owned()) {
                     return Classification::unknown(session_id, "duplicate-stop-hook");
                 }
                 (SessionState::Unknown, "stop-hook-pending")
@@ -233,7 +234,9 @@ fn classify_tail(session_id: &str, tail: &[u8]) -> Classification {
                     return Classification::unknown(session_id, "malformed-stop-hook");
                 };
                 stop_hooks.remove(id);
-                if event.data.get("success") == Some(&Value::Bool(true))
+                if invalidated_stops.contains(id) {
+                    (SessionState::Unknown, "agent-stop-invalidated")
+                } else if event.data.get("success") == Some(&Value::Bool(true))
                     && event
                         .data
                         .pointer("/output/decision")
@@ -514,6 +517,78 @@ mod tests {
             classify(&[shutdown, resume, event("user.message", json!({}))]).state,
             SessionState::Busy
         );
+    }
+
+    #[test]
+    fn session_state_late_invalidated_stop_cannot_override_newer_root_activity() {
+        let old_start = event(
+            "hook.start",
+            json!({"hookType": "agentStop", "hookInvocationId": "stop-1"}),
+        );
+        let mut new_start = old_start.clone();
+        new_start["data"]["hookInvocationId"] = json!("stop-2");
+        let mut new_end = stop("allow", true);
+        new_end["data"]["hookInvocationId"] = json!("stop-2");
+        for activity in [
+            event("user.message", json!({})),
+            event("assistant.turn_start", json!({})),
+            event("session.resume", json!({})),
+        ] {
+            let stale = vec![old_start.clone(), activity, stop("allow", true)];
+            let result = classify(&stale);
+            assert_eq!(result.state, SessionState::Unknown);
+            assert_eq!(result.reason, "agent-stop-invalidated");
+            let mut fresh = stale.clone();
+            fresh.extend([new_start.clone(), new_end.clone()]);
+            assert_eq!(classify(&fresh).state, SessionState::Idle);
+            fresh.push(stop("allow", true));
+            assert_eq!(
+                classify(&fresh).state,
+                SessionState::Unknown,
+                "a duplicate old completion must remain invalidated"
+            );
+        }
+    }
+
+    #[test]
+    fn session_state_front_clipped_stop_remains_decisive_suffix_evidence() {
+        for (pending, expected) in [
+            (start("ask-1", "ask_user"), SessionState::WaitingOnOperator),
+            (
+                event(
+                    "hook.start",
+                    json!({"hookType": "agentStop", "hookInvocationId": "pending-stop"}),
+                ),
+                SessionState::Unknown,
+            ),
+        ] {
+            let mut accounting = event("session.usage_record", json!({"padding": ""}));
+            let encode = |accounting: &Value| {
+                let mut bytes = Vec::new();
+                for entry in [&pending, accounting, &stop("allow", true)] {
+                    serde_json::to_writer(&mut bytes, entry).unwrap();
+                    bytes.push(b'\n');
+                }
+                bytes
+            };
+            let padding = TAIL_BYTES - encode(&accounting).len();
+            for extra in [0, 1] {
+                accounting["data"]["padding"] = json!("x".repeat(padding + extra));
+                let bytes = encode(&accounting);
+                assert_eq!(bytes.len(), TAIL_BYTES + extra);
+                let tail = read_tail(Cursor::new(&bytes), bytes.len() as u64).unwrap();
+                let result = classify_tail("front-clipped", &tail);
+                assert_eq!(
+                    result.state,
+                    if extra == 0 {
+                        expected
+                    } else {
+                        SessionState::Idle
+                    }
+                );
+                assert_eq!(result.activity.unwrap().id, "id-hook.end");
+            }
+        }
     }
 
     #[test]
