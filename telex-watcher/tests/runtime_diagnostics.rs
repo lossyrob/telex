@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Output};
+#[cfg(windows)]
 use telex_watcher::{Runtime, RuntimeConfig};
 
 struct Fixture {
@@ -148,15 +149,29 @@ fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text(
 #[test]
 fn registry_ownership_and_input_codes_do_not_gain_runtime_failure_diagnostics() {
     let fixture = Fixture::new();
-    let (runtime, _management) = Runtime::open(RuntimeConfig::installed(
+    #[cfg(windows)]
+    let (ownership, _management) = Runtime::open(RuntimeConfig::installed(
         fixture.root.join("registry.sqlite"),
         fixture.root.join("install"),
     ))
     .unwrap();
+    #[cfg(unix)]
+    let ownership = {
+        // Match the Unix owner's flock without requiring SQLite startup.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(fixture.root.join("registry.sqlite"))
+            .unwrap();
+        fs2::FileExt::try_lock_exclusive(&file).unwrap();
+        file
+    };
     let (output, envelope) = fixture.failed_run();
     assert_eq!(envelope["error"]["code"], "registry-already-owned");
     assert!(output.stderr.is_empty());
-    drop(runtime);
+    drop(ownership);
     let output = fixture
         .command()
         .env_remove("TELEX_INSTALL_ROOT")
