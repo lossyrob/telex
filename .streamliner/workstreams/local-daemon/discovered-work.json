@@ -2883,6 +2883,924 @@
           "downstream": "Both existing owners are awakened only; no execution/integration/freshCI/source/design/readiness/merge outcome is accepted. Do not wait for bookkeeping or resend."
         },
         "conservation": "Campaign explicitly accepts the existing #166 bounded repair node completed with all eight gate debts retained and open after actual PR196 product merge, issue closure and owner field report. Same d7 owner and all original evidence/observations/authorities/history remain exact, including earlier delivered:false wake snapshots. Add current once-sent/App-accepted dispositions for the two existing193/198recipients; no resend, recipient inspection, execution/integration/CI/merge-success or downstream readiness claim. Actual product merge is a separate external boundary after nineteen artifacts, not an artifact commit. No six-case causal mapping, source/native/runtime replay, postmergeCI/debt clearance, #203/#207/#167 acceptance, new owner/candidate/occurrence/node/edge/observer/scheduler, retry/waiver/flake, broader runtime, hardening/release or workstation-freeze credit. Gate makes #203 separate, superseding older preconditions without erasing history. Recurring native crash reopens166. Existing awakened owners and pending main follow-through do not wait on this recording."
+      },
+      "laterMainStoreLockAndSuccessfulRerunFollowThroughQualification": {
+        "kind": "later-main-store-lock-and-successful-ci-docs-follow-through",
+        "candidateId": "local-daemon-windows-station-restart-lockfileex-33",
+        "deduplicationKey": "run40328433964-attempt1-job121591124574-station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one",
+        "recordingDirection": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_1UttL409xWlB8RRLaWbch40q",
+          "receipt": {
+            "file": "rerun-policy-local-followthrough-intake.json",
+            "bytes": 1695,
+            "sha256": "d06ccf4a3f69d39b4a44a30cba841838cdc4b92e5c031a5fd57a929312d019e1"
+          },
+          "summary": "Local requests exactly one deduplicated attempt-1 store-lock occurrence and additive main/Docs follow-through, preserving the original #166 completion, debts, pending-CI snapshot and both sent wakes. No duplicate rerun or launch. The private absolute packet location is deliberately not projected.",
+          "authorityBoundary": "This is the actual Local intake. The original packet retains its coordinator attribution; the terminal supplement forwards Campaign direction as Local-attributed, not a direct Campaign receipt received here."
+        },
+        "sourcePacket": {
+          "file": "main8d-storelock-original-packet.json",
+          "bytes": 6077,
+          "sha256": "20b4970ce6a879e11f63be7a0da9e339143cb8af6eddc82bad23074453bcf4ab"
+        },
+        "sourcePacketLocation": "The exact original packet is retained in the new occurrence on the existing store-lock candidate.",
+        "laterTerminalSupplement": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_32zBsiFzX792fUpGLID5Z6Ny",
+          "verbatim": "For the separate main-storelock follow-through successor: Campaign toolu_01UPPDy9BrhDdh9Pbx9yhMyA reports attempt2 success and directs the attempt1 os33 failure counted once, with Sentinel owning staffing. Local independently verified run40328433964/attempts/2 is completed/success at unchanged8d7815a8, and the attempt-2 jobs endpoint lists21/21 successful jobs, all explicitly run_attempt=2, including WindowsBuild121598826679. Do not describe this as one rerun job plus inherited successful jobs; all21 entries are attempt2. Original job121591124574 remains one retained failure, not a causal repair or debt clearance. The frozen6077packet's pending-attempt2 state remains history; this is a later terminal supplement. No alteration or approval carry into withdrawn policyv3."
+        },
+        "laterExecutionProvenanceCorrection": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_Ikpc7KuKK6HUqUKU7vt2bvCN",
+          "receipt": {
+            "file": "main8dv3-local-correction-intake.json",
+            "bytes": 1536,
+            "sha256": "25dfae3efc30b279c075d2686cea16b70c9c4554bd3636fb457c08a3d5644aa4"
+          },
+          "comparisonPacket": {
+            "file": "main8dv3-local-execution-correction.json",
+            "bytes": 16483,
+            "sha256": "a50093c77f95dc88239a62955b586e88edb1ac795aea1e4a8e3437364beeffd4"
+          },
+          "pairedPublicComparison": {
+            "file": "main8dv3-execution-provenance.json",
+            "bytes": 20009,
+            "sha256": "76325d22ea0160e34fc60132b919582a817b9b948ee99aa8a508febf6b9cfedd"
+          },
+          "campaignDirection": {
+            "source": "toolu_01MWLGRfT4D1iSaxC2faBPhi",
+            "receipt": {
+              "file": "main8dv3-campaign-direction.json",
+              "bytes": 547,
+              "sha256": "552cbb0ef403fcdd3ab2c293253a7d7b4b873103d214424a1fa77c12522e1039"
+            }
+          },
+          "supersededInterpretation": "call_32zBsiFzX792fUpGLID5Z6Ny",
+          "statement": "The retained terminal supplement incorrectly inferred 21 fresh executions from endpoint labels/new IDs. Its original words remain history, not current provenance. Paired execution receipts show one re-executed Windows Build and 20 reused successes in a successful 21-entry aggregate view. The exact-head CI result, original failed occurrence and all other obligations remain unchanged. No retest or original-packet edit."
+        },
+        "publicVerification": {
+          "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+          "tree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+          "attempt1FailedJob": {
+            "id": 121591124574,
+            "name": "Build and test (windows-latest)",
+            "run": 40328433964,
+            "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "failure",
+            "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121591124574"
+          },
+          "ciAttempt2": {
+            "run": 40328433964,
+            "url": "https://github.com/lossyrob/telex/actions/runs/40328433964",
+            "event": "push",
+            "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "attempt": 2,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "allEntriesLabelledAttempt2": true,
+            "executionProvenance": {
+              "comparedJobCount": 21,
+              "reusedSuccessfulExecutionCount": 20,
+              "changedExecutionReceiptCount": 1,
+              "allIdsChanged": true,
+              "pairs": [
+                {
+                  "name": "Build and test (ubuntu-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124046,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:36Z",
+                    "completedAt": "2026-10-26T13:21:36Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 38,
+                    "stepsCanonicalSha256": "75cb89afd3293b473d6319791edc0a5a74f02903f0a9f5ae4b9c8c887ca92cec"
+                  },
+                  "attempt2": {
+                    "id": 121598883346,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:36Z",
+                    "completedAt": "2026-10-26T13:21:36Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 38,
+                    "stepsCanonicalSha256": "75cb89afd3293b473d6319791edc0a5a74f02903f0a9f5ae4b9c8c887ca92cec"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Build and test (windows-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124574,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:22:37Z",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "stepCount": 38,
+                    "stepsCanonicalSha256": "ac11c5922a33e7c3cb4c2e6c193df25d428f06f1ab07c1d467fc6c4df6a7c18e"
+                  },
+                  "attempt2": {
+                    "id": 121598826679,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:26:55Z",
+                    "completedAt": "2026-10-26T13:44:06Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 38,
+                    "stepsCanonicalSha256": "d10e67d431b4f4cdb2d341b637f0c4a78a455965a031b20164a431d9c7b5981a"
+                  },
+                  "executionReceiptsIdentical": false,
+                  "classification": "changed-execution-receipt"
+                },
+                {
+                  "name": "Copilot fallback E2E (macos-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124324,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:12:58Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 8,
+                    "stepsCanonicalSha256": "afdfe9be81505766e999fed340c99b780162bf77ecf97a927c14b65aae777fb6"
+                  },
+                  "attempt2": {
+                    "id": 121598898211,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:12:58Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 8,
+                    "stepsCanonicalSha256": "afdfe9be81505766e999fed340c99b780162bf77ecf97a927c14b65aae777fb6"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Copilot fallback E2E (windows-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124586,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:13:25Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 8,
+                    "stepsCanonicalSha256": "e35dace2a6995ae7f5f99d83a732f12019ee1ccf5c9b3956a2e8b5ef57c409a3"
+                  },
+                  "attempt2": {
+                    "id": 121598828681,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:13:25Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 8,
+                    "stepsCanonicalSha256": "e35dace2a6995ae7f5f99d83a732f12019ee1ccf5c9b3956a2e8b5ef57c409a3"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Credential invocation lifecycle (macOS)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124495,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:12:22Z",
+                    "completedAt": "2026-10-26T13:14:22Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "64b7b9b1c2842ac230b93182a3e05a2441a211993976d970ca6aae926b533a21"
+                  },
+                  "attempt2": {
+                    "id": 121598883977,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:12:22Z",
+                    "completedAt": "2026-10-26T13:14:22Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "64b7b9b1c2842ac230b93182a3e05a2441a211993976d970ca6aae926b533a21"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Feature combinations build",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124479,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:17:36Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 20,
+                    "stepsCanonicalSha256": "1eb0505717db66d6681eab846a63670f0107501b103d2981abdd760258e84321"
+                  },
+                  "attempt2": {
+                    "id": 121598908192,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:17:36Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 20,
+                    "stepsCanonicalSha256": "1eb0505717db66d6681eab846a63670f0107501b103d2981abdd760258e84321"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "InstalledCurrent Postgres process proofs (Windows)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124607,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:20:04Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 10,
+                    "stepsCanonicalSha256": "6ece45e5c5044eb7a434ce8f2d3ab818b8627eb5f25fa00d6bbff1f4e3a1603e"
+                  },
+                  "attempt2": {
+                    "id": 121598880135,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:20:04Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 10,
+                    "stepsCanonicalSha256": "6ece45e5c5044eb7a434ce8f2d3ab818b8627eb5f25fa00d6bbff1f4e3a1603e"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Live Postgres parity tests",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124744,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:20:14Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 14,
+                    "stepsCanonicalSha256": "c511dad628b903baa6e5eb0585701b18727a081238bdab3a6478998da6e1bfd6"
+                  },
+                  "attempt2": {
+                    "id": 121598896740,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:20:14Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 14,
+                    "stepsCanonicalSha256": "c511dad628b903baa6e5eb0585701b18727a081238bdab3a6478998da6e1bfd6"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Released v0.2.1 upgrade proof (Windows)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124849,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:26Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "ee04d49292a47f0191d1325de095c2b44ffe2933d8551fe7e01eb7ed47b701ba"
+                  },
+                  "attempt2": {
+                    "id": 121598829910,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:26Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "ee04d49292a47f0191d1325de095c2b44ffe2933d8551fe7e01eb7ed47b701ba"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Station-intent lock boundary (macos-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124560,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:13:04Z",
+                    "completedAt": "2026-10-26T13:14:37Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "4605ec68ad8fd4451c0c955f69813f318e1b75883d212312bea285da2f525098"
+                  },
+                  "attempt2": {
+                    "id": 121598882424,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:13:04Z",
+                    "completedAt": "2026-10-26T13:14:37Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "4605ec68ad8fd4451c0c955f69813f318e1b75883d212312bea285da2f525098"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Station-intent lock boundary (ubuntu-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124943,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:12:19Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "7a5e3b748f0a5413528d083edc4273a099ebe61462cd3f7b14b9861b22afe9b3"
+                  },
+                  "attempt2": {
+                    "id": 121598876882,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:12:19Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "7a5e3b748f0a5413528d083edc4273a099ebe61462cd3f7b14b9861b22afe9b3"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Station-intent lock boundary (windows-latest)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124468,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:09Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "e5b55acd7c424c19347fb46ca9520b718607be4f04285dd9ede3ee05ac559a6f"
+                  },
+                  "attempt2": {
+                    "id": 121598829053,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:09Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 9,
+                    "stepsCanonicalSha256": "e5b55acd7c424c19347fb46ca9520b718607be4f04285dd9ede3ee05ac559a6f"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows heap diagnostics",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124983,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:16:13Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 14,
+                    "stepsCanonicalSha256": "ce586cdc3d4e8ccdd2b52d84b2529fca58d7fc4a049bd696bcd4c7c7f64f916e"
+                  },
+                  "attempt2": {
+                    "id": 121598889190,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:16:13Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 14,
+                    "stepsCanonicalSha256": "ce586cdc3d4e8ccdd2b52d84b2529fca58d7fc4a049bd696bcd4c7c7f64f916e"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (all)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124714,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:59Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "c3b73e13cbf94be84bc63138eada53ad528e8cd913c5ebd1561b9f108e2c1b5b"
+                  },
+                  "attempt2": {
+                    "id": 121598909234,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:59Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "c3b73e13cbf94be84bc63138eada53ad528e8cd913c5ebd1561b9f108e2c1b5b"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (default)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124402,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:26Z",
+                    "completedAt": "2026-10-26T13:14:26Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "843e6e857845af9214532610ccb84b4492b1aba2261de296724218ca663f8365"
+                  },
+                  "attempt2": {
+                    "id": 121598876796,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:26Z",
+                    "completedAt": "2026-10-26T13:14:26Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "843e6e857845af9214532610ccb84b4492b1aba2261de296724218ca663f8365"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (entra)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124411,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:21Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "9b42705ce6af8e2ee18ef7e9862b080a3ccd0229bbb879c4c5a489aa9a1767f7"
+                  },
+                  "attempt2": {
+                    "id": 121598899205,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:14:21Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "9b42705ce6af8e2ee18ef7e9862b080a3ccd0229bbb879c4c5a489aa9a1767f7"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (postgres)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124817,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:38Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "20b2139b3df804c51e8aea4e6be8011f4e8ee31be4f26fdd71d114b8110489d3"
+                  },
+                  "attempt2": {
+                    "id": 121598903210,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:38Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "20b2139b3df804c51e8aea4e6be8011f4e8ee31be4f26fdd71d114b8110489d3"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (sqlite-entra)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124828,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:30Z",
+                    "completedAt": "2026-10-26T13:15:00Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "a1c12f2ca73cfa6f7ed82bf2234592df2ef72861274dbdd5b0403a11c08b36ad"
+                  },
+                  "attempt2": {
+                    "id": 121598829997,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:30Z",
+                    "completedAt": "2026-10-26T13:15:00Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "a1c12f2ca73cfa6f7ed82bf2234592df2ef72861274dbdd5b0403a11c08b36ad"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (sqlite-postgres)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124765,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:23Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "a9f4d65941e0f1a5ef8c38f5c4057a174c1969a1eb7e805f48cb3c15497e9493"
+                  },
+                  "attempt2": {
+                    "id": 121598883034,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:23Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "a9f4d65941e0f1a5ef8c38f5c4057a174c1969a1eb7e805f48cb3c15497e9493"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (sqlite-self-update)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124579,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:09Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "8e974a2a7a4a60cd47487ca3b852973a03863647fb3babbf8078bfae2cbec520"
+                  },
+                  "attempt2": {
+                    "id": 121598830389,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:27Z",
+                    "completedAt": "2026-10-26T13:13:09Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "8e974a2a7a4a60cd47487ca3b852973a03863647fb3babbf8078bfae2cbec520"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                },
+                {
+                  "name": "Windows token-user alignment (sqlite)",
+                  "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                  "attempt1": {
+                    "id": 121591124619,
+                    "attempt": 1,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:13:52Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "44186c99f1d8e8e68dd201fda1437686f8f0050402562f2afbd5bbdcd83c21de"
+                  },
+                  "attempt2": {
+                    "id": 121598877829,
+                    "attempt": 2,
+                    "startedAt": "2026-10-26T13:11:28Z",
+                    "completedAt": "2026-10-26T13:13:52Z",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "stepCount": 7,
+                    "stepsCanonicalSha256": "44186c99f1d8e8e68dd201fda1437686f8f0050402562f2afbd5bbdcd83c21de"
+                  },
+                  "executionReceiptsIdentical": true,
+                  "classification": "reused-prior-success"
+                }
+              ],
+              "boundary": "Compared job name/head/start/end/status/conclusion and every complete step receipt from bounded public metadata. New IDs and run_attempt labels alone are not proof of a fresh execution. No log, runtime inheritance/replay mechanism or causal repair is inferred."
+            },
+            "jobs": [
+              {
+                "id": 121598826679,
+                "name": "Build and test (windows-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598826679"
+              },
+              {
+                "id": 121598828681,
+                "name": "Copilot fallback E2E (windows-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598828681"
+              },
+              {
+                "id": 121598829053,
+                "name": "Station-intent lock boundary (windows-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829053"
+              },
+              {
+                "id": 121598829910,
+                "name": "Released v0.2.1 upgrade proof (Windows)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829910"
+              },
+              {
+                "id": 121598829997,
+                "name": "Windows token-user alignment (sqlite-entra)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829997"
+              },
+              {
+                "id": 121598830389,
+                "name": "Windows token-user alignment (sqlite-self-update)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598830389"
+              },
+              {
+                "id": 121598876796,
+                "name": "Windows token-user alignment (default)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598876796"
+              },
+              {
+                "id": 121598876882,
+                "name": "Station-intent lock boundary (ubuntu-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598876882"
+              },
+              {
+                "id": 121598877829,
+                "name": "Windows token-user alignment (sqlite)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598877829"
+              },
+              {
+                "id": 121598880135,
+                "name": "InstalledCurrent Postgres process proofs (Windows)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598880135"
+              },
+              {
+                "id": 121598882424,
+                "name": "Station-intent lock boundary (macos-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598882424"
+              },
+              {
+                "id": 121598883034,
+                "name": "Windows token-user alignment (sqlite-postgres)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883034"
+              },
+              {
+                "id": 121598883346,
+                "name": "Build and test (ubuntu-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883346"
+              },
+              {
+                "id": 121598883977,
+                "name": "Credential invocation lifecycle (macOS)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883977"
+              },
+              {
+                "id": 121598889190,
+                "name": "Windows heap diagnostics",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598889190"
+              },
+              {
+                "id": 121598896740,
+                "name": "Live Postgres parity tests",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598896740"
+              },
+              {
+                "id": 121598898211,
+                "name": "Copilot fallback E2E (macos-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598898211"
+              },
+              {
+                "id": 121598899205,
+                "name": "Windows token-user alignment (entra)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598899205"
+              },
+              {
+                "id": 121598903210,
+                "name": "Windows token-user alignment (postgres)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598903210"
+              },
+              {
+                "id": 121598908192,
+                "name": "Feature combinations build",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598908192"
+              },
+              {
+                "id": 121598909234,
+                "name": "Windows token-user alignment (all)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598909234"
+              }
+            ]
+          },
+          "docsAttempt1": {
+            "run": 40328433981,
+            "url": "https://github.com/lossyrob/telex/actions/runs/40328433981",
+            "event": "push",
+            "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "attempt": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 2,
+            "jobs": [
+              {
+                "id": 121591123899,
+                "name": "Build user guide",
+                "run": 40328433981,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433981/job/121591123899"
+              },
+              {
+                "id": 121593338791,
+                "name": "Deploy to GitHub Pages",
+                "run": 40328433981,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433981/job/121593338791"
+              }
+            ]
+          },
+          "sourceIdentityOnly": {
+            "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "path": "tests/daemon_process_sqlite.rs",
+            "blob": "b574cd845c43ab76dd9287109daccda90797cc72",
+            "boundary": "Git blob identity only; source bytes/ranges/control flow and raw log not read or replayed. Local retains attribution for exact failure/source anchors and operation classification."
+          }
+        },
+        "historicalCompletion": {
+          "qualification": "actualProductMergeCompletionAndSentWakesQualification",
+          "sha256": "b4c3cf6232812c139802f5134d2c925d7f9fed28b64e60156a98b4a041d965d4",
+          "pendingFollowThrough": {
+            "fieldReport": {
+              "url": "https://github.com/lossyrob/telex/issues/166#issuecomment-6416863991",
+              "file": "issue166-field-6416863991-20261026.txt",
+              "bytes": 6675,
+              "sha256": "797c16f1f8cc3bdd42aecf9023ba2ef5f0e7b851cb11900bc46d44776c2bf186",
+              "createdAt": "2026-10-26T13:12:50Z",
+              "verification": "Local read and retained the full public field report. Owner explanations and discovery inventories remain attributed, not a new Local source/archive audit."
+            },
+            "observations": {
+              "coordinator": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+              "source": "call_3vTCW56LZJrucPHEdBdpBXvx",
+              "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+              "ciRun": 40328433964,
+              "ciAttempt": 1,
+              "docsRun": 40328433981,
+              "docsAttempt": 1,
+              "state": "Sole coordinator reports registered under one verified armed scheduler; no terminal result accepted here."
+            },
+            "limits": "Post-merge CI and debt routing do not delay the already-due wakes. Downstream owner execution remains pending. #167 is still held; #207's separate gate disposition grants neither its merge nor a retroactive block on the #166 merge.",
+            "currentState": "All eight debts remain open. MainCI/Docs registration remains reported/pending follow-through for Local through the sole coordinator, not a terminal result, scheduler audit or completion hold.",
+            "recurrence": "Recurring native crash reopens166; preserve exact evidence, no retry past failure.",
+            "downstream": "Both existing owners are awakened only; no execution/integration/freshCI/source/design/readiness/merge outcome is accepted. Do not wait for bookkeeping or resend."
+          },
+          "boundary": "The complete prior completion qualification, including all eight open debts and historical/current sent-wake dispositions, stays byte-exact. Its pending-CI wording remains the historical snapshot; this later qualification records terminal results without rewriting it."
+        },
+        "classificationAndLimits": "Raw log bytes, NUL count, failure segment, source ranges/control flow, operation classification, artifact upload and diagnostics remain Local-attributed. The reconciler checked only Git blob identity and bounded public attempt/job metadata, not product source, logs, archives, dumps, runtime, scheduler or recipients. The not-running assertion does not prove kernel rundown, lock release, a holder or a cause; 61.18 seconds is target duration, not attach latency. This is not #193 intent admission, #204 ForeignDaemon or a reported native #166 recurrence. No common-cause, lock theft/removal/weakening, production retry-budget change, debt clearance or repair acceptance follows.",
+        "disposition": "The prior candidate fields remain unchanged in this evidence-only pre-promotion predecessor. Their candidate/proposed, unassigned and Sentinel-hold wording is retained historical canonical state, not a renewed current hold or a denial of later staffing. Local source call_sLyB1an97X0w90SsMPZrIBvc reports later Campaign-authorized #212 staffing; that promotion and owner launch are recorded separately and are not blocked, revoked or replaced here. This artifact creates no new tracker, node, edge, owner, scheduler, rerun, local runtime or wake. The original failed job counts once. The 21 successful aggregate attempt-2 records represent one re-executed Windows Build plus 20 reused prior successes, verified by paired name/head/start/end/status/conclusion and complete step receipts. New IDs and run_attempt labels alone do not prove fresh execution. Exact-head green CI does not erase the occurrence or establish a causal fix.",
+        "conservation": "#166 stays completed under the same owner; this ordinary store-lock failure does not invoke its native-recurrence reopening rule. All eight debts, both once-sent wakes and all prior evidence remain exact. No downstream execution, readiness, #167 acceptance, repair, release or workstation-freeze credit."
       }
     },
     {
@@ -3741,6 +4659,901 @@
               "limits": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
             },
             "conservation": "Two evidence-only successors in two existing candidates: one ordinary Windows workspace outer initial-attach timeout for #175 and one post-drain side-station SQLite LockFileEx os33 refusal. Deduplicate by run40266913484/attempt1/job121391199008 AND test; no combined cause or collapsed job count. Preserve candidate/proposed/unassigned dispositions, sourceNode null, targets/tracker uncertainty, all prior evidence and historical retry prose without granting another retry. Campaign holds staffing/promotion of both families pending operator policy. No new tracker/node/owner, promotion, graph/gate/status/attention/dependency/design-link change, #166/#167/#193/#203/#204 or wake/acceptance/debt/HOLD/readiness/freeze change, holder/lock-release/liveness/native/common-cause proof, runtime/observer/experiment/retry/rerun/waiver/flake authority. Credential passing phase output and separately authorized #167 phase collection are context only, not failure-side cause or measurement-implementation validation and not authority here. Recording does not delay active repairs."
+          },
+          {
+            "kind": "post-merge-main-store-lock-occurrence-with-later-terminal-rerun",
+            "deduplicationKey": "run40328433964-attempt1-job121591124574-station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one",
+            "executedMain": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+            "executedTree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+            "run": 40328433964,
+            "attempt": 1,
+            "job": 121591124574,
+            "test": "station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one",
+            "recordingDirection": {
+              "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "source": "call_1UttL409xWlB8RRLaWbch40q",
+              "receipt": {
+                "file": "rerun-policy-local-followthrough-intake.json",
+                "bytes": 1695,
+                "sha256": "d06ccf4a3f69d39b4a44a30cba841838cdc4b92e5c031a5fd57a929312d019e1"
+              },
+              "summary": "Local requests exactly one deduplicated attempt-1 store-lock occurrence and additive main/Docs follow-through, preserving the original #166 completion, debts, pending-CI snapshot and both sent wakes. No duplicate rerun or launch. The private absolute packet location is deliberately not projected.",
+              "authorityBoundary": "This is the actual Local intake. The original packet retains its coordinator attribution; the terminal supplement forwards Campaign direction as Local-attributed, not a direct Campaign receipt received here."
+            },
+            "sourcePacket": {
+              "file": "main8d-storelock-original-packet.json",
+              "bytes": 6077,
+              "sha256": "20b4970ce6a879e11f63be7a0da9e339143cb8af6eddc82bad23074453bcf4ab",
+              "rawUtf8": "{\r\n  \"kind\": \"post-166-merge-main-result-and-existing-store-lock-intake\",\r\n  \"reporter\": {\r\n    \"session\": \"2a4bc4c8-1211-49d4-ba68-9d05d5d7530d\",\r\n    \"source\": \"call_7vo5nXjMcRqkZfGmGnR8Exjy\"\r\n  },\r\n  \"publicIdentity\": {\r\n    \"head\": \"8d7815a8d0fb8c6f465d441904044bd20f7dcc7b\",\r\n    \"tree\": \"30aac58eb2f76fab2800308fa68a1c22658a2a05\",\r\n    \"event\": \"push\",\r\n    \"run\": 40328433964,\r\n    \"attempt\": 1,\r\n    \"overallConclusion\": \"failure\",\r\n    \"job\": 121591124574,\r\n    \"jobName\": \"Build and test (windows-latest)\",\r\n    \"jobUrl\": \"https://github.com/lossyrob/telex/actions/runs/40328433964/job/121591124574\",\r\n    \"jobConclusion\": \"failure\",\r\n    \"jobStartedAt\": \"2026-10-26T13:11:28Z\",\r\n    \"jobCompletedAt\": \"2026-10-26T13:22:37Z\",\r\n    \"verification\": \"Local independently queried this job's run/head/failure metadata and inspected the public completed-job log. Checkout lines 97-98 identify direct main, not a synthetic PR merge.\"\r\n  },\r\n  \"capture\": {\r\n    \"file\": \"run40328433964-job121591124574-public.log\",\r\n    \"bytes\": 399090,\r\n    \"sha256\": \"34d7da894e25b2db66afd5a9e99e5d39828f040fd6ba5ffad8a0b34c67db096d\",\r\n    \"source\": \"Completed-job public API response retrieved independently by Local using --allow-escape-sequences.\",\r\n    \"rawPreserved\": true,\r\n    \"nulBytes\": 1637,\r\n    \"failureSegment\": [2410, 2440],\r\n    \"segmentHasNuls\": false,\r\n    \"limits\": \"NULs elsewhere were removed only for an initial display; the retained raw capture and subsequently inspected failure segment were unchanged. Selected evidence inspection is not a full-log/native-stack audit.\"\r\n  },\r\n  \"observation\": {\r\n    \"candidateId\": \"local-daemon-windows-station-restart-lockfileex-33\",\r\n    \"deduplicationKey\": \"run40328433964-attempt1-job121591124574-station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one\",\r\n    \"test\": \"station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one\",\r\n    \"sourcePath\": \"tests/daemon_process_sqlite.rs\",\r\n    \"sourceBlob\": \"b574cd845c43ab76dd9287109daccda90797cc72\",\r\n    \"sourceRangesRead\": [[4549, 4573], [5818, 5902]],\r\n    \"caller\": 5867,\r\n    \"helper\": 4571,\r\n    \"assertion\": 24,\r\n    \"configuredCommandBudgetSeconds\": 10,\r\n    \"failureLogLine\": 2413,\r\n    \"code\": 1,\r\n    \"timedOut\": false,\r\n    \"stdout\": \"\",\r\n    \"stderrCategory\": \"Unsupported: opening SQLite store: cannot acquire store lock ... LockFileEx ... (os error 33)\",\r\n    \"operation\": \"Post-drain side-station attach intended to spawn the successor across two stores.\",\r\n    \"precedingControlFlow\": \"The source checks successful stop/drain, recoverable=1, degraded=1, observed_count=2 and wait_until_not_running before calling the failed helper.\",\r\n    \"unreached\": \"Successor push-restoration assertion at 5868-5872, second-store status query and later membership/manifest assertions.\",\r\n    \"targetResult\": {\r\n      \"passed\": 48,\r\n      \"failed\": 1,\r\n      \"ignored\": 0,\r\n      \"durationSeconds\": 61.18\r\n    },\r\n    \"limits\": \"The ordinary Windows job is not the PageHeap job. This is an explicit SQLite store-lock refusal, not #193 station-intent lock admission, #204 ForeignDaemon or a reported native #166 recurrence. The prior not-running assertion does not prove kernel rundown or store-lock release. Holder, timing and cause remain unknown; target duration is not attach latency. Preserve earlier same-test evidence with its different head, job and source anchors.\"\r\n  },\r\n  \"artifact\": {\r\n    \"id\": 12653327449,\r\n    \"name\": \"windows-build-test-crash\",\r\n    \"uploadedBytes\": 86638139,\r\n    \"verification\": \"Upload identity and size appear in the job log. No archive, dump or executable was downloaded or inspected; no presence/absence claim.\"\r\n  },\r\n  \"otherReportedOutcomes\": {\r\n    \"attribution\": \"Sole wait coordinator terminal report; Local did not independently inspect these jobs or artifacts for this intake.\",\r\n    \"installedCurrentJob\": {\r\n      \"id\": 121591124607,\r\n      \"result\": \"success\"\r\n    },\r\n    \"featureCombinationsJob\": {\r\n      \"id\": 121591124479,\r\n      \"result\": \"success\"\r\n    },\r\n    \"docs\": {\r\n      \"run\": 40328433981,\r\n      \"result\": \"success\",\r\n      \"successfulJobs\": [121591123899, 121593338791],\r\n      \"artifact\": 12654060364\r\n    }\r\n  },\r\n  \"rerunPolicySuccessor\": {\r\n    \"operatorDirectionSource\": \"toolu_01TnRkbaQuVxwQEMxx2kw1VH\",\r\n    \"campaignRerunReportSource\": \"toolu_01FQUhKS9iZnEedgtbgZb9jm\",\r\n    \"policy\": \"Failed CI jobs may be rerun at the unchanged head after recording run, job and test against the existing tracker. A green rerun at the exact head satisfies the CI gate; red merges remain prohibited and repeated failure of the same test is a finding.\",\r\n    \"reportedAction\": \"Campaign reports it reran this failed main job as run 40328433964 attempt 2. Attempt-1 evidence is preserved here; no attempt-2 result is claimed.\",\r\n    \"investigationOwner\": \"fc772c8f-2a38-40de-a868-69a5397dbbc5\",\r\n    \"staffingHold\": \"Separate #175 and LockFileEx-33 implementation staffing remains held pending the sentinel's recommendation, rather than the earlier policy-answer wait.\",\r\n    \"scopeLimit\": \"This supersedes the earlier no-CI-rerun restriction, not product retry budgets, lock authority, local-runtime restrictions or original failure evidence.\"\r\n  },\r\n  \"disposition\": \"Retain one deduplicated attempt-1 successor occurrence on the existing store-lock candidate, preserving its candidate/proposed status and separate implementation-staffing hold. Pass the evidence to the sentinel's cross-family inventory. Record main's failure and Docs success as later follow-through, leaving the frozen merge166v2 pending-CI snapshot intact. This signature does not trigger #166's native-recurrence reopening policy, undo accepted completion, clear gate debts or revoke/resend either delivered #193/#198 wake. Campaign has authorized and reported the unchanged-head attempt-2 CI rerun under the new rule; do not launch a duplicate. No lock theft/removal, local runtime, new implementation owner/tracker/graph edge or downstream acceptance follows.\"\r\n}\r\n"
+            },
+            "sourcePacketBoundary": "Complete 6,077-byte original packet retained exactly, including its pending-attempt-2 snapshot and original reported Docs/other-job attribution. Later independently checked facts are additions, not edits to that snapshot.",
+            "laterTerminalSupplement": {
+              "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "source": "call_32zBsiFzX792fUpGLID5Z6Ny",
+              "verbatim": "For the separate main-storelock follow-through successor: Campaign toolu_01UPPDy9BrhDdh9Pbx9yhMyA reports attempt2 success and directs the attempt1 os33 failure counted once, with Sentinel owning staffing. Local independently verified run40328433964/attempts/2 is completed/success at unchanged8d7815a8, and the attempt-2 jobs endpoint lists21/21 successful jobs, all explicitly run_attempt=2, including WindowsBuild121598826679. Do not describe this as one rerun job plus inherited successful jobs; all21 entries are attempt2. Original job121591124574 remains one retained failure, not a causal repair or debt clearance. The frozen6077packet's pending-attempt2 state remains history; this is a later terminal supplement. No alteration or approval carry into withdrawn policyv3."
+            },
+            "laterExecutionProvenanceCorrection": {
+              "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+              "source": "call_Ikpc7KuKK6HUqUKU7vt2bvCN",
+              "receipt": {
+                "file": "main8dv3-local-correction-intake.json",
+                "bytes": 1536,
+                "sha256": "25dfae3efc30b279c075d2686cea16b70c9c4554bd3636fb457c08a3d5644aa4"
+              },
+              "comparisonPacket": {
+                "file": "main8dv3-local-execution-correction.json",
+                "bytes": 16483,
+                "sha256": "a50093c77f95dc88239a62955b586e88edb1ac795aea1e4a8e3437364beeffd4"
+              },
+              "pairedPublicComparison": {
+                "file": "main8dv3-execution-provenance.json",
+                "bytes": 20009,
+                "sha256": "76325d22ea0160e34fc60132b919582a817b9b948ee99aa8a508febf6b9cfedd"
+              },
+              "campaignDirection": {
+                "source": "toolu_01MWLGRfT4D1iSaxC2faBPhi",
+                "receipt": {
+                  "file": "main8dv3-campaign-direction.json",
+                  "bytes": 547,
+                  "sha256": "552cbb0ef403fcdd3ab2c293253a7d7b4b873103d214424a1fa77c12522e1039"
+                }
+              },
+              "supersededInterpretation": "call_32zBsiFzX792fUpGLID5Z6Ny",
+              "statement": "The retained terminal supplement incorrectly inferred 21 fresh executions from endpoint labels/new IDs. Its original words remain history, not current provenance. Paired execution receipts show one re-executed Windows Build and 20 reused successes in a successful 21-entry aggregate view. The exact-head CI result, original failed occurrence and all other obligations remain unchanged. No retest or original-packet edit."
+            },
+            "publicVerification": {
+              "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+              "tree": "30aac58eb2f76fab2800308fa68a1c22658a2a05",
+              "attempt1FailedJob": {
+                "id": 121591124574,
+                "name": "Build and test (windows-latest)",
+                "run": 40328433964,
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "failure",
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121591124574"
+              },
+              "ciAttempt2": {
+                "run": 40328433964,
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433964",
+                "event": "push",
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "totalJobs": 21,
+                "allEntriesLabelledAttempt2": true,
+                "executionProvenance": {
+                  "comparedJobCount": 21,
+                  "reusedSuccessfulExecutionCount": 20,
+                  "changedExecutionReceiptCount": 1,
+                  "allIdsChanged": true,
+                  "pairs": [
+                    {
+                      "name": "Build and test (ubuntu-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124046,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:36Z",
+                        "completedAt": "2026-10-26T13:21:36Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 38,
+                        "stepsCanonicalSha256": "75cb89afd3293b473d6319791edc0a5a74f02903f0a9f5ae4b9c8c887ca92cec"
+                      },
+                      "attempt2": {
+                        "id": 121598883346,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:36Z",
+                        "completedAt": "2026-10-26T13:21:36Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 38,
+                        "stepsCanonicalSha256": "75cb89afd3293b473d6319791edc0a5a74f02903f0a9f5ae4b9c8c887ca92cec"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Build and test (windows-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124574,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:22:37Z",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "stepCount": 38,
+                        "stepsCanonicalSha256": "ac11c5922a33e7c3cb4c2e6c193df25d428f06f1ab07c1d467fc6c4df6a7c18e"
+                      },
+                      "attempt2": {
+                        "id": 121598826679,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:26:55Z",
+                        "completedAt": "2026-10-26T13:44:06Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 38,
+                        "stepsCanonicalSha256": "d10e67d431b4f4cdb2d341b637f0c4a78a455965a031b20164a431d9c7b5981a"
+                      },
+                      "executionReceiptsIdentical": false,
+                      "classification": "changed-execution-receipt"
+                    },
+                    {
+                      "name": "Copilot fallback E2E (macos-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124324,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:12:58Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 8,
+                        "stepsCanonicalSha256": "afdfe9be81505766e999fed340c99b780162bf77ecf97a927c14b65aae777fb6"
+                      },
+                      "attempt2": {
+                        "id": 121598898211,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:12:58Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 8,
+                        "stepsCanonicalSha256": "afdfe9be81505766e999fed340c99b780162bf77ecf97a927c14b65aae777fb6"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Copilot fallback E2E (windows-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124586,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:13:25Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 8,
+                        "stepsCanonicalSha256": "e35dace2a6995ae7f5f99d83a732f12019ee1ccf5c9b3956a2e8b5ef57c409a3"
+                      },
+                      "attempt2": {
+                        "id": 121598828681,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:13:25Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 8,
+                        "stepsCanonicalSha256": "e35dace2a6995ae7f5f99d83a732f12019ee1ccf5c9b3956a2e8b5ef57c409a3"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Credential invocation lifecycle (macOS)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124495,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:12:22Z",
+                        "completedAt": "2026-10-26T13:14:22Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "64b7b9b1c2842ac230b93182a3e05a2441a211993976d970ca6aae926b533a21"
+                      },
+                      "attempt2": {
+                        "id": 121598883977,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:12:22Z",
+                        "completedAt": "2026-10-26T13:14:22Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "64b7b9b1c2842ac230b93182a3e05a2441a211993976d970ca6aae926b533a21"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Feature combinations build",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124479,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:17:36Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 20,
+                        "stepsCanonicalSha256": "1eb0505717db66d6681eab846a63670f0107501b103d2981abdd760258e84321"
+                      },
+                      "attempt2": {
+                        "id": 121598908192,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:17:36Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 20,
+                        "stepsCanonicalSha256": "1eb0505717db66d6681eab846a63670f0107501b103d2981abdd760258e84321"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "InstalledCurrent Postgres process proofs (Windows)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124607,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:20:04Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 10,
+                        "stepsCanonicalSha256": "6ece45e5c5044eb7a434ce8f2d3ab818b8627eb5f25fa00d6bbff1f4e3a1603e"
+                      },
+                      "attempt2": {
+                        "id": 121598880135,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:20:04Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 10,
+                        "stepsCanonicalSha256": "6ece45e5c5044eb7a434ce8f2d3ab818b8627eb5f25fa00d6bbff1f4e3a1603e"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Live Postgres parity tests",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124744,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:20:14Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 14,
+                        "stepsCanonicalSha256": "c511dad628b903baa6e5eb0585701b18727a081238bdab3a6478998da6e1bfd6"
+                      },
+                      "attempt2": {
+                        "id": 121598896740,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:20:14Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 14,
+                        "stepsCanonicalSha256": "c511dad628b903baa6e5eb0585701b18727a081238bdab3a6478998da6e1bfd6"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Released v0.2.1 upgrade proof (Windows)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124849,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:26Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "ee04d49292a47f0191d1325de095c2b44ffe2933d8551fe7e01eb7ed47b701ba"
+                      },
+                      "attempt2": {
+                        "id": 121598829910,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:26Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "ee04d49292a47f0191d1325de095c2b44ffe2933d8551fe7e01eb7ed47b701ba"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Station-intent lock boundary (macos-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124560,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:13:04Z",
+                        "completedAt": "2026-10-26T13:14:37Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "4605ec68ad8fd4451c0c955f69813f318e1b75883d212312bea285da2f525098"
+                      },
+                      "attempt2": {
+                        "id": 121598882424,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:13:04Z",
+                        "completedAt": "2026-10-26T13:14:37Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "4605ec68ad8fd4451c0c955f69813f318e1b75883d212312bea285da2f525098"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Station-intent lock boundary (ubuntu-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124943,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:12:19Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "7a5e3b748f0a5413528d083edc4273a099ebe61462cd3f7b14b9861b22afe9b3"
+                      },
+                      "attempt2": {
+                        "id": 121598876882,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:12:19Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "7a5e3b748f0a5413528d083edc4273a099ebe61462cd3f7b14b9861b22afe9b3"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Station-intent lock boundary (windows-latest)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124468,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:09Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "e5b55acd7c424c19347fb46ca9520b718607be4f04285dd9ede3ee05ac559a6f"
+                      },
+                      "attempt2": {
+                        "id": 121598829053,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:09Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 9,
+                        "stepsCanonicalSha256": "e5b55acd7c424c19347fb46ca9520b718607be4f04285dd9ede3ee05ac559a6f"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows heap diagnostics",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124983,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:16:13Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 14,
+                        "stepsCanonicalSha256": "ce586cdc3d4e8ccdd2b52d84b2529fca58d7fc4a049bd696bcd4c7c7f64f916e"
+                      },
+                      "attempt2": {
+                        "id": 121598889190,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:16:13Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 14,
+                        "stepsCanonicalSha256": "ce586cdc3d4e8ccdd2b52d84b2529fca58d7fc4a049bd696bcd4c7c7f64f916e"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (all)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124714,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:59Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "c3b73e13cbf94be84bc63138eada53ad528e8cd913c5ebd1561b9f108e2c1b5b"
+                      },
+                      "attempt2": {
+                        "id": 121598909234,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:59Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "c3b73e13cbf94be84bc63138eada53ad528e8cd913c5ebd1561b9f108e2c1b5b"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (default)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124402,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:26Z",
+                        "completedAt": "2026-10-26T13:14:26Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "843e6e857845af9214532610ccb84b4492b1aba2261de296724218ca663f8365"
+                      },
+                      "attempt2": {
+                        "id": 121598876796,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:26Z",
+                        "completedAt": "2026-10-26T13:14:26Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "843e6e857845af9214532610ccb84b4492b1aba2261de296724218ca663f8365"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (entra)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124411,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:21Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "9b42705ce6af8e2ee18ef7e9862b080a3ccd0229bbb879c4c5a489aa9a1767f7"
+                      },
+                      "attempt2": {
+                        "id": 121598899205,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:14:21Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "9b42705ce6af8e2ee18ef7e9862b080a3ccd0229bbb879c4c5a489aa9a1767f7"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (postgres)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124817,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:38Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "20b2139b3df804c51e8aea4e6be8011f4e8ee31be4f26fdd71d114b8110489d3"
+                      },
+                      "attempt2": {
+                        "id": 121598903210,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:38Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "20b2139b3df804c51e8aea4e6be8011f4e8ee31be4f26fdd71d114b8110489d3"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (sqlite-entra)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124828,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:30Z",
+                        "completedAt": "2026-10-26T13:15:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "a1c12f2ca73cfa6f7ed82bf2234592df2ef72861274dbdd5b0403a11c08b36ad"
+                      },
+                      "attempt2": {
+                        "id": 121598829997,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:30Z",
+                        "completedAt": "2026-10-26T13:15:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "a1c12f2ca73cfa6f7ed82bf2234592df2ef72861274dbdd5b0403a11c08b36ad"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (sqlite-postgres)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124765,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:23Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "a9f4d65941e0f1a5ef8c38f5c4057a174c1969a1eb7e805f48cb3c15497e9493"
+                      },
+                      "attempt2": {
+                        "id": 121598883034,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:23Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "a9f4d65941e0f1a5ef8c38f5c4057a174c1969a1eb7e805f48cb3c15497e9493"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (sqlite-self-update)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124579,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:09Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "8e974a2a7a4a60cd47487ca3b852973a03863647fb3babbf8078bfae2cbec520"
+                      },
+                      "attempt2": {
+                        "id": 121598830389,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:27Z",
+                        "completedAt": "2026-10-26T13:13:09Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "8e974a2a7a4a60cd47487ca3b852973a03863647fb3babbf8078bfae2cbec520"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    },
+                    {
+                      "name": "Windows token-user alignment (sqlite)",
+                      "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                      "attempt1": {
+                        "id": 121591124619,
+                        "attempt": 1,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:13:52Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "44186c99f1d8e8e68dd201fda1437686f8f0050402562f2afbd5bbdcd83c21de"
+                      },
+                      "attempt2": {
+                        "id": 121598877829,
+                        "attempt": 2,
+                        "startedAt": "2026-10-26T13:11:28Z",
+                        "completedAt": "2026-10-26T13:13:52Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "stepCount": 7,
+                        "stepsCanonicalSha256": "44186c99f1d8e8e68dd201fda1437686f8f0050402562f2afbd5bbdcd83c21de"
+                      },
+                      "executionReceiptsIdentical": true,
+                      "classification": "reused-prior-success"
+                    }
+                  ],
+                  "boundary": "Compared job name/head/start/end/status/conclusion and every complete step receipt from bounded public metadata. New IDs and run_attempt labels alone are not proof of a fresh execution. No log, runtime inheritance/replay mechanism or causal repair is inferred."
+                },
+                "jobs": [
+                  {
+                    "id": 121598826679,
+                    "name": "Build and test (windows-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598826679"
+                  },
+                  {
+                    "id": 121598828681,
+                    "name": "Copilot fallback E2E (windows-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598828681"
+                  },
+                  {
+                    "id": 121598829053,
+                    "name": "Station-intent lock boundary (windows-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829053"
+                  },
+                  {
+                    "id": 121598829910,
+                    "name": "Released v0.2.1 upgrade proof (Windows)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829910"
+                  },
+                  {
+                    "id": 121598829997,
+                    "name": "Windows token-user alignment (sqlite-entra)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598829997"
+                  },
+                  {
+                    "id": 121598830389,
+                    "name": "Windows token-user alignment (sqlite-self-update)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598830389"
+                  },
+                  {
+                    "id": 121598876796,
+                    "name": "Windows token-user alignment (default)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598876796"
+                  },
+                  {
+                    "id": 121598876882,
+                    "name": "Station-intent lock boundary (ubuntu-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598876882"
+                  },
+                  {
+                    "id": 121598877829,
+                    "name": "Windows token-user alignment (sqlite)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598877829"
+                  },
+                  {
+                    "id": 121598880135,
+                    "name": "InstalledCurrent Postgres process proofs (Windows)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598880135"
+                  },
+                  {
+                    "id": 121598882424,
+                    "name": "Station-intent lock boundary (macos-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598882424"
+                  },
+                  {
+                    "id": 121598883034,
+                    "name": "Windows token-user alignment (sqlite-postgres)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883034"
+                  },
+                  {
+                    "id": 121598883346,
+                    "name": "Build and test (ubuntu-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883346"
+                  },
+                  {
+                    "id": 121598883977,
+                    "name": "Credential invocation lifecycle (macOS)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598883977"
+                  },
+                  {
+                    "id": 121598889190,
+                    "name": "Windows heap diagnostics",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598889190"
+                  },
+                  {
+                    "id": 121598896740,
+                    "name": "Live Postgres parity tests",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598896740"
+                  },
+                  {
+                    "id": 121598898211,
+                    "name": "Copilot fallback E2E (macos-latest)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598898211"
+                  },
+                  {
+                    "id": 121598899205,
+                    "name": "Windows token-user alignment (entra)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598899205"
+                  },
+                  {
+                    "id": 121598903210,
+                    "name": "Windows token-user alignment (postgres)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598903210"
+                  },
+                  {
+                    "id": 121598908192,
+                    "name": "Feature combinations build",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598908192"
+                  },
+                  {
+                    "id": 121598909234,
+                    "name": "Windows token-user alignment (all)",
+                    "run": 40328433964,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 2,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433964/job/121598909234"
+                  }
+                ]
+              },
+              "docsAttempt1": {
+                "run": 40328433981,
+                "url": "https://github.com/lossyrob/telex/actions/runs/40328433981",
+                "event": "push",
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "totalJobs": 2,
+                "jobs": [
+                  {
+                    "id": 121591123899,
+                    "name": "Build user guide",
+                    "run": 40328433981,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 1,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433981/job/121591123899"
+                  },
+                  {
+                    "id": 121593338791,
+                    "name": "Deploy to GitHub Pages",
+                    "run": 40328433981,
+                    "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                    "attempt": 1,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/lossyrob/telex/actions/runs/40328433981/job/121593338791"
+                  }
+                ]
+              },
+              "sourceIdentityOnly": {
+                "head": "8d7815a8d0fb8c6f465d441904044bd20f7dcc7b",
+                "path": "tests/daemon_process_sqlite.rs",
+                "blob": "b574cd845c43ab76dd9287109daccda90797cc72",
+                "boundary": "Git blob identity only; source bytes/ranges/control flow and raw log not read or replayed. Local retains attribution for exact failure/source anchors and operation classification."
+              }
+            },
+            "classificationAndLimits": "Raw log bytes, NUL count, failure segment, source ranges/control flow, operation classification, artifact upload and diagnostics remain Local-attributed. The reconciler checked only Git blob identity and bounded public attempt/job metadata, not product source, logs, archives, dumps, runtime, scheduler or recipients. The not-running assertion does not prove kernel rundown, lock release, a holder or a cause; 61.18 seconds is target duration, not attach latency. This is not #193 intent admission, #204 ForeignDaemon or a reported native #166 recurrence. No common-cause, lock theft/removal/weakening, production retry-budget change, debt clearance or repair acceptance follows.",
+            "disposition": "The prior candidate fields remain unchanged in this evidence-only pre-promotion predecessor. Their candidate/proposed, unassigned and Sentinel-hold wording is retained historical canonical state, not a renewed current hold or a denial of later staffing. Local source call_sLyB1an97X0w90SsMPZrIBvc reports later Campaign-authorized #212 staffing; that promotion and owner launch are recorded separately and are not blocked, revoked or replaced here. This artifact creates no new tracker, node, edge, owner, scheduler, rerun, local runtime or wake. The original failed job counts once. The 21 successful aggregate attempt-2 records represent one re-executed Windows Build plus 20 reused prior successes, verified by paired name/head/start/end/status/conclusion and complete step receipts. New IDs and run_attempt labels alone do not prove fresh execution. Exact-head green CI does not erase the occurrence or establish a causal fix.",
+            "conservation": "Append exactly one occurrence; all prior candidate fields, evidence and occurrences are exact. No candidate status, ownership or staffing change."
           }
         ]
       },

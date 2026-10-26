@@ -121,9 +121,17 @@ fn acquire_intent_lock<T>(
     mut sleep: impl FnMut(Duration),
 ) -> Result<T> {
     let deadline = now() + INTENT_LOCK_TIMEOUT;
+    let refused = |reason: String| {
+        IntentError::Io(format!(
+            "intent {id} is locked by another writer or its acquisition budget expired: {reason}"
+        ))
+    };
     for attempt in 0..INTENT_LOCK_ATTEMPTS {
         if now() >= deadline {
-            break;
+            return Err(refused(format!(
+                "budget expired before attempt {}; {attempt} contended attempts",
+                attempt + 1
+            )));
         }
         match try_acquire() {
             Ok(lock) => {
@@ -132,7 +140,11 @@ fn acquire_intent_lock<T>(
                 if now() < deadline {
                     return Ok(lock);
                 }
-                break;
+                drop(lock);
+                return Err(refused(format!(
+                    "late successful acquisition on attempt {}; guard released",
+                    attempt + 1
+                )));
             }
             Err(platform_fs::FsError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -141,13 +153,16 @@ fn acquire_intent_lock<T>(
         if attempt + 1 < INTENT_LOCK_ATTEMPTS {
             let remaining = deadline.saturating_duration_since(now());
             if remaining.is_zero() {
-                break;
+                return Err(refused(format!(
+                    "budget expired after contention on attempt {}",
+                    attempt + 1
+                )));
             }
             sleep(INTENT_LOCK_RETRY.min(remaining));
         }
     }
-    Err(IntentError::Io(format!(
-        "intent {id} is locked by another writer or its acquisition budget expired"
+    Err(refused(format!(
+        "attempt limit exhausted after {INTENT_LOCK_ATTEMPTS} contended attempts"
     )))
 }
 
@@ -1818,13 +1833,36 @@ impl IntentStore {
     /// `updated_at_ms` moves (this *is* a write), but it is deliberately not the clock any pending
     /// TTL reads.
     pub fn write_pending(&self, intent: &StationIntentV1) -> Result<PendingWrite> {
+        self.write_pending_acquiring(intent, |id| self.lock_intent(id))
+    }
+
+    /// Seed a real pending record without making a proof-transaction test depend on wall time.
+    /// Native locking and privacy checks remain real; elapsed-budget tests must not use this.
+    #[cfg(test)]
+    pub(crate) fn write_pending_fixture(&self, intent: &StationIntentV1) -> Result<PendingWrite> {
+        let admitted_at = Instant::now();
+        self.write_pending_acquiring(intent, |id| {
+            acquire_intent_lock(
+                id,
+                || platform_fs::try_acquire_owner_private_advisory_lock(&self.lock_path_for(id)),
+                || admitted_at,
+                std::thread::sleep,
+            )
+        })
+    }
+
+    fn write_pending_acquiring(
+        &self,
+        intent: &StationIntentV1,
+        acquire: impl FnOnce(&IntentId) -> Result<platform_fs::OwnerPrivateAdvisoryLock>,
+    ) -> Result<PendingWrite> {
         if intent.state != IntentRecoveryState::Pending {
             return Err(IntentError::Invalid(
                 "write_pending may only write a pending record".to_string(),
             ));
         }
         let id = intent.id();
-        let _lock = self.lock_intent(&id)?;
+        let _lock = acquire(&id)?;
         let existing = if path_present(&self.path_for(&id))? {
             Some(self.load(&id)?)
         } else {
@@ -1947,15 +1985,18 @@ impl IntentStore {
     /// removed, renamed, replaced, or stolen. A live hung holder therefore produces a bounded
     /// failure/degradation rather than permitting a stale writer to overlap a newer generation.
     fn lock_intent(&self, id: &IntentId) -> Result<platform_fs::OwnerPrivateAdvisoryLock> {
-        let path = self
-            .root
-            .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
+        let path = self.lock_path_for(id);
         acquire_intent_lock(
             id,
             || platform_fs::try_acquire_owner_private_advisory_lock(&path),
             Instant::now,
             std::thread::sleep,
         )
+    }
+
+    fn lock_path_for(&self, id: &IntentId) -> PathBuf {
+        self.root
+            .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()))
     }
 
     /// **Withdraw** one binding's desired state: the single fallible, linearized operation behind
@@ -4990,27 +5031,98 @@ mod tests {
     }
 
     #[test]
+    fn pending_fixture_keeps_native_exclusion_and_writes_a_real_record() {
+        let run_dir = temp_run_dir("pending-fixture");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        let id = pending.id();
+        let path = store.lock_path_for(&id);
+        let holder = platform_fs::try_acquire_owner_private_advisory_lock(&path).expect("holder");
+
+        let result = store.write_pending_fixture(&pending);
+        assert!(
+            matches!(result, Err(IntentError::Io(ref detail))
+                if detail.contains("attempt limit exhausted after 25 contended attempts")),
+            "a fixture cannot turn native contention into seed success: {result:?}"
+        );
+        assert!(!store.path_for(&id).exists());
+        assert!(
+            matches!(
+                platform_fs::try_acquire_owner_private_advisory_lock(&path),
+                Err(platform_fs::FsError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::WouldBlock
+            ),
+            "the original holder must retain its lock"
+        );
+        drop(holder);
+
+        assert_eq!(
+            store.write_pending_fixture(&pending).expect("seed"),
+            PendingWrite::Created { generation: 1 }
+        );
+        let seeded = store.load(&id).expect("real pending manifest");
+        assert_eq!(seeded.state, IntentRecoveryState::Pending);
+        assert_eq!(seeded.generation, 1);
+        assert!(!seeded.is_armed());
+        assert!(
+            path.exists(),
+            "the fixture must retain the persistent lock file"
+        );
+        let released = platform_fs::try_acquire_owner_private_advisory_lock(&path)
+            .expect("seed released lock");
+        drop(released);
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn lock_retry_budget_refuses_before_first_attempt() {
+        let start = Instant::now();
+        let mut times = [start, start + INTENT_LOCK_TIMEOUT].into_iter();
+        assert_eq!(INTENT_LOCK_TIMEOUT, Duration::from_millis(480));
+        assert_eq!(INTENT_LOCK_ATTEMPTS, 25);
+        let result: Result<()> = acquire_intent_lock(
+            &sample_intent("sqlite:/a", "sess", "addr").id(),
+            || panic!("an expired budget must not start a native attempt"),
+            || {
+                times
+                    .next()
+                    .expect("only deadline and admission read the clock")
+            },
+            |_| panic!("an expired budget must not sleep"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Io(ref detail))
+                if detail.contains("budget expired before attempt 1; 0 contended attempts")),
+            "pre-attempt expiry must be distinguishable: {result:?}"
+        );
+    }
+
+    #[test]
     fn lock_retry_budget_includes_attempt_cost_and_sleep_overshoot() {
         use std::cell::{Cell, RefCell};
 
-        for (attempt_cost, overshoot, expected_attempts, expected_sleeps) in [
+        for (attempt_cost, overshoot, expected_attempts, expected_sleeps, reason) in [
             (
                 Duration::from_millis(200),
                 Duration::ZERO,
                 3,
                 vec![INTENT_LOCK_RETRY; 2],
+                "budget expired after contention on attempt 3",
             ),
             (
                 Duration::ZERO,
                 INTENT_LOCK_TIMEOUT,
                 1,
                 vec![INTENT_LOCK_RETRY],
+                "budget expired before attempt 2; 1 contended attempts",
             ),
             (
                 INTENT_LOCK_TIMEOUT - Duration::from_millis(5),
                 Duration::ZERO,
                 1,
                 vec![Duration::from_millis(5)],
+                "budget expired before attempt 2; 1 contended attempts",
             ),
         ] {
             let start = Instant::now();
@@ -5034,7 +5146,10 @@ mod tests {
                     elapsed.set(elapsed.get() + duration + overshoot);
                 },
             );
-            assert!(matches!(result, Err(IntentError::Io(_))));
+            assert!(
+                matches!(result, Err(IntentError::Io(ref detail)) if detail.contains(reason)),
+                "wrong admission cause: {result:?}; expected {reason}"
+            );
             assert_eq!(attempts.get(), expected_attempts);
             assert_eq!(*sleeps.borrow(), expected_sleeps);
         }
@@ -5060,7 +5175,11 @@ mod tests {
             || start,
             |_| sleeps.set(sleeps.get() + 1),
         );
-        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(IntentError::Io(ref detail))
+                if detail.contains("attempt limit exhausted after 25 contended attempts")),
+            "attempt exhaustion must be distinguishable: {result:?}"
+        );
         assert_eq!(attempts.get(), INTENT_LOCK_ATTEMPTS);
         assert_eq!(sleeps.get(), INTENT_LOCK_ATTEMPTS - 1);
 
@@ -5119,7 +5238,8 @@ mod tests {
             || start + elapsed.get(),
             |_| panic!("a late success must not retry"),
         );
-        assert!(result.is_err());
+        assert!(matches!(result, Err(IntentError::Io(ref detail))
+                if detail.contains("late successful acquisition on attempt 1; guard released")));
         assert!(dropped.get(), "a late guard must release its OS lock");
 
         elapsed.set(Duration::ZERO);
@@ -5146,6 +5266,63 @@ mod tests {
         assert!(!dropped.get(), "a timely success retains the guard");
         drop(result);
         assert!(dropped.get());
+    }
+
+    #[test]
+    fn lock_retry_budget_releases_a_late_native_guard() {
+        use std::cell::Cell;
+
+        let run_dir = temp_run_dir("late-native-lock");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let path = store.lock_path_for(&id);
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                let lock = platform_fs::try_acquire_owner_private_advisory_lock(&path)?;
+                elapsed.set(INTENT_LOCK_TIMEOUT);
+                Ok(lock)
+            },
+            || start + elapsed.get(),
+            |_| panic!("a late acquisition must not retry"),
+        );
+        assert!(
+            matches!(result, Err(IntentError::Io(ref detail))
+                if detail.contains("late successful acquisition on attempt 1; guard released")),
+            "the native acquisition must succeed before testing late disposal: {result:?}"
+        );
+        let released = platform_fs::try_acquire_owner_private_advisory_lock(&path)
+            .expect("late native guard must have been released");
+        drop(released);
+        assert!(path.exists(), "late disposal must not remove the lock file");
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn lock_retry_budget_counts_real_elapsed_time() {
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let mut attempts = 0;
+        let result = acquire_intent_lock(
+            &id,
+            || {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(480));
+                Ok(())
+            },
+            Instant::now,
+            |_| panic!("a spent budget must not retry"),
+        );
+        let expected = match attempts {
+            0 => "budget expired before attempt 1; 0 contended attempts",
+            1 => "late successful acquisition on attempt 1; guard released",
+            _ => panic!("a spent budget must not start another attempt"),
+        };
+        assert!(
+            matches!(result, Err(IntentError::Io(ref detail)) if detail.contains(expected)),
+            "real elapsed time must refuse admission: {result:?}; expected {expected}"
+        );
     }
 
     #[test]
