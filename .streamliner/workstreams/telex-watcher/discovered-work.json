@@ -756,14 +756,16 @@
       "disposition": "external",
       "target": {
         "tracker": "https://github.com/lossyrob/telex/issues/203",
-        "owners": [],
-        "routing": "No owner is assigned. The operator routes existing issue #203 at check-in."
+        "owners": [
+          "Watcher #203 owner session b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f"
+        ],
+        "routing": "Campaign directed immediate staffing instead of waiting for operator check-in; the Watcher coordinator launched the existing #203 owner."
       },
-      "status": "routed",
+      "status": "in-progress",
       "decisionState": "accepted",
       "rationale": "Cargo identifies the affected Watcher library harness, not a culprit component or test. sourceNodeId watcher-runtime-core marks crate scope only; it is not causal attribution or a new dependency. This is separate from #166 command-child exits and the external Local signatures record.",
-      "terminalPath": "Watcher closes nothing and adds no dependency, gate or change to any existing item status. Further occurrences belong on existing issue #203 with run, job, head and printed progress. No implementation owner, retry, runtime probe or automatic edge to #198/#202 is created.",
-      "dispositionAuthority": "Owning Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 routed this evidence-only external record for existing issue #203 in actual message toolu_01MJApt8eW5Xi5tWXkaExKJE. The record accepts evidence routing only, not a repair, culprit, overrun finding, staffing or gate change.",
+      "terminalPath": "Existing #203 owner performs hosted-only diagnosis and repair from the public CI log, with a PR that says Closes #203. No retry, waiver or flake exception. If evidence establishes the same defect as #166, coordinate with Local rather than duplicate work. A launch is not repair, exact-head review/CI, merge, field validation or completion evidence. This record remains outside the graph and adds no node, dependency or automatic edge to #198/#202. Further occurrences remain on #203.",
+      "dispositionAuthority": "Campaign original direction toolu_01YYygb1QTgk6ahpmW3XrMxw is confirmed by Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c in actual correction toolu_01JVjJSa3b4msyzxVzPYAHQU, which supplies the canonical register text and identifies the earlier confirmation as a reconstruction. It authorized one immediate #203 owner. Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 reports actual launch and directs this owner/status recording in toolu_011KH1FEA1Js2QGRAao8jtL6. The original unassigned evidence-routing disposition remains historical below.",
       "evidence": [
         {
           "source": "issue",
@@ -926,7 +928,75 @@
           "details": "Artifact 12617062276 reports 73,044,878 bytes. The ZIP digest and ID are upload metadata only, not verification against downloaded bytes. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
         }
       ],
-      "limits": "One evidence-only external record for existing #203. No culprit, actual-overrun finding, common cause, PR attribution, implementation owner, observer, retry, probe, graph edge, source/review/CI/readiness, waiver, debt/HOLD or freeze credit. Equal committed nonplanning source to Watcher #180 does not establish identical executable/build/dependency/runner/input state or a controlled comparison. Keep #166 native command-child observations and watcher-ci-local-daemon-signatures distinct; preserve all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes. No automatic edge or disposition change to #198/#202."
+      "limits": "This update records the existing Campaign-authorized owner launch and hosted-only repair scope, not a new reconciler launch, diagnosis, culprit, overrun finding, common cause, PR attribution, retry/waiver/flake exception, workstation machine-state change, repair/review/CI/readiness/merge, debt/HOLD or freeze credit. All original observations, exact Local packet and artifact-metadata limits remain unchanged. Historical no-owner/no-probe intake statements describe the original capture; the later single-owner authority supersedes only that staffing deferral and authorizes hosted diagnosis/repair as specified. Keep #166 command-child cases distinct, all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes exact. No graph node/edge or automatic #198/#202 relationship is created.",
+      "laterOwnerLaunchQualification": {
+        "historicalIntakeFields": {
+          "target": {
+            "tracker": "https://github.com/lossyrob/telex/issues/203",
+            "owners": [],
+            "routing": "No owner is assigned. The operator routes existing issue #203 at check-in."
+          },
+          "status": "routed",
+          "terminalPath": "Watcher closes nothing and adds no dependency, gate or change to any existing item status. Further occurrences belong on existing issue #203 with run, job, head and printed progress. No implementation owner, retry, runtime probe or automatic edge to #198/#202 is created.",
+          "dispositionAuthority": "Owning Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 routed this evidence-only external record for existing issue #203 in actual message toolu_01MJApt8eW5Xi5tWXkaExKJE. The record accepts evidence routing only, not a repair, culprit, overrun finding, staffing or gate change.",
+          "limits": "One evidence-only external record for existing #203. No culprit, actual-overrun finding, common cause, PR attribution, implementation owner, observer, retry, probe, graph edge, source/review/CI/readiness, waiver, debt/HOLD or freeze credit. Equal committed nonplanning source to Watcher #180 does not establish identical executable/build/dependency/runner/input state or a controlled comparison. Keep #166 native command-child observations and watcher-ci-local-daemon-signatures distinct; preserve all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes. No automatic edge or disposition change to #198/#202."
+        },
+        "historicalBoundary": "Original routed/unassigned intake, operator-check-in deferral and no-implementation/probe statements are preserved verbatim here and in the untouched original evidence. They are historical, not current claims that no owner exists. The new authority is one Campaign-directed hosted-only owner launch; it does not retroactively validate the original observations or imply a repair.",
+        "campaignDirection": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "originalSource": "toolu_01YYygb1QTgk6ahpmW3XrMxw",
+          "directConfirmationSource": "toolu_01JVjJSa3b4msyzxVzPYAHQU",
+          "receipt": "campaign-staffing-correction-20261026.json",
+          "canonicalRegisterTextAttributedToCampaign": "Campaign: main at cbbff03b is red: the Watcher library harness exits 0xc0000409 (run 40240112300, job 121309895502), recorded as #203, which is unassigned. Under strict CI this blocks every PR, so don't hold it for operator routing: staff one #203 owner now on claude-opus-5.5 (high). Scope: hosted-only diagnosis and repair from the public CI log. No retry, waiver or flake exception. Coordinate with Local if it is the same defect as #166. Report the session ID.",
+          "attributionBoundary": "The complete actual correction is retained. This is the canonical register quote supplied by Campaign, not a reconciler claim to have independently read the original sent message or register.",
+          "earlierReconstructionHistory": {
+            "source": "toolu_01KCqfP4XKCCZ153wxA8pSaS",
+            "receipt": "owner203-campaign-confirmation.json",
+            "boundary": "Campaign initially labeled its reconstructed direction verbatim, then corrected that provenance. The reconstruction remains immutable history, not a copy of the exact sent direction or current canonical quote. Its scope was confirmed unchanged."
+          }
+        },
+        "watcherLaunch": {
+          "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "source": "toolu_011KH1FEA1Js2QGRAao8jtL6",
+          "receipt": "owner203-watcher-direction.json"
+        },
+        "launchBinding": {
+          "file": "watcher-lib-harness-0xc0000409-20261025.json",
+          "retainedCopy": "owner203-launch-binding.json",
+          "bytes": 1988,
+          "sha256": "0b872700afa04bb6697c7b9b2049bf372092242ae03172f285157a944e1597b0",
+          "nodeId": null,
+          "ledgerRecordId": "watcher-windows-lib-harness-abnormal-exit-0xc0000409",
+          "issue": 203,
+          "sessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+          "status": "launched",
+          "updatedAt": "2026-10-26T00:36:51.0940542Z",
+          "canonicalBase": "db8eaa75b019ab143b527fb93005bab45e2ca96e",
+          "branchAtLaunch": "lossyrob-special-train",
+          "profileReportedByBinding": {
+            "model": "claude-opus-5.5",
+            "reasoningEffort": "high",
+            "contextTier": "default",
+            "mode": "interactive"
+          }
+        },
+        "kickoff": {
+          "file": "kickoff.md",
+          "retainedCopy": "owner203-kickoff.txt",
+          "bytes": 16581,
+          "sha256": "1667aaec4e52cd77bb3a47b7767e847f217f84585a6b6d09611ce785430119dc",
+          "boundary": "Full kickoff read and byte-bound, not executed by the reconciler. Its hosted-only/no-retry override applies to this owner; general role-guide retry wording does not override it."
+        },
+        "ownerSession": {
+          "sessionId": "b8e0a6cc-6ae3-4c1b-b6f8-db46d47a279f",
+          "creatorSessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "observedBranch": "lossyrob-fix-watcher-lib-harness-0xc0000409",
+          "branchBoundary": "The launch binding records the initial branch; read-only App identity subsequently reports the renamed branch. This is the same session/worktree, not a second owner, namespace rebind or replacement.",
+          "publicOwnerPostBoundary": "The coordinator said the owner would post its Owner line. This record does not claim that post has been observed; the launch is bound to the actual directions, binding, kickoff and App identity."
+        },
+        "scope": "Hosted-only diagnosis and repair of the #203 Watcher library-test 0xc0000409 failure, beginning with public CI evidence. No retry, waiver or flake exception; PR closes #203. Coordinate with Local rather than duplicate only if evidence establishes the same defect as #166. No workstation PageHeap, WER, debugger or system-state changes.",
+        "conservation": "11 records/21 Watcher nodes and all ten other records remain exact. Entire Local tree, 48 records/27 nodes, both graphs, all #166 qualifications and both pending #193/#198 product-repair-merge wakes remain exact. No graph node, edge or #198/#202 relationship is added."
+      }
     }
   ]
 }
