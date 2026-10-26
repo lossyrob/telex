@@ -1,6 +1,13 @@
 use super::*;
 use serde_json::json;
 
+/// Hang guard, not a latency assertion. Every management command commits a
+/// `synchronous=FULL` SQLite transaction, so the elapsed time follows disk
+/// flush latency. On hosted Windows runners the five commands plus Shutdown
+/// measured p50 0.5 s, p99 3.1 s and max 7.4 s over 3,162 runs, and opening the
+/// fresh registry alone reached 14.7 s. CI exceeded the former 10 s bound (#203).
+const DURABLE_MANAGEMENT_HANG_GUARD: Duration = Duration::from_secs(60);
+
 struct Fixture {
     root: PathBuf,
 }
@@ -198,7 +205,7 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
         let (runtime, management) = fixture.open();
         let owner = tokio::spawn(runtime.run());
         let (rejected, removed, shown, reused, attempts) =
-            tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, async {
                 let registration = |id, initial_state| Command::Register {
                     json: serde_json::to_vec(&json!({
                         "schemaVersion": 2, "id": id, "command": ["not-executed"],
@@ -236,7 +243,7 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
             })
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), owner)
+        tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, owner)
             .await
             .unwrap()
             .unwrap()
