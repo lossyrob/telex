@@ -169,6 +169,30 @@ failure. The original finite wait deadline bounds every attempt and retry delay.
 If that deadline expires before or at the recovery deadline, the outcome is
 `Timeout`; otherwise exhausted recovery returns `BackendUnavailable`.
 
+PostgreSQL candidate fetches use one additional connection per backend, separate
+from the transactional command/status client. It is opened with the backend's
+already-resolved connection configuration, without another credential invocation.
+Waiters and push candidate readers clone its shared handle and pipeline their
+autocommit materialization and reads; they hold no client mutex while executing
+SQL. Status and other members therefore cannot spend a wait's recovery grace
+queued behind command/status work. This is a fixed per-backend connection, not a
+per-wait connection pool. Database execution or lock delays remain bounded by
+the unchanged recovery and idle deadlines.
+
+Only replacement of a closed candidate connection is serialized. Replacement
+resolves the profile's credentials afresh within the existing wait budget; a
+waiter queued behind that replacement reports `acquisition`, while its owner
+reports `credential` or `connect`. No credential retry policy or budget changes.
+Each attempt retains its current phase across cancellation: `acquisition`,
+`credential`, `connect` (including connection/session setup), `materialization`,
+`primary-read`, or `cc-read`. The surrounding optional clock and delivery-fence
+operations report `durable-clock` and `ownership-proof`; backends without finer
+instrumentation report `candidate-read`. Exhaustion detail includes the phase
+and the 3,000 ms recovery budget, both in the error and the existing status
+`last_waiter_detail`. It identifies where the budget expired, not an auth/PIM
+diagnosis or proof that that phase consumed the entire budget. Exit 7 still
+leaves the station registered and explicitly unattended with no live waiter.
+
 Authentication, configuration, schema, and other permanent errors retain their
 ordinary error path. Recovery never bypasses membership, liveness, or epoch
 checks, and does not consume a message. The independent PostgreSQL `LISTEN` loop

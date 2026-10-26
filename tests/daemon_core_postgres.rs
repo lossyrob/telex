@@ -25,6 +25,9 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 #[path = "fixtures/credential_command_helpers.rs"]
 mod credential_helpers;
 
+#[path = "fixtures/pg_latency_proxy.rs"]
+mod pg_latency_proxy;
+
 #[tokio::test]
 async fn application_client_schema_v3_operation_smoke() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -2154,6 +2157,11 @@ async fn postgres_reset_does_not_abort_pull_or_unregister_push_station() {
     tokio::spawn(async move { connection.await.expect("reset lock connection") });
 
     for reset in ["query", "listen"] {
+        let reset_application = if reset == "query" {
+            format!("{application_name}-wait")
+        } else {
+            application_name.clone()
+        };
         if reset == "query" {
             blocker
                 .batch_execute(&format!(
@@ -2176,7 +2184,7 @@ async fn postgres_reset_does_not_abort_pull_or_unregister_push_station() {
                        AND (($2 = 'query' AND wait_event_type = 'Lock'
                              AND query LIKE '%deliveries%')
                          OR ($2 = 'listen' AND query LIKE 'LISTEN telex_messages_%'))",
-                    &[&application_name, &reset],
+                    &[&reset_application, &reset],
                 )
                 .await
                 .unwrap();
@@ -2389,7 +2397,7 @@ async fn postgres_wait_does_not_retry_permanent_reconnect_configuration() {
         .query(
             "SELECT pid FROM pg_stat_activity WHERE application_name=$1
          AND query NOT LIKE 'LISTEN telex_messages_%'",
-            &[&application_name],
+            &[&format!("{application_name}-wait")],
         )
         .await
         .unwrap();
@@ -2571,7 +2579,7 @@ async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_me
             .query(
                 "SELECT pid FROM pg_stat_activity WHERE application_name=$1 \
              AND query NOT LIKE 'LISTEN telex_messages_%'",
-                &[&application_name],
+                &[&format!("{application_name}-wait")],
             )
             .await
             .unwrap();
@@ -2634,8 +2642,10 @@ async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_me
         } else {
             assert!(
                 matches!(
-                    response, Response::Error { ref code, .. }
+                    response, Response::Error { ref code, ref message, .. }
                         if code == proto::ERROR_BACKEND_UNAVAILABLE
+                            && message.contains("phase=credential")
+                            && message.contains("recovery_grace_ms=3000")
                 ),
                 "{response:?}"
             );
@@ -2663,6 +2673,25 @@ async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_me
         assert_eq!(pull.last_waiter_exit_code, Some(expected_code));
         assert_eq!(pull.live_waiters_count, 0);
         assert!(!pull.idle);
+        if expected_code == 7 {
+            assert!(pull
+                .last_waiter_detail
+                .as_deref()
+                .unwrap()
+                .contains("phase=credential"));
+        }
+        daemon
+            .open_backend(&store_key)
+            .await
+            .fetch_wait_candidates(
+                "addr:pull",
+                telex::backend::WaitFetchOptions {
+                    wake_on_cc: false,
+                    cc_after_ms: 0,
+                },
+            )
+            .await
+            .expect("restore the candidate connection after credential cleanup");
     }
     assert!(matches!(
         daemon
@@ -2687,6 +2716,206 @@ async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_me
         .unwrap();
     drop(fixture);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn postgres_candidate_waits_do_not_queue_behind_status_and_report_sql_phases() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) =
+        pg_url_or_skip("postgres_candidate_waits_do_not_queue_behind_status_and_report_sql_phases")
+    else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let host = match cfg.get_hosts().first().expect("PostgreSQL test host") {
+        tokio_postgres::config::Host::Tcp(host) => host.clone(),
+        #[cfg(unix)]
+        tokio_postgres::config::Host::Unix(_) => panic!("latency fixture requires loopback TCP"),
+    };
+    let proxy =
+        pg_latency_proxy::PgLatencyProxy::start(host, *cfg.get_ports().first().unwrap_or(&5432))
+            .await;
+    let unique = format!("{}_{}", std::process::id(), now_ms());
+    let schema = sanitize_ident(&format!("telex_candidate_latency_{unique}")).unwrap();
+    let secret_name = format!("TELEX_TEST_CANDIDATE_{unique}");
+    let config_path = write_temp_config("candidate-latency", &ConfigFile::default());
+    let fixture = CredentialReconnectFixture {
+        previous_config: std::env::var_os("TELEX_CONFIG"),
+        previous_secret: std::env::var_os(&secret_name),
+        secret_name: secret_name.clone(),
+        delay: config_path.parent().unwrap().join("unused-delay"),
+    };
+    std::env::set_var(
+        &secret_name,
+        std::str::from_utf8(cfg.get_password().unwrap_or(b"local-test-placeholder")).unwrap(),
+    );
+    let quote = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
+    let profile = BackendProfile {
+        kind: "postgres".into(),
+        path: None,
+        url: Some(format!(
+            "host=127.0.0.1 port={} user='{}' dbname='{}' sslmode=disable application_name=candidate-{unique}",
+            proxy.port,
+            quote(cfg.get_user().unwrap()),
+            quote(cfg.get_dbname().unwrap_or("postgres")),
+        )),
+        auth: Some("password".into()),
+        password_env: Some(secret_name),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store = profiles::store_key(&profile, None);
+    std::fs::write(
+        &config_path,
+        toml::to_string(&ConfigFile {
+            default: Some("candidate-latency".into()),
+            backends: BTreeMap::from([("candidate-latency".into(), profile)]),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let daemon = TestDaemon::new("candidate-latency");
+    for i in 0..6 {
+        registered_epoch(&daemon, &store, &format!("s{i}"), &format!("addr:case{i}")).await;
+    }
+    admin_exec(
+        &cfg,
+        &format!(
+            "SET search_path TO {schema}, public;
+             INSERT INTO messages(id,to_addr,cc,body,sent_at_ms,created_at_ms)
+             SELECT i,'history:'||i,CASE WHEN i<=1199 THEN 'history:cc' ELSE NULL END,
+                    repeat('x',1100),i,i FROM generate_series(1,4190) AS i;
+             INSERT INTO deliveries(message_id,recipient,delivered_at_ms,consumed_at_ms)
+             SELECT id,to_addr,created_at_ms,created_at_ms FROM messages;
+             INSERT INTO deliveries(message_id,recipient,delivered_at_ms,consumed_at_ms)
+             SELECT id,'history:cc',created_at_ms,created_at_ms FROM messages WHERE id<=1199;
+             INSERT INTO dispositions(message_id,recipient,state,at_ms)
+             SELECT id,to_addr,'handled',created_at_ms FROM messages WHERE id<=2002;
+             ANALYZE;"
+        ),
+    )
+    .await
+    .unwrap();
+
+    // Reproduce the isolated three-waiter/status regression without changing production grace.
+    proxy.set_delay(70);
+    let status = {
+        let daemon = daemon.clone();
+        tokio::spawn(async move { daemon.status().await })
+    };
+    let mut waits = tokio::task::JoinSet::new();
+    for i in 0..3 {
+        let daemon = daemon.clone();
+        let store = store.clone();
+        waits.spawn(async move {
+            let started = Instant::now();
+            let response = daemon
+                .wait(&store, &format!("s{i}"), &format!("addr:case{i}"), 6_000)
+                .await;
+            assert!(matches!(response, Response::Timeout), "{response:?}");
+            assert!(started.elapsed() >= Duration::from_secs(6));
+        });
+    }
+    while let Some(wait) = waits.join_next().await {
+        wait.unwrap();
+    }
+    assert_eq!(status.await.unwrap().members.len(), 6);
+    proxy.assert_running();
+    proxy.set_delay(0);
+    let status = daemon.status().await;
+    for member in status
+        .members
+        .iter()
+        .filter(|member| ["s0", "s1", "s2"].contains(&member.session_id.as_str()))
+    {
+        assert_eq!(member.last_waiter_exit_code, Some(2));
+        assert_eq!(member.live_waiters_count, 0);
+    }
+
+    let (blocker, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    let driver = tokio::spawn(connection);
+    for (table, phase) in [
+        ("deliveries", "materialization"),
+        ("application_state_version", "primary-read"),
+    ] {
+        blocker
+            .batch_execute(&format!(
+                "BEGIN; LOCK TABLE {schema}.{table} IN ACCESS EXCLUSIVE MODE"
+            ))
+            .await
+            .unwrap();
+        let response = daemon.wait(&store, "s0", "addr:case0", 10_000).await;
+        blocker.batch_execute("ROLLBACK").await.unwrap();
+        let detail = match response {
+            Response::Error { code, message, .. } => {
+                assert_eq!(code, proto::ERROR_BACKEND_UNAVAILABLE);
+                assert!(message.contains(&format!("phase={phase}")), "{message}");
+                assert!(message.contains("recovery_grace_ms=3000"), "{message}");
+                message
+            }
+            other => panic!("expected bounded {phase} exhaustion: {other:?}"),
+        };
+        let status = daemon.status().await;
+        let member = status
+            .members
+            .iter()
+            .find(|m| m.session_id == "s0")
+            .unwrap();
+        assert_eq!(member.last_waiter_detail.as_deref(), Some(detail.as_str()));
+        assert_eq!(member.last_waiter_exit_code, Some(7));
+        assert_eq!(member.live_waiters_count, 0);
+        assert_eq!(
+            serde_json::to_value(member.station_health).unwrap(),
+            serde_json::json!("unattended")
+        );
+    }
+    proxy.set_connect_delay(5_700);
+    let pids = blocker
+        .query(
+            "SELECT pid FROM pg_stat_activity WHERE application_name=$1",
+            &[&format!("candidate-{unique}-wait")],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        pids.len(),
+        1,
+        "target exactly the owned candidate connection"
+    );
+    let pid: i32 = pids[0].get(0);
+    assert!(blocker
+        .query_one("SELECT pg_terminate_backend($1)", &[&pid])
+        .await
+        .unwrap()
+        .get::<_, bool>(0));
+    let response = daemon.wait(&store, "s0", "addr:case0", 10_000).await;
+    assert!(
+        matches!(response, Response::Error { ref code, ref message, .. }
+            if code == proto::ERROR_BACKEND_UNAVAILABLE && message.contains("phase=connect")),
+        "{response:?}"
+    );
+    assert!(daemon
+        .status()
+        .await
+        .members
+        .iter()
+        .find(|member| member.session_id == "s0")
+        .unwrap()
+        .last_waiter_detail
+        .as_deref()
+        .unwrap()
+        .contains("phase=connect"));
+    proxy.assert_running();
+    drop(blocker);
+    driver.abort();
+    admin_exec(&cfg, &format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .unwrap();
+    drop(fixture);
+    std::fs::remove_dir_all(config_path.parent().unwrap()).unwrap();
 }
 
 // ---------------------------------------------------------------------------------------------

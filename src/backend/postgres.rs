@@ -13,7 +13,7 @@ use tokio_postgres::{GenericClient, IsolationLevel, Row, Transaction};
 
 use super::{
     application_compound_state_delta, application_operation_state_delta, retryable_backend_error,
-    Backend, Capabilities, WaitCandidate, WaitFetchOptions,
+    Backend, Capabilities, WaitCandidate, WaitFetchOptions, WaitFetchPhase, WaitFetchProgress,
 };
 use crate::model::*;
 
@@ -22,6 +22,7 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 pub struct PgBackend {
     connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
+    wait_client: AsyncMutex<Arc<ManagedPgClient>>,
     release: Arc<PgReleaseClient>,
     notify_channel: String,
 }
@@ -973,6 +974,7 @@ impl PgBackend {
         schema: Option<&str>,
     ) -> Result<Self> {
         let client = Self::open_client(&config, schema).await?;
+        let wait_client = Self::open_wait_client(&config, schema).await?;
         let release_config = Self::release_config(&config);
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
@@ -981,6 +983,7 @@ impl PgBackend {
                 schema: schema.map(str::to_string),
             },
             client: AsyncMutex::new(client),
+            wait_client: AsyncMutex::new(Arc::new(wait_client)),
             release: Arc::new(PgReleaseClient {
                 client: AsyncMutex::new(None),
                 connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
@@ -1008,6 +1011,7 @@ impl PgBackend {
     ) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
+        let wait_client = Self::open_wait_client(&config, schema.as_deref()).await?;
         let release_config = Self::release_config(&config);
         let release_client = if prepare_release {
             Some(Self::open_release_client(&release_config, schema.as_deref()).await?)
@@ -1019,6 +1023,7 @@ impl PgBackend {
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
+            wait_client: AsyncMutex::new(Arc::new(wait_client)),
             release: Arc::new(PgReleaseClient {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema)),
@@ -1109,6 +1114,73 @@ impl PgBackend {
         }
         let driver = driver.0.take().expect("release driver remains owned");
         Ok(ManagedPgClient { client, driver })
+    }
+
+    async fn open_wait_client(
+        config: &tokio_postgres::Config,
+        schema: Option<&str>,
+    ) -> Result<ManagedPgClient> {
+        let mut config = config.clone();
+        config.application_name(format!(
+            "{}-wait",
+            config.get_application_name().unwrap_or("telex")
+        ));
+        let (client, connection) = config
+            .connect(make_tls()?)
+            .await
+            .context("connecting PostgreSQL candidate client")?;
+        let driver = tokio::spawn(async move {
+            if let Err(error) = connection.await {
+                eprintln!("[telex] postgres candidate connection ended: {error}");
+            }
+        });
+        let mut driver = ConnectionTaskGuard(Some(driver));
+        client
+            .batch_execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
+            )
+            .await
+            .context("pinning candidate READ COMMITTED isolation")?;
+        if let Some(schema) = schema {
+            let schema = sanitize_ident(schema)?;
+            client
+                .batch_execute(&format!("SET search_path TO {schema}, public"))
+                .await
+                .context("setting candidate schema search_path")?;
+        }
+        Ok(ManagedPgClient {
+            client,
+            driver: driver.0.take().expect("candidate driver remains owned"),
+        })
+    }
+
+    async fn candidate_client(&self, progress: &WaitFetchProgress) -> Result<Arc<ManagedPgClient>> {
+        progress.set(WaitFetchPhase::Acquisition);
+        let mut client = self.wait_client.lock().await;
+        if client.client.is_closed() {
+            let replacement = match &self.connector {
+                PgConnector::Static { config, schema } => {
+                    progress.set(WaitFetchPhase::Connect);
+                    Self::open_wait_client(config, schema.as_deref()).await?
+                }
+                PgConnector::Profile(profile) => {
+                    progress.set(WaitFetchPhase::Credential);
+                    let (config, schema) = crate::profiles::pg_connect_config(profile)
+                        .await
+                        .context("resolving postgres candidate reconnect profile")?;
+                    progress.set(WaitFetchPhase::Connect);
+                    let replacement = Self::open_wait_client(&config, schema.as_deref()).await?;
+                    *self.release.connection.lock().await = (Self::release_config(&config), schema);
+                    replacement
+                }
+            };
+            *client = Arc::new(replacement);
+        }
+        if self.release.proactive_repair {
+            self.schedule_release_repair();
+        }
+        // Only connection replacement is serialized; no SQL holds this mutex.
+        Ok(client.clone())
     }
 
     async fn client(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>> {
@@ -2280,9 +2352,22 @@ impl Backend for PgBackend {
         address: &str,
         options: WaitFetchOptions,
     ) -> Result<Vec<WaitCandidate>> {
+        self.fetch_wait_candidates_with_progress(address, options, &WaitFetchProgress::default())
+            .await
+    }
+
+    async fn fetch_wait_candidates_with_progress(
+        &self,
+        address: &str,
+        options: WaitFetchOptions,
+        progress: &WaitFetchProgress,
+    ) -> Result<Vec<WaitCandidate>> {
         let result: Result<Vec<WaitCandidate>> = async {
-            let client = self.client().await?;
-            materialize_pending_delivery_rows_for_recipient(&client, address).await?;
+            let connection = self.candidate_client(progress).await?;
+            let client = &connection.client;
+            progress.set(WaitFetchPhase::Materialization);
+            materialize_pending_delivery_rows_for_recipient(client, address).await?;
+            progress.set(WaitFetchPhase::PrimaryRead);
             let terminal = terminal_dispositions_sql_list();
             let primary_sql = format!(
                 "SELECT {MSG_COLS_M}, d.id AS delivery_id,
@@ -2311,6 +2396,7 @@ impl Backend for PgBackend {
                 .collect();
 
             if options.wake_on_cc {
+                progress.set(WaitFetchPhase::CcRead);
                 let cc_sql = format!(
                     "SELECT {MSG_COLS_M}, d.id AS delivery_id,
                             (SELECT version FROM application_state_version WHERE singleton=1)
