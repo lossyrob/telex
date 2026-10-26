@@ -2241,12 +2241,25 @@ class TransportBoundaryTests(unittest.TestCase):
                     derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100, receipt)
                 self.assertNotIn("SECRET", str(caught.exception) + json.dumps(receipt))
                 self.assertIsNone(caught.exception.__cause__)
-        with tempfile.TemporaryDirectory() as temp, fixture.transport(pin, raw, storage_raw=raw+b"x"):
+        original_read = MockHTTP.read
+        read_sizes = []
+        def read_response(response, size):
+            read_sizes.append(size)
+            return original_read(response, size)
+        with tempfile.TemporaryDirectory() as temp, fixture.transport(pin, raw, storage_raw=raw+b"x"), \
+                patch.object(MockHTTP, "read", read_response):
             receipt = {}
-            with self.assertRaises(RuntimeError):
-                derived.download(pin, Path(temp) / "zip", "TEST-TOKEN", 100, receipt)
+            target = Path(temp) / "zip"
+            with self.assertRaisesRegex(RuntimeError, "^response byte bound$"):
+                derived.download(pin, target, "TEST-TOKEN", 100, receipt)
+            self.assertEqual(read_sizes, [len(raw)+1])
+            self.assertEqual(target.read_bytes(), b"")
             self.assertEqual(receipt["observed_body_bytes"], len(raw)+1)
             self.assertEqual(receipt["observed_body_sha256"], hashlib.sha256(raw+b"x").hexdigest())
+            self.assertEqual(receipt["byte_precision"],
+                             "OVERFLOW FAILURE EVIDENCE: cap+1 response body; not ZIP identity or file persistence.")
+            self.assertNotIn("sha256", receipt)
+            self.assertNotIn("bytes", receipt)
         with self.assertRaises(RuntimeError) as caught:
             derived.close_error(SimpleNamespace(close=unittest.mock.Mock(side_effect=OSError("signed-SECRET"))))
         self.assertNotIn("SECRET", str(caught.exception))

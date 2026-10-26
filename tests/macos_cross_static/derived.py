@@ -86,7 +86,8 @@ def read_bounded(response, maximum, deadline, sink=None, progress=None):
         digest.update(raw)
         if progress is not None:
             progress.update(observed_body_bytes=count, observed_body_sha256=digest.hexdigest(),
-                            byte_precision="Received response body, not file persistence.")
+                            byte_precision=("OVERFLOW FAILURE EVIDENCE: cap+1 response body; not ZIP identity or file persistence."
+                                            if count > maximum else "Received response body, not file persistence."))
         require(count <= maximum, "response byte bound")
         if sink is None:
             chunks.append(raw)

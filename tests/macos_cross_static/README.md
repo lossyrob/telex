@@ -47,7 +47,14 @@ follows no further redirects. Both API and storage openers explicitly disable
 environment/system proxies. API metadata redirects are refused.
 
 Reads have deadlines and exact byte limits (one overflow sentinel byte may be
-observed and immediately rejected). ZIP length and full hash must match before
+observed and immediately rejected). Under
+[6429885615](https://github.com/lossyrob/telex/issues/172#issuecomment-6429885615),
+total response reads never exceed 27545841 bytes (cap + 1). Reaching cap + 1
+is terminal: no second read or retry, and no excess byte is written, extracted
+or used. A running cap + 1 hash is labeled **OVERFLOW FAILURE EVIDENCE**, never
+a ZIP identity and never compared against or substituted for the pinned ZIP
+hash. Success still requires exactly 27545840 bytes and EOF without a sentinel.
+ZIP length and full hash must match before
 ZIP parsing or extraction. All 55 flat regular members, total 86459578 expanded
 bytes, and the complete 54-entry manifest are checked; duplicate keys/names,
 unsafe paths, links, encryption, oversized members, missing candidate and hash
