@@ -907,3 +907,104 @@ The gap is really two parts with different causes:
 Trigger: when macOS detector containment is authorized and lands under #172 or its successor, macOS hosted coverage of the Watcher v2 detector tests, including both parts above, becomes an item through the design steward. Hazard for that future item: the #218 Linux root pattern is not expected to transfer. On macOS, / is a read-only sealed system volume. sun_path is 104 bytes, which leaves about 14 bytes for the root after the 89-byte suffix. $TMPDIR under /var/folders is too long, and /var is a symlink. The item must meet the #215 conditions (https://github.com/lossyrob/telex/issues/215#issuecomment-6421010376) on macOS, or stop and record why. It must not relax a check.
 
 Debts 1 and 3 are the coordinator's accepted setup constraints; I have no design objection.
+
+
+## #200 guidance completion and retained follow-through boundaries (2026-10-26)
+
+Campaign `toolu_01GveqQN5GHTUpT12jn1UqAb` accepts #200 complete after PR #217 merged `2dc8134ac87ac1af5570d82c1d35484e89c0d934` from `b7fe01cb3607bf7138351bdc2d16ad5e065cad39`. The same App owner `fb884e5b-cd43-41b7-aed9-b22f58477c62` reports obligations complete (`call_sXBnua8K3vopxT8CEkSlGYNt`). This records existing staffing and completion, not a new owner or launch.
+
+Controller-provided launch custody: initial branch `lossyrob-legendary-pancake`, public PR branch `lossyrob-stall-detection-guidance`, kickoff 15374 bytes / SHA-256 `7cb445790589810a0b0c1f1a5ecd75d8c9b222b29e6811fb482dc98e0d2c68a9`, start `3c9ac7ca960c5abae9d3f98a56f3c1ba91a6b63c`, delivered `2026-10-26T16:08:54.9770455Z`, and workflow 14034 bytes / SHA-256 `55131fd3bdfbc3978c408acb4b6d3b1b70320be390ceb30b6ce708b05004e2fe`. Kickoff equals the entire captured handoff prompt. Preparation, profile and delivery remain coordinator-attributed. The coordinator reports no separate #200 creation receipt: none is invented, and no recipient workspace, activity or transcript was inspected. Original freeze, canonical-pending and temporary-guidance launch instructions remain historical under the current operator policy and later #216 routing.
+
+The readiness and Campaign merge snapshots left main CI and field follow-through with this owner. Later exact-merge main CI run 40365748597, attempt 2, is green in aggregate: one new Windows fallback job 121738788335 follows failed job 121722844042; 20 other successes retain identical full ordered steps, execution timestamps, heads, conclusions and runner identity. All 21 aggregate job IDs were regenerated and runner-group metadata changed; neither implies new execution. Both original and later metadata envelopes are retained. Docs run 40365748539 has two successful jobs. This is metadata evidence only; documentation merits, named tests, observer exit and runtime claims remain owner/Campaign-attributed.
+
+Preserve the original attempt-1 failure and the single recorded failed-jobs rerun. #182/Local retains one distinct waiter-list readiness candidate, unassigned, not a demonstrated product defect or repair. Missing status samples, outcomes and waiter liveness/output prevent a causal diagnosis. #208 Live-seed admission remains separate. The later green execution explains neither failure. No run, observer, log/source replay or local runtime was added here.
+
+Retained #217 gate debts: #216 owns the temporary bounded-inbox limitation cleanup in both guidance surfaces; #201 owns live workstream validation. Source-text guards do not execute registration examples or prove App wakeup. Installation, one-registry and observation limits remain. No #216 completion or #201 readiness/validation is inferred, no geometry or checkpoint changes, and no Local-family state is projected by this packet.
+
+Full public final-readiness, Campaign merge gate and terminal field follow as CRLF-to-LF displays; original raw bytes remain separately bound.
+
+https://github.com/lossyrob/telex/pull/217#issuecomment-6422354531
+
+PAW Implementer: Review Addressed
+
+Ready for operator at b7fe01cb3607bf7138351bdc2d16ad5e065cad39.
+
+All 21 [hosted CI jobs](https://github.com/lossyrob/telex/actions/runs/40361887570), [independent review](https://github.com/lossyrob/telex/pull/217#pullrequestreview-5655965370), and [design inspection](https://github.com/lossyrob/telex/pull/217#issuecomment-6421710161) pass at that exact head. No unresolved review threads or main conflict; the PR closes only #200. Consequence: low, documentation and its regression guard only.
+
+Read and triaged every non-blocking observation in review 5655965370. Acknowledge and retain these boundaries:
+
+- The existing history cap remains with #216; this guidance preserves routing identity/history and uses the App fallback.
+- Local classification and one-registry inventory do not establish every App or background-work state; broader observation is outside #200.
+- Registration depends on existing-installation values, as required by the confirmed scope; no guessed values or wrapper are added.
+- Source-text checks establish template parity and required guidance, not live registration or App wakeup. Live dogfood remains with #201.
+
+No code change or new review cycle is needed for these observations. Prior-head Windows failures retain the #182/#208 disposition; this exact-head green run is the gate evidence. The PR is ready for the operator's merge decision. This session will continue monitoring and will not merge.
+
+https://github.com/lossyrob/telex/pull/217#issuecomment-6422398993
+
+## Campaign merge gate - PR #217 at b7fe01cb (Closes #200)
+
+Verdict: **merge**, with low debt.
+
+Gated head: b7fe01cb3607bf7138351bdc2d16ad5e065cad39. Merge base 3c9ac7ca.
+
+### Floor
+- Exact-head CI: run 40361887570 (pull_request), attempt 1, 21/21 success. It was created at 16:43:46Z, so the merge ref included #206 (a0a9c064).
+- Receipts at this head:
+  - Independent review: PASS, review 5655965370, commit_id b7fe01cb.
+  - Design steward: PASS, issuecomment-6421710161, which carries forward the f9d34af6 PASS (6421211275). The only change since is the formatting-only test delta.
+  - Readiness: issuecomment-6422354531.
+- closingIssuesReferences: [200]. Unresolved threads: 0. MERGEABLE/CLEAN. Not a draft.
+- Main drift since the base:
+  - #206 is already in the CI merge ref.
+  - #218 (a4b3b21f) touched ci.yml, CONTRIBUTING, the stall-detector test fixtures, the cli_v2 tests and credential_command.
+  - V6 changed .streamliner only.
+  - None of these overlap this PR's five files (copilot/COPILOT.md, the guide pages, SUMMARY and tests/copilot_plugin.rs), and the new test reads only those files. The drift is disjoint, so no merge is required.
+
+### Merits (Campaign review)
+- The binary-owned COPILOT.md now documents opt-in group stall watching:
+  - membership records and the active, parked, operator-held and done states;
+  - a PowerShell 7 Watcher v2 registration template that takes values from the existing installation, with no guessed paths and an ask_user fallback;
+  - a confirm-then-ring response that calls get_sessions_status before acting;
+  - degraded-is-not-silence guidance.
+- The new guide page and the push-guide link are consistent with COPILOT.md. The contract test asserts that the registration template is identical across COPILOT.md and the guide, that the required fields are present and that the shared response vocabulary is present in both.
+- It does not add a detector script or a polling loop, and it tells members not to park merely to suppress degradation.
+
+### Debt
+1. The bounded-inbox limit paragraph ("more than 1024 retained inbox entries ... until a release includes #216") is temporary guidance. The #216 owner's kickoff carries the steward's COPILOT.md cleanup for it.
+2. Live validation of this guidance on a real workstation belongs to #201.
+
+### Follow-through (owner fb884e5b)
+Report main CI for the merge commit and post the #200 field report.
+
+https://github.com/lossyrob/telex/issues/200#issuecomment-6423179743
+
+## Field report: #200
+
+Delivered in [PR #217](https://github.com/lossyrob/telex/pull/217), merged as `2dc8134ac87ac1af5570d82c1d35484e89c0d934`. #200 remains closed.
+
+Design impact: updated-docs
+
+### What held
+
+Binary-owned Copilot instructions and the linked guide now cover root-owned group membership, member state transitions, the shipped Watcher v2 registration template, distinct stall/advisory handling, and fresh App confirmation before ringing members. Backend, registry and cadence each have one installation source. Unknown installation values go to the operator; no wrapper, product flags, detector implementation or plugin bootstrap changes were added.
+
+### What changed during implementation
+
+Design inspection narrowed degraded-state handling to retained routing identity/history, incomplete-coverage reporting and App inspection. The documentation says the bounded-inbox limitation applies until a release includes #216. A hosted rustfmt finding in the source-text guard was corrected without changing its behavior.
+
+### Evidence
+
+The final pre-merge head `b7fe01cb3607bf7138351bdc2d16ad5e065cad39` passed all 21 [hosted CI jobs](https://github.com/lossyrob/telex/actions/runs/40361887570), [independent review](https://github.com/lossyrob/telex/pull/217#pullrequestreview-5655965370), and [design inspection](https://github.com/lossyrob/telex/pull/217#issuecomment-6421710161). All non-blocking observations were [explicitly dispositioned](https://github.com/lossyrob/telex/pull/217#issuecomment-6422354531).
+
+At the exact merge commit, [main CI attempt 2](https://github.com/lossyrob/telex/actions/runs/40365748597/attempts/2) passed all 21 jobs. The [Docs run](https://github.com/lossyrob/telex/actions/runs/40365748539) passed both guide build and Pages deployment.
+
+Main CI attempt 1 failed the Windows E2E test `station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone`, timing out while listing a waiter. The [failure record](https://github.com/lossyrob/telex/issues/182#issuecomment-6423039499) preceded the [single authorized failed-jobs rerun](https://github.com/lossyrob/telex/issues/182#issuecomment-6423062122). No source/check changes or second rerun were made. A green rerun is evidence for that attempt, not a repair or common-cause finding. [Sentinel classified](https://github.com/lossyrob/telex/issues/182#issuecomment-6423155985) this as a distinct waiter-list readiness observation: initial setup succeeded, but the later daemon projection barrier did not yield the waiter PID; busy-handoff assertions were unreached. Earlier pre-merge Live-seeding failures retain their separate [#208 classification](https://github.com/lossyrob/telex/issues/208#issuecomment-6421783331).
+
+### Carried boundaries
+
+- #216 owns the history-cap product repair and cleanup of its temporary limitation paragraphs in both guidance surfaces.
+- #201 owns live workstream validation. Source-text guards do not execute the registration examples or prove App wakeup; no local runtime was performed by this owner.
+- Local and one-registry observation limits and existing-installation prerequisites remain explicit. The Windows E2E observation remains under #182 for requested local adjudication; no product defect or repair owner is inferred.
+
+The post-merge observer has completed and exited. No merged #200 guidance-outcome failure was found.

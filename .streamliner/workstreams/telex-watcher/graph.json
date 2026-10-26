@@ -434,8 +434,8 @@
       "id": "stall-detection-agent-guidance",
       "type": "task",
       "title": "Stall detection agent guidance",
-      "summary": "Adds `telex copilot skill` instructions and a guide page for creating a group, registering the watch, member state changes, and the root's confirm-then-ring response. Depends on item 2.",
-      "status": "planned",
+      "summary": "Campaign accepted #200 guidance completion (2026-10-26): PR #217 merged as 2dc8134ac87ac1af5570d82c1d35484e89c0d934 from reviewed head b7fe01cb3607bf7138351bdc2d16ad5e065cad39; same owner fb884e5b-cd43-41b7-aed9-b22f58477c62 reports follow-through complete in field report 6423179743. Main CI run 40365748597, attempt 2, has 21 successful aggregate jobs: one new Windows fallback execution and 20 reused successes, with the original attempt-1 waiter-list failure retained under #182. Regenerated job IDs do not mean 21 fresh executions. Docs run 40365748539 passed build and deployment. The distinct unassigned waiter-list evidence candidate and earlier #208 seed-admission observations are separate, with no repair or common-cause finding. Temporary limitation cleanup belongs to #216; live validation belongs to #201. Source-text guards do not execute examples or prove App wakeup. Historical task scope follows: Adds `telex copilot skill` instructions and a guide page for creating a group, registering the watch, member state changes, and the root's confirm-then-ring response. Depends on item 2.",
+      "status": "completed",
       "attention": "watch",
       "repoIds": [
         "telex"
