@@ -160,9 +160,28 @@ jobs:
           tests/capture_windows_crash_evidence.ps1 `
             -EvidenceName workspace -SnapshotSymbols
 
+      - name: Prepare private short Unix test homes
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          root="$(sudo mktemp -d /t.XXXXXXXX)"
+          sudo chown "$(id -u):$(id -g)" "$root"
+          chmod 0700 "$root"
+          printf 'TELEX_TEST_HOME_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+
       - name: Test
         timeout-minutes: ${{ runner.os == 'Windows' && 30 || 360 }}
         run: cargo test --workspace --verbose
+
+      - name: Assert Unix test home root is empty
+        if: always() && runner.os == 'Linux' && env.TELEX_TEST_HOME_ROOT != ''
+        shell: bash
+        run: |
+          entry="$(find "$TELEX_TEST_HOME_ROOT" -mindepth 1 -maxdepth 1 -print -quit)"
+          if [ -n "$entry" ]; then
+            printf 'Leaked test home: %s\n' "$entry" >&2
+            exit 1
+          fi
 
       - name: Check Windows crashes after workspace tests
         if: always() && runner.os == 'Windows'

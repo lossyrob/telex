@@ -98,6 +98,45 @@ discovery. Acquisition errors are observed directly instead of being reported
 as an indistinguishable readiness timeout. Deterministic error/identity seams
 supplement, rather than replace, real platform scope/termination/reap and pipe tests.
 
+## Stall-detector fixture isolation
+
+On Unix, workspace tests require `TELEX_TEST_HOME_ROOT` for the binary-owned
+stall-detector fixture. It must name an existing absolute directory outside the
+real user home, owned by the current user with mode 0700. Neither that directory
+nor any ancestor may be a symlink. Ancestors must be owned by root or the
+current user and must not be group- or world-writable. The complete management
+socket path must fit the platform limit.
+
+The test validates these conditions before creating a unique child home. It
+fails with setup instructions if the variable is missing; it never falls back
+to the real home or adjusts an existing directory's permissions. Teardown
+removes each child on normal return or unwind. An abrupt process exit can leave
+only a fixture outside the real home.
+
+Where a short user-owned runtime directory already qualifies, create a private
+child there without sudo. For example, `/run/user/$(id -u)` can qualify on Linux
+when its ancestors satisfy the conditions above:
+
+```sh
+export TELEX_TEST_HOME_ROOT="$(mktemp -d "/run/user/$(id -u)/XXX")"
+chmod 0700 "$TELEX_TEST_HOME_ROOT"
+cargo test --workspace
+rmdir "$TELEX_TEST_HOME_ROOT"
+```
+
+The eight-character fixture child plus `/.telex-watcher/` and the 64-character
+socket key add 89 bytes to the root path. The final path must be shorter than
+`sockaddr_un.sun_path` (typically 108 bytes on Linux and 104 on macOS). A
+shorter setup root may therefore be necessary even with safe permissions.
+Ordinary `/tmp` roots are rejected because their ancestry is world-writable.
+
+The hosted Linux workspace job creates a short `/t.XXXXXXXX` root. Only setup
+uses sudo, to create the new directory and transfer its ownership to the runner;
+the runner applies mode 0700 and all tests run unprivileged. The job checks that
+the setup root is empty after tests; the root itself is discarded with the
+hosted runner. Windows uses a home inside the existing isolated fixture root
+and needs no additional setup.
+
 ## Windows CI bounds and execution evidence
 
 The Windows `build-test` job has independent hosted ceilings around whole steps:

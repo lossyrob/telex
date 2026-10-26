@@ -26,8 +26,48 @@ impl Directory {
 
 impl Drop for Directory {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).unwrap();
+        let removed = std::fs::remove_dir_all(&self.0);
+        if !std::thread::panicking() {
+            removed.expect("remove isolated stall detector directory");
+        }
     }
+}
+
+#[test]
+fn directory_cleanup_is_attempted_during_unwind_and_normal_return() {
+    for panicking in [true, false] {
+        let directory = Directory::new();
+        let path = directory.0.clone();
+        let result = std::panic::catch_unwind(|| {
+            let _directory = directory;
+            if panicking {
+                panic!("original test failure");
+            }
+        });
+        assert_eq!(result.is_err(), panicking);
+        assert!(!path.exists());
+    }
+}
+
+#[test]
+fn directory_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let directory = Directory::new();
+        std::fs::remove_dir_all(&directory.0).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
+}
+
+#[test]
+fn directory_cleanup_failure_without_unwinding_still_fails() {
+    let directory = Directory::new();
+    std::fs::remove_dir_all(&directory.0).unwrap();
+    assert!(std::panic::catch_unwind(|| drop(directory)).is_err());
 }
 
 fn at(seconds: i64) -> String {
