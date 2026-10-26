@@ -1019,3 +1019,45 @@ supplies no actual repair merge or Local #193 wake.
 The later #166 heap-routing qualification and BOTH still-pending
 #193/#198 actual-repair-merge wakes remain unchanged. This older
 identity/draft snapshot supplies no delivery or current gate credit.
+
+## 2026-10-26 - Separate ForeignDaemon repair #204 already staffed
+
+Campaign authorized a separate tracker and one public-record-only owner
+for the Windows InstalledCurrent crash/reattach ForeignDaemon failure,
+with launch first and artifact recording afterward. Existing candidate
+`local-daemon-windows-installed-current-crash-reattach-foreign-daemon`
+is promoted to [#204](https://github.com/lossyrob/telex/issues/204) and
+`foreigndaemon-reattach-repair`. The actual owner is
+`8afc363c-1af3-447d-a472-336f92d57998`, on its own main-based checkout
+and branch `lossyrob-foreigndaemon-reattach-repair`. Local reports one
+launch and clean starting head `7e1bfc3a`; App identity confirms the same
+session/checkout. The requested Opus 5.5/high/default/interactive profile
+and no-idle setting are not independent effective-capacity verification.
+
+The ledger keeps both earlier Windows observations and all candidate/
+unassigned source wording as history. One later public PR #196 occurrence
+is appended: run `40250813915`, job `121342086267`, event head
+`854855f1`, executed merge `1813c432a9a43178b17dc6909f2fe272367b5e8e`
+with base `db8eaa75` and that PR head. Failure at line 508 reports
+`DaemonBootstrap(ForeignDaemon)`; target 29 passed / 1 failed / 2 ignored,
+139.79 seconds, after fixture 6 passed / 0 failed / 1 ignored.
+The complete public issue and Local's launch/evidence binding are retained
+by hash. Their log/source verification remains Local-attributed; the
+reconciler did not replay logs, source, archives or runtime.
+
+The public result does not identify an actual foreign process, failed
+authentication branch, native exception or common cause. Later successor-
+PID, marker and single-spawn assertions were not reached; configured
+delay/recovery counts are not new retry permission. Preserve authenticated
+peers, owner-private authority, non-theft, fencing, bounded recovery and
+the refusal of genuinely foreign peers. Runtime work stays on authorized
+disposable hosted Windows only. No retry/rerun, waiver, flake exception,
+budget widening, blanket-success conversion or local runtime permission.
+
+The owner coordinates overlapping daemon/bootstrap/test/CI edits with
+`d7a17cd2-08c2-4760-b1a6-1209c2d0f80c` before publishing and does not
+write PR #196's branch. d7 remains #166 only. No automatic dependency or
+Watcher edge/status change is added. Both #166 actual-product-merge wakes
+remain pending and unchanged. Deliver one separately reviewed PR closing
+#204 with discriminating evidence, exact-final-head hosted coverage and
+the normal Campaign merge gate; launch is not repair, CI or readiness.

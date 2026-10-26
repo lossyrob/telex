@@ -4821,19 +4821,194 @@
                 "conservation": "Preserve all canonical history,166/193 ownership and scopes, Watcher state, accepted181/187 and retained debts. Do not delay active repair work or open a duplicate observer."
               }
             }
+          },
+          {
+            "kind": "additional-public-pr196-signature-occurrence",
+            "source": "https://github.com/lossyrob/telex/issues/204",
+            "sourceCapture": {
+              "rawFile": "foreign204-issue-raw.json",
+              "bodyFile": "foreign204-issue-body.txt",
+              "createdAt": "2026-10-26T00:57:36Z",
+              "updatedAt": "2026-10-26T00:57:36Z",
+              "bodyBytes": 5350,
+              "bodySha256": "c40b35d82238551b4e4125d6d9d40e3af063c772dc236718f163c3c19275e729"
+            },
+            "observation": {
+              "triggeringPullRequest": "https://github.com/lossyrob/telex/pull/196",
+              "eventHead": "854855f145752957025ae0df38df6f7b36859176",
+              "run": "https://github.com/lossyrob/telex/actions/runs/40250813915",
+              "attempt": 1,
+              "job": "https://github.com/lossyrob/telex/actions/runs/40250813915/job/121342086267",
+              "jobName": "InstalledCurrent Postgres process proofs (Windows)",
+              "executedMerge": "1813c432a9a43178b17dc6909f2fe272367b5e8e",
+              "executedTree": "6dd90524660f6cb171f68be6f78913ada3bcdf5c",
+              "orderedParents": [
+                "db8eaa75b019ab143b527fb93005bab45e2ca96e",
+                "854855f145752957025ae0df38df6f7b36859176"
+              ],
+              "publicLogBytes": 51310,
+              "publicLogSha256": "c8ec9f6d1cb0e4a842f0dcc3cdc461227316c20821268a4b2df8e7386b08abe2",
+              "failure": "installed_current_crash_restart_and_reattach_recovers_membership at508 returns DaemonBootstrap(ForeignDaemon); target29passed/1failed/2ignored,139.79s, precedingfixture6passed/0failed/1ignored.",
+              "verification": "Parent independently read public run/job metadata, bounded completed-job log excerpts, merge parents/tree and exact executed-source test lines471-526. No private d7 capture was read or forwarded.",
+              "limits": "Public signature does not identify an actual foreign process, internal failed check, common cause or a native exception. Suite duration is not stage latency; laterPID/marker/spawn assertions are unreached."
+            },
+            "publicIssueDetails": {
+              "event": "pull_request",
+              "executedRef": "refs/remotes/pull/196/merge",
+              "sourceTest": "installed_current_crash_restart_and_reattach_recovers_membership",
+              "sourcePath": "tests/installed_current_process.rs",
+              "assertionLine": "508:5",
+              "result": "MultiAddressOutcome { ready: false, results: {\"ic:crash:station\": Failed(DaemonBootstrap(ForeignDaemon))}, compensation: [], validation_error: None, cancellation: None }",
+              "fixtureTarget": {
+                "passed": 6,
+                "failed": 0,
+                "ignored": 1
+              },
+              "installedCurrentTarget": {
+                "passed": 29,
+                "failed": 1,
+                "ignored": 2,
+                "durationSeconds": 139.79
+              },
+              "reportedLogRanges": {
+                "checkout": "82-112",
+                "failure": "545-546",
+                "targetResult": "573"
+              },
+              "reportedExecutedSourceRange": "471-526",
+              "sourceBoundary": "Initial attach succeeds, the recorded daemon is deliberately terminated and disappearance is awaited. A configured 1,500ms publication delay and the existing BoundedRepair policy with four retries precede the failed outcome.ready check. The later successor-PID, marker and single-spawn assertions are not reached.",
+              "noNativeStatus": "The public issue filed by Local reports no 0xc00* native-exit status in the completed-job log. This is not a reconciler full-log read or process inspection."
+            },
+            "attribution": "The reconciler read the full public #204 issue and complete Local launch binding, not raw logs, executed source, provider CI inventory or archives. Public job/log/immutable-Git/test-line verification remains Local-attributed. Log bytes/hash identify completed-job text, not ZIP contents.",
+            "limits": "This is the third separately retained Windows public-signature observation on the same existing record, not proof of common cause or PR source attribution. Event head 854855f1 differs from executed merge 1813c432, whose base is db8eaa75. ForeignDaemon identifies no actual foreign process, image or failed internal check and is not a native exception. Target duration is not stage latency; configured delay and recovery counts neither prove that the intended window occurred nor authorize a new retry. The older Ubuntu timeout, #166 native cases, #193 seed admission, Overran and #203 harness exit remain distinct."
           }
         ]
       },
-      "description": "Classify the Windows InstalledCurrent crash/reattach ForeignDaemon bootstrap refusal without assuming an internal cause.",
+      "description": "Diagnose and repair the Windows InstalledCurrent crash/reattach ForeignDaemon refusal under separately authorized issue #204, without assuming an internal cause.",
       "affectedOutcome": "Reliability of hosted Windows crash/reattach admission proof; no Watcher source implication or established ownership violation.",
-      "requiredness": "Evidence-only candidate, not accepted repair scope, a hardening-gate transition or a dependency.",
-      "sequencing": "Preserve original evidence and distinguish the Ubuntu timeout. Explicit owning-role tracker/causal disposition must precede separately authorized implementation. Existing configured retries grant no new retry.",
-      "target": "Candidate intake only; GitHub tracker and implementation unassigned.",
-      "owner": "Local Daemon orchestrator owns evidence-only intake/triage. Implementation unassigned; no launch.",
-      "status": "candidate",
-      "decisionState": "proposed",
-      "dispositionAuthority": "Local's bounded evidence-only classification. Canonical reconciliation was deferred until the separate issue #166 launch prerequisite had landed. This intake authorizes no new issue, node, owner, retry or gate change.",
-      "terminalPath": "Owning-role triage, tracker disposition and causal classification before any separately authorized repair or hardening disposition; preserve fail-closed owner authority and evidence limits."
+      "requiredness": "Campaign-authorized separate #204 repair of the ForeignDaemon signature family blocking strict CI on PR #196; no automatic graph dependency or hardening-gate clearance.",
+      "sequencing": "One independently launched public-record-only owner works on its own main-based branch. Coordinate overlapping daemon/bootstrap/test/CI edits with d7 before publishing; do not write PR #196 branch. Launch first, record afterward as Campaign directed. No retry, waiver or flake exception.",
+      "target": "local-daemon/foreigndaemon-reattach-repair / https://github.com/lossyrob/telex/issues/204",
+      "owner": "Actual #204 owner 8afc363c-1af3-447d-a472-336f92d57998, coordinated by Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, on its own main-based lossyrob-foreigndaemon-reattach-repair branch. d7 remains #166 / PR #196 only.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign original direction toolu_01An1S92Jpt43cjRLd4HDCXC, confirmed directly with exact sent/register wording in toolu_014EXnE5H5oXyQfrYA6reKfs, authorizes one separate tracker and public-record-only owner, hosted-only diagnosis/repair, launch first/record after. Owning Local call_Hm5HNZfojopq27h8yU4vvjeO reports issue #204 and actual owner launch and requests this promotion. Candidate/unassigned/no-runtime source snapshots remain historical, not current repair authority or launch prerequisites.",
+      "terminalPath": "One separately reviewed PR closes #204 after a bounded cause-level diagnosis and justified correction, preserved authentication/owner-private authority/non-theft/fencing/bounded recovery, meaningful regression or discriminating evidence, exact-final-head hosted Windows InstalledCurrent and relevant required CI, public reviewer-origin source receipt, design review and normal Campaign merge gate. No unchanged-head retry/rerun, waiver, flake exception, budget widening or blanket ForeignDaemon success; launch alone is not implementation, repair, CI/readiness or accepted delivery.",
+      "separate204RepairPromotionAndActualLaunch": {
+        "kind": "additive-separate204-promotion-and-already-launched-owner",
+        "historicalCandidateFields": {
+          "description": "Classify the Windows InstalledCurrent crash/reattach ForeignDaemon bootstrap refusal without assuming an internal cause.",
+          "requiredness": "Evidence-only candidate, not accepted repair scope, a hardening-gate transition or a dependency.",
+          "sequencing": "Preserve original evidence and distinguish the Ubuntu timeout. Explicit owning-role tracker/causal disposition must precede separately authorized implementation. Existing configured retries grant no new retry.",
+          "target": "Candidate intake only; GitHub tracker and implementation unassigned.",
+          "owner": "Local Daemon orchestrator owns evidence-only intake/triage. Implementation unassigned; no launch.",
+          "status": "candidate",
+          "decisionState": "proposed",
+          "dispositionAuthority": "Local's bounded evidence-only classification. Canonical reconciliation was deferred until the separate issue #166 launch prerequisite had landed. This intake authorizes no new issue, node, owner, retry or gate change.",
+          "terminalPath": "Owning-role triage, tracker disposition and causal classification before any separately authorized repair or hardening disposition; preserve fail-closed owner authority and evidence limits."
+        },
+        "historicalBoundary": "All original evidence, first and second Windows classifications, candidate/proposed/unassigned source statements, no-issue/no-owner scope and prior reconciliation deferral remain exact history. Later Campaign authority accepts a separate repair and records its actual launch. It neither rewrites the original evidence nor imposes a new prelaunch reconciliation requirement.",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "originalSource": "toolu_01An1S92Jpt43cjRLd4HDCXC",
+          "directConfirmationSource": "toolu_014EXnE5H5oXyQfrYA6reKfs",
+          "receipt": "foreign204-campaign-authority.json",
+          "originalDirectionQuotedByCampaign": "Campaign: the ForeignDaemon failure sits on PR #196, so it blocks the critical path. Don't wait for a second occurrence. Do these now: 1. File a tracker issue for the ForeignDaemon family. Cite run 40250813915, job 121342086267, and the PR #196 head it ran on. 2. Staff one owner for it on claude-opus-5.5 (high), working from the public record only. The work is hosted-only diagnosis and repair, with no retry, waiver or flake exception. It coordinates with d7 if it touches #166 code. Launch first, record after. 3. Report the issue number and session ID. d7 stays on #166 only."
+        },
+        "localDirection": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_Hm5HNZfojopq27h8yU4vvjeO",
+          "receipt": "foreign204-local-request.json"
+        },
+        "launchBinding": {
+          "file": "foreigndaemon-reattach-repair-20261025.json",
+          "retainedCopy": "foreign204-launch-binding.json",
+          "bytes": 5309,
+          "sha256": "e996c5a138355120c4a81aeb916402bf9bc1ad20961dd119420352a659ff7f4a",
+          "projection": {
+            "kind": "public-record-only-independent-repair-launch",
+            "issue": 204,
+            "issueUrl": "https://github.com/lossyrob/telex/issues/204",
+            "workstreamId": "local-daemon",
+            "proposedNodeId": "foreigndaemon-reattach-repair",
+            "nodeState": "Canonical node not yet prepared; Campaign expressly directed launch first and record afterward.",
+            "status": "launched",
+            "createdAt": "2026-10-26T00:58:52.843Z",
+            "verifiedAt": "2026-10-26T00:59:37.3949410Z",
+            "ownerSessionId": "8afc363c-1af3-447d-a472-336f92d57998",
+            "coordinatorSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "authority": {
+              "campaignSessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "sourceMessage": "toolu_01An1S92Jpt43cjRLd4HDCXC",
+              "direction": "Create a tracker and staff one public-record-only claude-opus-5.5/high owner for hosted-only ForeignDaemon diagnosis and repair. No retry, waiver or flake exception. Coordinate with d7 on overlapping166 code. Launch first, record after; d7 stays on166 only."
+            },
+            "profile": {
+              "model": "claude-opus-5.5",
+              "reasoningEffort": "high",
+              "contextTier": "default",
+              "mode": "interactive"
+            },
+            "checkout": {
+              "branch": "lossyrob-foreigndaemon-reattach-repair",
+              "headAtVerification": "7e1bfc3add904565a808952953be14a98f4f2180",
+              "treeAtVerification": "e4bc34bbce33627d95613112482d1c54597cb3fe",
+              "cleanAtVerification": true,
+              "baseSelection": "App project default main; no explicit base_branch, copied worktree or shared166 branch.",
+              "checkoutName": "lossyrob-ubiquitous-sniffle"
+            },
+            "publicEvidence": {
+              "triggeringPullRequest": "https://github.com/lossyrob/telex/pull/196",
+              "eventHead": "854855f145752957025ae0df38df6f7b36859176",
+              "run": "https://github.com/lossyrob/telex/actions/runs/40250813915",
+              "attempt": 1,
+              "job": "https://github.com/lossyrob/telex/actions/runs/40250813915/job/121342086267",
+              "jobName": "InstalledCurrent Postgres process proofs (Windows)",
+              "executedMerge": "1813c432a9a43178b17dc6909f2fe272367b5e8e",
+              "executedTree": "6dd90524660f6cb171f68be6f78913ada3bcdf5c",
+              "orderedParents": [
+                "db8eaa75b019ab143b527fb93005bab45e2ca96e",
+                "854855f145752957025ae0df38df6f7b36859176"
+              ],
+              "publicLogBytes": 51310,
+              "publicLogSha256": "c8ec9f6d1cb0e4a842f0dcc3cdc461227316c20821268a4b2df8e7386b08abe2",
+              "failure": "installed_current_crash_restart_and_reattach_recovers_membership at508 returns DaemonBootstrap(ForeignDaemon); target29passed/1failed/2ignored,139.79s, precedingfixture6passed/0failed/1ignored.",
+              "verification": "Parent independently read public run/job metadata, bounded completed-job log excerpts, merge parents/tree and exact executed-source test lines471-526. No private d7 capture was read or forwarded.",
+              "limits": "Public signature does not identify an actual foreign process, internal failed check, common cause or a native exception. Suite duration is not stage latency; laterPID/marker/spawn assertions are unreached."
+            },
+            "launchReceipt": {
+              "kickoffDeliveredByCreateSession": true,
+              "attachments": [],
+              "observedActivity": "busy, same created session",
+              "publicInputsOnly": true,
+              "privateContextTransferred": false,
+              "qualification": "Staffing and starting-checkout verification only; no implementation, causal diagnosis, CI success or readiness."
+            },
+            "coordination": {
+              "nativeRepairOwner": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+              "nativeRepairBoundary": "d7 retains166/PR196. New204 owner must coordinate overlapping daemon/bootstrap/test/CI edits before publishing, and must not write to the196 branch. Do not serialize unrelated analysis behind166.",
+              "designSteward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+              "externalWaitCoordinator": "2a4bc4c8-1211-49d4-ba68-9d05d5d7530d",
+              "reconciler": "b737a932-c687-4b95-b273-8335a59f6e89",
+              "nativeOwnerNotified": true,
+              "existingMergeWakes": "The166 actual-product-merge reporting obligation remains with d7; Local still verifies and wakes193owner519693a5 and198ownera96926b1. Neither recipient or pending state is changed by204 staffing."
+            },
+            "constraints": "Public issue/PR/hosted-CI/committed-source inputs only, with a newly reconstructed plan; no other session transcript/private files/.paw/checkout. Runtime diagnosis and tests only on authorized disposable hosted Windows infrastructure. Locally allow only source/evidence reads, isolated edits/commits/pushes and compile-only checks. No local runtime/process/debugger/registry/ACL/real-root/installed-state actions or fixture cleanup. Preserve peer authentication, owner-private authority, non-theft, fencing and bounded recovery. No retry/rerun, waiver, flake exception, budget widening or blanket ForeignDaemon success. Exact-head source/design/CI and normal merge gate remain.",
+            "reconciliation": "After launch, propose promotion of the existing ForeignDaemon evidence record to the separately authorized204 task/owner, preserve both historical Windows observations and source limits, and add the public PR196 occurrence without duplication. No canonical mutation or graph edge is performed by this binding; any proposal needs fresh owning review."
+          },
+          "redaction": "Only checkout.path is replaced by checkout.checkoutName to avoid a private machine path in canonical artifacts. Every other parsed binding field is exact. The complete original bytes remain in private custody."
+        },
+        "appIdentity": {
+          "sessionId": "8afc363c-1af3-447d-a472-336f92d57998",
+          "creatorSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "branch": "lossyrob-foreigndaemon-reattach-repair",
+          "checkoutName": "lossyrob-ubiquitous-sniffle",
+          "createdAt": "2026-10-26T00:58:52.843Z",
+          "boundary": "Read-only App session identity matches the supplied launch. Checkout cleanliness/starting head/tree, actual kickoff delivery/busy and no private-context transfer remain Local-reported; no owner worktree/runtime inspected. Requested profile is not independent effective-capacity proof; no public Owner-post assertion."
+        },
+        "deduplication": "One existing record retains its initial observation and one prior appended occurrence. Search every canonical discovered-work ledger for the exact new run 40250813915 and job 121342086267 before appending this public PR #196 occurrence. Do not create another record or duplicate an already retained run/job.",
+        "coordination": "d7 remains the sole #166 / PR #196 writer. The new #204 owner uses its own main-based branch and separate closing PR, coordinates overlapping edits before publishing, and never writes PR #196's branch. Unrelated analysis is not serialized. No Watcher graph edge or status change is implied.",
+        "conservation": "The Local ledger retains 48 unique records. Exactly one new Local node increases the count from 27 to 28, with no dependency edges or edits to existing nodes, status, attention or design references. The entire Watcher tree remains exact. All other 47 records and ledger root fields, all original #166 evidence and launch/recovery/heap/alias/stop-drain qualifications, and both pending #193/#198 product-repair-merge wakes remain exact. No new retry or runtime permission, source/design/CI/readiness credit, repair/delivery, debt/HOLD or freeze acceptance follows."
+      }
     },
     {
       "id": "local-daemon-windows-copilot-fallback-return-to-push-timeout",
