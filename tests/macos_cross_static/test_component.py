@@ -710,7 +710,8 @@ class NativeBindingTests(unittest.TestCase):
 
 class SDKResolutionTests(unittest.TestCase):
     @contextmanager
-    def sdk_case(self, stdout, version="26.5", alias_target=None, alias_error=None):
+    def sdk_case(self, stdout, version="26.5", alias_target=None, alias_error=None,
+                 canonical_target=None, canonical_error=None, symlink_error=None):
         policy = run.BOUNDS["native_binding"]
         events = []
         responses = {"resolve-otool": policy["otool"] + "\n", "resolve-sdk": stdout,
@@ -727,16 +728,145 @@ class SDKResolutionTests(unittest.TestCase):
                 if alias_error is not None:
                     raise alias_error
                 return Path(alias_target or policy["sdk_canonical_path"])
+            if str(path) == policy["sdk_canonical_path"]:
+                if canonical_error is not None:
+                    raise canonical_error
+                return Path(canonical_target or policy["sdk_canonical_path"])
             self.assertIn(str(path), [policy[name] for name in ("hdiutil", "xcrun", "otool")])
             return path
+
+        original_lstat = Path.lstat
+        def lstat(path):
+            if str(path) not in (policy["sdk_path"], policy["sdk_canonical_path"]):
+                return original_lstat(path)
+            events.append(("lstat", str(path)))
+            if symlink_error is not None:
+                raise symlink_error
+            return SimpleNamespace(st_mode=native.stat.S_IFLNK if str(path) == policy["sdk_path"]
+                                   else native.stat.S_IFDIR)
 
         controller = SimpleNamespace(bounds=run.BOUNDS, command=command,
             output=SimpleNamespace(json=lambda name, value: events.append(("output", name, value))))
         with patch.dict("os.environ", {}, clear=True):
             binding = native.NativeBinding(controller)
-            with patch.object(Path, "resolve", resolve), \
+            with patch.object(Path, "resolve", resolve), patch.object(Path, "lstat", lstat), \
                     patch.object(binding, "snapshot", return_value={"synthetic_snapshot": True}) as snapshot:
                 yield binding, events, snapshot
+
+    def test_nominal_resolution_receipt_precedes_the_same_equality_guard(self):
+        policy = run.BOUNDS["native_binding"]
+        original_require = native.require
+        for resolved in (policy["sdk_canonical_path"], "/synthetic/mismatch.sdk"):
+            with self.subTest(resolved=resolved), self.sdk_case(
+                    policy["sdk_canonical_path"] + "\n", alias_target=resolved) as (binding, events, snapshot):
+                def guarded(condition, reason):
+                    if reason == "SDK symlink resolution differs from frozen policy":
+                        events.append(("equality-guard", condition, reason))
+                    return original_require(condition, reason)
+                with patch.object(native, "require", side_effect=guarded):
+                    if resolved == policy["sdk_canonical_path"]:
+                        binding.resolve()
+                        snapshot.assert_called_once_with()
+                    else:
+                        with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
+                            binding.resolve()
+                        snapshot.assert_not_called()
+                resolutions = [e for e in events if e[0] == "resolve" and e[1] == policy["sdk_path"]]
+                self.assertEqual(resolutions, [("resolve", policy["sdk_path"], True)])
+                self.assertEqual([e for e in events if e[0] == "resolve" and e[1] == policy["sdk_canonical_path"]],
+                                 [("resolve", policy["sdk_canonical_path"], True)])
+                self.assertEqual([e for e in events if e[0] == "lstat"],
+                                 [("lstat", policy["sdk_path"]), ("lstat", policy["sdk_canonical_path"])])
+                receipt = ("output", "resolve-sdk-nominal.json", {
+                    "nominal_path": policy["sdk_path"], "resolved_path": resolved,
+                    "expected_path": policy["sdk_canonical_path"], "strict": True,
+                    "diagnostics_only": {
+                        "sdk_path": {"path": policy["sdk_path"], "is_symlink": True},
+                        "sdk_canonical_path": {"path": policy["sdk_canonical_path"], "is_symlink": False},
+                        "canonical_resolution": {"path": policy["sdk_canonical_path"],
+                                                 "resolved_path": policy["sdk_canonical_path"], "strict": True}}})
+                self.assertIn(receipt, events)
+                guard_index = next(i for i, e in enumerate(events) if e[0] == "equality-guard")
+                self.assertLess(events.index(receipt), guard_index)
+
+    def test_mismatch_resolution_receipt_fits_existing_output_sink(self):
+        policy = run.BOUNDS["native_binding"]
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            with self.sdk_case(policy["sdk_canonical_path"] + "\n",
+                               alias_target="/synthetic/mismatch.sdk") as (binding, events, snapshot):
+                binding.run.output = cache.Output(evidence, run.BOUNDS["limits"])
+                with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+                receipt = evidence / "resolve-sdk-nominal.json"
+                payload = json.loads(receipt.read_text())
+                self.assertEqual({k: v for k, v in payload.items() if k != "diagnostics_only"}, {
+                    "nominal_path": policy["sdk_path"], "resolved_path": "/synthetic/mismatch.sdk",
+                    "expected_path": policy["sdk_canonical_path"], "strict": True})
+                self.assertEqual(payload["diagnostics_only"]["sdk_path"]["is_symlink"], True)
+                self.assertLess(receipt.stat().st_size, 4096)
+                self.assertEqual([p.name for p in evidence.iterdir()], [receipt.name])
+
+    def test_failed_resolution_has_no_fabricated_result_or_retry(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case(policy["sdk_canonical_path"] + "\n",
+                           alias_error=FileNotFoundError("synthetic missing path")) as (binding, events, snapshot):
+            with self.assertRaises(FileNotFoundError):
+                binding.resolve()
+            snapshot.assert_not_called()
+            self.assertEqual([e for e in events if e[0] == "resolve"],
+                             [("resolve", policy["sdk_path"], True)])
+            self.assertFalse(any(e[0] == "output" for e in events))
+
+    def test_resolution_receipt_failure_prevents_advancing(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case(policy["sdk_canonical_path"] + "\n") as (binding, events, snapshot):
+            with patch.object(binding.run.output, "json", side_effect=cache.EvidenceError("output budget exhausted")):
+                with self.assertRaisesRegex(cache.EvidenceError, "output budget exhausted"):
+                    binding.resolve()
+            snapshot.assert_not_called()
+            self.assertEqual([e for e in events if e[0] == "resolve"],
+                             [("resolve", policy["sdk_path"], True), ("resolve", policy["sdk_canonical_path"], True)])
+
+    def test_optional_diagnostic_errors_do_not_change_nominal_guard_outcome(self):
+        policy = run.BOUNDS["native_binding"]
+        for nominal in (policy["sdk_canonical_path"], "/synthetic/mismatch.sdk"):
+            with self.subTest(nominal=nominal), self.sdk_case(
+                    policy["sdk_canonical_path"] + "\n", alias_target=nominal,
+                    canonical_error=RuntimeError("synthetic canonical loop"),
+                    symlink_error=PermissionError("synthetic status denied")) as (binding, events, snapshot):
+                if nominal == policy["sdk_canonical_path"]:
+                    binding.resolve()
+                    snapshot.assert_called_once_with()
+                else:
+                    with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
+                        binding.resolve()
+                    snapshot.assert_not_called()
+                payload = next(e[2] for e in events if e[0:2] == ("output", "resolve-sdk-nominal.json"))
+                self.assertEqual(payload["resolved_path"], nominal)
+                self.assertEqual(payload["diagnostics_only"]["canonical_resolution"]["error_type"], "RuntimeError")
+                self.assertEqual(payload["diagnostics_only"]["sdk_path"]["error_type"], "PermissionError")
+                self.assertEqual(payload["diagnostics_only"]["sdk_canonical_path"]["error_type"], "PermissionError")
+
+    def test_optional_canonical_target_never_supplies_acceptance(self):
+        policy = run.BOUNDS["native_binding"]
+        for nominal in (policy["sdk_canonical_path"], "/synthetic/shared-other-target.sdk"):
+            with self.subTest(nominal=nominal), self.sdk_case(
+                    policy["sdk_canonical_path"] + "\n", alias_target=nominal,
+                    canonical_target="/synthetic/shared-other-target.sdk") as (binding, events, snapshot):
+                if nominal == policy["sdk_canonical_path"]:
+                    binding.resolve()
+                    snapshot.assert_called_once_with()
+                else:
+                    with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
+                        binding.resolve()
+                    snapshot.assert_not_called()
+                payload = next(e[2] for e in events if e[0:2] == ("output", "resolve-sdk-nominal.json"))
+                self.assertEqual(payload["diagnostics_only"]["canonical_resolution"]["resolved_path"],
+                                 "/synthetic/shared-other-target.sdk")
+                self.assertFalse(any(e[0] in ("resolve", "lstat") and e[1] == "/synthetic/shared-other-target.sdk"
+                                     for e in events))
 
     def test_both_declared_sdk_spellings_retain_mandatory_alias_check(self):
         policy = run.BOUNDS["native_binding"]

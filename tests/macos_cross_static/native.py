@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import resource
 import selectors
+import stat
 import struct
 import subprocess
 import time
@@ -277,6 +278,24 @@ def equal_binding(before, after):
     require(before == after, "bound native component/developer/SDK/cache changed before acceptance")
 
 
+def declared_sdk_diagnostics(policy):
+    observations = {}
+    for key in ("sdk_path", "sdk_canonical_path"):
+        path = Path(policy[key])
+        try:
+            observations[key] = {"path": str(path), "is_symlink": stat.S_ISLNK(path.lstat().st_mode)}
+        except OSError as error:
+            observations[key] = {"path": str(path), "error_type": type(error).__name__, "error": str(error)}
+    canonical = Path(policy["sdk_canonical_path"])
+    try:
+        observations["canonical_resolution"] = {
+            "path": str(canonical), "resolved_path": str(canonical.resolve(strict=True)), "strict": True}
+    except (OSError, RuntimeError) as error:
+        observations["canonical_resolution"] = {
+            "path": str(canonical), "strict": True, "error_type": type(error).__name__, "error": str(error)}
+    return observations
+
+
 class NativeBinding:
     def __init__(self, run):
         self.run = run
@@ -311,7 +330,12 @@ class NativeBinding:
                 "xcrun selected an unfrozen SDK")
         version = self.run.command("resolve-sdk-version", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-version"])
         require(version["stdout"].strip() == policy["sdk_version"], "SDK version mismatch")
-        require(str(Path(policy["sdk_path"]).resolve(strict=True)) == policy["sdk_canonical_path"],
+        nominal_sdk_resolved = str(Path(policy["sdk_path"]).resolve(strict=True))
+        self.run.output.json("resolve-sdk-nominal.json", {
+            "nominal_path": policy["sdk_path"], "resolved_path": nominal_sdk_resolved,
+            "expected_path": policy["sdk_canonical_path"], "strict": True,
+            "diagnostics_only": declared_sdk_diagnostics(policy)})
+        require(nominal_sdk_resolved == policy["sdk_canonical_path"],
                 "SDK symlink resolution differs from frozen policy")
         for name in ("hdiutil", "xcrun", "otool"):
             require(str(Path(policy[name]).resolve(strict=True)) == policy[name],
