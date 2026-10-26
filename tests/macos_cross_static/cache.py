@@ -471,6 +471,19 @@ def edges(decoded, arch, start, end, pointer, machine_bytes=None, *, entry=None)
     return merged
 
 
+def otool_instructions(text, container, start, end):
+    lines = text.splitlines()
+    require(len(lines) > 2 and lines[:2] == [str(container) + ":", "(__TEXT,__text) section"],
+            "unexpected otool disassembly header")
+    require(all(re.fullmatch(r"\s*[0-9a-fA-F]{8,16}\t[a-zA-Z][a-zA-Z0-9_.]*(?:\s+.*)?", line)
+                for line in lines[2:]), "unexpected otool disassembly row")
+    decoded = instructions(text, start, end)
+    require(len(decoded) == len(lines) - 2 and decoded[0]["address"] == start and
+            all(left["address"] < right["address"] for left, right in zip(decoded, decoded[1:])),
+            "unusable otool disassembly addresses")
+    return decoded
+
+
 def collect(primary, family, output, run):
     cache = CandidateCache(primary, output, family)
     root_images = {}
@@ -513,8 +526,7 @@ def collect(primary, family, output, run):
                 output.write(stem + ".macho", macho_function(start, raw, "arm64" if family == "arm64e" else "x86_64"))
                 dis = run.command(stem + "-disassembly", [run.otool_path, "-tvV", output.root / (stem + ".macho")])
                 output.write(stem + ".txt", dis["stdout"])
-                decoded = instructions(dis["stdout"], start, end)
-                require(decoded and decoded[0]["address"] == start, "unusable disassembly")
+                decoded = otool_instructions(dis["stdout"], output.root / (stem + ".macho"), start, end)
                 record = {"root": root, "parent": parent, "entry": hex(address), "start": hex(start),
                           "end": hex(end), "extent": derivation, "bytes": len(raw),
                           "sha256": hashlib.sha256(raw).hexdigest(), "image": image["name"],

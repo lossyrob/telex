@@ -103,10 +103,24 @@ class ComponentRun(Run):
                             freeze_required_before_launch=True, native_binding_verified=False)
 
     def command(self, name, args, **kwargs):
-        require(str(args[0]) not in ("xcrun", "otool", "hdiutil"),
+        require(args and str(args[0]) not in ("xcrun", "otool", "llvm-otool", "hdiutil"),
                 "native components must use frozen absolute resolved paths")
+        policy = self.bounds["native_binding"]
+        is_otool = name.endswith("-disassembly") or str(args[0]) in (
+            policy["otool_canonical_path"], policy["otool_nominal_path"])
+        if is_otool:
+            require(str(args[0]) == self.otool_path == policy["otool_canonical_path"],
+                    "otool invocation must use fixed canonical C")
+            require(self.native_binding is not None and self.native_binding.before is not None and
+                    self.native_binding.before["native_tools"]["otool"]["path"] == policy["otool_canonical_path"],
+                    "otool invocation lacks canonical C binding")
         if name != "RawImagePatch":
-            return super().command(name, args, **kwargs)
+            result = super().command(name, args, **kwargs)
+            if is_otool:
+                require(result.get("argv") == [str(arg) for arg in args] and
+                        result["argv"][0] == policy["otool_canonical_path"],
+                        "recorded otool invocation differs from fixed canonical C")
+            return result
         require(self.native_binding is not None and self.native_binding.before is not None,
                 "decoder binding absent before RawImagePatch")
         require(set(kwargs) == {"timeout", "file_limit"}, "unexpected decoder invocation options")

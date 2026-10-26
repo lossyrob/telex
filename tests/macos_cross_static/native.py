@@ -348,16 +348,42 @@ class NativeBinding:
                     "SDK " + role + " strict resolution differs from canonical A")
         return observed_version
 
+    def check_otool_identity(self, checkpoint):
+        require(checkpoint in ("prebinding", "postdecoder"), "invalid otool identity checkpoint")
+        policy = self.policy
+        receipt = {"checkpoint": checkpoint, "canonical_path_C": policy["otool_canonical_path"],
+                   "nominal_path_D": policy["otool_nominal_path"], "relations": [],
+                   "observations_are_sequential": True}
+        results = []
+        for role, key in (("C", "otool_canonical_path"), ("D", "otool_nominal_path")):
+            relation = {"role": role, "input_path": policy[key],
+                        "expected_path": policy["otool_canonical_path"], "strict": True}
+            try:
+                resolved_path = str(Path(policy[key]).resolve(strict=True))
+            except (OSError, RuntimeError) as error:
+                relation.update(error_type=type(error).__name__, error=str(error))
+                results.append((role, None, error))
+            else:
+                relation["resolved_path"] = resolved_path
+                results.append((role, resolved_path, None))
+            receipt["relations"].append(relation)
+        self.run.output.json("otool-identity-" + checkpoint + ".json", receipt)
+        for role, resolved_path, error in results:
+            if error is not None:
+                raise error
+            require(resolved_path == policy["otool_canonical_path"],
+                    "otool " + role + " strict resolution differs from canonical C")
+
     def resolve(self):
         policy = self.policy
         self.check_environment()
         result = self.run.command("resolve-otool", [policy["xcrun"], "--sdk", "macosx", "--find", "otool"])
-        require(result["stdout"].strip() == policy["otool"], "xcrun selected an unfrozen otool path")
+        require(result["stdout"].strip() == policy["otool_nominal_path"], "xcrun selected an unfrozen otool path")
         sdk = self.run.command("resolve-sdk", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-path"])
         require(sdk["stdout"].strip() in (policy["sdk_canonical_path"], policy["sdk_versioned_path"]),
                 "xcrun selected an unfrozen SDK")
         sdk_version = self.check_sdk_identity("prebinding")
-        for name in ("hdiutil", "xcrun", "otool"):
+        for name in ("hdiutil", "xcrun"):
             filename = "resolve-native-" + name + ".json"
             receipt = {"tool": name, "declared_path": policy[name],
                        "expected_path": policy[name], "strict": True}
@@ -370,12 +396,14 @@ class NativeBinding:
             self.run.output.json(filename, {**receipt, "resolved_path": resolved_path})
             require(resolved_path == policy[name],
                     "native executable resolves outside its allowed absolute path")
+        self.check_otool_identity("prebinding")
         xcrun_version = self.run.command("native-xcrun-version", [policy["xcrun"], "--version"])
-        self.resolution = {"otool": result["stdout"].strip(), "sdk": sdk["stdout"].strip(),
+        self.resolution = {"otool_canonical_path": policy["otool_canonical_path"],
+                           "otool_nominal_selection": result["stdout"].strip(), "sdk": sdk["stdout"].strip(),
                            "sdk_version": sdk_version,
                            "otool_version_source": "LC_SOURCE_VERSION when present; see native_tools.otool.macho_slices",
                            "xcrun_version": xcrun_version["stdout"].strip()}
-        self.run.otool_path = policy["otool"]
+        self.run.otool_path = policy["otool_canonical_path"]
         self.run.hdiutil_path = policy["hdiutil"]
         self.before = self.snapshot()
         self.run.output.json("native-binding-before.json", self.before)
@@ -387,8 +415,9 @@ class NativeBinding:
         self.snapshots += 1
         budget = [policy["hash_bytes_per_snapshot"]]
         files = {}
-        for name in ("hdiutil", "xcrun", "otool"):
-            path = Path(policy[name])
+        for name, pathname in (("hdiutil", policy["hdiutil"]), ("xcrun", policy["xcrun"]),
+                               ("otool", policy["otool_canonical_path"])):
+            path = Path(pathname)
             files[name] = {**bind_hash(path, budget, run.deadline), "macho_slices": file_machos(path)}
         sdk_files = {path: bind_hash(Path(path), budget, run.deadline)
                      for path in policy["developer_sdk_identity_files"]}
@@ -429,6 +458,7 @@ class NativeBinding:
         require(self.before is not None and self.use_record is not None, "acceptance lacks actual decoder use evidence")
         self.check_environment()
         self.check_sdk_identity("postdecoder")
+        self.check_otool_identity("postdecoder")
         after = self.snapshot()
         self.run.output.json("native-binding-after.json", after)
         equal_binding(self.before, after)
@@ -556,7 +586,8 @@ class NativeBinding:
         budget = [self.policy["final_tool_hash_bytes"]]
         observed = {}
         for name, before in self.before["native_tools"].items():
-            after = bind_hash(Path(self.policy[name]), budget, self.run.deadline)
+            pathname = self.policy["otool_canonical_path"] if name == "otool" else self.policy[name]
+            after = bind_hash(Path(pathname), budget, self.run.deadline)
             equal_binding({key: before[key] for key in after}, after)
             observed[name] = after
         for path, before in self.before["developer_sdk_files"].items():

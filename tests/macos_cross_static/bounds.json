@@ -1,6 +1,6 @@
 {
   "component": "arm24-intel25-static-v1",
-  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431],
+  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431, 6406617725, 6406629529, 6406665201],
   "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
   "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
   "prelaunch_status": {
@@ -64,7 +64,7 @@
       "binary_sha256": "8e495531e1b2b8cb169ca583493922d4ab386007756418c15b95f07f642c35fb"
     },
     "apple_system_tools": {
-      "scope": "Only declared hdiutil, xcrun-selected otool, and actual loaded libParallelCompression through pinned ipsw under6401453292.",
+      "scope": "Only declared hdiutil, xcrun nominal otool D with fixed canonical llvm-otool C under6406617725/6406629529, and actual loaded libParallelCompression through pinned ipsw under6401453292.",
       "binding": "Bind exact allowed paths, developer/SDK selection, actual Mach-O identities/hashes and actual loaded decoder image to relevant backing cache/subcache identities/hashes before transfers. Use fixed resolved paths, verify actual ipsw loader trace against bound image, and recheck components before acceptance. Missing/change/unresolved is decision-needed.",
       "binary_hashes_known_before_launch": false
     }
@@ -74,7 +74,24 @@
     "xcrun": "/usr/bin/xcrun",
     "developer_dir": "/Applications/Xcode_26.6.app/Contents/Developer",
     "toolchain": "com.apple.dt.toolchain.XcodeDefault",
-    "otool": "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/otool",
+    "otool_canonical_path": "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-otool",
+    "otool_nominal_path": "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/otool",
+    "otool_identity_policy": {
+      "design_disposition": "https://github.com/lossyrob/telex/issues/172#issuecomment-6406617725",
+      "corrected_condition_1": "https://github.com/lossyrob/telex/issues/172#issuecomment-6406629529",
+      "record_precision": "https://github.com/lossyrob/telex/issues/172#issuecomment-6406665201",
+      "canonical_C": "otool_canonical_path",
+      "nominal_xcrun_D": "otool_nominal_path",
+      "xcrun_result": "Only exact literal D after existing whitespace trim, not C or any other spelling.",
+      "required_checkpoints": ["before native binding and transfers", "after decoder and before snapshot and semantics"],
+      "required_relations": ["resolve(C, strict=True) == exact literal C", "resolve(D, strict=True) == exact literal C"],
+      "binding_and_invocation": "Bind, hash, inspect and directly invoke fixed C. The launcher argv[0] and recorded invocation must name C; D or other paths fail closed. First actual C hash binds under6401453292; post snapshot and final canonical hash must match it.",
+      "output": "Use the existing address/mnemonic otool -tvV format from direct C without program-basename dispatch. Unexpected header, row or invocation record fails closed; no output reinterpretation.",
+      "trace_precision": "Existing IPSW-child libParallelCompression path/UUID trace is unchanged and is NOT an otool trace. No new otool main-image/UUID trace. Existing argv/rc/streams are command records, not executed-image attestation; the inherited generic command receipt has no PID field.",
+      "final_precision": "Final C rehash is NOT a new alias observation; C->C and D->C are required at prebinding and postdecoder.",
+      "no_dynamic_adoption": true,
+      "observations_are_sequential_not_atomic_stability_proof": true
+    },
     "sdk_canonical_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
     "sdk_versioned_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
     "sdk_version": "26.5",

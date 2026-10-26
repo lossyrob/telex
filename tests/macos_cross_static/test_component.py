@@ -397,10 +397,11 @@ class OwnerRegressionTests(unittest.TestCase):
                 assert fail_pointer and address == 0x100E
                 raise cache.EvidenceError("identified import-slot decode failure")
         commands = []
-        controller = SimpleNamespace(bounds={"roots": roots}, otool_path="/frozen/otool",
+        controller = SimpleNamespace(bounds={"roots": roots},
+                                     otool_path=run.BOUNDS["native_binding"]["otool_canonical_path"],
                                      command=lambda name, args: (commands.append(args) or {"stdout": "fixture"}))
         with patch.object(cache, "CandidateCache", return_value=Fixture()), \
-                patch.object(cache, "instructions", return_value=decoded):
+                patch.object(cache, "otool_instructions", return_value=decoded):
             result = cache.collect(Path("not-opened"), "x86_64", MemoryOutput(), controller)
         return result, commands
 
@@ -416,7 +417,7 @@ class OwnerRegressionTests(unittest.TestCase):
                                                bytes.fromhex("e9fb0f0000e9f61f0000"), decoded)
         self.assertEqual(len(report["captures"]), 1)
         self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0][0], "/frozen/otool")
+        self.assertEqual(commands[0][0], run.BOUNDS["native_binding"]["otool_canonical_path"])
         analyses = report["captures"][0]["analyses"]
         self.assertEqual([(a["entry"], a["branches"][0]["target"]) for a in analyses],
                          [("0x1000", "0x2000"), ("0x1005", "0x3000")])
@@ -682,14 +683,15 @@ class NativeBindingTests(unittest.TestCase):
         self.assertEqual(policy["hdiutil"], "/usr/bin/hdiutil")
         self.assertEqual(policy["xcrun"], "/usr/bin/xcrun")
         self.assertEqual(policy["library"], "/usr/lib/libParallelCompression.dylib")
-        self.assertIn("/Applications/Xcode_26.6.app/", policy["otool"])
+        self.assertIn("/Applications/Xcode_26.6.app/", policy["otool_canonical_path"])
+        self.assertNotIn("otool", policy)
         self.assertEqual(policy["maximum_native_snapshots"], 2)
         self.assertEqual(run.BOUNDS["limits"]["artifact_bytes_per_job"], 33554432)
 
     def test_native_search_path_invocation_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             controller = run.ComponentRun(Path(temp), Path(temp), "ARM24")
-            for name in ("xcrun", "otool", "hdiutil"):
+            for name in ("xcrun", "otool", "llvm-otool", "hdiutil"):
                 with self.subTest(name=name), self.assertRaises(cache.EvidenceError):
                     controller.command("bad-path", [name, "--version"])
 
@@ -720,7 +722,7 @@ class SDKResolutionTests(unittest.TestCase):
 
         def command(name, arguments):
             events.append(("command", name, arguments))
-            responses = {"resolve-otool": policy["otool"] + "\n",
+            responses = {"resolve-otool": policy["otool_nominal_path"] + "\n",
                          "resolve-sdk": b + "\n" if stdout is None else stdout,
                          "resolve-sdk-version": versions["prebinding"] + "\n",
                          "recheck-sdk-version": versions["postdecoder"] + "\n",
@@ -734,7 +736,10 @@ class SDKResolutionTests(unittest.TestCase):
                 if str(path) in errors:
                     raise errors[str(path)]
                 return Path(targets.get(str(path), a))
-            self.assertIn(str(path), [policy[name] for name in ("hdiutil", "xcrun", "otool")])
+            self.assertIn(str(path), [policy[name] for name in (
+                "hdiutil", "xcrun", "otool_canonical_path", "otool_nominal_path")])
+            if str(path) in (policy["otool_canonical_path"], policy["otool_nominal_path"]):
+                return Path(policy["otool_canonical_path"])
             return path
 
         original_lstat = Path.lstat
@@ -1095,7 +1100,7 @@ class SDKResolutionTests(unittest.TestCase):
 
 class NativeToolResolutionTests(unittest.TestCase):
     sdk_case = SDKResolutionTests.sdk_case
-    names = ("hdiutil", "xcrun", "otool")
+    names = ("hdiutil", "xcrun")
     guard_message = "native executable resolves outside its allowed absolute path"
 
     @contextmanager
@@ -1150,7 +1155,7 @@ class NativeToolResolutionTests(unittest.TestCase):
             last_guard = max(i for i, e in enumerate(events) if e[0] == "tool-guard")
             version = next(i for i, e in enumerate(events) if e[:2] == ("command", "native-xcrun-version"))
             self.assertLess(last_guard, version)
-            self.assertEqual(binding.run.otool_path, policy["otool"])
+            self.assertEqual(binding.run.otool_path, policy["otool_canonical_path"])
             self.assertEqual(binding.run.hdiutil_path, policy["hdiutil"])
             self.assertEqual(binding.resolution["xcrun_version"], "synthetic-version")
             self.assertEqual([e[1] for e in events if e[0] == "lstat"],
@@ -1264,6 +1269,358 @@ class NativeToolResolutionTests(unittest.TestCase):
             self.assert_stopped_before_binding(binding, events, snapshot)
             self.assertFalse(list(output.glob("resolve-native-*.json")))
             self.assertFalse(any(e[0] == "tool-guard" for e in events))
+
+
+class OtoolIdentityTests(unittest.TestCase):
+    sdk_case = SDKResolutionTests.sdk_case
+
+    @contextmanager
+    def otool_case(self, stdout=None, targets=None, errors=None):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        targets = targets if targets is not None else {}
+        errors = errors if errors is not None else {}
+        with self.sdk_case() as (binding, events, snapshot):
+            original_resolve, command = Path.resolve, binding.run.command
+            def resolve(path, strict=False):
+                if str(path) not in (c, d):
+                    return original_resolve(path, strict=strict)
+                events.append(("resolve", str(path), strict))
+                self.assertTrue(strict)
+                if str(path) in errors:
+                    raise errors[str(path)]
+                return Path(targets.get(str(path), c))
+            def selected(name, args):
+                result = command(name, args)
+                if name == "resolve-otool" and stdout is not None:
+                    result["stdout"] = stdout
+                return result
+            with patch.object(Path, "resolve", resolve), patch.object(binding.run, "command", side_effect=selected):
+                yield binding, events, snapshot
+
+    def test_policy_has_distinct_fixed_C_and_D_without_old_ambiguous_key(self):
+        policy = run.BOUNDS["native_binding"]
+        prefix = "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
+        self.assertEqual(policy["otool_canonical_path"], prefix + "llvm-otool")
+        self.assertEqual(policy["otool_nominal_path"], prefix + "otool")
+        self.assertNotIn("otool", policy)
+        self.assertIn("6406629529", policy["otool_identity_policy"]["corrected_condition_1"])
+        self.assertIn("6406665201", policy["otool_identity_policy"]["record_precision"])
+        self.assertEqual(policy["library"], "/usr/lib/libParallelCompression.dylib")
+
+    def test_D_stdout_requires_both_relations_once_per_checkpoint_before_snapshot(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        with self.otool_case(d + "\n") as (binding, events, snapshot):
+            binding.resolve()
+            self.assertEqual(binding.resolution["otool_nominal_selection"], d)
+            self.assertEqual(binding.resolution["otool_canonical_path"], c)
+            self.assertEqual(binding.run.otool_path, c)
+            snapshot.assert_called_once_with()
+            self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (c, d)],
+                             [("resolve", c, True), ("resolve", d, True)])
+            binding.use_record = {"synthetic_child": True}
+            events.clear()
+            snapshot.side_effect = lambda: (events.append(("snapshot",)) or binding.before)
+            binding.recheck()
+            self.assertTrue(binding.decoder_confirmed)
+            self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (c, d)],
+                             [("resolve", c, True), ("resolve", d, True)])
+            sdk = max(i for i, e in enumerate(events) if e[:2] == ("output", "sdk-identity-postdecoder.json"))
+            otool = next(i for i, e in enumerate(events) if e[:2] == ("output", "otool-identity-postdecoder.json"))
+            self.assertLess(sdk, otool)
+            self.assertLess(otool, events.index(("snapshot",)))
+            receipt = events[otool][2]
+            self.assertEqual([r["resolved_path"] for r in receipt["relations"]], [c, c])
+            self.assertEqual([r["input_path"] for r in receipt["relations"]], [c, d])
+
+    def test_C_stdout_and_every_nonD_spelling_fail_before_any_relation(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        for stdout in (c, "", "/synthetic/otool", d + "/", d + "\n" + c):
+            with self.subTest(stdout=stdout), self.otool_case(stdout) as (binding, events, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "xcrun selected an unfrozen otool path"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+                self.assertFalse(any(e[0] == "resolve" for e in events))
+
+    def test_either_relation_and_common_third_targets_fail_pre_and_post(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        for checkpoint in ("prebinding", "postdecoder"):
+            for changes in ({c: d}, {d: d}, {c: "/synthetic/third", d: "/synthetic/third"},
+                            {d: "/synthetic/third"}):
+                targets = {}
+                with self.subTest(checkpoint=checkpoint, changes=changes), self.otool_case(
+                        targets=targets) as (binding, events, snapshot):
+                    if checkpoint == "postdecoder":
+                        binding.resolve()
+                        binding.use_record = {"synthetic_child": True}
+                        events.clear()
+                        snapshot.reset_mock()
+                    targets.update(changes)
+                    with self.assertRaisesRegex(cache.EvidenceError, "strict resolution differs from canonical C"):
+                        binding.resolve() if checkpoint == "prebinding" else binding.recheck()
+                    snapshot.assert_not_called()
+                    self.assertFalse(binding.decoder_confirmed)
+                    self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (c, d)],
+                                     [("resolve", c, True), ("resolve", d, True)])
+                    self.assertFalse(any(e[:2] == ("resolve", "/synthetic/third") for e in events))
+
+    def test_missing_inaccessible_or_looping_C_or_D_records_error_before_rethrow_pre_and_post(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        for checkpoint in ("prebinding", "postdecoder"):
+            for role, pathname in (("C", c), ("D", d)):
+                for error in (FileNotFoundError("missing"), PermissionError("denied"),
+                              OSError("I/O"), RuntimeError("loop")):
+                    errors = {}
+                    with self.subTest(checkpoint=checkpoint, role=role, error=type(error).__name__), \
+                            self.otool_case(errors=errors) as (binding, events, snapshot):
+                        if checkpoint == "postdecoder":
+                            binding.resolve()
+                            binding.use_record = {"synthetic_child": True}
+                            snapshot.reset_mock()
+                            events.clear()
+                        errors[pathname] = error
+                        with self.assertRaises(type(error)) as raised:
+                            binding.resolve() if checkpoint == "prebinding" else binding.recheck()
+                        self.assertIs(raised.exception, error)
+                        snapshot.assert_not_called()
+                        self.assertFalse(binding.decoder_confirmed)
+                        receipt = next(e[2] for e in events if e[:2] == (
+                            "output", f"otool-identity-{checkpoint}.json"))
+                        relation = next(r for r in receipt["relations"] if r["role"] == role)
+                        self.assertEqual(relation["error_type"], type(error).__name__)
+                        self.assertNotIn("resolved_path", relation)
+                        self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (c, d)],
+                                         [("resolve", c, True), ("resolve", d, True)])
+
+    def test_completed_receipt_precedes_guard_and_sink_failure_stops_both_checkpoints(self):
+        c = run.BOUNDS["native_binding"]["otool_canonical_path"]
+        for checkpoint in ("prebinding", "postdecoder"):
+            with self.subTest(checkpoint=checkpoint), self.otool_case() as (binding, events, snapshot):
+                if checkpoint == "postdecoder":
+                    binding.resolve()
+                    binding.use_record = {"synthetic_child": True}
+                    snapshot.reset_mock()
+                    events.clear()
+                original = binding.run.output.json
+                failure = cache.EvidenceError("synthetic otool sink cap")
+                def fail(name, value):
+                    if name == f"otool-identity-{checkpoint}.json":
+                        self.assertEqual([r["resolved_path"] for r in value["relations"]], [c, c])
+                        raise failure
+                    return original(name, value)
+                with patch.object(binding.run.output, "json", side_effect=fail), \
+                        self.assertRaises(cache.EvidenceError) as raised:
+                    binding.resolve() if checkpoint == "prebinding" else binding.recheck()
+                self.assertIs(raised.exception, failure)
+                snapshot.assert_not_called()
+                self.assertFalse(binding.decoder_confirmed)
+
+    def test_both_relations_recorded_before_rejection_without_sink_operand_feedback(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        with self.otool_case(targets={d: "/synthetic/third"}) as (binding, events, snapshot):
+            output, original_require = binding.run.output.json, native.require
+            def mutate(name, value):
+                output(name, value)
+                if name.startswith("otool-identity"):
+                    value["relations"][1]["resolved_path"] = c
+            def guarded(condition, reason):
+                if reason.startswith("otool ") and "strict resolution" in reason:
+                    events.append(("guard", condition))
+                return original_require(condition, reason)
+            with patch.object(binding.run.output, "json", side_effect=mutate), \
+                    patch.object(native, "require", side_effect=guarded), \
+                    self.assertRaisesRegex(cache.EvidenceError, "otool D strict resolution"):
+                binding.resolve()
+            snapshot.assert_not_called()
+            receipt = next(i for i, e in enumerate(events) if e[:2] == ("output", "otool-identity-prebinding.json"))
+            guard = next(i for i, e in enumerate(events) if e[0] == "guard")
+            self.assertLess(receipt, guard)
+            self.assertEqual(events[receipt][2]["relations"][1]["resolved_path"], "/synthetic/third")
+
+    def test_first_snapshot_hashes_and_inspects_C_only_without_old_digest(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        with self.otool_case() as (binding, _, snapshot):
+            binding.resolve()
+            binding.run.deadline = time.monotonic() + 10
+            hashed, inspected = [], []
+            def hash_file(path, budget, deadline):
+                hashed.append(str(path))
+                return {"path": str(path), "sha256": "first-actual"}
+            def inspect(path):
+                inspected.append(str(path))
+                return [{"uuid": "synthetic-controller-macho"}]
+            with patch.object(native, "bind_hash", side_effect=hash_file), \
+                    patch.object(native, "file_machos", side_effect=inspect), \
+                    patch.object(native, "loaded_parallel", return_value=(object(), {"synthetic": True})), \
+                    patch.object(native, "backing_binding", return_value={"synthetic": True}):
+                manifest = native.NativeBinding.snapshot(binding)
+            self.assertEqual(manifest["native_tools"]["otool"]["path"], c)
+            self.assertEqual(manifest["native_tools"]["otool"]["sha256"], "first-actual")
+            self.assertIn(c, hashed)
+            self.assertIn(c, inspected)
+            self.assertNotIn(d, hashed + inspected)
+
+    def test_changed_C_hash_blocks_post_snapshot_even_with_correct_relations(self):
+        with self.otool_case() as (binding, _, snapshot):
+            binding.resolve()
+            binding.use_record = {"synthetic_child": True}
+            snapshot.return_value = {"synthetic_first_metadata_hash": "changed-C"}
+            with self.assertRaisesRegex(cache.EvidenceError, "bound native component"):
+                binding.recheck()
+            self.assertFalse(binding.decoder_confirmed)
+
+    def test_final_hash_uses_original_fixed_C_with_no_new_alias_or_image_trace(self):
+        policy = run.BOUNDS["native_binding"]
+        c = policy["otool_canonical_path"]
+        for digest in ("first", "changed"):
+            with self.subTest(digest=digest), self.otool_case() as (binding, _, _):
+                binding.before = {"native_tools": {"otool": {"path": c, "sha256": "first"}},
+                                  "developer_sdk_files": {}}
+                binding.decoder_confirmed = True
+                binding.run.deadline = time.monotonic() + 10
+                with patch.object(native, "bind_hash", return_value={"path": c, "sha256": digest}) as hasher, \
+                        patch.object(Path, "resolve") as resolver, patch.object(binding.run, "command") as command, \
+                        patch.object(native, "decode_trace") as trace:
+                    if digest == "first":
+                        binding.recheck_tools_after_semantics()
+                    else:
+                        with self.assertRaisesRegex(cache.EvidenceError, "bound native component"):
+                            binding.recheck_tools_after_semantics()
+                    self.assertEqual(hasher.call_args.args[0], Path(c))
+                    resolver.assert_not_called()
+                    command.assert_not_called()
+                    trace.assert_not_called()
+
+    def test_otool_relation_receipt_fits_unchanged_sink(self):
+        with tempfile.TemporaryDirectory() as temp, self.otool_case() as (binding, _, _):
+            output = Path(temp)
+            binding.run.output = cache.Output(output, run.BOUNDS["limits"])
+            binding.resolve()
+            receipt = output / "otool-identity-prebinding.json"
+            self.assertLess(receipt.stat().st_size, 2048)
+            self.assertEqual(len(json.loads(receipt.read_text())["relations"]), 2)
+
+    def test_resolution_error_receipt_sink_failure_does_not_advance(self):
+        c = run.BOUNDS["native_binding"]["otool_canonical_path"]
+        with self.otool_case(errors={c: PermissionError("synthetic denied")}) as (binding, events, snapshot):
+            output = binding.run.output.json
+            def reject(name, value):
+                if name == "otool-identity-prebinding.json":
+                    self.assertNotIn("resolved_path", value["relations"][0])
+                    raise cache.EvidenceError("synthetic error receipt failure")
+                return output(name, value)
+            with patch.object(binding.run.output, "json", side_effect=reject), \
+                    self.assertRaisesRegex(cache.EvidenceError, "synthetic error receipt failure"):
+                binding.resolve()
+            snapshot.assert_not_called()
+            self.assertFalse(any(e[:2] == ("command", "native-xcrun-version") for e in events))
+
+
+class OtoolInvocationTests(unittest.TestCase):
+    @contextmanager
+    def invocation_case(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            controller = run.ComponentRun(root, root, "ARM24")
+            c = run.BOUNDS["native_binding"]["otool_canonical_path"]
+            controller.otool_path = c
+            controller.native_binding = SimpleNamespace(before={"native_tools": {"otool": {"path": c}}})
+            yield controller, [c, "-tvV", str(root / "fixture.macho")]
+
+    def test_actual_inherited_launcher_receives_C_not_D_without_executing(self):
+        with self.invocation_case() as (controller, args), patch(
+                "macos_static_ridiff.subprocess.Popen", side_effect=OSError("synthetic launcher stop")) as launch:
+            with self.assertRaisesRegex(OSError, "synthetic launcher stop"):
+                controller.command("body-00-disassembly", args)
+            self.assertEqual(launch.call_args.args[0], args)
+            self.assertNotIn("executable", launch.call_args.kwargs)
+
+    def test_D_other_or_unbound_invocation_is_rejected_before_launcher(self):
+        policy = run.BOUNDS["native_binding"]
+        c, d = policy["otool_canonical_path"], policy["otool_nominal_path"]
+        for invoked, configured, bound in ((d, c, c), ("/other/llvm-otool", c, c), (c, d, c),
+                                            (c, c, d), (c, c, "/other/otool")):
+            with self.subTest(invoked=invoked, configured=configured, bound=bound), \
+                    self.invocation_case() as (controller, args):
+                controller.otool_path = configured
+                controller.native_binding.before["native_tools"]["otool"]["path"] = bound
+                args[0] = invoked
+                with patch.object(run.Run, "command") as launch, self.assertRaises(cache.EvidenceError):
+                    controller.command("body-00-disassembly", args)
+                launch.assert_not_called()
+
+    def test_D_is_rejected_even_outside_disassembly_name(self):
+        with self.invocation_case() as (controller, args):
+            args[0] = run.BOUNDS["native_binding"]["otool_nominal_path"]
+            with patch.object(run.Run, "command") as launch, self.assertRaises(cache.EvidenceError):
+                controller.command("synthetic-name", args)
+            launch.assert_not_called()
+
+    def test_recorded_D_other_missing_or_changed_argv_blocks_use_and_preserves_report(self):
+        d = run.BOUNDS["native_binding"]["otool_nominal_path"]
+        for replacement in (d, "/other/llvm-otool", None, []):
+            with self.subTest(replacement=replacement), self.invocation_case() as (controller, args):
+                reported = [replacement, *args[1:]] if isinstance(replacement, str) else replacement
+                result = {"argv": reported, "rc": 0, "elapsed_seconds": 0.01,
+                          "stdout": "synthetic", "stderr": "", "failure": None}
+                def recorded(name, argv, **kwargs):
+                    controller.output.json(name + ".json", result)
+                    return result
+                with patch.object(run.Run, "command", side_effect=recorded), \
+                        self.assertRaisesRegex(cache.EvidenceError, "recorded otool invocation differs"):
+                    controller.command("body-00-disassembly", args)
+                self.assertEqual(json.loads((controller.evidence / "body-00-disassembly.json").read_text()), result)
+        with self.invocation_case() as (controller, args), patch.object(
+                run.Run, "command", return_value={"argv": [args[0], "--other"]}), self.assertRaises(cache.EvidenceError):
+            controller.command("body-00-disassembly", args)
+
+    def test_success_keeps_existing_report_shape_without_PID_or_main_image_trace(self):
+        with self.invocation_case() as (controller, args):
+            report = {"argv": args, "rc": 0, "elapsed_seconds": 0.01,
+                      "stdout": "synthetic", "stderr": "", "failure": None}
+            with patch.object(run.Run, "command", return_value=report) as launch, \
+                    patch.object(native, "decode_trace") as trace:
+                self.assertIs(controller.command("body-00-disassembly", args), report)
+                self.assertEqual(launch.call_args.args[1], args)
+                self.assertEqual(set(report), {"argv", "rc", "elapsed_seconds", "stdout", "stderr", "failure"})
+                trace.assert_not_called()
+
+
+class OtoolOutputTests(unittest.TestCase):
+    def test_direct_C_format_uses_container_not_program_basename_for_both_architectures(self):
+        for container in (Path("/synthetic/otool.macho"), Path("/synthetic/llvm-otool.macho")):
+            for mnemonic in ("ret", "retq"):
+                text = f"{container}:\n(__TEXT,__text) section\n0000000000001000\t{mnemonic}\n"
+                decoded = cache.otool_instructions(text, container, 0x1000, 0x1004)
+                self.assertEqual(decoded[0]["mnemonic"], mnemonic)
+
+    def test_unexpected_headers_rows_and_objdump_formats_are_not_reinterpreted(self):
+        container = Path("/synthetic/body.macho")
+        prefix = f"{container}:\n(__TEXT,__text) section\n"
+        valid = "0000000000001000\tret\n"
+        for text in ("", valid, prefix.replace("__text", "__data") + valid,
+                     "llvm-otool warning\n" + prefix + valid, prefix + "1000: c3 ret\n",
+                     prefix + "0000000000001000\tc3\tret\nunexpected footer\n",
+                     prefix + "0000000000001000\t.byte 0xc3\n", prefix + valid + "\n",
+                     prefix + valid + "unparsed line\n", prefix.replace(str(container), "/other/body") + valid):
+            with self.subTest(text=text), patch.object(cache, "instructions") as decode, \
+                    self.assertRaises(cache.EvidenceError):
+                cache.otool_instructions(text, container, 0x1000, 0x1004)
+            decode.assert_not_called()
+
+    def test_duplicate_out_of_range_missing_start_or_descending_rows_fail_closed(self):
+        container = Path("/synthetic/body.macho")
+        for addresses in ([0x1000, 0x1000], [0x1000, 0x1004], [0x1001], [0x1000, 0x1002, 0x1001]):
+            text = f"{container}:\n(__TEXT,__text) section\n" + "".join(
+                f"{address:016x}\tret\n" for address in addresses)
+            with self.subTest(addresses=addresses), self.assertRaises(cache.EvidenceError):
+                cache.otool_instructions(text, container, 0x1000, 0x1004)
 
 
 if __name__ == "__main__":
