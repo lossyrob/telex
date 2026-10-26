@@ -3165,7 +3165,7 @@
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign original direction toolu_014vkRgy6ysjNiGD88kQeR6L and direct confirmation toolu_01Jw6FHd8GL21QG41ruVtEnr authorize one Opus 5.5/high public-record-only owner for hosted-only #167 diagnosis/repair, Closes #167, overlap coordination and launch first/record after. Owning Local call_d9NxdDsCntpTp9O4amIuuF1e reports the actual completed launch. Earlier candidate/unassigned wording remains saved history, not a new launch prerequisite. Campaign four-times wording is attributed, not a new census.",
-      "terminalPath": "One separate PR uses Closes #167 after an evidence-backed bounded diagnosis/correction that preserves delayed inherited-writer output after shell exit, output/error semantics, effective negative assertions and owned-process cleanup. Require independent exact-final-head source review with reviewer-origin public receipt, design inspection as applicable, strict required hosted CI and Campaign gate; no autonomous merge. No retry/rerun, cosmetic-head retry, waiver, flake exception, unbounded experiment or workstation/installed-state change. Starting-checkout identity/cleanliness remains unverified, requested profile is not effective capacity, and launch alone is not implementation, runtime, repair, CI/readiness or accepted delivery.",
+      "terminalPath": "One separate PR uses Closes #167 after an evidence-backed bounded diagnosis/correction that preserves delayed inherited-writer output after shell exit, output/error semantics, effective negative assertions and owned-process cleanup. Require independent exact-final-head source review with reviewer-origin public receipt, design inspection as applicable, strict required hosted CI and Campaign gate; no autonomous merge. Same-head failed-job CI reruns are allowed after existing-tracker run/job/test retention; green exact-head reruns satisfy CI, red merges remain forbidden, and repeated same-test failure is a finding. #167 remains held/no merge; its B/C decision is deferred to Sentinel. No cosmetic-head retry, waived/skipped/weakened check, unbounded experiment, local runtime, product retry weakening or workstation/installed-state change. Starting-checkout identity/cleanliness remains unverified, requested profile is not effective capacity, and launch alone is not implementation, runtime, repair, CI/readiness or accepted delivery.",
       "separate167RepairPromotionAndActualLaunch": {
         "kind": "additive-existing167-promotion-and-actual-public-only-owner-launch",
         "historicalCandidateFields": {
@@ -3290,6 +3290,38 @@
         "remainingGates": "Independent exact-final-head source review with reviewer-origin public verdict/scope/limits receipt, design inspection as applicable, strict required hosted CI and Campaign gate. No autonomous merge, inherited source/CI acceptance or new scheduler. Existing sole external coordinator remains; no canonical artifact review grants product/runtime/readiness acceptance.",
         "coordination": "Existing d7a17cd2-08c2-4760-b1a6-1209c2d0f80c remains #166/PR #196 sole writer. The #167 owner coordinates overlapping credential/daemon/CI/dependency edits before publishing, does not write #196 branch or absorb its repair. No inferred graph edge or unrelated-analysis serialization. Both #193/#198 wakes remain exact and pending until Local verifies actual #166 product-repair merge.",
         "conservation": "Record Campaign-authorized promotion of the same existing #167 candidate and the already-completed launch of owner 9a868a31, with one repair node/task and no occurrence append. Preserve all prior candidate/unassigned fields as history and all evidence, including four successor entries. Exact starting owner checkout/head/tree/cleanliness remains unverified; public-main preflight is not checkout proof, requested profile is not effective-capacity proof, and Campaign four-times wording is not an independent census. No new launch, owner, tracker, private-context transfer, inferred edge, existing-node status/attention/dependency/design-link change, #166/#203/#204 or wake change, source/runtime/design/CI/readiness/repair acceptance, autonomous merge, retry/waiver/flake, debt/HOLD or freeze credit. Runtime remains hosted-only under the already-given authority; implementation does not wait on recording."
+      },
+      "sameHeadRerunAndSentinelPolicyQualification": {
+        "kind": "campaign-directed-same-head-ci-reruns-and-existing-sentinel-scope",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01BAMphx5UxVR6KEHAWxh5Ud",
+          "operatorDirectiveVerbatim": "That seems like a bad rule. \"no reruns\" doesn't make sense. Remove that rule. Reruns are fine. We need a separate session to investigate the flaky tests and windows environrment, and decide what the best approach is there. perhaps something for the dedicated integration session"
+        },
+        "rules": {
+          "sameHeadCiReruns": "Failed CI jobs may rerun at the unchanged head after recording run, job and test on the existing tracker or discovered-work record. A green rerun at that exact head satisfies CI; merging red remains forbidden. Repeated failure of the same test across reruns is a finding to report, not noise or permission to weaken a check.",
+          "supersession": "The prior #167 and #203 no-retry/flake-exception scope clauses are superseded only for these same-head CI reruns. All prior failures, observations and scope statements remain history; a green rerun is not a causal fix, repair acceptance or debt clearance. No cosmetic-head retry, waived/skipped/weakened required check, local runtime or product retry weakening is authorized.",
+          "sentinel": {
+            "sessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "authority": "Campaign assigns the existing test sentinel the cross-family Windows flake and environment investigation and the approach decision, amending R15 for this purpose. This records the assignment, not a new session launch, new implementation owner or evidence of execution or a recommendation.",
+            "deferredDecisions": "#167 B/C and #175/LockFileEx-33 staffing are deferred to the sentinel's recommendation. #167 remains held with no merge; both unstaffed candidates remain unstaffed. No recommendation, staffing or repair outcome is inferred."
+          },
+          "planningCommit": {
+            "commit": "74721a829f1dda93d1d2acc869a60fa2266c45f1",
+            "repositoryKind": "operator private planning repository",
+            "meaning": "Campaign process-document change to the owner guide and merge-gate charter; not a telex main commit or product merge. Only the operator directive and rule summary are projected here, not private planning-document content."
+          },
+          "conservation": "No new observation, candidate, node, graph edge, implementation owner, scheduler or wake. Existing #167/#203 repair ownership, candidate dispositions, statuses, attention, dependencies, design links and all evidence/history remain exact. No CI result, #166 debt clearance or causality, #167/#203/#207 acceptance, release, hardening or workstation-freeze credit. Recording does not delay existing owners, reruns or the sentinel."
+        },
+        "scope": "#167 B/C deferred to the existing Sentinel recommendation; existing repair owner unchanged and held/no merge.",
+        "historicalCurrentFields": {
+          "terminalPath": "One separate PR uses Closes #167 after an evidence-backed bounded diagnosis/correction that preserves delayed inherited-writer output after shell exit, output/error semantics, effective negative assertions and owned-process cleanup. Require independent exact-final-head source review with reviewer-origin public receipt, design inspection as applicable, strict required hosted CI and Campaign gate; no autonomous merge. No retry/rerun, cosmetic-head retry, waiver, flake exception, unbounded experiment or workstation/installed-state change. Starting-checkout identity/cleanliness remains unverified, requested profile is not effective capacity, and launch alone is not implementation, runtime, repair, CI/readiness or accepted delivery."
+        },
+        "provenance": {
+          "directionReceipt": "rerun-policyv4-campaign-direction.json",
+          "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
+        },
+        "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
       }
     },
     {
@@ -3721,7 +3753,37 @@
       "status": "candidate",
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23; Campaign evidence-only reconciliation, with no graph/node/gate transition.",
-      "terminalPath": "Exact failing test/operation evidence and explicit tracker disposition; causal classification and any separately authorized fix must preserve owner-private persistent-lock/fail-closed semantics and full hosted diagnostic coverage. Green rerun alone is not resolution."
+      "terminalPath": "Exact failing test/operation evidence and explicit tracker disposition; causal classification and any separately authorized fix must preserve owner-private persistent-lock/fail-closed semantics and full hosted diagnostic coverage. Green rerun alone is not resolution.",
+      "sameHeadRerunAndSentinelPolicyQualification": {
+        "kind": "campaign-directed-same-head-ci-reruns-and-existing-sentinel-scope",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01BAMphx5UxVR6KEHAWxh5Ud",
+          "operatorDirectiveVerbatim": "That seems like a bad rule. \"no reruns\" doesn't make sense. Remove that rule. Reruns are fine. We need a separate session to investigate the flaky tests and windows environrment, and decide what the best approach is there. perhaps something for the dedicated integration session"
+        },
+        "rules": {
+          "sameHeadCiReruns": "Failed CI jobs may rerun at the unchanged head after recording run, job and test on the existing tracker or discovered-work record. A green rerun at that exact head satisfies CI; merging red remains forbidden. Repeated failure of the same test across reruns is a finding to report, not noise or permission to weaken a check.",
+          "supersession": "The prior #167 and #203 no-retry/flake-exception scope clauses are superseded only for these same-head CI reruns. All prior failures, observations and scope statements remain history; a green rerun is not a causal fix, repair acceptance or debt clearance. No cosmetic-head retry, waived/skipped/weakened required check, local runtime or product retry weakening is authorized.",
+          "sentinel": {
+            "sessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "authority": "Campaign assigns the existing test sentinel the cross-family Windows flake and environment investigation and the approach decision, amending R15 for this purpose. This records the assignment, not a new session launch, new implementation owner or evidence of execution or a recommendation.",
+            "deferredDecisions": "#167 B/C and #175/LockFileEx-33 staffing are deferred to the sentinel's recommendation. #167 remains held with no merge; both unstaffed candidates remain unstaffed. No recommendation, staffing or repair outcome is inferred."
+          },
+          "planningCommit": {
+            "commit": "74721a829f1dda93d1d2acc869a60fa2266c45f1",
+            "repositoryKind": "operator private planning repository",
+            "meaning": "Campaign process-document change to the owner guide and merge-gate charter; not a telex main commit or product merge. Only the operator directive and rule summary are projected here, not private planning-document content."
+          },
+          "conservation": "No new observation, candidate, node, graph edge, implementation owner, scheduler or wake. Existing #167/#203 repair ownership, candidate dispositions, statuses, attention, dependencies, design links and all evidence/history remain exact. No CI result, #166 debt clearance or causality, #167/#203/#207 acceptance, release, hardening or workstation-freeze credit. Recording does not delay existing owners, reruns or the sentinel."
+        },
+        "scope": "Staffing is deferred to the existing Sentinel recommendation; candidate/proposed/unassigned implementation disposition, sourceNode:null, tracker uncertainty and all observations stay exact.",
+        "historicalCurrentFields": {},
+        "provenance": {
+          "directionReceipt": "rerun-policyv4-campaign-direction.json",
+          "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
+        },
+        "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
+      }
     },
     {
       "id": "local-daemon-windows-pageheap-deadline-failures",
@@ -4002,7 +4064,37 @@
       "status": "candidate",
       "decisionState": "proposed",
       "dispositionAuthority": "Local Daemon routing adjudication 2026-10-23 under existing ledger-only reconciliation authority. Co-tracking is administrative, not causal equivalence or gate acceptance.",
-      "terminalPath": "Independently classify each timeout using retained command/daemon timing and identity evidence. Preserve prompt store-lock refusal, successful attach/readiness and ordinary-send/turn-guard semantics. Any confirmed fix or justified harness change requires separately authorized scope and exact-head full hosted validation; no skipped checks, accepted timeout or unsupported budget increase. A green rerun alone is not a causal fix. Explicit hardening disposition is still required."
+      "terminalPath": "Independently classify each timeout using retained command/daemon timing and identity evidence. Preserve prompt store-lock refusal, successful attach/readiness and ordinary-send/turn-guard semantics. Any confirmed fix or justified harness change requires separately authorized scope and exact-head full hosted validation; no skipped checks, accepted timeout or unsupported budget increase. A green rerun alone is not a causal fix. Explicit hardening disposition is still required.",
+      "sameHeadRerunAndSentinelPolicyQualification": {
+        "kind": "campaign-directed-same-head-ci-reruns-and-existing-sentinel-scope",
+        "campaignAuthority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01BAMphx5UxVR6KEHAWxh5Ud",
+          "operatorDirectiveVerbatim": "That seems like a bad rule. \"no reruns\" doesn't make sense. Remove that rule. Reruns are fine. We need a separate session to investigate the flaky tests and windows environrment, and decide what the best approach is there. perhaps something for the dedicated integration session"
+        },
+        "rules": {
+          "sameHeadCiReruns": "Failed CI jobs may rerun at the unchanged head after recording run, job and test on the existing tracker or discovered-work record. A green rerun at that exact head satisfies CI; merging red remains forbidden. Repeated failure of the same test across reruns is a finding to report, not noise or permission to weaken a check.",
+          "supersession": "The prior #167 and #203 no-retry/flake-exception scope clauses are superseded only for these same-head CI reruns. All prior failures, observations and scope statements remain history; a green rerun is not a causal fix, repair acceptance or debt clearance. No cosmetic-head retry, waived/skipped/weakened required check, local runtime or product retry weakening is authorized.",
+          "sentinel": {
+            "sessionId": "fc772c8f-2a38-40de-a868-69a5397dbbc5",
+            "authority": "Campaign assigns the existing test sentinel the cross-family Windows flake and environment investigation and the approach decision, amending R15 for this purpose. This records the assignment, not a new session launch, new implementation owner or evidence of execution or a recommendation.",
+            "deferredDecisions": "#167 B/C and #175/LockFileEx-33 staffing are deferred to the sentinel's recommendation. #167 remains held with no merge; both unstaffed candidates remain unstaffed. No recommendation, staffing or repair outcome is inferred."
+          },
+          "planningCommit": {
+            "commit": "74721a829f1dda93d1d2acc869a60fa2266c45f1",
+            "repositoryKind": "operator private planning repository",
+            "meaning": "Campaign process-document change to the owner guide and merge-gate charter; not a telex main commit or product merge. Only the operator directive and rule summary are projected here, not private planning-document content."
+          },
+          "conservation": "No new observation, candidate, node, graph edge, implementation owner, scheduler or wake. Existing #167/#203 repair ownership, candidate dispositions, statuses, attention, dependencies, design links and all evidence/history remain exact. No CI result, #166 debt clearance or causality, #167/#203/#207 acceptance, release, hardening or workstation-freeze credit. Recording does not delay existing owners, reruns or the sentinel."
+        },
+        "scope": "Staffing is deferred to the existing Sentinel recommendation; candidate/proposed/unassigned implementation disposition, sourceNode:null, tracker uncertainty and all observations stay exact.",
+        "historicalCurrentFields": {},
+        "provenance": {
+          "directionReceipt": "rerun-policyv4-campaign-direction.json",
+          "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
+        },
+        "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
+      }
     },
     {
       "id": "local-daemon-windows-cooperative-partial-page-overrun",

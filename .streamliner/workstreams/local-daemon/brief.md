@@ -1243,3 +1243,35 @@ debt clearance is accepted here. Campaign's later confirmation reports
 CI; this records no #203/#207 or #167 acceptance. Counts stay 48 Local
 records and 29 nodes, with no edge, other status, owner, runtime or
 workstation-freeze change. Recording does not delay either awakened owner.
+
+## 2026-10-26: Same-head CI reruns and Sentinel investigation
+
+Campaign `toolu_01BAMphx5UxVR6KEHAWxh5Ud` records the operator's
+09:25 ET directive: "Reruns are fine." The prior #167 and #203
+no-retry/flake-exception clauses are superseded for same-head CI reruns.
+Record each failure's run, job and test on its existing tracker or
+discovered-work record before rerunning failed jobs at the unchanged head.
+A green rerun at that exact head satisfies CI; merging red is still
+forbidden. Repeated failure of the same test is a finding, not noise.
+Do not waive, skip or weaken a required check or manufacture a new head.
+This changes neither local-runtime restrictions nor product retry behavior.
+
+Existing test sentinel `fc772c8f-2a38-40de-a868-69a5397dbbc5` now owns the
+cross-family Windows flake/environment investigation and approach decision;
+R15 is amended for that purpose. #167's B/C decision and #175/LockFileEx-33
+staffing are deferred to its recommendation. #167 remains held with no
+merge; the two candidates stay unstaffed. This records an assignment, not
+a new session launch, implementation owner, recommendation or result.
+
+Campaign's `74721a829f1dda93d1d2acc869a60fa2266c45f1` is an owner-guide
+and merge-gate process-document commit in the private planning repository,
+not a telex main commit or product merge. Only this directive/rule summary
+is projected; private planning-document content stays private.
+
+All earlier failures and policy statements remain history, not current
+no-rerun authority. A green rerun is not a causal fix, repair acceptance
+or debt clearance. Existing repair owners, statuses, attention, graph
+geometry and all evidence remain unchanged. No CI result, #166 debt
+clearance/causality, #167/#203/#207 acceptance, new wake, release,
+hardening or freeze credit follows. Owners, reruns and Sentinel do not
+wait on this recording.
