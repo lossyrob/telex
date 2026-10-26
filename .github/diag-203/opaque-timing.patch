@@ -1,0 +1,73 @@
+diff --git a/telex-watcher/src/runtime_management_tests.rs b/telex-watcher/src/runtime_management_tests.rs
+index 8c93509a..7f35d81a 100644
+--- a/telex-watcher/src/runtime_management_tests.rs
++++ b/telex-watcher/src/runtime_management_tests.rs
+@@ -195,10 +195,15 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
+             )
+             .unwrap();
+         drop(connection);
++        let diag_limit = Duration::from_secs(std::env::var("DIAG203_OPAQUE_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(10));
++        let diag_started = std::time::Instant::now();
++        let diag_marks = std::sync::Mutex::new(Vec::<(&str, u128)>::new());
++        let diag_mark = |name: &'static str| diag_marks.lock().unwrap().push((name, diag_started.elapsed().as_millis()));
+         let (runtime, management) = fixture.open();
++        diag_mark("open");
+         let owner = tokio::spawn(runtime.run());
+-        let (rejected, removed, shown, reused, attempts) =
+-            tokio::time::timeout(Duration::from_secs(10), async {
++        let diag_commands =
++            tokio::time::timeout(diag_limit, async {
+                 let registration = |id, initial_state| Command::Register {
+                     json: serde_json::to_vec(&json!({
+                         "schemaVersion": 2, "id": id, "command": ["not-executed"],
+@@ -212,32 +217,46 @@ async fn public_management_removes_opaque_legacy_state_without_v2_admission() {
+                 let rejected = management
+                     .execute(registration("new-watch", state.clone()))
+                     .await;
++                diag_mark("rejected");
+                 let removed = management
+                     .execute(Command::Remove {
+                         id: "old-watch".into(),
+                     })
+                     .await;
++                diag_mark("removed");
+                 let shown = management
+                     .execute(Command::Show {
+                         id: "old-watch".into(),
+                     })
+                     .await;
++                diag_mark("shown");
+                 let reused = management
+                     .execute(registration("old-watch", serde_json::Value::Null))
+                     .await;
++                diag_mark("reused");
+                 let attempts = management
+                     .execute(Command::Attempts {
+                         id: "old-watch".into(),
+                         limit: 10,
+                     })
+                     .await;
++                diag_mark("attempts");
+                 management.execute(Command::Shutdown).await.unwrap();
++                diag_mark("shutdown-reply");
+                 (rejected, removed, shown, reused, attempts)
+             })
+-            .await
+-            .unwrap();
+-        tokio::time::timeout(Duration::from_secs(10), owner)
+-            .await
++            .await;
++        let diag_owner = tokio::time::timeout(diag_limit, owner).await;
++        diag_mark("owner-joined");
++        {
++            use std::io::Write;
++            let line = format!("{} limit_s={} commands_ok={} owner_ok={} marks={:?}\n", std::process::id(), diag_limit.as_secs(), diag_commands.is_ok(), diag_owner.is_ok(), diag_marks.lock().unwrap());
++            let _ = std::fs::create_dir_all("C:\\diag203-mio");
++            let mut out = std::fs::OpenOptions::new().create(true).append(true).open(format!("C:\\diag203-mio\\opaque-{}.log", std::process::id())).unwrap();
++            out.write_all(line.as_bytes()).unwrap();
++        }
++        let (rejected, removed, shown, reused, attempts) = diag_commands.unwrap();
++        diag_owner
+             .unwrap()
+             .unwrap()
+             .unwrap();
