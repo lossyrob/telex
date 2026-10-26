@@ -2157,7 +2157,7 @@ async fn connect_existing_against_resolved(
         None,
         Some(&resolved.expected_identity),
     )
-    .map_err(bootstrap_error_from_peer)?;
+    .map_err(|error| bootstrap_error_from_connected_peer(&conn, error))?;
     // The endpoint can become connectable just before the successor publishes
     // its fresh capability record. Read the record only after connecting and
     // treat a generation mismatch as bounded readiness, not as foreign peer
@@ -2182,7 +2182,8 @@ async fn connect_existing_against_resolved(
             "capability record does not match connected peer: {error}"
         ))
     })?;
-    verify_cap_bootstrap_evidence(&cap, &paths, resolved).map_err(bootstrap_error_from_peer)?;
+    verify_cap_bootstrap_evidence(&cap, &paths, resolved)
+        .map_err(|error| bootstrap_error_from_connected_peer(&conn, error))?;
     let hello = proto::client_hello(store_key);
     let client = handshake_connected(conn, paths, &hello).await?;
     if let Some(sel) = resolved.selection.as_ref() {
@@ -2520,6 +2521,28 @@ fn bootstrap_error_from_peer(error: DaemonError) -> DaemonError {
     // unverifiable. It is never permission to launch another daemon beside
     // the connected process.
     DaemonError::Bootstrap(crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon)
+}
+
+/// [`bootstrap_error_from_peer`] for the bounded bootstrap connect path, which
+/// first asks whether the connected server process has already exited.
+///
+/// Windows records a terminated process's exit status before it runs down
+/// that process's handles, so a client can still connect to a pipe instance
+/// of a daemon that is already gone and then fail to verify its image (#204).
+/// Such an endpoint is not running: report it that way so the caller keeps
+/// probing within its readiness bounds for the endpoint to disappear or a
+/// successor to bind. Any peer whose exit is not proven stays a terminal
+/// `ForeignDaemon`; nothing is ever sent to the exited peer.
+fn bootstrap_error_from_connected_peer(
+    conn: &platform::ClientConn,
+    error: DaemonError,
+) -> DaemonError {
+    match platform::exited_server_pid(conn) {
+        Some(pid) => DaemonError::NotRunning(format!(
+            "connected endpoint server process {pid} has exited"
+        )),
+        None => bootstrap_error_from_peer(error),
+    }
 }
 
 fn bootstrap_spawn_env(
@@ -16020,6 +16043,12 @@ mod platform {
         verify_server_peer_bootstrap(conn, expected_exe, expected_pid, expected_start_time, None)
     }
 
+    /// A Unix listener is closed by the kernel when its process exits, so a
+    /// connected server is never classified as an exited process here.
+    pub fn exited_server_pid(_conn: &ClientConn) -> Option<u32> {
+        None
+    }
+
     /// Extended peer verification that additionally checks the peer image's
     /// platform file identity when the caller supplies one. Used by the
     /// InstalledCurrent connect path so a peer running a canonical-path-match
@@ -16239,8 +16268,8 @@ mod platform {
     use std::os::windows::io::AsRawHandle;
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY,
-        FILETIME, HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_INVALID_PARAMETER,
+        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE, STILL_ACTIVE,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
@@ -16258,7 +16287,7 @@ mod platform {
         PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
+        GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
         PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
@@ -16401,6 +16430,29 @@ mod platform {
             expected_pid,
             expected_start_time,
         )
+    }
+
+    /// The pid of the process that created the server end of `conn`, but only
+    /// when that process provably has exited: either its exit status is set
+    /// or no process object remains for the kernel-reported pid. Windows sets
+    /// a terminated process's exit status before it runs down that process's
+    /// handles, so its pipe instance can still accept a connection (#204).
+    pub fn exited_server_pid(conn: &ClientConn) -> Option<u32> {
+        let mut pid = 0u32;
+        if unsafe { GetNamedPipeServerProcessId(conn.as_raw_handle() as HANDLE, &mut pid) } == 0 {
+            return None;
+        }
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process == 0 {
+            let error = std::io::Error::last_os_error();
+            return (error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32)).then_some(pid);
+        }
+        let process = Handle(process);
+        let mut code = 0u32;
+        if unsafe { GetExitCodeProcess(process.0, &mut code) } == 0 {
+            return None;
+        }
+        (code != STILL_ACTIVE as u32).then_some(pid)
     }
 
     fn create_pipe(pipe_name: &str, first: bool) -> Result<NamedPipeServer> {
@@ -16824,6 +16876,122 @@ mod platform {
                 other => panic!("expected existing token sizing error, got {other:?}"),
             }
         }
+
+        const EXITED_PEER_HELPER_PIPE: &str = "TELEX_TEST_EXITED_PEER_HELPER_PIPE";
+        const EXITED_PEER_HELPER_READY: &str = "TELEX_TEST_EXITED_PEER_HELPER_READY";
+
+        /// Pipe-server body for `windows_exited_pipe_server_is_not_a_foreign_daemon`.
+        /// It only acts when that test launches it with the helper variables.
+        #[test]
+        #[ignore = "helper process launched by windows_exited_pipe_server_is_not_a_foreign_daemon"]
+        fn windows_exited_pipe_server_helper_process() {
+            let (Ok(pipe_name), Some(ready)) = (
+                std::env::var(EXITED_PEER_HELPER_PIPE),
+                std::env::var_os(EXITED_PEER_HELPER_READY),
+            ) else {
+                return;
+            };
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("helper runtime");
+            runtime.block_on(async {
+                let _server = create_pipe(&pipe_name, true).expect("create helper pipe instance");
+                std::fs::write(&ready, b"ready").expect("publish helper readiness");
+                tokio::time::sleep(Duration::from_secs(120)).await;
+            });
+        }
+
+        /// #204: a client can hold a connection to a daemon's pipe instance
+        /// after the daemon process has exited. Failing to verify that gone
+        /// peer must be retryable `NotRunning`, never a terminal
+        /// `ForeignDaemon`, while a live peer running another image must stay
+        /// `ForeignDaemon`.
+        #[test]
+        fn windows_exited_pipe_server_is_not_a_foreign_daemon() {
+            let exe = std::env::current_exe().expect("current test executable");
+            let unique = format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock after epoch")
+                    .as_nanos()
+            );
+            let pipe_name = format!(r"\\.\pipe\telex-exited-peer-{unique}");
+            let ready = std::env::temp_dir().join(format!("telex-exited-peer-{unique}.ready"));
+            let mut helper = std::process::Command::new(&exe)
+                .args([
+                    "windows_exited_pipe_server_helper_process",
+                    "--ignored",
+                    "--test-threads=1",
+                ])
+                .env(EXITED_PEER_HELPER_PIPE, &pipe_name)
+                .env(EXITED_PEER_HELPER_READY, &ready)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn pipe-server helper");
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while !ready.exists() {
+                if let Some(status) = helper.try_wait().expect("poll helper") {
+                    panic!("pipe-server helper exited before readiness: {status}");
+                }
+                if Instant::now() >= deadline {
+                    let _ = helper.kill();
+                    let _ = helper.wait();
+                    panic!("pipe-server helper did not publish readiness");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let _ = std::fs::remove_file(&ready);
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("client runtime");
+            let _entered = runtime.enter();
+            let conn = ClientOptions::new()
+                .open(&pipe_name)
+                .expect("connect to helper pipe instance");
+
+            assert_eq!(exited_server_pid(&conn), None, "live helper is not exited");
+            verify_server_peer_bootstrap(&conn, &exe, None, None, None)
+                .expect("a live peer running the selected image authenticates");
+            let foreign_exe = PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"))
+                .join("System32")
+                .join("cmd.exe");
+            let refused = verify_server_peer_bootstrap(&conn, &foreign_exe, None, None, None)
+                .expect_err("a live peer running another image must be refused");
+            match bootstrap_error_from_connected_peer(&conn, refused) {
+                DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+                ) => {}
+                other => panic!("a live foreign peer must stay ForeignDaemon, got {other:?}"),
+            }
+
+            let helper_pid = helper.id();
+            helper.kill().expect("terminate pipe-server helper");
+            helper.wait().expect("reap pipe-server helper");
+            let assert_exited_peer_is_not_running = |phase: &str| {
+                assert_eq!(exited_server_pid(&conn), Some(helper_pid), "{phase}");
+                // The exited image may or may not still be queryable; either
+                // way the mapping must not depend on that verifier outcome.
+                let error = verify_server_peer_bootstrap(&conn, &exe, None, None, None)
+                    .err()
+                    .unwrap_or_else(|| DaemonError::Protocol("peer verification failed".into()));
+                match bootstrap_error_from_connected_peer(&conn, error) {
+                    DaemonError::NotRunning(_) => {}
+                    other => panic!("{phase}: exited peer must be NotRunning, got {other:?}"),
+                }
+            };
+            // First while `helper` still holds the process object (exit status
+            // set, object retained), then after its last handle is closed.
+            assert_exited_peer_is_not_running("exited-object-retained");
+            drop(helper);
+            assert_exited_peer_is_not_running("exited-object-released");
+        }
     }
 }
 
@@ -16914,6 +17082,10 @@ mod platform {
             capability: "client-side server-auth bootstrap",
             message: "no peer credential primitive for this platform".into(),
         })
+    }
+
+    pub fn exited_server_pid(_conn: &ClientConn) -> Option<u32> {
+        None
     }
 }
 
