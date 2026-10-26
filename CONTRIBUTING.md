@@ -98,6 +98,34 @@ discovery. Acquisition errors are observed directly instead of being reported
 as an indistinguishable readiness timeout. Deterministic error/identity seams
 supplement, rather than replace, real platform scope/termination/reap and pipe tests.
 
+## Windows CI bounds and execution evidence
+
+The Windows `build-test` job has independent hosted ceilings around whole steps:
+
+| Scope | Ceiling |
+| --- | --- |
+| Workspace `Test` | 30 minutes |
+| Complete SQLite Application Client suite | 15 minutes |
+| Credential invocation lifecycle | 5 minutes |
+| Entire Windows workspace job, including builds and evidence collection | 60 minutes |
+
+These are failure-cost limits chosen from whole-step receipts, not product
+deadlines or latency percentiles; see [#209](https://github.com/lossyrob/telex/issues/209).
+Other OS bounds, test commands, profiles, PageHeap checks, teardown and artifact
+definitions are unchanged. Existing failure collection still runs where its
+conditions permit; a job cancellation can preempt cleanup or artifact upload.
+
+`Record Windows execution context` emits one `TELEX_CI_CONTEXT` JSON record in
+the job log, under its own two-minute ceiling. It records the run and attempt,
+event/provider/checkout identities, image, exposed logical CPU count and actual
+Rust toolchain. Missing image environment values are unavailable metadata.
+GitHub step timestamps supply whole-step durations. These context fields do not
+measure CPU contention, disk latency, fsync or Defender activity.
+
+Record the original run, attempt, job and test before rerunning a failed job at
+the unchanged head. A green exact-head rerun can satisfy CI; retain the first
+failure, and treat repeated failure of the same test as a finding.
+
 ## Windows token-user regression coverage
 
 On Windows, run `cargo test --lib windows_token_user_alignment` to exercise the
