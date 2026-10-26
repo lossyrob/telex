@@ -52,6 +52,15 @@ from end-to-end SQL/scheduler latency. A separate virtual-time test proves that
 notification selection does not wait for the normal polling deadline. Production
 poll intervals remain unchanged.
 
+`postgres_candidate_waits_do_not_queue_behind_status_and_report_sql_phases`
+requires a disposable loopback PostgreSQL server. It seeds synthetic retained
+history and uses a localhost TCP delay fixture to run three waiters alongside
+status for six members, with the production 3,000ms recovery grace unchanged.
+It also checks materialization, primary-read and connect exhaustion details and
+their status projection. The credential-cancellation contract separately checks
+credential-phase exhaustion and the shorter idle deadline. These are controlled
+latency/cancellation proofs, not production-network or Entra measurements.
+
 ## Station-intent boundary coverage
 
 The `station-intent-lock` CI job runs the complete station-intent and

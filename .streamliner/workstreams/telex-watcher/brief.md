@@ -1008,3 +1008,276 @@ Main CI attempt 1 failed the Windows E2E test `station_intent_a_busy_station_def
 - Local and one-registry observation limits and existing-installation prerequisites remain explicit. The Windows E2E observation remains under #182 for requested local adjudication; no product defect or repair owner is inferred.
 
 The post-merge observer has completed and exited. No merged #200 guidance-outcome failure was found.
+
+
+## #222 Watcher bootstrap shape and #223 outbound routing (2026-10-26)
+
+Watcher design `toolu_015RDXAXUBTBpbRkmXBYyDxu` / public6425261263 adds exactly planned/watch task node `watcher-installation-bootstrap` tracked by [#222](https://github.com/lossyrob/telex/issues/222). Its only dependencies are completed watcher-cli-ux and stall-detection-agent-guidance. runtime-hardening gains only this dependency; closure already reaches it transitively. All 22 old node objects remain exact except that one appended hardening edge. Existing statuses, summaries, geometry, root fields, checkpoints, design links and ordering remain exact. No #201/five-minute/macOS edge is added.
+
+The coordinator `toolu_01596kTy4zSBeUtdxZib8VwJ` requires this canonical node and GitHub tracker before launching its ready single owner. This records no owner, requested/effective profile, launch, implementation, installed state or readiness/validation result. The coordinator receives a doorbell only after verified publication.
+
+Owning Watcher `toolu_01HCzYW79vQL9tMEhErXwssY` reports Campaign `toolu_019JXfDVGr4mW1LwPYYa7NBw` priority hold of five-minute-custom-watch-gate until #222 product delivery. This is NOT a graph dependency and planned-node publication does not lift it. The gate stays planned/unowned; no status change is made here.
+
+### Complete #222 shape/outcome/boundaries
+
+https://github.com/lossyrob/telex/issues/222#issuecomment-6425261263
+
+Raw 2101 bytes / SHA-256 `15990c6d76bf591556868af4e5630334ea4e804e540ee4e715af77edd66e42bf`; LF display 2100 bytes / SHA-256 `7d98e6b9d6dbda31ac6ce60f9d7682b6d5abd261aa607245c360356958d3841e`.
+
+```text
+Design steward decision: this joins the Watcher geometry as a new item.
+
+Node: `watcher-installation-bootstrap`, a task tracked by this issue, with attention watch.
+- Depends on `watcher-cli-ux` and `stall-detection-agent-guidance`, both completed.
+- `runtime-hardening` gains a dependency on it, so `closure-gate` depends on it transitively.
+- It is not a dependency of #201, `five-minute-custom-watch-gate` or `watcher-macos-containment-runtime`.
+
+Why it is Watcher work: the Watcher guidance (stall guide, `telex copilot skill`) starts from a running Watcher installation whose trusted executable, registry, profile and sender values the root can look up. No supported way exists to create or record one. Runtime-hardening exercises packaging and upgrade but does not provide this, and the #201 dogfood setup was operator-authorized for that run only.
+
+Outcome:
+1. A supported, discoverable Watcher installation and launch record holds the trusted `telex` and `telex-watcher` paths, the registry, the backend profile and the send-only sender, for an agent to read instead of guess.
+2. A documented bootstrap path creates that record and starts the runtime with its required environment. It has explicit shutdown, rollback, and handling for an existing older installation. It never silently modifies an existing installation.
+3. The stall guide (and `telex copilot skill` where it carries the same text) points to that path. It names the supported root delivery modes: Copilot bridge push, or the documented pull fallback (`telex copilot fallback prepare`) where the host cannot load the bridge. It keeps the two modes distinct, as #201 recorded in 6425143128.
+
+Boundaries:
+- It uses existing backend profiles and authentication. If a new backend authentication capability is needed, that is a separate item.
+- Telex binary installation and upgrade stay with the existing release-upgrade surface.
+- The App bridge loading gap is #223 and is not part of this item.
+- Platforms are Windows and Linux. macOS follows the containment item and remains debt here.
+
+The reconciler writes the graph change.
+
+```
+
+### #223 routes to Local, no Watcher geometry/dependency
+
+https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961
+
+Raw 881 bytes / SHA-256 `e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad`; LF display 880 bytes / SHA-256 `5f1fdfedef777735ef422fd4de32f9a8a1a75f2cc4b6cf7343673a4d56bc81c2`.
+
+```text
+Design steward decision: this does not join the Watcher geometry. It routes to the Local Daemon workstream.
+
+Why: first-time Copilot bridge loading (`telex copilot attach --copilot-bridge`, then `extensions_reload`) and the push/pull delivery contract belong to Local Daemon's `push-delivery` design (docs/design/copilot-bridge-push.md, guides/copilot-push.md). Whether App-hosted sessions get a supported first-time bridge path, or the guide states pull fallback as the App path, is that workstream's decision.
+
+Watcher dependencies: none. #201 uses the supported pull fallback (6425143128). The Watcher stall guide naming push as the only root delivery mode is Watcher's own wording; the fix moves into #222's outcome, item 3, and does not wait on this issue.
+
+The Watcher coordinator hands this off to Local Daemon routing. The outcome text in this issue body stands as filed.
+
+```
+
+### Earlier supported-pull semantics and conditions, not runtime proof
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6425143128
+
+Raw 3150 bytes / SHA-256 `b09087f984619ca0593731a907ab1d68bc421ab60e4a3b3b10480658dea6ed14`; LF display 3149 bytes / SHA-256 `74778ede2fc6291ba2232145258ade22023255305573f13e1357bf2f4df0ba7d`.
+
+```text
+Design steward answer for the #201 owner: root wake path when the App session cannot reload extensions.
+
+Decision: Telex's supported pull fallback satisfies the real-root criterion. This is not an upstream blocker, and #201 keeps its outcome and scope. The operator-chosen root, Campaign, stays the root.
+
+Why: the #197 criterion, as copilot-session-stalls.md records it, is that Telex delivers the detector event to the root as a turn, the root confirms the stall with the App's get_sessions_status, and then rings the affected members. It does not name a delivery channel. copilot-push.md documents the pull fallback (`telex copilot fallback prepare` plus exactly one pull-mode wait) as the supported Copilot delivery path when `extensions_reload` is unavailable. A turn produced by that path is Telex delivery. The stall guide's sentence "already receive turns through Copilot push delivery" is a guidance gap: it names one channel where the design needs any supported one. That gap does not change what the gate proves.
+
+Conditions:
+1. Use the documented fallback as written: Telex-owned `copilot fallback prepare` and a single pull-mode wait whose completion wakes the App session. Do not use a custom polling loop, a scripted inbox read, or the operator relaying messages.
+2. The event the root acts on is the real detector event, delivered by the real Watcher registration on the real backend, to the root's real address. "Exactly one event per episode" is counted where the event is emitted and stored in Telex, not by what the wait surfaced. The report states how it was counted.
+3. Re-arming: a pull wait completes once. If the run spans more than one episode, or also receives the staged attention-needed case, the root re-prepares or re-arms per the guide before the next episode. Report any event that arrived while no wait was armed, and when it was read. Do not count it as a missed or duplicate emission.
+4. The report says plainly that root delivery used the pull fallback and that bridge push delivery to an App root was not exercised. It names the delivery mode station_health reported (`pull`). Do not claim push and do not imply the guide was followed as written.
+5. Confirm and ring are unchanged: the root confirms with get_sessions_status before acting and rings members through its normal channel. The report names the channel the members' replies came back on.
+6. File the App bridge / stall-guide prerequisite gap as a separate discovered-work issue, per the owner guide. It covers both the missing extensions_reload in App-hosted sessions and the stall guide naming push only. It is not a dependency of #201, and #201 does not amend the shipped guidance (no guidance or product change in this item).
+7. If the fallback itself fails, for example no wake on completion or a lost or duplicated event, that is a product failure: file it. If it prevents confirm/ring, bring it back to me; the answer is an upstream item, as in 6424158582 item 5.
+
+The alternative, an external CLI root, would change the operator's chosen arrangement and is not needed. No graph or outcome change. Earlier conditions in 6424158582 still apply.
+
+```
+
+Two new Watcher records retain #222 disposition and #223 outbound routing, with all 15 old rows/root/order exact. No Local ledger/node/owner is changed. #222 owns Watcher bootstrap and stall-group installation/root-mode wording, not host loading, new backend authentication, Telex binary install/upgrade or macOS containment. Owning Local `call_kUHJSXbVmnRG8PJlpwsuplKL` separately assigns #223 host-capability/first-load/fallback/recovery text; shared copilot/COPILOT.md changes require open-PR plus named-section coordination, not a dependency. #224 and the actual blocked #201/external edge remain their separate packets and receive no runtime, cause or acceptance credit here.
+
+No new task markdown file or launch packet is invented. Only graph, ledger and this append change: one new task node, exactly the declared runtime-hardening edge and two rows; Watcher17/23. All other workstreams/product/canonical design, Local debts/observations, #166 eight debts/two sent wakes and existing Watcher debt/notification state remain exact. No new observer, root re-arm, runtime/install/ACL action, wake, repair, gate waiver or debt clearance follows.
+
+
+## #225 planned Watcher runtime-failed diagnostics, external #195 consumer (2026-10-26)
+
+Watcher steward `toolu_01R872e2ciDWRcqikEuCpnZz` / [public decision 6425865009](https://github.com/lossyrob/telex/pull/221#issuecomment-6425865009) accepts existing [#225](https://github.com/lossyrob/telex/issues/225) as planned/watch task `watcher-runtime-failure-diagnostics`. Readiness is a coordinator report (`toolu_013hXzYq7X45TS3HAq1m3CcX`), not a new graph status or assigned owner. Only completed watcher-runtime-core and watcher-cli-ux are dependencies; no Watcher node gains a dependency on it. Sentinel #195 / PR #221 is external discovery/consumer provenance and stays outside Watcher geometry. Its workstream owns the external edge.
+
+For runtime-failed startup/run errors, write a bounded 4 KiB redacted stage-labeled cause chain to stderr, with truncation marked. Preserve the stdout envelope, runtime-failed code/exit 1 and all other specific codes. Update docs/design/watcher.md and the exit-code reference; test forced startup failure/stage labeling, redaction, byte cap and unchanged envelope on every platform where the binary builds. Do not diagnose/fix the #195 macOS cause, add a logging framework or persisted startup records.
+
+The cap is 4,096 bytes including the diagnostic/truncation marker. Preserve envelope shape/code/exit; the source issue allows message text to point to actual stderr. Redact environment values/DSNs/tokens/secret-like values; existing design permits local registry/endpoint paths. These are future acceptance requirements, not measurements or current implementation proof.
+
+### Full steward decision and bounded native-consumer hold
+
+Raw 2785 bytes / SHA-256 `624299d760a30baeae82ae318f5448d122416c0fcac90a648ec74cab05c98aad`; LF display 2784 bytes / SHA-256 `993044a5f588671549e2fd2e1039a17b7ded38cfe40945b3ef625357a62ccb63`.
+
+```text
+Design steward decision for #195 / PR #221 on the diagnostic receipt https://github.com/lossyrob/telex/pull/221#issuecomment-6425811617 (head 85d78160, run 40389528160/1, job 121806570895).
+
+Classification: the macOS startup cause is still unknown, but the reason it cannot be seen is a product defect. That defect is now upstream item #225. No more evidence can come from #195 until #225 lands.
+
+Source facts (read only):
+- The envelope comes from `run_host` in telex-watcher/src/main.rs (lines 119-123). It maps every error that is not `registry-already-owned` and not a top-level `TransportError` to fixed text and drops the cause chain. The runtime writes nothing to stderr, which is why the receipt has 0 stderr bytes. A test-side change cannot recover it.
+- This rules out the leads I listed in 6425476487. `endpoint()` failures in transport/unix.rs, including the home-directory requirement, the private-directory and ancestor checks, and the sun_path length check, come back as a top-level `TransportError`, so they would report a transport code, not `runtime-failed`.
+- The remaining sources are all product paths. `Runtime::open` and `Registry::open`. The listener steps after `endpoint()`, where an existing-socket check, unlink, `UnixListener::bind` or the 0600 chmod could fail. `Runtime::run` startup (unfinished containment, start_runtime, heartbeat). A management-server task failure. Which one, and whether the cause is in the fixture or the product, is not established.
+
+Decision:
+1. New Watcher item #225 (`watcher-runtime-failure-diagnostics`). For `runtime-failed`, write a bounded, redacted, stage-labeled cause chain to stderr. The stdout envelope, the code and the exit code stay as they are. Update the design and exit-code docs, and add tests on every platform the binary builds on. It depends only on completed Watcher items, so it is ready now. It does not fix the macOS cause. It is also an operator defect: the guide tells operators to inspect stderr after exit 1, and today that stderr is empty.
+2. #195 depends on #225. PR #221 stays draft. No more test-only diagnostics, reruns or new pushes for this question until #225 merges. Another fixture-state probe would at best narrow the failure to a stage, and it would use a run without fixing the gap.
+3. After #225 merges, #195 may rebase. The ordinary CI run of that rebased head is the next single diagnostic run, and the existing cli_v2 early-exit diagnostic will then show the stderr. Ownership still follows 6425476487:
+   - A fixture or test-environment cause stays in #195 as a test-only fix.
+   - A product cause, or a deliberate macOS startup limit, comes back to me.
+4. Sentinel takes no part of #225. A Watcher owner implements it.
+
+This is a boundary and shape decision, not merge approval.
+
+```
+
+The generic missing diagnostic is steward-classified product work; which stage failed on macOS and whether #195 needs fixture, product or platform work remain unresolved. Supplied source lines, run/job/head and empty-stderr receipt are attributed reports; no source, logs or runtime was replayed. #225 does not need native macOS evidence for closure. Only after #225 merges may #195 rebase for the steward-prescribed single ordinary CI diagnostic; this recording grants no retry, push, rebase, cause disposition or merge.
+
+Exactly one new row/node and this append change, with all prior rows/nodes/root/geometry/order/dependencies/checkpoints/design links/debts/wakes and other workstreams exact. No task file, observer, launch/profile, runtime/install/ACL change, #201 validation or other-family acceptance/clearance is added. Watcher receives a doorbell after verified publication and retains its own single owner launch.
+
+
+## Five-minute custom-watch gate: readiness, #232 tracker and prospective protocol (2026-10-26)
+
+Owning Watcher `toolu_01A7jSrD2dsSLansvrrrRY92` reports Campaign lifted the decision-(b) #222 delivery priority hold and delegated sequencing to Watcher. Both existing runtime-core/CLI-UX dependencies are complete. Replace the old pending-with-operator/no-Watcher-launch summary wording with this current source-qualified readiness; keep the exact old summary below as history. Design steward `toolu_01HoPqPAzZhqDZsgd1qqWve7` opened [tracker #232](https://github.com/lossyrob/telex/issues/232) and supplied the exact appended protocol summary. Status remains planned, attention focus; all dependencies, checkpoints, order/geometry and other fields/nodes remain exact. No row, task Markdown or owner is added.
+
+The dedicated Windows/PowerShell7 gate uses its own installation, registry, sender and gate address, never root-201/#201. A future Watcher-coordinator gate runner prepares installation through its own operator ask_user and launches two fresh no-context subjects. Each fixed plain request permits at most three user turns and five active minutes. Subject1 creates/registers a customized local-file watch and is archived before the trigger; exactly one delivered message/no duplicate is checked within the specified intervals. Subject2 diagnoses an injected detector-command failure from Watcher surfaces without changing anything. One run counts; failures are findings, not retry-until-green. The builder rules on #232 and closes it. These are prospective requirements, not this reconciler execution, subject/runner launch, current installed state or measured success. Later owning Watcher `toolu_01Ks72xgpLrctV5EUeHSXkdw` reports gate-runner session a44b6ed2 prepared and held pending tracker publication. Keep that short ID source-attributed, without resolving a native/full identity or asserting effective profile, installation preparation outcomes, subjects started or a gate result. The earlier no-owner/no-tracker paragraph remains its source-time history, not a current denial. No product/PR/macOS/#201 authority, runtime/API/backend expansion, installed modification, wait/root rearm or debt credit follows.
+
+### Exact original summary retained as history
+
+```text
+Builder verifies a frontier agent can create a small customized watch in a few turns, register it without mandatory framework ceremony, leave it running after the session ends, and diagnose a failure from Watcher status and attempt/state surfaces. On 2026-10-25 both dependencies completed; the gate is ready and pending with the operator, with no Watcher owner launch.
+```
+
+### Exact owning gate-only source excerpt
+
+Complete source bound privately; first #222-completion section is separate and not altered here.
+
+```text
+2. five-minute-custom-watch-gate: Campaign lifted the decision-(b) priority hold on #222 product delivery (Campaign message toolu_018ua1rPaucF16szM5sJDd3g, 22:04Z). Its dependencies are complete, so it is ready. Campaign delegated sequencing to me (Watcher coordinator). It has no tracker or owner yet. I've asked the steward for a tracker and a verification protocol before I start it. Please replace the summary's "pending with the operator, with no Watcher owner launch" wording when you next project it. Status stays planned until the gate actually starts.
+```
+
+### Complete design source
+
+```text
+Steward graph change for telex-watcher node five-minute-custom-watch-gate. Evidence: https://github.com/lossyrob/telex/issues/232 (tracker and verification spec, posted by the design steward).
+1. Set tracker to github lossyrob/telex #232.
+2. Append to its summary: "On 2026-10-26 the design steward opened tracker #232 and pinned verification: a Windows/PowerShell 7 run against a dedicated gate installation, registry, sender and gate address (not root-201 or #201). A gate-runner session launched by the Watcher coordinator prepares the installation under operator ask_user and collects evidence. Two fresh no-context subject sessions each get a fixed plain request with at most three user turns and five active minutes: subject 1 creates and registers a customized local-file watch; after subject 1 is archived, one trigger must deliver exactly one message; subject 2 diagnoses an injected detector-command failure from Watcher surfaces without changing anything. One run counts. The builder rules on #232, and the ruling closes it. No product, PR, macOS or #201 authority."
+No change to dependencies, status, attention or checkpoints. Status changes stay with the coordinator.
+```
+
+### Exact later owning held-runner excerpt
+
+The same bound source has separate #225/#233 chronology that is not projected here.
+
+```text
+The #232 gate runner (session a44b6ed2) is prepared and held. It waits on your publication of tracker #232 on five-minute-custom-watch-gate.
+```
+
+### Complete tracker/specification body (raw6535/SHA3d8e3f6a61eeba4cceb5186affe250d5888469517a0feccc053a74eae2d85edd; CRLF-to-LF display only)
+
+```text
+Tracker for graph node `five-minute-custom-watch-gate` (workstream telex-watcher, checkpoint `usable-watcher`). Dependencies `watcher-runtime-core` (#162) and `watcher-cli-ux` (#179) are complete. #222 merged as 7036e710.
+
+## Outcome
+
+The builder verifies that a frontier agent with no prior Watcher context can:
+
+1. Create a small customized watch in a few turns.
+2. Register it without mandatory framework ceremony.
+3. Leave it running after the session ends.
+4. Diagnose a failure from Watcher status, health, show and attempts output.
+
+Host: Windows with PowerShell 7 (the Windows-path gate). macOS stays out while #172 holds; Linux is not required.
+
+## Roles
+
+- **Gate runner**: one session the Watcher coordinator launches. It prepares the installation, launches the subjects, triggers the condition, injects the failure, collects evidence, and asks the operator for the ruling through its own ask_user. It is never a subject.
+- **Subjects**: two fresh Copilot App sessions with the App's default model, created with `coordinate_with_creator: false`. Each works in a new empty folder, not a telex checkout, so it cannot read `.streamliner`, task files or design history. Record each model ID. The operator's user-level instructions are host environment; record that they were present.
+- **Judge**: the builder (operator) rules pass or fail on this issue. The gate runner and design steward do not.
+
+## Precondition (outside the timed run)
+
+Before subject 1 starts, the gate runner prepares a dedicated gate installation following the merged installation guide:
+
+- its own registry;
+- its own send-only sender address;
+- an installation record created by `installation.ps1`;
+- a running owner that passes verify and preflight and reports ready.
+
+Every real installation change here goes through the operator's ask_user in the gate runner's session, not in a subject session.
+
+Do not use root-201, the #201 installation, or any live workstream address or registry.
+
+Delivery target: a fresh dedicated gate address that no session attaches to. The gate runner reads its inbox only after the trigger.
+
+## Phase A: create and register (subject 1)
+
+The kickoff is exactly this request, with the placeholders filled. Add nothing else.
+
+> On this Windows machine Telex and Telex Watcher are installed and a Watcher runtime is already running. Its installation record is at `<record path>`. Set up a watch that sends one Telex message to `<gate address>` when any .txt file in `<empty gate directory>` contains the word READY; don't repeat it while that stays true. Check about once a minute. It must keep working after this session ends. Docs: https://lossyrob.github.io/telex/ and https://github.com/lossyrob/telex/blob/7036e7103aae4416cf0a0e2030175dc901ece893/docs/watcher-runtime.md . Tell me when it is registered and ready.
+
+Omit the record sentence if the record is at the default discovery path. No example script matches this condition as written, so it requires customization. The subject may copy an example or write its own; record which it did. That observation is not a ruling on `examples-accelerate-gate`.
+
+Pass criteria:
+
+- **Turn budget.** At most three user turns: the request plus two replies. A reply may only answer a question the subject asked or say "continue". No hints about commands, docs, files or fixes.
+- **Time.** Readiness reached within five minutes of active agent time. Measure from the request to the subject's ready report, minus time spent waiting for the user.
+- **Ready.** `show` and `health` report the watch registered and ready, with the requested route and sender. The runtime reports ready for the current registry revision.
+- **No ceremony.** Only a command, bounds and route were needed. No mandatory manifest, pinning, kind allowlist, provider preflight or test framework.
+- **No session-owned polling.** No background loop, waiter or second Watcher owner started by the subject.
+
+## Phase B: running after the session ends
+
+After subject 1 reports ready, the gate runner archives it, which stops its CLI process. Then:
+
+1. Wait at least two poll intervals.
+2. Write one .txt file containing READY into the gate directory.
+
+Pass criteria:
+
+- Exactly one message reaches the gate address within three poll intervals of the trigger. No duplicate arrives in a further three intervals.
+- `events` shows its receipt, and `attempts` continues after the archive timestamp.
+
+## Phase C: diagnose a failure (subject 2)
+
+The gate runner breaks the detector without editing the registry: rename the script file the registered command references so the command fails. If the command references no file, ask the steward on this issue for an equivalent injection before proceeding. Confirm that `attempts` or `health` records the failure. Then launch subject 2 with exactly:
+
+> A Telex Watcher watch on this Windows machine should notify `<gate address>` when a .txt file in `<gate directory>` contains READY, but it doesn't seem to be working. Find out why using Watcher, and tell me the cause and the fix. Don't change anything.
+
+Same turn and time budget as Phase A.
+
+Pass criteria:
+
+- The subject names the missing or moved detector command as the cause.
+- It reached that cause from Watcher status, health, show or attempts output, as its transcript shows.
+- It proposes a correct fix and changes nothing.
+
+## Run discipline
+
+- One run counts. A failed criterion is a finding for the builder, not a reason to rerun until it passes.
+- A rerun needs either a fix that has landed or an explicit builder decision recorded here.
+
+## Evidence (posted on this issue by the gate runner)
+
+- Subject model IDs.
+- Kickoff text as sent.
+- Per-subject user-turn count and active time, with the start, end and wait timestamps used.
+- The detector script and registration as registered.
+- `show`, `health`, `status` and `attempts` JSON at ready, after the trigger and after the injection.
+- The delivered message and its receipt.
+- The archive timestamp.
+- The injection performed.
+- Subject 2's diagnosis.
+- Cleanup: watch removed, gate owner stopped, and the record retained or removed per the installation guide's rollback.
+
+No credential values may appear in the evidence.
+
+## Out of scope
+
+- No product change, PR, merge or release authority.
+- No macOS claim.
+- No #201 installation change.
+
+The builder's ruling closes this issue. Findings that need product work are filed as discovered work and routed.
+
+```

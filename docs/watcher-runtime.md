@@ -16,6 +16,9 @@ Omitting `run` preserves the original runtime-host invocation. In another
 process, use the same `--registry` with the management commands below. Only
 runtime startup requires `--install-root`; management never connects a sender.
 Service installation, supervision, and automatic upgrades remain separate work.
+For the supported Windows/Linux installation record, required authentication
+features and launch/rollback procedure, start with
+[Watcher installation and launch](guide/src/guides/watcher-installation.md).
 The experimental v1 CLI adapter is retired; v1 example detectors and schemas
 remain historical evidence and are not accepted by this runtime.
 
@@ -24,6 +27,19 @@ macOS and other unclaimed hosts reject detector execution. macOS remains a
 required Watcher product capability tracked in
 [#165](https://github.com/lossyrob/telex/issues/165); this delivery does not claim
 macOS containment.
+
+## Runtime failure diagnostics
+
+If the host exits 1 with `runtime-failed`, inspect its stderr for the failing
+stage and cause chain. This works even when startup fails before a runtime
+record exists. Capture both streams when supervising the host: stdout retains
+the ordinary human or JSON response; stderr carries the redacted diagnostic.
+Its 4096-byte UTF-8 limit includes the final newline, and `[truncated]` marks an
+omitted tail. Secret-named environment values are redacted at any length; other
+environment values are redacted from 8 UTF-8 bytes onward. Fixed stage labels
+are preserved. Credential-like text and connection strings are omitted; review
+diagnostics before exporting them. See the
+[exit-code reference](guide/src/reference/exit-codes.md#watcher-runtime-host).
 
 ## Detached user process
 

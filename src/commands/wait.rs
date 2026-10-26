@@ -274,8 +274,8 @@ async fn wait_loop<C: WaitConnector>(
                 if needs_attach_reason == Some(NeedsAttachReason::PushIntentPending) {
                     return Err(anyhow!(
                         "{code}: {message}. A push attach for this station is still finalizing; \
-                         run `extensions_reload` in the Copilot session, or re-run \
-                         `telex --address <station> copilot resume`"
+                         use `telex copilot skill` to choose supported loader recovery or \
+                         `telex --address <station> copilot fallback prepare` when no loader is available"
                     ));
                 }
                 if !allow_reattach || retried_after_attach {

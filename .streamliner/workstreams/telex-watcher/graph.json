@@ -303,7 +303,7 @@
       "id": "five-minute-custom-watch-gate",
       "type": "gate",
       "title": "A custom watch is operational in five minutes",
-      "summary": "Builder verifies a frontier agent can create a small customized watch in a few turns, register it without mandatory framework ceremony, leave it running after the session ends, and diagnose a failure from Watcher status and attempt/state surfaces. On 2026-10-25 both dependencies completed; the gate is ready and pending with the operator, with no Watcher owner launch.",
+      "summary": "Builder verifies a frontier agent can create a small customized watch in a few turns, register it without mandatory framework ceremony, leave it running after the session ends, and diagnose a failure from Watcher status and attempt/state surfaces. On 2026-10-26 Watcher reports Campaign lifted the decision-(b) #222 delivery priority hold and delegated sequencing to the Watcher coordinator. Dependencies are complete; the gate remains planned and ready. Later Watcher reports gate-runner session a44b6ed2 prepared and held pending publication of tracker #232; no started run or outcome is reported. On 2026-10-26 the design steward opened tracker #232 and pinned verification: a Windows/PowerShell 7 run against a dedicated gate installation, registry, sender and gate address (not root-201 or #201). A gate-runner session launched by the Watcher coordinator prepares the installation under operator ask_user and collects evidence. Two fresh no-context subject sessions each get a fixed plain request with at most three user turns and five active minutes: subject 1 creates and registers a customized local-file watch; after subject 1 is archived, one trigger must deliver exactly one message; subject 2 diagnoses an injected detector-command failure from Watcher surfaces without changing anything. One run counts. The builder rules on #232, and the ruling closes it. No product, PR, macOS or #201 authority.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -312,7 +312,13 @@
       "dependsOn": [
         "watcher-runtime-core",
         "watcher-cli-ux"
-      ]
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 232
+      }
     },
     {
       "id": "minimal-example-pack",
@@ -374,7 +380,8 @@
       ],
       "dependsOn": [
         "five-minute-custom-watch-gate",
-        "examples-accelerate-gate"
+        "examples-accelerate-gate",
+        "watcher-installation-bootstrap"
       ]
     },
     {
@@ -489,6 +496,48 @@
       },
       "dependsOn": [
         "copilot-group-stall-detector"
+      ]
+    },
+    {
+      "id": "watcher-installation-bootstrap",
+      "type": "task",
+      "title": "Supported Watcher installation and bootstrap path",
+      "summary": "Provide a supported, discoverable Watcher installation/launch record (trusted telex and telex-watcher paths, registry, backend profile, send-only sender) and a documented bootstrap path with runtime environment, shutdown, rollback and handling of existing older installations, never silently modifying one. Stall guide and telex copilot skill point to it and name both supported root delivery modes (bridge push, or documented pull fallback where the host cannot load the bridge), kept distinct. Uses existing backend profiles/auth; Telex binary install/upgrade, App bridge loading (#223) and macOS are out of scope. Found by #201; not a dependency of #201.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 222
+      },
+      "dependsOn": [
+        "watcher-cli-ux",
+        "stall-detection-agent-guidance"
+      ]
+    },
+    {
+      "id": "watcher-runtime-failure-diagnostics",
+      "type": "task",
+      "title": "Report the cause of Watcher runtime-failed startup and run errors",
+      "summary": "For runtime-failed startup/run errors, write a bounded 4 KiB redacted stage-labeled cause chain to stderr, with truncation marked. Preserve the stdout envelope, runtime-failed code/exit 1 and all other specific codes. Update docs/design/watcher.md and the exit-code reference; test forced startup failure/stage labeling, redaction, byte cap and unchanged envelope on every platform where the binary builds. Do not diagnose/fix the #195 macOS cause, add a logging framework or persisted startup records.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 225
+      },
+      "dependsOn": [
+        "watcher-runtime-core",
+        "watcher-cli-ux"
       ]
     }
   ],

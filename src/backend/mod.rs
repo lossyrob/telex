@@ -5,6 +5,7 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use std::fmt;
+use std::sync::Mutex;
 
 use crate::model::*;
 
@@ -115,6 +116,50 @@ pub struct Capabilities {
 pub struct WaitFetchOptions {
     pub wake_on_cc: bool,
     pub cc_after_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum WaitFetchPhase {
+    #[default]
+    Acquisition,
+    Credential,
+    Connect,
+    Materialization,
+    PrimaryRead,
+    CcRead,
+    CandidateRead,
+    DurableClock,
+    OwnershipProof,
+}
+
+impl WaitFetchPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Acquisition => "acquisition",
+            Self::Credential => "credential",
+            Self::Connect => "connect",
+            Self::Materialization => "materialization",
+            Self::PrimaryRead => "primary-read",
+            Self::CcRead => "cc-read",
+            Self::CandidateRead => "candidate-read",
+            Self::DurableClock => "durable-clock",
+            Self::OwnershipProof => "ownership-proof",
+        }
+    }
+}
+
+/// Outlives a cancelled fetch future so its timeout can identify the unfinished phase.
+#[derive(Default)]
+pub struct WaitFetchProgress(Mutex<WaitFetchPhase>);
+
+impl WaitFetchProgress {
+    pub fn set(&self, phase: WaitFetchPhase) {
+        *self.0.lock().unwrap() = phase;
+    }
+
+    pub fn phase(&self) -> WaitFetchPhase {
+        *self.0.lock().unwrap()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -438,6 +483,15 @@ pub trait Backend: Send + Sync {
         }
         candidates.sort_by_key(|candidate| candidate.message.id);
         Ok(candidates)
+    }
+    async fn fetch_wait_candidates_with_progress(
+        &self,
+        address: &str,
+        options: WaitFetchOptions,
+        progress: &WaitFetchProgress,
+    ) -> Result<Vec<WaitCandidate>> {
+        progress.set(WaitFetchPhase::CandidateRead);
+        self.fetch_wait_candidates(address, options).await
     }
     async fn has_delivery_for_recipient(&self, _message_id: i64, _recipient: &str) -> Result<bool> {
         Ok(false)

@@ -6976,6 +6976,7 @@ async fn wait_for_message_with_idle_ttl(
         if current.idle {
             return Response::PresenceEnded;
         }
+        let fetch_progress = crate::backend::WaitFetchProgress::default();
         let fetch = async {
             #[cfg(test)]
             {
@@ -6991,6 +6992,7 @@ async fn wait_for_message_with_idle_ttl(
                 ));
             }
             if wake_on_cc && cc_after_ms.is_none() {
+                fetch_progress.set(crate::backend::WaitFetchPhase::DurableClock);
                 cc_after_ms = Some(backend.durable_clock_now_ms().await?);
                 if let Some(waiter) = state
                     .waiters
@@ -7002,12 +7004,13 @@ async fn wait_for_message_with_idle_ttl(
                 }
             }
             let candidates = backend
-                .fetch_wait_candidates(
+                .fetch_wait_candidates_with_progress(
                     &address,
                     WaitFetchOptions {
                         wake_on_cc,
                         cc_after_ms: cc_after_ms.unwrap_or_default(),
                     },
+                    &fetch_progress,
                 )
                 .await?;
             let owns_epoch = if candidates.iter().any(|candidate| {
@@ -7017,6 +7020,7 @@ async fn wait_for_message_with_idle_ttl(
                     parsed_min_attention,
                 )
             }) {
+                fetch_progress.set(crate::backend::WaitFetchPhase::OwnershipProof);
                 backend
                     .heartbeat_epoch(&address, &current.owner_instance_id, current.lease_epoch)
                     .await?
@@ -7038,9 +7042,11 @@ async fn wait_for_message_with_idle_ttl(
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(crate::backend::retryable_backend_error(
-                "backend query or reconnect attempt timed out",
-            )),
+            Err(_) => Err(crate::backend::retryable_backend_error(format!(
+                "backend {} phase timed out (recovery_grace_ms={})",
+                fetch_progress.phase().as_str(),
+                WAIT_BACKEND_RECOVERY_GRACE.as_millis()
+            ))),
         };
         if deadline.is_some_and(|wait_deadline| Instant::now() >= wait_deadline) {
             continue;
@@ -7100,7 +7106,10 @@ async fn wait_for_message_with_idle_ttl(
                 });
                 if now >= recovery_deadline {
                     let detail = format!(
-                        "backend recovery grace expired while fetching wait candidates for {address}: {detail}"
+                        "backend recovery grace expired while fetching wait candidates for {address} \
+                         (phase={}, recovery_grace_ms={}): {detail}",
+                        fetch_progress.phase().as_str(),
+                        WAIT_BACKEND_RECOVERY_GRACE.as_millis()
                     );
                     let Some(response) = state.record_backend_exhaustion_if_current(
                         &current,

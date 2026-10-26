@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+#[cfg(any(target_os = "linux", windows))]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,6 +19,7 @@ use tokio::sync::oneshot;
 pub const MAX_STDIN_BYTES: usize = 1024 * 1024;
 pub const MAX_STDOUT_BYTES: usize = 256 * 1024;
 pub const MAX_STDERR_BYTES: usize = 64 * 1024;
+#[cfg(any(target_os = "linux", windows))]
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
@@ -108,6 +111,7 @@ impl ProcessFailure {
         }
     }
 
+    #[cfg(any(target_os = "linux", windows))]
     fn io(error: impl std::fmt::Display) -> Self {
         Self::new(ProcessFailureKind::Io, error.to_string())
     }
@@ -265,11 +269,7 @@ fn launch_environment(allowlist: &[String]) -> Result<(Environment, Vec<String>)
             ));
         }
         if let Some(value) = std::env::var_os(name) {
-            let lower = name.to_ascii_lowercase();
-            if ["token", "pat", "key", "secret", "password", "credential"]
-                .iter()
-                .any(|part| lower.contains(part))
-            {
+            if sensitive_environment_name(name) {
                 if let Some(value) = value.to_str().filter(|value| !value.is_empty()) {
                     sensitive.push(value.to_owned());
                 }
@@ -279,6 +279,13 @@ fn launch_environment(allowlist: &[String]) -> Result<(Environment, Vec<String>)
     }
     sensitive.sort_by_key(|value| std::cmp::Reverse(value.len()));
     Ok((environment, sensitive))
+}
+
+pub fn sensitive_environment_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ["token", "pat", "key", "secret", "password", "credential"]
+        .iter()
+        .any(|part| lower.contains(part))
 }
 
 fn environment_key(name: &str) -> OsString {

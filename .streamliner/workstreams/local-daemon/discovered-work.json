@@ -9068,6 +9068,1133 @@
       "decisionState": "accepted",
       "dispositionAuthority": "Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 accepted this evidence-only association with existing issue #174 in actual decision call_hVzE6JhvBqtHKExZPe1oQTFV. Routed/accepted records the existing-tracker evidence association only, not repair scope, staffing, retry or gate authority. The rejected Watcher placement remains unlanded; the entire Watcher subtree remains unchanged.",
       "terminalPath": "Preserve the exact Local classification and separately identified lifecycle boundary under existing #174. This evidence-only record grants no repair, source/review/CI/readiness, retry, waiver, debt/HOLD or freeze credit."
+    },
+    {
+      "id": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+      "sourceNode": null,
+      "source": "Existing issue #224 from #201 real-workstation reports; Watcher routing and owning Local candidate intake, followed by explicit Campaign node-first authority.",
+      "crossReference": "telex-watcher / stall-detection-workstream-gate / #201; completed postgres-wait-reset-recovery / #155 is related only; separate #223 does not absorb this observation.",
+      "evidence": {
+        "publicIssue": {
+          "number": 224,
+          "url": "https://github.com/lossyrob/telex/issues/224",
+          "title": "Generated pull fallback can become unattended after an Entra Postgres candidate-fetch timeout",
+          "author": "lossyrob",
+          "createdAt": "2026-10-26T19:25:16Z",
+          "state": "open",
+          "body": {
+            "file": "watcher201-candidate224-issue-body.txt",
+            "bytes": 1405,
+            "sha256": "e3cb60f04f242102df6a0332d73878ac9c2c13208f2f6d2c28d6b6b0d4d6c862"
+          }
+        },
+        "publicReceipts": [
+          {
+            "issue": 224,
+            "id": 6425323208,
+            "url": "https://github.com/lossyrob/telex/issues/224#issuecomment-6425323208",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:26:39Z",
+            "updatedAt": "2026-10-26T19:26:39Z",
+            "body": {
+              "file": "watcher224-initial-routing-body.txt",
+              "bytes": 1228,
+              "sha256": "63be896a50ed9f775f9f23f78ef0c1a4aa5587dc399c41ceb162972628ca8434"
+            }
+          },
+          {
+            "issue": 224,
+            "id": 6425382766,
+            "url": "https://github.com/lossyrob/telex/issues/224#issuecomment-6425382766",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:29:32Z",
+            "updatedAt": "2026-10-26T19:29:32Z",
+            "body": {
+              "file": "watcher224-formal-dependency-body.txt",
+              "bytes": 818,
+              "sha256": "d422f70857b52456689a88e104e359257b389494c545c18e182fdf10eeb39ace"
+            }
+          },
+          {
+            "issue": 201,
+            "id": 6425382009,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:29:30Z",
+            "updatedAt": "2026-10-26T19:29:30Z",
+            "body": {
+              "file": "watcher201-external224-design-body.txt",
+              "bytes": 2071,
+              "sha256": "81280e282f91625ac2b129b458ab76ce370e416cc3d185fcae2301c6c658f5ba"
+            }
+          },
+          {
+            "issue": 224,
+            "id": 6425409170,
+            "url": "https://github.com/lossyrob/telex/issues/224#issuecomment-6425409170",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:30:54Z",
+            "updatedAt": "2026-10-26T19:30:54Z",
+            "body": {
+              "file": "local224-member-custody-body.txt",
+              "bytes": 3769,
+              "sha256": "0b4e5147effd3ea5ae7875d3a19c5cc2eeed44240d43830babb64a4aea1440c6"
+            }
+          },
+          {
+            "issue": 201,
+            "id": 6425427162,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:31:49Z",
+            "updatedAt": "2026-10-26T19:31:49Z",
+            "body": {
+              "file": "watcher201-owner-hold-body.txt",
+              "bytes": 2585,
+              "sha256": "268835ff1f1173cb156f089fbe4f1baddd9c789a79380f074343d27e934f5aa8"
+            }
+          }
+        ],
+        "initialCandidateReport": {
+          "source": "call_syvr6WHAnAqXXLBYruD6qWCV",
+          "receipt": {
+            "file": "local224-candidate-fetch-exhaustion-intake.json",
+            "bytes": 1915,
+            "sha256": "c993823d967f1df308b0429cd490c2246d2ba9204f31c0a72c662b3d43cf267b"
+          },
+          "status": "candidate",
+          "decisionState": "proposed",
+          "sourceNode": null,
+          "owner": "Local triage; implementation unassigned",
+          "boundary": "Reported pre-canonical candidate intake, not a previous canonical row or an already-published node."
+        },
+        "initialController": {
+          "receipt": {
+            "file": "local224-routing-authority-source.json",
+            "bytes": 6296,
+            "sha256": "147fe912a4d8acd4e4ebc707d2940e80ec45bb888365ecf07ff8d607f40e06e9"
+          },
+          "projection": {
+            "kind": "campaign-accepted-local-node-before-owner",
+            "issue": 224,
+            "issueUrl": "https://github.com/lossyrob/telex/issues/224",
+            "nodeId": "postgres-fallback-recovery-exhaustion",
+            "familyId": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+            "workstream": "local-daemon",
+            "priority": "top priority within Local because it blocks the #201 real-root criterion",
+            "authority": {
+              "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "source": "toolu_01JR27dM8djhYUzuMCGXmgYN",
+              "verbatim": "#224 is routed as you proposed: a separate Local node, postgres-fallback-recovery-exhaustion, at top priority within Local, because it blocks the #201 real-root criterion.\n\nSequence:\n1. The reconciler publishes the node.\n2. You launch its owner. No further Campaign approval is needed.\n3. The owner diagnoses first, against the filed outcome and your stated boundaries, and returns either an evidence-only disposition for my decision or a closing PR with its own exact-head and hosted gates.\n\nThe steward adjudicates the #201 to #224 edge. My position for that adjudication is that #201's root confirm-and-ring criterion cannot pass while #224 is open, and I am not narrowing that criterion.\n\nEvidence for the owner (I am the owner of these root runs). All three were on v0.3.0-gate201-9e971fd9, root-201, against pg-rde-telex. Each exited 7 backend-unavailable with \"backend recovery grace expired while fetching wait candidates ... backend query or reconnect attempt timed out\" after roughly 28 to 58s:\n- 1793042572542-c8903866107167a1\n- 1793042640067-5700450788a59922\n- 1793042940764-4b4f25eb407601ab, at 19:29:59Z. This was a single re-arm prompted by a turn guard.\n\nRun directories are under [private run directory withheld]. `status` on the same backend succeeds every time. wait-coordinator and gate201-owner fail identically. Root stays attached and unattended, and I am making no further retries until #224 reports."
+            },
+            "filedOutcome": "Determine whether candidate-fetch/reconnect timeout handling is a transient environment observation or a product lifecycle defect, and preserve explicit unattended health and actionable diagnostics if recovery is exhausted.",
+            "publicationSequence": {
+              "beforeOwner": "The sole reconciler publishes the reviewed planned Local node/task. Local verifies publication before launching exactly one implementation/diagnosis owner.",
+              "ownerInitiallyUnassigned": true,
+              "noFurtherCampaignLaunchApproval": true,
+              "ownerMode": "Diagnosis first; evidence-only disposition goes to Campaign for decision, or a closing PR with its own exact-head source/design/hosted gates.",
+              "requestedModel": null,
+              "modelBoundary": "No model or reasoning override is prescribed by this routing decision."
+            },
+            "dependency": {
+              "downstreamWorkstream": "telex-watcher",
+              "downstreamNode": "stall-detection-workstream-gate",
+              "downstreamIssue": 201,
+              "stewardDecision": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009",
+              "localIssueDecision": "https://github.com/lossyrob/telex/issues/224#issuecomment-6425382766",
+              "boundary": "The steward adjudicates the external #201 -> #224 edge. Local assigns the target ID; Watcher owns its graph projection. Do not invent a dependency of #224 on #223 or #222.",
+              "campaignPosition": "The real-root confirm-and-ring criterion cannot pass while #224 is open; it is not narrowed."
+            },
+            "rootEvidence": {
+              "attribution": "Actual Campaign root owner report, not independently inspected by Local or a future implementation owner.",
+              "reportedVersion": "v0.3.0-gate201-9e971fd9",
+              "station": "root-201",
+              "backendProfile": "pg-rde-telex",
+              "runs": [
+                "1793042572542-c8903866107167a1",
+                "1793042640067-5700450788a59922",
+                "1793042940764-4b4f25eb407601ab"
+              ],
+              "lastRunReportedAt": "2026-10-26T19:29:59Z",
+              "reportedOutcome": "All three exited 7/backend-unavailable after approximately 28-58 seconds, reporting candidate-fetch query/reconnect timeout and exhausted backend recovery grace.",
+              "reportedStatus": "Status queries succeed; root remains attached, pull and unattended. Campaign reports wait-coordinator and gate201-owner routes also fail.",
+              "deduplicationBoundary": "Keep these three root runs distinct from the #201 owner's run1793042657859-83154eafc09756e3 and any member re-arm. Do not infer one failure per station or collapse distinct run identities.",
+              "privacyBoundary": "Do not project the private directory, credentials, tokens or connection details into public artifacts. Share sanitized evidence and hashes, preserving raw originals privately."
+            },
+            "constraints": [
+              "No additional real-root or member retry is authorized by this recording. Campaign has stopped retries until #224 reports.",
+              "Do not stage a real detector event or claim #201 pass while the dependency is unresolved.",
+              "Do not change timeouts, auth/PIM, the real installation, registry, ACLs or permissions as an inferred workaround.",
+              "Existing runtime/registry/branch remain preserved under the dogfood authorization; changing them requires appropriate explicit authority.",
+              "Local supporting validation in an assigned task uses isolated TELEX_* roots and temporary LOCALAPPDATA; no real-user ACL changes or I161-1 restore/reset.",
+              "Hosted CI at the exact final head remains gate evidence; local validation cannot substitute.",
+              "Preserve finite recovery and idle-timeout distinctions, typed exit 7, explicit unattended health and actionable diagnostics. No infinite retry or false attendance.",
+              "#155 remains completed unless new evidence and authority establish a different disposition. Its prior recovery contract is context, not proof that this is a regression.",
+              "#223 remains docs/recovery-text alignment; it does not absorb the backend bug or prove fallback wakeup.",
+              "A successful status query does not prove the wait-candidate fetch path is healthy. Timeout evidence alone establishes no auth/PIM, network, scheduling or fleet-wide root cause."
+            ]
+          }
+        },
+        "laterController": {
+          "receipt": {
+            "file": "local224-diagnosis-validation-authority-source.json",
+            "bytes": 5879,
+            "sha256": "f216aad74d8688698a9c4f44a3e43b7a0ebce90e6c14f2fd5da68ff59261bc5f"
+          },
+          "projection": {
+            "kind": "campaign-scoped-diagnosis-and-validation-authority",
+            "issue": 224,
+            "nodeId": "postgres-fallback-recovery-exhaustion",
+            "supersedesOperationalUncertaintyIn": "issue224-routing-authority-20261026.json",
+            "authority": {
+              "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "source": "toolu_012dMoYnEa5LdQd2wUwFehr1",
+              "verbatim": "#224 routing decision, given that the steward has made #201 depend on #224 (6425382009).\n\nSequence: node first, then owner. Ask the reconciler to publish postgres-fallback-recovery-exhaustion now, as the next publication. Launch the owner as soon as the node is on canonical main. #224 goes ahead of #223, with no edge between them.\n\nDiagnosis authority:\n- Read-only work against pg-rde-telex is allowed: status, schema and catalog reads, EXPLAIN without ANALYZE on the candidate-fetch query, connection and latency timing, and server-side activity views.\n- Isolated reproduction is allowed, using a separate TELEX_HOME/TELEX_CONFIG and a disposable local Postgres seeded to production-like history size.\n- Reading the existing run directories and the custody packet is allowed.\n- Not allowed: real `telex wait` retries on campaign addresses, timeout, auth, PIM or install changes, ACL restores, detector-event staging, and writes to production rows.\n\nValidation authority:\n- Path (a), a product or guidance fix: a closing PR with its own exact-head review, design and hosted gates, which I will gate.\n- Path (b), environmental closure: allowed only after diagnosis gives specific evidence that the cause was transient or environmental and has cleared. The owner then asks the steward to approve exactly one supported same-profile wait that must outlast the failure window, and runs it only with that approval. I will not authorize that real wait myself.\n\nEither way, the disposition comes to me. After it is accepted, I re-arm root once and report station_health for #201."
+            },
+            "sequence": {
+              "nextPublication": "postgres-fallback-recovery-exhaustion planned node and task through the sole reconciler",
+              "ownerLaunch": "Local launches exactly one owner only after verifying the node is on canonical main; no further Campaign launch approval needed.",
+              "priority": "Ahead of #223, no dependency edge between the two.",
+              "pendingTupleBoundary": "Do not overwrite frozen prior proposal sources or carry approval across a changed base. The next-publication instruction is operational sequencing, not authority to skip independent artifact review."
+            },
+            "diagnosis": {
+              "readOnlyRealProfile": [
+                "status",
+                "schema and catalog reads",
+                "EXPLAIN without ANALYZE on the candidate-fetch query",
+                "connection and latency timing",
+                "server-side activity views"
+              ],
+              "isolatedReproduction": "Separate TELEX_HOME and TELEX_CONFIG; disposable local Postgres seeded to production-like history size. Apply the existing temporary LOCALAPPDATA and no-real-directory-ACL guards.",
+              "existingEvidence": "Reading the explicitly supplied existing run directories and custody packet is allowed. Preserve raw originals and avoid exposing credentials, tokens or connection details.",
+              "notAllowed": [
+                "Real telex wait retries on campaign addresses",
+                "Timeout changes",
+                "Auth or PIM changes",
+                "Installation changes",
+                "ACL restoration",
+                "Detector-event staging",
+                "Writes to production rows"
+              ]
+            },
+            "validation": {
+              "productOrGuidanceFix": "Closing PR with its own exact-head source review, design inspection and hosted CI; Campaign performs the gate.",
+              "environmentalClosure": "Diagnosis must first establish specific evidence of a transient/environmental cause that has cleared. Only then may the owner ask the design steward to approve exactly one supported same-profile wait outlasting the observed failure window. Do not run that wait before steward approval.",
+              "finalDisposition": "Both paths return to Campaign. After acceptance, Campaign re-arms root once and reports station_health for #201.",
+              "noCurrentWaitAuthorization": true,
+              "noNarrowed201Criterion": true
+            },
+            "laterOwnerCustody": {
+              "sourceSession": "7aca0f50-2036-46ae-901d-0ff517744e56",
+              "sourceMessage": "call_Bnp3OsB111dTTTPaK1ct38hB",
+              "publicUrl": "https://github.com/lossyrob/telex/issues/224#issuecomment-6425409170",
+              "originalOwnerRun": "1793042657859-83154eafc09756e3",
+              "singleOwnerRearm": "1793042722283-01fcd5d2b4bc7687",
+              "outcomes": "Both owner runs report exit.code 7, status.exit_code 7 and backend-unavailable. No third owner attempt.",
+              "rawStatusHashes": [
+                "fe86bb98d25501033d675cd16c61c546b552e4487863a8469e7ab41734c49cae",
+                "c3ce26f269093add6ce54ea6ed2c5c71394d1067cd446804177cf1047f039f07"
+              ],
+              "rawExitHash": "10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58",
+              "emittedValueLimits": "Idle timeout is 1800000 ms. No numeric recovery-grace value was emitted. Prepare identifiers and status written_at timestamps are not process-runtime measurements. No before/armed owner station_health snapshot was captured.",
+              "runtimeProvenance": "Local read the public sanitized packet only. Raw bytes, binary hashes, runtime/isolation and reported status merits remain owner-attributed until the assigned owner verifies them.",
+              "scope": "Keep the two owner runs separate from Campaign's three root run identities and the wait-coordinator run. Repeated observations across these routes are not a fleet-wide prevalence estimate or an auth/PIM/#155-regression finding.",
+              "notificationObligation": "Notify this #201 owner when #224 has an accepted resolution or approved environmental closure. That notification alone is not permission to stage an event before fresh supported root preparation."
+            }
+          }
+        },
+        "projectionBoundary": "Original controller bytes are exact. First projection removes only the private run-directory field and replaces its one verbatim occurrence with an explicit marker; reversal restores the complete original object, not claimed byte-identical serialization. Later controller projection is the complete unchanged object. No referenced run path was followed.",
+        "methodBoundary": "Explicit controller originals and public sanitized metadata only. Controller Campaign messages remain supplied Local custody; raw run/status/exit hashes, installed binary/runtime identity, timings, isolation and operational merits remain source-attributed, not independently replayed. Typed exit7 exhaustion is not itself a defect, cause, #155 regression, auth/PIM or fleet-wide finding.",
+        "distinctReportedRuns": {
+          "campaignRoot": [
+            "1793042572542-c8903866107167a1",
+            "1793042640067-5700450788a59922",
+            "1793042940764-4b4f25eb407601ab"
+          ],
+          "memberOwner": [
+            "1793042657859-83154eafc09756e3",
+            "1793042722283-01fcd5d2b4bc7687"
+          ],
+          "otherCoordinator": "1793042546147-82d8d1bea621074e",
+          "boundary": "Separate reported run identities, not a reconciler execution, finite census or independent raw-hash verification. The member report records two owner attempts, not a third; Campaign later reports its third distinct root run. Do not infer fleet prevalence or shared cause."
+        }
+      },
+      "description": "Determine whether candidate-fetch/reconnect timeout handling is a transient environment observation or a product lifecycle defect, and preserve explicit unattended health and actionable diagnostics if recovery is exhausted.",
+      "affectedOutcome": "Supported Copilot pull waits on the Entra Postgres profile must not falsely appear attended after exhausted recovery; #201 real-root confirm/ring remains unpassed while its upstream condition is unresolved.",
+      "requiredness": "Required upstream of the unpassed #201 real-root criterion under its design steward; no other new graph gate is inferred.",
+      "sequencing": "Campaign explicitly requires #224 as the NEXT canonical publication, before its ONE owner launch, ahead of #223 with no edge between them. Diagnose first; do not retry real campaign waits to create evidence now.",
+      "recommendedDisposition": "Separate tracked Local diagnosis-first task for existing #224.",
+      "selectedDisposition": "Accept the same new family into one planned/unlaunched Local node/task; preserve candidate history, null discovery provenance and all evidence limits.",
+      "target": "postgres-fallback-recovery-exhaustion / existing issue #224",
+      "owner": "Local Daemon; existing implementation owner 769a992c-7319-4d2e-b93a-4977094d7715 (reported same-owner path (a), not a new launch).",
+      "terminalPath": "Path (a): a closing product/guidance PR with independent exact-head source review, design and hosted gates, followed by Campaign acceptance. Path (b): specific diagnosis that a transient/environmental cause has cleared, then prior design-steward approval for exactly one supported same-profile wait outlasting the observed failure window and Campaign disposition. Neither path is satisfied now. After acceptance Campaign re-arms root once and reports station_health; that later action is not authorized or performed by this recording.",
+      "status": "in-progress",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01JR27dM8djhYUzuMCGXmgYN then toolu_012dMoYnEa5LdQd2wUwFehr1, supplied in exact Local controller custody and actual Local call_Ltnq26mZRnQscWnsSbCG8ugr. Routing/shape acceptance only, not outcome acceptance.",
+      "routingQualification": {
+        "acceptedRouting": {
+          "source": "call_Ltnq26mZRnQscWnsSbCG8ugr",
+          "receipt": {
+            "file": "local224-next-publication-intake.json",
+            "bytes": 2985,
+            "sha256": "f1d3d67cf0a90892a1e3a15686673005a66a56705ceb1c1cca4e0ac32fa93a6b"
+          }
+        },
+        "canonicalDedup": [
+          {
+            "path": ".streamliner/workstreams/application-client/discovered-work.json",
+            "items": 5,
+            "matches": []
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+            "items": 48,
+            "matches": []
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/discovered-work.json",
+            "items": 1,
+            "matches": []
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+            "items": 15,
+            "matches": []
+          }
+        ],
+        "noPriorCanonicalRow": true,
+        "plannedAndUnlaunched": true,
+        "noImplementationOwner": true,
+        "noCurrentRealWaitAuthorization": true,
+        "watcherBoundary": "Watcher owns its graph/status/ledger projection. This Local-only shape records no #201 activation/block status/edge or validation, and conserves the complete Watcher files.",
+        "exclusions": "No #155 reopening, #223 product absorption or fallback-wake proof, #212 publication/approval carry, other-family completion/intake, cause, repair, runtime/profile operation, owner/observer/wake or debt clearance."
+      },
+      "actualOwnerQualification": {
+        "kind": "same-family-actual-owner-with-later-phase-and-additive-identity-correction",
+        "source": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_snSu89ZCyTsGxy7QTsNISKt3",
+          "originEvent": {
+            "id": "176a7622-4f0a-4044-b478-c4e788ce45c0",
+            "timestamp": "2026-10-26T20:03:24.536Z",
+            "bytes": 3781,
+            "sha256": "a3580f52180eb10ffaa83ac521bb6190378615fbdbd8717e81d99625c6c2b322"
+          },
+          "receipt": {
+            "file": "local224-actual-owner-launch-intake.json",
+            "bytes": 1816,
+            "sha256": "03f35b6bccc5cab7a74cc10a0c926b4e84c2de596754e24e06d0345cb09f9f1b"
+          }
+        },
+        "controllerSource": {
+          "file": "local224-actual-owner-controller-source.json",
+          "bytes": 5312,
+          "sha256": "ce0fefd7e5defc825d352918ba68e61e72ea2478c8b14ff51cbece09e5f6df53"
+        },
+        "controllerCapture": {
+          "file": "local224-actual-owner-controller-capture.json",
+          "bytes": 728,
+          "sha256": "b5e38a733190b8d93db38871d66e4567bf8ce9bcc8a6a3eaa1153a1c7399e14a"
+        },
+        "controller": {
+          "kind": "published-node-followed-by-single-authorized-owner-launch",
+          "issue": 224,
+          "issueUrl": "https://github.com/lossyrob/telex/issues/224",
+          "nodeId": "postgres-fallback-recovery-exhaustion",
+          "familyId": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+          "campaignAuthority": [
+            "toolu_01JR27dM8djhYUzuMCGXmgYN",
+            "toolu_012dMoYnEa5LdQd2wUwFehr1"
+          ],
+          "publicationPrerequisite": {
+            "verifiedAt": "2026-10-26T19:58:33.719Z",
+            "commit": "51a94f8ef0126e74f89f0f4b7fcd6201d718b793",
+            "parent": "9e971fd9ee877a20d13c97ad59b25d477b5c6ad0",
+            "tree": "b41027839a5925c40e0f89e4f99a186b2fbc4091",
+            "patchBytes": 80769,
+            "patchSha256": "5c51bc15e7aef0936c8a50f95912e64aaebf69b0bd9f8452cbcfa7e150247415",
+            "taskPath": ".streamliner/workstreams/local-daemon/tasks/postgres-fallback-recovery-exhaustion.md",
+            "taskSha256": "9a87f79f352b1ef0c60c4824dc9e644f91cf35cd7617bb2818895bdeed674ead",
+            "verification": "Local independently verified public main/commit/parent/tree, exact approved patch, published planned node/task, all actor receipt bindings and final Tier B zero-blocker/zero-warning header; persistent closure records 30 published packets across 13 boundaries.",
+            "prelaunchSnapshot": "Planned/watch, unassigned/unlaunched, dependsOn empty, sourceNode null. Those published fields describe the prelaunch snapshot, not a renewed hold after this actual launch."
+          },
+          "duplicateGuard": {
+            "sessions": "Fresh App inventory contained no #224 diagnosis/implementation session.",
+            "pullRequests": "Open repository PR search for 224 returned none.",
+            "boundary": "Inventory/ledger check before creation, not a general guarantee about unregistered external activity."
+          },
+          "launch": {
+            "sessionId": "769a992c-7319-4d2e-b93a-4977094d7715",
+            "name": "224 postgres fallback diagnosis",
+            "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+            "creatorAndCoordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "createdAt": "2026-10-26T19:59:29.847Z",
+            "requestedMode": "interactive",
+            "modelOverride": null,
+            "reasoningOverride": null,
+            "contextOverride": null,
+            "baseBranchOverride": false,
+            "notifyOnIdle": false,
+            "kickoffAtCreation": true,
+            "appObservation": {
+              "path": "lossyrob-crispy-giggle",
+              "branch": "lossyrob-crispy-giggle",
+              "activity": "busy",
+              "busyForSeconds": 14,
+              "awaitingInput": false,
+              "interrupted": false
+            },
+            "limits": "App identity/activity independently read by Local. No requested model override was supplied, and resolved effective model/capacity was not independently verified. Local did not inspect the owner's checkout HEAD, dirty state, profile, runtime or evidence directories."
+          },
+          "assignment": {
+            "outcome": "Diagnose candidate-fetch/reconnect exhaustion as transient/environmental versus lifecycle defect, preserving explicit unattended health, finite deadlines and actionable diagnostics.",
+            "diagnosisAuthority": "Read-only pg-rde-telex status/schema/catalog, EXPLAIN without ANALYZE, connection/latency timing, server activity views and explicitly supplied existing run/custody files; isolated separate TELEX_HOME/TELEX_CONFIG/temporary LOCALAPPDATA and disposable Postgres seeded to production-like history.",
+            "prohibitions": "No real campaign-address wait retry, timeout/auth/PIM/install change, ACL restoration or real-directory permission change, detector-event staging or production-row write. Do not leak credentials or connection details. No new campaign waiter/Telex bridge for coordination.",
+            "environmentalPath": "Specific evidence of transient/environmental cause and clearance first; then request design-steward approval for exactly one supported same-profile wait outlasting the failure window. Do not execute it without that separate approval. Final disposition goes to Campaign; Campaign re-arms root once after acceptance.",
+            "repairPath": "If a product/guidance fix is warranted, closing PR for #224 with its own exact-head independent source review, design inspection, hosted CI and Campaign gate; no autonomous merge or issue closure.",
+            "evidenceBoundaries": "Three Campaign root runs, two member-owner runs and one separately reported coordinator run remain distinct actor reports. No cause or runtime measurement inferred from preparation timestamps or successful status. #155 is related completed history, not automatically reopened.",
+            "coordination": "Local parent; existing design steward and sole CI observer; #201 owner and Watcher coordinator for retained evidence and dependency. No second implementation owner or new observer.",
+            "exclusions": "No #223/#222 absorption or dependency, #201 validation/pass credit, installed-runtime/registry changes, other-family repair or parked #212 publication authority."
+          },
+          "recordingRequest": "Add actual launch/owner qualification to the same published #224 row/node under the usual fresh artifact review. Preserve the complete planned-before-launch snapshot and authority/controller evidence. No duplicate row/node/tracker/worker or new failure occurrence. Operational owner work does not wait for recording."
+        },
+        "projection": "The complete supplied controller is retained; only launch.appObservation.path becomes its checkout name. Restoring that one value exactly recovers the full original object.",
+        "methodBoundary": "Local publication/duplicate/launch/requested-setting and temporal App observations are attributed. The supplied controller is not raw create_session output or a complete kickoff payload. No effective model/capacity, current owner checkout HEAD/cleanliness, referenced private file, recipient, runtime or actual delivery was inspected here.",
+        "noDuplicateOrWorkHold": "Same previously launched owner, not a second worker/node/family/occurrence; no operational work or publication hold follows from recording.",
+        "phase": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_v9EqKx99uvyHMavvBRiF5rFq",
+            "originEvent": {
+              "id": "f391fbb6-c341-4b12-ab5f-cdc494173209",
+              "timestamp": "2026-10-26T20:32:27.516Z",
+              "bytes": 3455,
+              "sha256": "acfe0f8e6f737ad666c0b01292ec1d3fe0613a6cedb53aa88997d15424935757"
+            },
+            "receipt": {
+              "file": "local224-phase-a-decision-intake.json",
+              "bytes": 1654,
+              "sha256": "85b3036f142506de201ff495677ee49c9d97a08a1da0358c2c1c8a14c190a065"
+            }
+          },
+          "verbatim": "Same-node #224 phase decision, NOT a shape change: Campaign toolu_01QLkaykjbzhsK7TeNYSpRyS accepts owner769a992c's evidence-only diagnosis and chooses path(a): one bounded closingPR fixing shared-client contention plusphase-specificexhaustiondiagnostics, unchanged3000msgrace. Environmentalclosureand201rootrearmremainblockeduntilPRmergeANDinstalledbuildupgrade. No installed-upgradepermission or outcomecredit follows;samefamily/node/owner.\n\nOwnerfinaldiagnosispacket17464/SHA10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db readbyLocal;mechanismis sufficientisolatedcontention+separateslowcredentialalternatives,NOThistoricalcauseorcalibratedproductionreplay. I requested additiveidentitycorrectionbecausepacketowner_session0a11050e differsAppowner769a992c;do notsilentlybindit/overwriteoriginalorcopyprivatepaths. Cleanupcommand/timestampspacket12669/SHAb7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029 bindsrecordedcommands,whileactualDockerstop/resourceabsencearemereownerattestationinLocalreview. Keepfailingsetupassertions/partialrunlimits. Existingactual-ownerqualificationcanrecordthisnewphaseadditivelywhenin scope;no duplicateowner/shape/publicationhold.",
+          "campaignAuthority": "Local reports Campaign toolu_01QLkaykjbzhsK7TeNYSpRyS; no independent raw Campaign origin is claimed.",
+          "outcome": "Same family/node/owner now implements path (a): one bounded closing #224 PR for shared-client contention and phase-specific exhaustion diagnostics, unchanged 3000 ms grace. No environmental closure or #201 root re-arm before BOTH PR merge and installed-build upgrade; no upgrade permission is granted here.",
+          "diagnosisBoundary": "Sufficient isolated contention and a distinct slow-credential alternative, not the historical production cause or calibrated production replay. Failed setup assertions and partial-run limits remain retained; no diagnosis packet/manifest/19-file set or experiment was read/replayed here.",
+          "cleanup": {
+            "reportedCommandPacketBytes": 12669,
+            "reportedCommandPacketSha256": "b7c7b70995efec266947ca3ba07c396cf5bf2929c5b823f7658199f5062c3029",
+            "boundary": "Recorded commands/timestamps do not independently establish Docker stop or resource absence. Actual cleanup remains owner-attested, not environmental clearance or #201 unblock."
+          }
+        },
+        "additiveIdentityCorrection": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_QNYGcQ0UNjFkBw8WJnFiZ9sy",
+            "originEvent": {
+              "id": "b337fde7-a4fb-4464-8115-730a6e7444b2",
+              "timestamp": "2026-10-26T20:36:50.777Z",
+              "bytes": 3294,
+              "sha256": "97ddcff2e09b7061941daa7b47cb5b493ee0a2d8cb0a7560647208c886bd5a54"
+            },
+            "receipt": {
+              "file": "local224-binding-correction-intake.json",
+              "bytes": 1573,
+              "sha256": "a812577401e2f2b5d4f60830a2abeef54a49f6c620ceac1d23518da2d36ddcda"
+            }
+          },
+          "original": {
+            "file": "local224-binding-correction-controller-source.json",
+            "bytes": 1239,
+            "sha256": "0dcf579c8c847156506d4e3db142a104bfab2c593edda6c46249cbbfaa922795"
+          },
+          "capture": {
+            "file": "local224-binding-correction-controller-capture.json",
+            "bytes": 1060,
+            "sha256": "dc7f21bb4f270049c4a0de8aa6769ec6978288b560ac5f586aa1cbef053e71b1"
+          },
+          "completeProvidedCorrection": {
+            "kind": "additive-owner-identity-binding",
+            "original_packet": "issue224-diagnosis-disposition.json",
+            "original_bytes": 17464,
+            "original_sha256": "10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db",
+            "original_packet_and_manifest_preserved": true,
+            "canonical_app_owner_session": "769a992c-7319-4d2e-b93a-4977094d7715",
+            "original_owner_session_value": "0a11050e-77b7-4b4d-8eed-f8ac937e9957",
+            "binding_evidence": "The initial workspace envelope supplied 0a11050e as project_session_id. On 2026-10-26, get_session invoked independently with 0a11050e and with 769a992c returned the same canonical id/active_session_id 769a992c, project d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54, original checkout path, current branch and Local creator. Thus the original field used a resolvable workspace alias rather than the canonical App session ID; it is not evidence of a second owner.",
+            "cleanup_provenance": "Cleanup was observed by this owner in tool output. The retained Docker transcript records commands/timestamps but is not claimed to contain every external-command receipt. Cleanup remains owner-attested for an independent packet reader. No restart or experiment was performed to reconstruct receipts."
+          },
+          "interpretation": "Local reports independently resolving both IDs to the same canonical/active App owner, checkout/current branch and Local creator. The original workspace alias is not a second owner; original diagnosis bytes/field remain unchanged and this correction is additive.",
+          "reportedCustody": {
+            "originalDiagnosisBytes": 17464,
+            "originalDiagnosisSha256": "10cc8a269de279a2f749a2a02050412cdcee2b276363a2ca90e23843e39d48db",
+            "manifestBytes": 3391,
+            "manifestSha256Prefix": "b6c15760",
+            "manifestFileCount": 19,
+            "boundary": "Local reports unchanged manifest and matching bytes/hashes for all 19 files. This reconciler did not read the diagnosis, manifest, listed files, App lookup or experiments; the statement is source-attributed byte custody, not experiment/production/cleanup replay."
+          },
+          "noOutcomeCredit": "No environmental clearance, historical cause, runtime repair, installed upgrade, root re-arm, #201 validation, second worker or artifact-review authority follows."
+        },
+        "prelaunchFields": {
+          "node": {
+            "summary": "Diagnose the #224 Postgres pull-fallback candidate-fetch/query/reconnect exhaustion observation before deciding environmental disposition or a product/guidance fix. Preserve finite recovery versus idle timeout, typed exit 7, explicit unattended health and actionable diagnostics. Campaign requires this reviewed planned node on canonical main before Local launches exactly one owner; no owner, requested model, launch, diagnosis or readiness is recorded now. Watcher owns the separate #201 upstream edge; no dependency on #222/#223 is inferred. Completed #155 is related history only, not reopened or proved regressed.",
+            "status": "planned"
+          },
+          "row": {
+            "owner": "Local Daemon routing; implementation/diagnosis owner unassigned until verified publication and Local launch.",
+            "status": "planned"
+          },
+          "task": {
+            "path": ".streamliner/workstreams/local-daemon/tasks/postgres-fallback-recovery-exhaustion.md",
+            "bytes": 4298,
+            "sha256": "9a87f79f352b1ef0c60c4824dc9e644f91cf35cd7617bb2818895bdeed674ead"
+          }
+        },
+        "prelaunchHistoryBoundary": "All unchanged old candidate, routing, planned/unlaunched and no-owner fields describe the original prelaunch snapshot. This additive later assignment/phase/correction qualifies that snapshot without deleting or rewriting it, and creates no new work hold."
+      }
+    },
+    {
+      "id": "local-daemon-copilot-app-first-time-delivery-path",
+      "sourceNode": null,
+      "source": "Existing #223 from #201 real-workstation validation, Watcher-to-Local routing and owning Local source/guidance assessment.",
+      "crossReference": "Existing push-delivery design owns the normative contract; #53 is not reopened. #222 is separate Watcher bootstrap/root-mode wording; #224 is separate backend candidate-fetch recovery.",
+      "evidence": {
+        "publicIssue": {
+          "number": 223,
+          "url": "https://github.com/lossyrob/telex/issues/223",
+          "title": "Copilot App sessions cannot load a first-time Telex bridge through extensions_reload",
+          "state": "open",
+          "body": {
+            "file": "local223-first-time-delivery-issue-body.txt",
+            "bytes": 953,
+            "sha256": "3a9f0606a4fa8ba88c91efefce4cc2056ecc08d49273dd7acf41d6793f9a56ab"
+          }
+        },
+        "publicReceipts": [
+          {
+            "id": 6425261961,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425261961",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:23:33Z",
+            "updatedAt": "2026-10-26T19:23:33Z",
+            "body": {
+              "file": "watcher-bridge223-local-routing-body.txt",
+              "bytes": 881,
+              "sha256": "e001e67d741596207da1c10abd3d926f7eb3cf66a9785fc443949c3e923e29ad"
+            }
+          },
+          {
+            "id": 6425315392,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425315392",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:26:15Z",
+            "updatedAt": "2026-10-26T19:26:15Z",
+            "body": {
+              "file": "local223-routing-body.txt",
+              "bytes": 2635,
+              "sha256": "32dd52e68c6f6ea26235606a07bbdfc7bd2945e512616fd0109050ac8a68f59f"
+            }
+          }
+        ],
+        "initialCandidateReport": {
+          "source": "call_VgSiZu98cIBGYiKEn7h5Lvod",
+          "receipt": {
+            "file": "local223-first-time-delivery-intake.json",
+            "bytes": 1989,
+            "sha256": "bed978e16d9b87608d5e881d5d102219810d6dbd2a85c8751e066917a6f70a5c"
+          },
+          "status": "candidate",
+          "decisionState": "proposed",
+          "sourceNode": null,
+          "owner": "Local routing; implementation unassigned",
+          "boundary": "Private initial report, not a prior canonical row. Its pending-Campaign status is superseded only by later accepted node authority, not rewritten."
+        },
+        "acceptedNode": {
+          "source": "call_kUHJSXbVmnRG8PJlpwsuplKL",
+          "receipt": {
+            "file": "local223-authorized-node-intake.json",
+            "bytes": 1993,
+            "sha256": "6c6f8f4f6708f3698428dafb8dc80acf69bf928bbe72446867e79f80d97eaa31"
+          },
+          "campaignSource": "toolu_01Y5o2oxjb7MD82B7hCRAj5r",
+          "campaignVerbatim": "Routing decision for #223: accepted as proposed. It is a separate node, copilot-app-delivery-path, owned by the Local workstream, with the scope and boundaries you posted in 6425315392. It has no dependency on #201 or #222. Have the reconciler publish the node, then launch its owner yourself; no further Campaign approval is needed. Note for the owner: the real root cannot currently arm the pull fallback, because `telex wait` times out fetching wait candidates on pg-rde-telex. The #201 owner is filing that separately. #223 fixes the docs and recovery text only; it must not claim fallback wake works and must not absorb that bug."
+        },
+        "canonicalDedup": [
+          {
+            "path": ".streamliner/workstreams/application-client/discovered-work.json",
+            "items": 5,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/local-daemon/discovered-work.json",
+            "items": 49,
+            "matches": [
+              {
+                "id": "local-daemon-postgres-fallback-candidate-fetch-exhaustion",
+                "status": "planned",
+                "decisionState": "accepted"
+              }
+            ],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/operator-station/discovered-work.json",
+            "items": 1,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          },
+          {
+            "path": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+            "items": 15,
+            "matches": [],
+            "boundary": "All-field hits are retained, not misreported as zero. The existing #224 row may mention separate #223 only as a scope boundary; its canonical target is #224. A foreign Watcher hit must be an accepted external Local route. No Local #223 family/node/tracker is already modeled."
+          }
+        ],
+        "methodBoundary": "Source/guidance mismatch and capability/fallback behavior retain Local/Watcher/#201-owner attribution. Public bodies and actual Local receipts are checked; no raw Campaign-origin or recipient/runtime/source execution is claimed. Existing generated fallback procedures do not prove real App wake, and #224 is a separate unresolved product/environment observation."
+      },
+      "description": "Align first-time Copilot delivery guidance and directly related recovery messages/tests with actual host capabilities. App without a supported live loader uses documented Telex-owned pull fallback; loader-capable or already-live push remains supported, and provisioning is not loading proof. Preserve one supported pull wait, completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics. No new host API, transport or shell polling loop; no fallback-wake proof or #224 backend repair. #222 owns Watcher bootstrap/stall-group installation/root-mode wording. No #201/#222 dependency or #53 reopening.",
+      "affectedOutcome": "An App-hosted session without a live bridge loader receives an honest supported first-time delivery path without removing working push or asserting unobserved wakeup.",
+      "requiredness": "Accepted separate Local task; creates no #201/#222 dependency and does not waive #224 or its #201 upstream condition.",
+      "sequencing": "After verified canonical planned-node publication Local launches exactly one owner; Campaign requires no further launch approval. #224 publishes first, but no dependency edge is added between them.",
+      "recommendedDisposition": "Separate Local guidance/recovery-message/test-alignment task for existing #223.",
+      "selectedDisposition": "Accept the same new family into one planned/unlaunched node/task, preserving initial candidate/private-pending snapshots as source history.",
+      "target": "copilot-app-delivery-path / existing issue #223",
+      "owner": "Local Daemon; existing implementation owner a78ad6b1-1f7d-4936-85d7-6cf660022386 (source-attributed assignment, not a new launch).",
+      "terminalPath": "A separate closing #223 PR aligns the binary-owned skill, guide, bridge design/overview and directly related recovery text/tests under independent exact-head source review, design inspection and hosted CI, then Campaign gate/accepted disposition. Source-text checks are not App wake/bridge-loading proof. No delivery or repair acceptance is recorded now.",
+      "status": "completed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01Y5o2oxjb7MD82B7hCRAj5r, quoted in actual Local call_kUHJSXbVmnRG8PJlpwsuplKL; route/shape authority only.",
+      "routingQualification": {
+        "noPriorCanonicalRow": true,
+        "plannedAndUnlaunched": true,
+        "noImplementationOwner": true,
+        "overlapCoordination": "Require open-PR plus named-section coordination for copilot/COPILOT.md: #222 may edit stall-group installation/root-mode wording; #223 owns host capability/first-load/fallback/recovery text. Do not duplicate changes or silently overlap; this is coordination, not a new dependency.",
+        "policy": "Current isolation policy: authorized local tests use isolated TELEX_* roots and temporary LOCALAPPDATA; no real-directory ACL/permission changes or I161-1 restore/reset, and exact-head hosted gates remain. Old blanket freeze is not renewed.",
+        "exclusions": "No #224 product fix or supported-wake proof, host API/transport, #201 validation/dependency, #222 absorption/dependency, #53 reopening, launch/profile/runtime/observer/wake, other-family acceptance or debt clearance."
+      },
+      "actualOwnerQualification": {
+        "kind": "same-family-later-actual-owner-qualification",
+        "source": {
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_zru2oYv7FN9jbHBzw8pTWUSC",
+          "receipt": {
+            "file": "local223-actual-owner-launch-intake.json",
+            "bytes": 1531,
+            "sha256": "6f333cd6d7959c950a55dfabecad4d7d5fa92e243aab177f987598f91b16d952"
+          },
+          "originEvent": {
+            "id": "eea3f9c9-c4e8-4ee6-8342-3c2f01e60187",
+            "timestamp": "2026-10-26T20:20:01.919Z",
+            "bytes": 3211,
+            "sha256": "bdd88a55c5f91dae1f65e2f1b77e95f74544845eb59bdcf6494e60b81171dc1c"
+          }
+        },
+        "controllerSource": {
+          "file": "local223-actual-owner-controller-source.json",
+          "bytes": 5286,
+          "sha256": "b8031ad312da0e6aefbaf43a94bc09e48d5ee5cd105d6e869a787d755b438f32"
+        },
+        "controllerCapture": {
+          "file": "local223-actual-owner-controller-capture.json",
+          "bytes": 728,
+          "sha256": "b34a0b8f1ce48f995f4e89532739477f141442b1f42e115920f7babd1dfe165a"
+        },
+        "controller": {
+          "kind": "published-node-followed-by-single-authorized-owner-launch",
+          "issue": 223,
+          "issueUrl": "https://github.com/lossyrob/telex/issues/223",
+          "nodeId": "copilot-app-delivery-path",
+          "familyId": "local-daemon-copilot-app-first-time-delivery-path",
+          "campaignAuthority": "toolu_01Y5o2oxjb7MD82B7hCRAj5r",
+          "publicScopeDecision": "https://github.com/lossyrob/telex/issues/223#issuecomment-6425315392",
+          "publicationPrerequisite": {
+            "verifiedAt": "2026-10-26T20:17:09.328Z",
+            "commit": "a3a788063b558927bfe914c50613d421a50a60af",
+            "parent": "51a94f8ef0126e74f89f0f4b7fcd6201d718b793",
+            "tree": "4fe59962991fe6b445d414cb11a9931634502575",
+            "patchBytes": 57284,
+            "patchSha256": "e1bee2e47e491e3df8e5a0ac9056610a5e22b4b65beaa1217b9fb68602ba5a60",
+            "taskPath": ".streamliner/workstreams/local-daemon/tasks/copilot-app-delivery-path.md",
+            "taskSha256": "911efcd57ea9ad7750985d4640e4de83b6123e9251f4dc281deb38873304ff20",
+            "verification": "Local independently verified public main/commit/parent/tree and exact approved patch, published planned node/task, actual role receipt bindings and final Tier B zero-blocker/zero-warning header. Persistent closure records 31 published packets across 13 product boundaries.",
+            "prelaunchBoundary": "Published planned/watch, unassigned/unlaunched fields describe the prerequisite snapshot. This receipt adds the actual later assignment without rewriting that history."
+          },
+          "duplicateGuard": {
+            "sessions": "Fresh App inventory contained no #223 implementation owner.",
+            "pullRequests": "Open #223 and #222 PR searches were empty at the prelaunch read.",
+            "limits": "A fresh open-PR and named-section overlap check is still required before shared-file edits; the inventory is not proof that #222 has no work outside the inspected surface."
+          },
+          "launch": {
+            "sessionId": "a78ad6b1-1f7d-4936-85d7-6cf660022386",
+            "name": "223 app delivery guidance",
+            "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+            "creatorAndCoordinator": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "createdAt": "2026-10-26T20:17:58.585Z",
+            "requestedMode": "interactive",
+            "modelOverride": null,
+            "reasoningOverride": null,
+            "contextOverride": null,
+            "baseBranchOverride": false,
+            "notifyOnIdle": false,
+            "kickoffAtCreation": true,
+            "appObservation": {
+              "path": "lossyrob-bookish-train",
+              "branch": "lossyrob-bookish-train",
+              "activity": "busy",
+              "busyForSeconds": 3,
+              "awaitingInput": false,
+              "interrupted": false
+            },
+            "limits": "App identity and temporal activity independently read by Local. Effective model/capacity and the owner's checkout HEAD/dirty state were not independently verified. No model, reasoning or context override was supplied."
+          },
+          "assignment": {
+            "scope": "Capability-based first-time App delivery guidance, directly related recovery text and contract tests. App without a supported live loader uses the existing Telex-owned fallback; preserve loader-capable and already-live push.",
+            "surfaces": "Binary-owned skill, operator guide, bridge design/overview and directly related emitted recovery text/tests, without inventing host APIs, transports or polling loops.",
+            "invariants": "Provisioning is not bridge-loading proof. Preserve exactly one supported fallback wait, completion artifacts, acknowledgment/deduplication, explicit re-arm and stop/mode-transition behavior. Source-text checks are not real-host delivery proof.",
+            "overlap222": "Mandatory live open-PR and named-section coordination with Watcher for shared copilot/COPILOT.md. #222 owns stall-group installation/root-mode wording and bootstrap; #223 owns host capability/first-load/fallback/recovery text. Relay the actual #223 PR to Watcher and Local. No dependency is inferred.",
+            "validationPolicy": "Local checks use isolated TELEX_* roots and temporary LOCALAPPDATA; no real-directory ACL/permission changes or I161-1 restore/reset. Exact-head hosted CI remains gate evidence.",
+            "prohibitedExpansion": "No real installation changes, campaign-address waits, bridge attach/reload or detector-event staging; no backend probing or Docker permission inherited from #224. No #224 backend repair, #222 bootstrap absorption, #53 reopening or #201 wake/pass credit.",
+            "delivery": "Separate closing #223 PR, independent exact-head source review, design inspection, hosted CI through the existing sole observer, Campaign gate; no autonomous merge or issue closure. Parsed closing references must be exactly [223].",
+            "coordination": "App messages, not a new real Telex bridge/waiter. Same Local parent, existing design steward, sole hosted observer and Watcher coordinator. No second implementation writer."
+          },
+          "recordingRequest": "Fresh additive actual-owner/work-start qualification on the SAME published #223 row/node. Preserve the complete prelaunch planned snapshot, old candidate/authority history and all #224/other-family state. Redact the private checkout path to checkout name if projecting it; no duplicate row/node/tracker/worker or runtime/outcome credit. Owner work does not wait for recording."
+        },
+        "privatePathProjection": "Only launch.appObservation.path is replaced by its checkout name. Restoring that one value exactly restores the complete supplied controller object.",
+        "attribution": "Publication, duplicate guard, launch, requested settings, temporal App activity and assignment are Local reports. The complete supplied controller is retained, not represented as the raw create_session response or complete kickoff payload.",
+        "methodBoundary": "The reconciler read only the explicitly supplied controller original and its captured actual intake. No recipient directory, checkout, HEAD, cleanliness, effective model/capacity, referenced kickoff/private path, runtime, transport, installation, permission or live delivery was inspected or operated.",
+        "noOutcomeCredit": "One previously launched owner, not a new worker, node, family or occurrence. The temporal busy/no-input observation is not continuing activity, effective capacity or product/wake acceptance. Recording does not hold the owner work or release any other family gate.",
+        "prelaunchFields": {
+          "node": {
+            "summary": "Align first-time Copilot delivery guidance and directly related recovery messages/tests with actual host capabilities. App without a supported live loader uses documented Telex-owned pull fallback; loader-capable or already-live push remains supported, and provisioning is not loading proof. Preserve one supported pull wait, completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics. No new host API, transport or shell polling loop; no fallback-wake proof or #224 backend repair. #222 owns Watcher bootstrap/stall-group installation/root-mode wording. No #201/#222 dependency or #53 reopening.",
+            "status": "planned"
+          },
+          "row": {
+            "owner": "Local Daemon routing; implementation owner unassigned and unlaunched.",
+            "status": "planned"
+          },
+          "task": {
+            "path": ".streamliner/workstreams/local-daemon/tasks/copilot-app-delivery-path.md",
+            "bytes": 3021,
+            "sha256": "911efcd57ea9ad7750985d4640e4de83b6123e9251f4dc281deb38873304ff20"
+          }
+        },
+        "laterPhase": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_WSt05WJGuvIa4JQyLPAIIV9t",
+            "receipt": {
+              "file": "local223-current-phase-intake.json",
+              "bytes": 2746,
+              "sha256": "83ec72e75e0cc0fcb9928bc57b7806a712ed7f2606d3dd20e0c5ce70cc2fb011"
+            },
+            "originEvent": {
+              "id": "3bea7132-7608-4bd5-9e53-71920e1a24fe",
+              "timestamp": "2026-10-26T21:06:10.241Z",
+              "bytes": 5640,
+              "sha256": "1190de29fc0efe205d992c55bb229924cfcdf82d76dfd9e6799a8a9282cfa129"
+            }
+          },
+          "verbatim": "Actual later same-owner #223 phase, freshly checked now: a78ad6b1-1f7d-4936-85d7-6cf660022386 owns OPEN/non-draft PR226 https://github.com/lossyrob/telex/pull/226 at head274c1195db078a70b6fc5f546d29b351c6b8a935/tree02e053f5c271d34a4a9fdee75e788325fd67e4f0, recordedbasea3a788063b558927bfe914c50613d421a50a60af; parsedclosingrefs[223]. Mainfc962a6ab7d12f40b004b4eed6b5d18700292a34. This is implementation/review in progress, not merge/readiness/Campaign acceptance or issue completion.\n\nActual source sequence: reviewer77597d21-e23e-4b66-ab48-02418854e927 AUTHORED historicalreceipt6426679183at0bc480ea withP2missingexistingexit6/7guidance/contracts; ownercorrectedskill/guide/tests inone+56line3filecommit274c1195. Reviewer-authoredfinal https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756 resolvesP2/no source blockers atnewhead, coveringprior10fileinspection+verifieddelta;Localreadfullreceipt/identity,notcode/runtimereplay.\n\nHosted: CI40397079900attempt1pull_request candidate/EVENT274c1195 completedSUCCESS/21uniquejobs independentlyverifiedbyLocal. Observer-authoredterminal https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198 retainsfullinventoryandWindowsprovider/CHECKOUT37cc92d6e903376a180e52106611471eef4e0608;Localverifiedthatcommittree632f2ad3123b6035b29c92b93d43803b8d83c7c7/parents331c4da1ed9970771e3d7213d13dc2ed068d31e7+274c1195,executionclaimobserverlog-attributed. DocsPRN/A/notscheduled/notpassed:exactdocs.ymlnoPRtrigger,pushmain+dispatchonly/Pagesdeploy;Localreadsource,no dispatch/newwatch. Scheduler clearedperobserver.\n\nFormaldesign-pr226-274c1195-20261026requestedbyLocal withcanonicalmainfc962a6a/designba29e6b7b99d5c3990f56bf7a5ee1ed3a84dc3d3/currentbridge394b0e7edc4ae8af61979d08b453cf2d9f4d0989/proposed9165f24edfb625b55555bedf04aadeb30eb3a946. Stewardcall_NMLH1LNIPeueueR8mCnwqFED independentlyagreesprereqs21:03:42Zandislaunchingonefreshreadonlyinspector;NOdesignPASS/providerreceipt orCampaigngateyet. Ownerlocal21unit+3guidancepassesareattributedsupportonly,notrealAppwake/bridge-load/#201proof. #222sharedsectioncoordinationandPR228remainseparate;onlyscopeoverlapreport,notreviewof228. Preservecompleteoriginallaunch/prelaunch/historicalP2andalllimitsadditively;no oldheadcarry/newworker/debtclearance oroperationalhold.",
+          "publicCapture": {
+            "file": "owner223-phase-public-capture.json",
+            "bytes": 4057,
+            "sha256": "93be76ae014b240ad1a032923afbcffb56070f0bc2cff534c05f894cada13d3c"
+          },
+          "publicEvidence": {
+            "observedAt": "2026-10-26T21:08:23.768Z",
+            "result": "PASS",
+            "phaseSource": "call_WSt05WJGuvIa4JQyLPAIIV9t",
+            "sourceOrigin": "3bea7132-7608-4bd5-9e53-71920e1a24fe",
+            "pr": {
+              "number": 226,
+              "url": "https://github.com/lossyrob/telex/pull/226",
+              "stateAtCapture": "open",
+              "draftAtCapture": false,
+              "headAtCapture": "274c1195db078a70b6fc5f546d29b351c6b8a935",
+              "headBranch": "lossyrob-223-app-delivery-guidance",
+              "targetBranch": "main",
+              "publicBaseAtCapture": "a3a788063b558927bfe914c50613d421a50a60af",
+              "raw": {
+                "file": "owner223-phase-pr-raw.json",
+                "bytes": 18732,
+                "sha256": "7d19b7c2f26e808bdcf99e076890de8db9a20b2df9fb4a109cbea8e24030f1a3"
+              },
+              "branchQualification": "The initial controller branch and this public PR branch are distinct snapshots. Same-owner association is supplied by Local; no rename mechanism/time or current owner checkout state is inferred.",
+              "parsedClosingReferences": [
+                223
+              ],
+              "parsed": {
+                "file": "owner223-phase-parsed-pr-raw.json",
+                "bytes": 460,
+                "sha256": "d0bfa0c52e011f92ddd8ceab503baca976d79806bff14d81f8033b5f0ba36e4b"
+              }
+            },
+            "comments": [
+              {
+                "name": "historical-p2",
+                "id": 6426679183,
+                "url": "https://github.com/lossyrob/telex/pull/226#issuecomment-6426679183",
+                "author": "lossyrob",
+                "createdAt": "2026-10-26T20:33:50Z",
+                "updatedAt": "2026-10-26T20:33:50Z",
+                "raw": {
+                  "file": "owner223-phase-historical-p2-raw.json",
+                  "bytes": 7233,
+                  "sha256": "c3b2bc69d241fe9ff33d43efb2eee4b71161dc87542de6de6a682273ccce307f"
+                },
+                "body": {
+                  "file": "owner223-phase-historical-p2-body.txt",
+                  "bytes": 5519,
+                  "sha256": "b06e813344e9d821c2fed48ff673f6b16c27f2cfc519efca026e5852da66b90a"
+                }
+              },
+              {
+                "name": "source-review",
+                "id": 6426763756,
+                "url": "https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756",
+                "author": "lossyrob",
+                "createdAt": "2026-10-26T20:38:07Z",
+                "updatedAt": "2026-10-26T20:38:07Z",
+                "raw": {
+                  "file": "owner223-phase-source-review-raw.json",
+                  "bytes": 5923,
+                  "sha256": "a4b9bef886b7464c271a66e4f9b17033ce23413dc48b40d469bc99fd0ffd8359"
+                },
+                "body": {
+                  "file": "owner223-phase-source-review-body.txt",
+                  "bytes": 4221,
+                  "sha256": "a7b00244851f15a02bc0a3adc3ee6c6e917e861d2244e80e2980088f6ae77b8b"
+                }
+              },
+              {
+                "name": "observer-terminal",
+                "id": 6427256198,
+                "url": "https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198",
+                "author": "lossyrob",
+                "createdAt": "2026-10-26T21:02:56Z",
+                "updatedAt": "2026-10-26T21:02:56Z",
+                "raw": {
+                  "file": "owner223-phase-observer-terminal-raw.json",
+                  "bytes": 4015,
+                  "sha256": "0441467a30b10540171b982c891ecd5d1bfee1b83f7f96bad62b8d93586be856"
+                },
+                "body": {
+                  "file": "owner223-phase-observer-terminal-body.txt",
+                  "bytes": 2349,
+                  "sha256": "27d6f742dda9e273aed07f1c60cf3a7ed4e7a0dc43f7605249ac2708b86320b2"
+                }
+              }
+            ],
+            "providerMetadata": {
+              "commit": "37cc92d6e903376a180e52106611471eef4e0608",
+              "tree": "632f2ad3123b6035b29c92b93d43803b8d83c7c7",
+              "parents": [
+                "331c4da1ed9970771e3d7213d13dc2ed068d31e7",
+                "274c1195db078a70b6fc5f546d29b351c6b8a935"
+              ],
+              "raw": {
+                "file": "owner223-phase-provider-commit-raw.json",
+                "bytes": 2595,
+                "sha256": "641629e0b7b0cfdeb65b403570079bb425d7f1d364b0b0aeeeaf4f5c172df345"
+              },
+              "boundary": "Bounded public Git object metadata only; this does not establish checkout or execution. Execution remains attributed to the observer report through Local."
+            },
+            "boundary": "Public PR identity, parsed closing references, complete public comment bodies and bounded Git object metadata capture only. No source, CI run/job/log, product/runtime, recipient, private controller/reference, installation, transport or permission inspection; no observer or operational action."
+          },
+          "attribution": "The complete later Local report is retained verbatim. Reviewer and observer authorship, source inspection, CI/run/job verification, checkout/execution, Docs workflow inspection, scheduler state and design-inspector launch remain Local-attributed; the reconciler captured public identities, full comment bodies and bounded Git object metadata only.",
+          "chronology": "The initial launch-controller branch and later public PR head branch remain distinct snapshots, not a reconstructed rename. Reported branch base, candidate/event head, provider/checkout merge commit and present artifact main are distinct identities. Public PR state/head and review gates are their captured snapshots, not continuing readiness or old-head carry."
+        },
+        "currentQualification": "Same previously launched owner; implementation/review in progress at the later Local report. Historical P2 at 0bc480eae8bcc22c7d7d7d56e46bc19c2d2a09a6 and its later source-review resolution at 274c1195db078a70b6fc5f546d29b351c6b8a935 are retained separately. Formal design PASS and Campaign acceptance were absent at that report. This is no merge, completion, operator readiness, real App wake/bridge-loading, #201 validation or #224 repair.",
+        "laterFormalDesign": {
+          "source": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_0F9MTGeJqsX6Ws8PTJWu8kah",
+            "receipt": {
+              "file": "local223-formal-design-phase-intake.json",
+              "bytes": 1198,
+              "sha256": "522e7e3210cea82eba38202a862c9e587a5d6f2ae3c1a3b51ade1408d8e46ee3"
+            },
+            "originEvent": {
+              "id": "b0ec9aa8-aedf-4edd-9fe1-78d52ba25123",
+              "timestamp": "2026-10-26T21:14:31.091Z",
+              "bytes": 2544,
+              "sha256": "1a19360594e0d25d8298e56f1b11aec1cac42a27deeec94de456881e2e1f9d94"
+            }
+          },
+          "sourceVerbatim": "Additive current-phase fact for the same #223 actual-owner qualification, not launch/acceptance: formal design-pr226-274c1195-20261026 now posted-verified https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907 . Local independently matched full4085-byte ASCII body/SHA25681f6a245ac5ff3bfef25b823a0a2e1a6265b871ebd7c46977e09a4730189e5b9, live head274c1195/tree02e053f5/basea3a788/mainfc962/parsed refs[223]/zero reviewthreads. Design-aligned/no blockers; source6426763756 and CIobserver6427256198 remain separate; DocsPRN/A/notpassed. Owner is refreshing final design link only, then Local will route one Campaign readiness request. No Campaign acceptance, merge, runtime or #201/#224 release yet; preserve launch/prelaunch history.",
+          "publicCapture": {
+            "file": "owner223-design-public-capture.json",
+            "bytes": 2088,
+            "sha256": "02b33d994f912600be59e103f0d13fc35e449acf07163a97c48293df9befd255"
+          },
+          "publicEvidence": {
+            "observedAt": "2026-10-26T21:16:56.141Z",
+            "result": "PASS",
+            "source": "call_0F9MTGeJqsX6Ws8PTJWu8kah",
+            "origin": "b0ec9aa8-aedf-4edd-9fe1-78d52ba25123",
+            "publicComment": {
+              "id": 6427438907,
+              "url": "https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T21:12:14Z",
+              "updatedAt": "2026-10-26T21:12:14Z",
+              "raw": {
+                "file": "owner223-design-comment-raw.json",
+                "bytes": 5739,
+                "sha256": "fc9bec0819242260727561aae03eb6a33234ada40dc2d747b86e7e34574f6b17"
+              },
+              "body": {
+                "file": "owner223-design-comment-body.txt",
+                "bytes": 4085,
+                "sha256": "81f6a245ac5ff3bfef25b823a0a2e1a6265b871ebd7c46977e09a4730189e5b9"
+              }
+            },
+            "publicPr": {
+              "number": 226,
+              "url": "https://github.com/lossyrob/telex/pull/226",
+              "stateAtCapture": "open",
+              "draftAtCapture": false,
+              "headAtCapture": "274c1195db078a70b6fc5f546d29b351c6b8a935",
+              "treeAtCapture": "02e053f5c271d34a4a9fdee75e788325fd67e4f0",
+              "baseAtCapture": "a3a788063b558927bfe914c50613d421a50a60af",
+              "parsedClosingReferences": [
+                223
+              ],
+              "raw": {
+                "file": "owner223-design-pr-raw.json",
+                "bytes": 19760,
+                "sha256": "3e40d64f57975ea5197d9a192a2ed43d552305f90712dedb4950f7c39feee7d1"
+              },
+              "parsed": {
+                "file": "owner223-design-pr-parsed-raw.json",
+                "bytes": 357,
+                "sha256": "f0e54b9c7ae4159c689d4ba55b7e316981fdef26a589896b87175b2e69351f6c"
+              },
+              "headMetadata": {
+                "file": "owner223-design-head-metadata-raw.json",
+                "bytes": 1371,
+                "sha256": "9a141cc206f39bd57378ff7aca49611e59324e0efd6d709522328ff4c2a3a28f"
+              }
+            },
+            "boundary": "Complete public design comment/identity, public PR/parsed closing references and bounded head Git metadata only. Local receipt/provider matching, zero-review-thread check, final-link refresh and future Campaign routing remain attributed. No product source, CI logs, recipient/runtime or referenced private/design path was read; no source/design/runtime replay or readiness acceptance."
+          },
+          "publicBodyVerbatim": "Design Inspection: +1\n\nInitial design inspection for local-daemon / copilot-app-delivery-path, closing #223. Correlation: `design-pr226-274c1195-20261026`. The Local Daemon design steward adjudicated this result and authorized this one receipt.\n\nExact binding:\n- Head: `274c1195db078a70b6fc5f546d29b351c6b8a935`; tree: `02e053f5c271d34a4a9fdee75e788325fd67e4f0`.\n- Base: `a3a788063b558927bfe914c50613d421a50a60af`.\n- Canonical design revision: `fc962a6ab7d12f40b004b4eed6b5d18700292a34`; `current-design.md` blob: `ba29e6b7b99d5c3990f56bf7a5ee1ed3a84dc3d3`.\n- Canonical `docs/design/copilot-bridge-push.md` blob: `394b0e7edc4ae8af61979d08b453cf2d9f4d0989`; proposed blob: `9165f24edfb625b55555bedf04aadeb30eb3a946`.\n\n**No design blockers.** The complete #223 guidance outcome matches the accepted capability-based routing. Already-live push remains supported, including in App; hosts with a supported loader can load the bridge; first-time App setup without one uses existing Telex-owned prepared pull. Provisioning and registration are not loading proof, and restart/clear do not substitute for an unavailable loader.\n\nThe single-shot detached launcher contract preserves completion artifacts and exit.code-first interpretation, exits 0-7 and legacy exit 1, quarantine metadata/no-ack/conditional continuation, recovery before re-arming backend failure, message-id acknowledgment/deduplication/disposition and the CC exception, explicit re-arm/stop, intentional --force downgrade, and push/pull exclusion. See the [binary-owned skill](https://github.com/lossyrob/telex/blob/274c1195db078a70b6fc5f546d29b351c6b8a935/copilot/COPILOT.md#L198-L318) and [design boundary](https://github.com/lossyrob/telex/blob/274c1195db078a70b6fc5f546d29b351c6b8a935/docs/design/copilot-bridge-push.md#L39-L65).\n\nProposed durable documentation promotion is adequate across the design of record, skill, guide, bridge overview, README, troubleshooting and recovery messages. No daemon protocol, ADR or canonical current-design rewrite is needed for this bounded repair. No new API, transport, polling loop or readiness mechanism is introduced. #222 retains Watcher bootstrap/stall wording; #224 retains backend repair; #201 retains real-root delivery acceptance.\n\nPrerequisites are separately evidenced by the [reviewer-authored source receipt](https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756) and [observer-owned hosted receipt](https://github.com/lossyrob/telex/pull/226#issuecomment-6427256198). The parent steward independently verified CI run `40397079900`, attempt 1, pull_request event/API candidate head `274c1195db078a70b6fc5f546d29b351c6b8a935`, and all 21 successful jobs. The observer's Windows provider/checkout SHA is the distinct synthetic merge `37cc92d6e903376a180e52106611471eef4e0608`, with ordered parents `331c4da1ed9970771e3d7213d13dc2ed068d31e7` and `274c1195db078a70b6fc5f546d29b351c6b8a935`. I verified that commit geometry; execution attribution remains observer-log-derived, not my or the parent's log replay. Candidate and checkout SHAs are not equated; aggregate CI is not per-test, causal or App-runtime proof.\n\nPR Docs is N/A, not passed: exact-head `.github/workflows/docs.yml` blob `ef2945ac216695eabde74a1d324f78efea0602d4` has only path-filtered push to main and workflow_dispatch, not pull_request. Any applicable post-merge Docs run is separate.\n\nThe owner should refresh the PR body's stale source/CI status before readiness. This separately routed evidence bookkeeping is not a source/design blocker; this receipt does not claim the body was updated.\n\nConfidence is high for source/design alignment only. This was read-only exact-source design inspection, not another implementation review. I did not rerun the owner's 21 unit/3 guidance checks, execute or poll CI, replay logs, perform runtime/installation/auth/ACL actions, inspect recipients, or merge. No real App wakeup, bridge loading, #224 repair or #201 acceptance is certified. This receipt grants no merge authority. Any head/base or relevant canonical-design change invalidates coverage.",
+          "publicBodyLfDisplay": {
+            "bytes": 4085,
+            "sha256": "81f6a245ac5ff3bfef25b823a0a2e1a6265b871ebd7c46977e09a4730189e5b9"
+          },
+          "chronology": "The earlier phase report lacked a formal design PASS at that time. This later posted/verified design receipt qualifies only that pending-design fact; the earlier report remains exact history, not a regression or denial of the later result.",
+          "outcome": "Local reports the same-head formal inspection is design-aligned with no blockers. Source review and observer CI remain separate; Docs PR N/A is not passed. Owner final-body/link refresh and future Campaign readiness routing are prospective at this source, not completed operations. No Campaign acceptance, merge, completion, runtime/App wake, #201 validation or #224 repair follows.",
+          "methodBoundary": "Complete public comment/identity, public PR/parsed closing references and bounded head metadata were captured. Actual Local provider/receipt matching and zero-review-thread verification remain attributed. No supplied inspector, product source/design/private path, CI log, recipient or runtime was replayed or inspected by the reconciler."
+        },
+        "laterProductMerge": {
+          "boundary": {
+            "file": "owner223v3-product-merge-boundary.json",
+            "bytes": 2874,
+            "sha256": "769b46ca02d3824b7ff32c32e286702b92e37bff6fb5e59f8fa2982f222b2de5"
+          },
+          "evidence": {
+            "observedAt": "2026-10-26T21:24:04.464Z",
+            "result": "PASS",
+            "before": "fc962a6ab7d12f40b004b4eed6b5d18700292a34",
+            "commit": "f4c58eed5fe9336408750d69d59ae446707c9f88",
+            "second": "274c1195db078a70b6fc5f546d29b351c6b8a935",
+            "tree": "28dc7120912323257f6ab07d6255c2ea447c63c1",
+            "changedPaths": [
+              "README.md",
+              "copilot/COPILOT.md",
+              "copilot/bridge/README.md",
+              "docs/design/copilot-bridge-push.md",
+              "docs/guide/src/guides/copilot-push.md",
+              "docs/guide/src/guides/troubleshooting.md",
+              "src/commands/copilot.rs",
+              "src/commands/send.rs",
+              "src/commands/wait.rs",
+              "tests/copilot_plugin.rs"
+            ],
+            "streamlinerTree": "d810782517b6da5d09ee0b44b1ccfd6e7b83ba42",
+            "wholeStreamlinerTreeUnchanged": true,
+            "firstParentChainExact": true,
+            "fastForwardOnly": true,
+            "worktreeAndIndexClean": true,
+            "noNewCommitOrPush": true,
+            "campaignSource": {
+              "file": "campaign223-merged-intake.json",
+              "bytes": 692,
+              "sha256": "ac7393e1241ddb709a550f07ddd4283e04bebf44236c08bf0fb03f4b019c389c"
+            },
+            "localSource": {
+              "file": "local223-merged-phase-intake.json",
+              "bytes": 1667,
+              "sha256": "551af33ac41e6aeae9707bf6690d98faeef1aa63cae18b6518266ac9da6960ff"
+            },
+            "parking": {
+              "file": "owner223v2-parking.json",
+              "bytes": 999,
+              "sha256": "a8f5aae5f3b709ff00a57cc299e1df31ae0a17619ef784ff33da84e0ebb559f9"
+            },
+            "publicPr": {
+              "file": "owner223v3-merged-pr-raw.json",
+              "bytes": 20724,
+              "sha256": "fc33b5710e90f4ac7b43643f71eb0d22447a1b91827c0c7ffce6b97dd5bddf76"
+            },
+            "publicIssue": {
+              "file": "owner223v3-merged-issue-raw.json",
+              "bytes": 4252,
+              "sha256": "f6ca4cd52af5ef07368abd11b0da5a56aa77b9424130c120bca361d5cad78449"
+            },
+            "publicGate": {
+              "id": 6427601103,
+              "url": "https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T21:20:38Z",
+              "updatedAt": "2026-10-26T21:20:38Z",
+              "raw": {
+                "file": "owner223v3-merge-gate-raw.json",
+                "bytes": 3586,
+                "sha256": "01f7a8f4a806943c102c6342d7a0823c3fa9db56bbac21d46e6ab40015e9c9e7"
+              },
+              "body": {
+                "file": "owner223v3-merge-gate-body.txt",
+                "bytes": 1936,
+                "sha256": "a172ef846a867a6985d36c4d0d4e5319f9e90424017b4d121151f9325256fd60"
+              }
+            },
+            "parsedClosing": {
+              "file": "owner223v3-parsed-closing-raw.json",
+              "bytes": 357,
+              "sha256": "f0e54b9c7ae4159c689d4ba55b7e316981fdef26a589896b87175b2e69351f6c"
+            },
+            "parsedClosingReferences": [
+              223
+            ],
+            "boundary": "Accepted Campaign product merge metadata/path custody and clean fast-forward only. No product source/log/runtime inspection, merge creation, follow-through/CI/Docs completion, new observer, root test, real bridge/loading/wake, #224 repair or #201 acceptance. Conditional App extension-discovery report is not observed behavior or runtime authority."
+          },
+          "campaign": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01SzupWWGaZeqoNRuZgTMCPb",
+            "originEvent": {
+              "id": "a3204916-7157-4a06-9ffb-006de93d9ac6",
+              "timestamp": "2026-10-26T21:21:46.137Z",
+              "bytes": 1838,
+              "sha256": "39c5bddbe212cdbc2fdfeb32c8df49362ac8b042e4835abb8fc6eb25a035128a"
+            },
+            "verbatim": "#226 merged: merge commit f4c58eed5fe9336408750d69d59ae446707c9f88, Closes #223, gate record https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103, ledger planning commit 877f37c. Follow-through pending from owner a78ad6b1."
+          },
+          "local": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_v7l5SEzgZfdIqX5Bbx07zR65",
+            "originEvent": {
+              "id": "ca088992-35e4-4ef7-9b73-b87f67c223a0",
+              "timestamp": "2026-10-26T21:21:46.146Z",
+              "bytes": 3482,
+              "sha256": "58758b36b6f0d4d7413e89a3170c4b1a3d58224fdc60cf3e9e10305a380b71f2"
+            },
+            "verbatim": "New product boundary invalidates any unpublished #223 tuple based on fc962: Campaign merged PR226 at2026-10-26T21:20:40Z. Local independently verified full merge f4c58eed5fe9336408750d69d59ae446707c9f88/tree28dc7120912323257f6ab07d6255c2ea447c63c1, ordered parentsfc962a6ab7d12f40b004b4eed6b5d18700292a34 +274c1195db078a70b6fc5f546d29b351c6b8a935; parsedrefs[223], issue223 CLOSED/COMPLETED21:20:42Z. Campaign gate https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103 ; Local fullread plus independently confirmed331c..fc962drift is only3Watcher.streamlinerfiles. Ownera78has postmerge exact-mainCI/Docs/field follow-through; not yet complete/accepted.\n\nPreserve frozen owner packets as historical, fresh base/tuple/reviews only; no approval carry or automatic completed/watch projection. Gate retains one nonblocking discovery: operator reports App startup extension discovery may load session-scoped extensions without advertised reload/manage tools; IF Campaign root restart test confirms live bridge, file evidence-backed correction to restart/resume/first-time path wording. This is a conditional report, not observed App loading/wake, runtime launch authority, #224repair or #201acceptance."
+          },
+          "publicGateBodyVerbatim": "## Campaign merge gate: PR #226 (Closes #223) - MERGE\n\nHead 274c1195db078a70b6fc5f546d29b351c6b8a935 (tree 02e053f5). PR base a3a78806; current main fc962a6a.\n\n**Floor**\n- OPEN, non-draft, MERGEABLE/CLEAN; closing refs exactly [#223]; 0 unresolved review threads.\n- Hosted CI: run 40397079900 attempt 1, pull_request, head 274c1195, completed/success, 21/21 jobs. Synthetic merge parents 331c4da1 + 274c.\n- Final-main drift: 331c4da1..fc962a6a touches only .streamliner/workstreams/telex-watcher/{brief.md,discovered-work.json,graph.json}. Disjoint from the 10 PR files; disjoint-drift exception applies, no refresh.\n- Docs: PR Docs not applicable (docs.yml has no pull_request trigger). Main Docs is post-merge follow-through, not credited as passed.\n- Receipts: source review 6426763756 (no blockers), design 6427438907 (+1, no blockers), observer 6427256198.\n\n**Merits**\nCapability-based delivery guidance replaces the CLI-only /experimental assumption for App sessions; keeps live and loader-capable push; adds exit 6/7 fallback handling and states that docs/contract tests prove neither App wake nor bridge loading. No transport/API/runtime change claimed.\n\n**Follow-up (non-blocking, recorded):** the operator reports that in Copilot App, startup extension discovery still loads session-scoped extensions even though extensions_reload/extensions_manage are not advertised. If the Campaign root restart test confirms the bridge goes live that way, the sentence \"Restarting or clearing a session is not a substitute for an unavailable loader\" and the App first-time routing to pull fallback need a follow-up correction naming restart/resume startup discovery as an App first-time path. To be filed with evidence, not assumed here.\n\n**Post-merge obligations (owner a78ad6b1):** exact-main CI and Docs at the merge commit, field report on #223. No #224 repair, #201 acceptance, or App wake/bridge-load proof is credited by this merge.",
+          "chronology": "Campaign subsequently accepted the merge gate and merged PR #226. All earlier pending-design/readiness statements remain their exact historical reports, not current denials. Public issue closure is distinct from owner post-merge follow-through and campaign completion acceptance.",
+          "currentDisposition": "Same owner, merged implementation with exact-main CI/Docs/field follow-through pending at the source; retain in-progress/watch, not completed. No new owner, rerun/observer, runtime/wake, #224 repair, #201 validation or debt credit.",
+          "conditionalDiscovery": "The gate records only an operator-reported startup-extension discovery possibility. A future evidence-backed wording correction is conditional on the Campaign root restart test actually confirming the bridge goes live. No such result, current bridge loading/wake, new family/row or runtime/test authorization is inferred.",
+          "methodBoundary": "Actual Campaign/Local receipts, complete public gate, public merge/issue/parsed-reference metadata, ordered commit parents/path names and identical whole .streamliner tree were checked. The stale authored tuple was exactly reversed and accepted main cleanly fast-forwarded. No product source/log/runtime or recipient inspection, merge creation/push, follow-through completion, observer or root experiment."
+        }
+      },
+      "completionQualification": {
+        "kind": "later-campaign-accepted-bounded-guidance-followthrough",
+        "source": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01RtX3dmYB4DhkWdLrKE9wqf",
+          "verbatim": "#223 follow-through accepted. Owner a78ad6b1 finished the field report (6428012639), and main CI (40403556376) and Docs (40403556481) passed at f4c58eed. Nothing in this credits #224, #201, or App wake/bridge loading.",
+          "originEvent": {
+            "id": "0a58891f-3772-4fe9-95bc-1fcf932635e7",
+            "timestamp": "2026-10-26T21:42:04.157Z",
+            "bytes": 1800,
+            "sha256": "51eaa30a27e96101e41604b49aa2c1ccbf987e0d8f67b545b22ef71922b058af"
+          },
+          "receipt": {
+            "file": "campaign223-followthrough-accepted-intake.json",
+            "bytes": 673,
+            "sha256": "aa2ee352e7aa49ce34d19ac93c7933ab83ed1683e4f8802bddd8ec75480e1ed4"
+          }
+        },
+        "publicFollowthrough": {
+          "observedAt": "2026-10-26T22:11:27.761Z",
+          "result": "PASS",
+          "campaignSource": {
+            "file": "campaign223-followthrough-accepted-intake.json",
+            "bytes": 673,
+            "sha256": "aa2ee352e7aa49ce34d19ac93c7933ab83ed1683e4f8802bddd8ec75480e1ed4"
+          },
+          "field": {
+            "id": 6428012639,
+            "url": "https://github.com/lossyrob/telex/issues/223#issuecomment-6428012639",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T21:41:20Z",
+            "updatedAt": "2026-10-26T21:41:20Z",
+            "raw": {
+              "file": "complete223-owner-field-raw.json",
+              "bytes": 5666,
+              "sha256": "bb6150059cab9db1a4eed1db60db92b8dee361bacb47de9ac96989b7e11ddb14"
+            },
+            "body": {
+              "file": "complete223-owner-field-body.txt",
+              "bytes": 3734,
+              "sha256": "b2b3defb2ee80b333664dce9a92ad3ad0ee9de02b1c80ad77b0951292bb2a8dc"
+            }
+          },
+          "runs": [
+            {
+              "workflow": "CI",
+              "id": 40403556376,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40403556376",
+              "head": "f4c58eed5fe9336408750d69d59ae446707c9f88",
+              "attempt": 1,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete223-ci-run-raw.json",
+                "bytes": 11716,
+                "sha256": "3c2e61fb73de19eadf842ea5d6b885a5e586708f333a3b64bd6225e3f51de55a"
+              }
+            },
+            {
+              "workflow": "Docs",
+              "id": 40403556481,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40403556481",
+              "head": "f4c58eed5fe9336408750d69d59ae446707c9f88",
+              "attempt": 1,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete223-docs-run-raw.json",
+                "bytes": 11719,
+                "sha256": "f750e0bbc37948de9dabcf15ac695194f0ec66eb326bed92bbfdff4c949966ac"
+              }
+            }
+          ],
+          "method": "Complete public field body/identity and exact push-run metadata readback only. Job inventory totals, Windows event/provider/checkout context and scheduler termination remain owner/observer-attributed in the complete field body; no jobs/logs/source/runtime/archive/recipient or scheduler was inspected, and no run/wait/dispatch was started.",
+          "boundary": "Evidence for bounded #223 follow-through only, not App loading/wake, #224 repair, #201 validation, installed upgrade, root test, environmental clearance, debt or hold release, nor artifact landing authority."
+        },
+        "completeFieldBodyVerbatim": "## Field report: bounded guidance repair and merged-head follow-through\r\n\r\n[PR #226](https://github.com/lossyrob/telex/pull/226) merged at `f4c58eed5fe9336408750d69d59ae446707c9f88` on 2026-10-26 at 21:20:40Z; this issue closed at 21:20:42Z. The merge tree is `28dc7120912323257f6ab07d6255c2ea447c63c1`, with ordered parents `fc962a6ab7d12f40b004b4eed6b5d18700292a34` and reviewed candidate `274c1195db078a70b6fc5f546d29b351c6b8a935`.\r\n\r\nThe bounded change aligns the binary-owned skill, operator/bridge documentation, README, troubleshooting and recovery messages with host capabilities. It preserves live push and the existing prepared single-shot pull procedure, including completion artifacts, exits 0-7, acknowledgment/deduplication/disposition, explicit re-arming/stopping and mode exclusion. No transport, host API, backend repair or polling loop was introduced. The Watcher stall subsection and its mirrored guide remain unchanged for #222.\r\n\r\n### Exact-merge checks\r\n\r\nThe existing observer reported terminal success, and I independently read back the run identities and complete job conclusions through GitHub:\r\n\r\n| Workflow | Exact merge | Attempt | Result |\r\n|---|---|---|---|\r\n| [CI 40403556376](https://github.com/lossyrob/telex/actions/runs/40403556376) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; 21/21 jobs successful |\r\n| [Docs 40403556481](https://github.com/lossyrob/telex/actions/runs/40403556481) | `f4c58eed5fe9336408750d69d59ae446707c9f88` | 1 | push; completed/success; build and Pages deployment both successful |\r\n\r\nThe observer's Windows Build/test execution-context read records event, provider and checkout SHA all equal to this actual merge. That execution attribution is observer-log-derived, not my independent log replay or an every-job checkout claim. This post-merge evidence is distinct from the earlier candidate CI, whose Windows checkout was a generated PR merge ref. PR Docs was not scheduled; the actual main Docs result above supplies the post-merge follow-through.\r\n\r\nThe observer reports all waits terminal and its scheduler cleared. No rerun, manual dispatch or local runtime mutation was performed for this follow-through.\r\n\r\n### Review and limits\r\n\r\n- [Independent source review](https://github.com/lossyrob/telex/pull/226#issuecomment-6426763756): no blockers at the reviewed candidate, with the exit 6/7 documentation gap resolved.\r\n- [Formal design inspection](https://github.com/lossyrob/telex/pull/226#issuecomment-6427438907): +1, no design blockers.\r\n- [Campaign merge gate](https://github.com/lossyrob/telex/pull/226#issuecomment-6427601103): authorized the actual merge with disjoint final-main drift and retained follow-up.\r\n\r\nLocal support checks passed 21 unit and three guidance contracts using isolated roots. Those checks, hosted CI and this report establish neither real App fallback wakeup nor bridge loading. They do not repair #224 or satisfy #201 real-root delivery acceptance. No real installation, campaign waiter, bridge reload, detector, backend probe or real-user ACL change was part of this work.\r\n\r\nThe gate's non-blocking startup-discovery follow-up remains explicit: the operator reports that App startup discovery can load session-scoped extensions even without an advertised live reload tool. Campaign owns the root restart test and evidence-backed filing. If confirmed, the restart wording and App first-time routing need a separate correction. This report does not claim that experiment ran or infer its result, and no speculative correction was added here.\r\n\r\nThe assigned exact-merge CI/Docs follow-through is complete. Campaign's bounded delivery acceptance and the separately owned runtime evidence remain distinct.\r\n",
+        "priorFields": {
+          "node": {
+            "summary": "Campaign subsequently merged PR #226 as f4c58eed5fe9336408750d69d59ae446707c9f88, closing #223. The same owner has post-merge exact-main CI, Docs and field follow-through pending at the source; retain in-progress/watch, not completed. The conditional startup-extension-discovery report is not observed bridge loading/wake, test authorization or #201/#224 credit. All premerge owner/review/design snapshots below remain history, not a denial of that merge: A later Local report records the posted, verified formal design receipt for PR #226 at the same 274c1195 head as design-aligned with no blockers. Source review and hosted CI remain separate; Docs PR N/A is not passed, and Campaign acceptance, merge, completion and runtime/wake evidence are not credited. The earlier pending-design report below remains history, not a current denial: Local reports implementation/review in progress under the same previously launched owner a78ad6b1-1f7d-4936-85d7-6cf660022386, with open non-draft PR #226 at 274c1195db078a70b6fc5f546d29b351c6b8a935 and parsed closing reference [223]. The later source-review receipt resolves the historical P2 at its new head; Local reports exact-head hosted CI success, with the separate Windows provider/checkout merge identity and Docs not scheduled for PRs. Formal design PASS and Campaign acceptance were absent at the report; no merge, completion, operator readiness, runtime/wake proof or debt credit follows. Initial controller checkout/branch lossyrob-bookish-train and later public PR branch lossyrob-223-app-delivery-guidance are distinct snapshots; no rename timing/mechanism or current owner checkout state is inferred. Attention, geometry, dependencies and checkpoints remain unchanged. The complete prelaunch summary remains history: Align first-time Copilot delivery guidance and directly related recovery messages/tests with actual host capabilities. App without a supported live loader uses documented Telex-owned pull fallback; loader-capable or already-live push remains supported, and provisioning is not loading proof. Preserve one supported pull wait, completion artifacts, acknowledgment/deduplication, explicit re-arming and stop/mode-transition semantics. No new host API, transport or shell polling loop; no fallback-wake proof or #224 backend repair. #222 owns Watcher bootstrap/stall-group installation/root-mode wording. No #201/#222 dependency or #53 reopening.",
+            "status": "in-progress"
+          },
+          "row": {
+            "status": "in-progress"
+          }
+        },
+        "chronology": "Later Campaign acceptance and field/exact-merge CI/Docs follow-through qualify the complete earlier owner223v3 pending-at-source history. All earlier controller, source/review/design/candidate CI, merge gate, pending statements and task/brief prefixes remain unchanged, not current denials or reopened work.",
+        "acceptedOutcome": "Completed only #223 bounded first-time App delivery guidance/recovery repair and assigned exact-merge follow-through; same historical owner. No actual App fallback wake, bridge load, runtime transport/backend repair or #201/#224 credit.",
+        "hostedBoundary": "Run metadata independently matched exact f4c58eed push/attempt1/completed/success. CI21/21 and Docs build+Pages job inventory, Windows event/provider/checkout equality, observer terminal/scheduler and support21unit/3guidance remain complete-field owner/observer attribution; no log/job/runtime replay here. PR Docs N/A remains its premerge history; actual main Docs is the later distinct follow-through.",
+        "discoveryBoundary": "The field report retains startup-discovery as conditional at its source. Later Campaign root startup/push reports and separate #230 routing are subsequent distinct work; they neither rewrite that field body nor reopen #223, and this packet does not independently claim their runtime result or absorb #230/#231.",
+        "conservation": "Only same node summary/status and row status/one completionQualification change, with pure brief/task appends. Existing owner and complete actualOwnerQualification remain unchanged; all other rows/nodes/fields/dependencies/geometry/checkpoints/attention/debts/wakes exact.",
+        "noOperationalAuthority": "No owner/observer launch, rerun/dispatch/wait/root test/rearm, source/CI/runtime replay, install/upgrade/ACL/auth/transport, environmental cleanup, #201 validation, #224 repair, five-minute/195 hold release, debt credit or successor/parked approval follows."
+      }
     }
   ]
 }
