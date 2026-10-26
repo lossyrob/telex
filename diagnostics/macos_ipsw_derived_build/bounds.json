@@ -113,7 +113,7 @@
     "identifier": "org.telex.harness.ipsw.stdout-only",
     "mode": "Explicit ad-hoc, no entitlements/hardened runtime/identity/timestamp. Preserve pre-explicit-sign and post-sign hashes; Go linker may already have supplied a signature, so pre-sign does not assert signature absence.",
     "static_only": "codesign strict verify/display/entitlements and go version -m read the file; never invoke ipsw, including --version.",
-    "binary_limit": "Build and signing children inherit RLIMIT_FSIZE=128MiB, which also restricts any individual intermediate they write; the volume independently enforces aggregate logical capacity."
+    "binary_limit": "Compile child RLIMIT_FSIZE soft=hard=2GiB limits each intermediate file; ad-hoc-sign stays soft=hard=128MiB. Produced ipsw must be a regular file <=128MiB immediately after compile, before hash/metadata/signing/export. These are configured limits, not kernel readback. The volume bounds aggregate logical capacity; outside-volume writes remain unclaimed."
   },
   "limits": {
     "workflow_minutes": 45,
@@ -134,6 +134,7 @@
     "artifact_files": 64,
     "artifact_total_bytes": 268435456,
     "binary_bytes": 134217728,
+    "compile_file_bytes": 2147483648,
     "other_artifact_file_bytes": 4194304,
     "maximum_commands": 24,
     "request_seconds": 15,

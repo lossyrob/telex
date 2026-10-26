@@ -562,8 +562,14 @@ class RunnerTests(unittest.TestCase):
                 self.assertIsNotNone(bound)
                 setting.assert_not_called()
                 bound()
+                expected = 2147483648 if label == "compile" else 134217728
                 setting.assert_called_once_with(b.resource.RLIMIT_FSIZE,
-                    (BOUNDS["limits"]["binary_bytes"], BOUNDS["limits"]["binary_bytes"]))
+                    (expected, expected))
+                config = runner.records[0]["configured_file_limits"]
+                self.assertEqual(config["compile_file_bytes"], 2147483648)
+                self.assertEqual(config["binary_bytes"], 134217728)
+                self.assertEqual(config["RLIMIT_FSIZE"], {"soft_bytes": expected, "hard_bytes": expected})
+                self.assertEqual(runner.file_limit_configurations, [config])
 
     def test_metadata_phase_charges_noncommand_time(self):
         with self.fake() as (runner, _, _, _, _):
@@ -1831,7 +1837,7 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
     @contextmanager
     def recipe(self, fail_label=None, go_env_mismatch=False, fail_fetch=False,
                go_env_override=None, go_env_omit=None, pre_values=None, post_values=None, metadata_ldflags=None,
-               import_tags=(), metadata_tags=None):
+               import_tags=(), metadata_tags=None, produced_size=None, produced_mode=None, produced_stat_error=False):
         with tempfile.TemporaryDirectory() as temporary:
             work, evidence = Path(temporary) / "work", Path(temporary) / "evidence"
             volume = work / "volume"
@@ -1849,6 +1855,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             environment["GH_TOKEN"] = "CONTROLLER_ONLY_TOKEN"
             original_init, original_stat, original_resolve = b.Runner.__init__, Path.stat, Path.resolve
             original_hash = b.file_hash
+            original_lstat = Path.lstat
+            produced_checks = []
             original_import_check = b.static_imports.check_tree
             import_files = synthetic_import_files()
 
@@ -1873,6 +1881,26 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                     fields[2] += 1
                     return os.stat_result(fields)
                 return result
+
+            def lstat_file(file):
+                if file == volume / "output" / "ipsw" and not produced_checks:
+                    produced_checks.append("first")
+                    events.append("produced-ipsw-lstat")
+                    if produced_stat_error:
+                        raise OSError("synthetic produced output stat failure")
+                    fields = list(original_lstat(file))
+                    if produced_mode is not None:
+                        fields[0] = produced_mode
+                    if produced_size is not None:
+                        fields[6] = produced_size
+                    return os.stat_result(fields)
+                return original_lstat(file)
+
+            def hash_file(file, *args):
+                if file in (volume / "output" / "ipsw", volume / "signing" / "ipsw"):
+                    events.append("hash-" + ("produced-ipsw" if file.parent.name == "output" else "signed-ipsw"))
+                    return original_hash(file, *args)
+                return {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}
 
             def unpack(archive, destination, root_name, maximum, deadline):
                 destination.mkdir(parents=True)
@@ -1927,6 +1955,16 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 self.assertNotIn("GH_TOKEN", kwargs["env"])
                 self.assertEqual(os.environ, environment)
                 self.assertTrue(kwargs["start_new_session"])
+                with patch.object(b.resource, "setrlimit") as setting:
+                    bound = kwargs["preexec_fn"]
+                    if label in ("compile", "ad-hoc-sign"):
+                        self.assertIsNotNone(bound)
+                        bound()
+                        expected_limit = 2147483648 if label == "compile" else 134217728
+                        setting.assert_called_once_with(b.resource.RLIMIT_FSIZE, (expected_limit, expected_limit))
+                    else:
+                        self.assertIsNone(bound)
+                        setting.assert_not_called()
                 sequence.append({"label": label, "argv": list(argv), "env": kwargs["env"].copy()})
                 events.append("spawn-" + label)
                 stdout, stderr = b"", b""
@@ -1984,12 +2022,10 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
                 patches.enter_context(patch.object(b.os, "uname", return_value=SimpleNamespace(machine="arm64")))
                 patches.enter_context(patch.object(Path, "resolve", resolve))
                 patches.enter_context(patch.object(Path, "stat", stat_file))
+                patches.enter_context(patch.object(Path, "lstat", lstat_file))
                 patches.enter_context(patch.object(b.os, "statvfs",
                     return_value=SimpleNamespace(f_blocks=1024, f_frsize=4096, f_bavail=16777216)))
-                patches.enter_context(patch.object(b, "file_hash",
-                    side_effect=lambda file, *args: original_hash(file, *args)
-                    if file in (volume / "output" / "ipsw", volume / "signing" / "ipsw") else
-                    {"path": str(file), "bytes": 1, "sha256": "synthetic-stable"}))
+                patches.enter_context(patch.object(b, "file_hash", side_effect=hash_file))
                 patches.enter_context(patch.object(b, "unpack", side_effect=unpack))
                 patches.enter_context(patch.object(b, "verify_tree"))
                 patches.enter_context(patch.object(b.static_imports, "check_tree", side_effect=import_check))
@@ -2011,6 +2047,8 @@ class FullRecipeEnvironmentTests(unittest.TestCase):
             self.assertTrue((work / "build.dmg").is_file())
             self.assertEqual(events[0], "gate")
             records = json.loads((evidence / "commands.json").read_bytes())
+            self.assertEqual(provenance["child_file_limit_configurations"],
+                             [record["configured_file_limits"] for record in records])
             saved_streams = {}
             for record in records:
                 self.assertTrue(record["complete"])
@@ -2319,6 +2357,84 @@ def synthetic_import_manifest(files):
     return {"files": [{"path": name, "bytes": len(raw), "mode": "100644",
                        "sha": hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()}
                       for name, raw in sorted(files.items())]}
+
+
+class CompileFileLimitTests(unittest.TestCase):
+    def test_only_compile_uses_2GiB_all_23_children_record_both_configured_limits(self):
+        self.assertEqual(BOUNDS["limits"]["compile_file_bytes"], 2147483648)
+        self.assertEqual(BOUNDS["limits"]["binary_bytes"], 134217728)
+        with FullRecipeEnvironmentTests().recipe() as result:
+            self.assertEqual(result["code"], 0)
+            configs = result["provenance"]["child_file_limit_configurations"]
+            self.assertEqual(len(configs), 23)
+            for index, config in enumerate(configs):
+                self.assertEqual(config["command_index"], index)
+                self.assertEqual(config["compile_file_bytes"], 2147483648)
+                self.assertEqual(config["binary_bytes"], 134217728)
+                limit = 2147483648 if config["label"] == "compile" else 134217728 if config["label"] == "ad-hoc-sign" else None
+                self.assertEqual(config["RLIMIT_FSIZE"], None if limit is None else {"soft_bytes": limit, "hard_bytes": limit})
+                self.assertEqual(config["basis"], "Configured child preexec request only; no kernel or nested-child limit readback.")
+            events = result["events"]
+            self.assertEqual(events[events.index("spawn-compile") + 1], "produced-ipsw-lstat")
+            self.assertLess(events.index("produced-ipsw-lstat"), events.index("spawn-modules-verify-after"))
+            self.assertLess(events.index("produced-ipsw-lstat"), events.index("hash-produced-ipsw"))
+
+    def test_one_byte_oversized_produced_binary_stops_before_hash_metadata_sign_or_export(self):
+        with FullRecipeEnvironmentTests().recipe(produced_size=134217729) as result:
+            self.assertEqual(result["code"], 1)
+            self.assertIn("produced ipsw type/size bound", result["provenance"]["failure"]["message"])
+            self.assertEqual([r["label"] for r in result["sequence"]],
+                             FullRecipeEnvironmentTests.labels[:15] + ["image-detach"])
+            self.assertNotIn("hash-produced-ipsw", result["events"])
+            self.assertNotIn("hash-signed-ipsw", result["events"])
+            self.assertNotIn("pre_explicit_sign", result["provenance"])
+            self.assertNotIn("post_sign", result["provenance"])
+            self.assertFalse(result["export_present"])
+            self.assertFalse(result["provenance"]["output_binary_accepted"])
+            self.assertTrue(result["manifest_valid"] and result["backing_retained"])
+
+    def test_exact_binary_cap_passes_immediate_stat_boundary_with_tiny_synthetic_bytes(self):
+        with FullRecipeEnvironmentTests().recipe(produced_size=134217728) as result:
+            self.assertEqual(result["code"], 0)
+            self.assertTrue(result["manifest_valid"])
+            self.assertEqual(result["events"].count("produced-ipsw-lstat"), 1)
+            self.assertLess(result["provenance"]["pre_explicit_sign"]["bytes"], 4096)
+            self.assertFalse(result["provenance"]["output_binary_accepted"])
+
+    def test_nonregular_or_unstatable_output_fails_before_any_binary_use(self):
+        for kwargs in ({"produced_mode": b.stat.S_IFDIR | 0o700}, {"produced_mode": b.stat.S_IFLNK | 0o700},
+                       {"produced_stat_error": True}):
+            with self.subTest(kwargs=kwargs), FullRecipeEnvironmentTests().recipe(**kwargs) as result:
+                self.assertEqual(result["code"], 1)
+                self.assertNotIn("hash-produced-ipsw", result["events"])
+                self.assertNotIn("spawn-modules-verify-after", result["events"])
+                self.assertFalse(result["export_present"])
+                self.assertTrue(result["backing_retained"] and result["manifest_valid"])
+
+    def test_failed_compile_never_stats_or_hashes_possible_partial_binary(self):
+        with FullRecipeEnvironmentTests().recipe(fail_label="compile") as result:
+            self.assertEqual(result["code"], 1)
+            self.assertNotIn("produced-ipsw-lstat", result["events"])
+            self.assertNotIn("hash-produced-ipsw", result["events"])
+            self.assertFalse(result["export_present"])
+            self.assertEqual(result["provenance"]["failure"]["message"], "command failed; no retry: compile")
+            self.assertTrue(result["backing_retained"] and result["manifest_valid"])
+
+    def test_preexec_limit_failure_preserves_configuration_without_claiming_application(self):
+        for label in ("compile", "ad-hoc-sign"):
+            with self.subTest(label=label), RunnerTests().fake() as (runner, _, spawn, kill, _):
+                def failure(*args, **kwargs):
+                    with patch.object(b.resource, "setrlimit", side_effect=OSError("synthetic setrlimit failure")):
+                        kwargs["preexec_fn"]()
+                spawn.side_effect = failure
+                with self.assertRaises(b.Error):
+                    runner.command(label, ["/fixed/tool"], {})
+                record = runner.records[0]
+                self.assertIsNone(record["pid"])
+                self.assertFalse(record["complete"])
+                self.assertIn("synthetic setrlimit failure", record["errors"][0]["message"])
+                self.assertIn("no kernel", record["configured_file_limits"]["basis"])
+                kill.assert_not_called()
 
 
 class StaticImportTests(unittest.TestCase):

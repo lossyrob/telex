@@ -21,6 +21,39 @@ The first required-output failure remains the raised error and the primary
 failure-receipt error; later sink failures are recorded separately. A failed
 provenance write is never described as persisted evidence.
 
+## Separate compile and final-binary file limits
+
+Under [6428392720](https://github.com/lossyrob/telex/issues/172#issuecomment-6428392720),
+the compile child alone requests RLIMIT_FSIZE soft=hard=`compile_file_bytes`,
+2147483648 bytes (2 GiB), for each file it writes, including intermediates.
+The ad-hoc-sign child still requests soft=hard=`binary_bytes`, 134217728 bytes
+(128 MiB). Other child labels receive no new preexec limit. Each child command
+record and the provenance `child_file_limit_configurations` list record both
+configured values and the selected soft/hard request (or null). These are
+configuration records, never kernel readback or nested-compiler attestation;
+they also remain configuration if spawning or setting the limit fails.
+
+Immediately after a successful compile, before any subsequent module checks,
+binary hash, metadata, signing or export, `lstat` must establish a regular
+produced `ipsw` no larger than the unchanged 128 MiB cap. Oversize, a nonregular
+file or a failed stat stops the attempt without partial binary use. Later hash,
+signature and export bounds remain in force. A failed compile does not inspect
+or use a possible partial binary. Synthetic boundary tests mock stat sizes on
+tiny files; they neither allocate large files nor measure real build outputs.
+
+The existing fixed volume independently bounds aggregate logical capacity.
+Outside-volume writes remain unclaimed; the larger per-file compile limit
+does not establish a live reserve floor, successful compilation or capacity
+sufficiency. An intermediate exceeding 2 GiB fails closed and returns to the
+steward. No retry or further increase is authorized.
+
+The steward classified the preceding reused 128 MiB compile limit as a
+design-owned bound defect. Actual 40404832511 reported a file-too-large write
+to an intermediate archive, but its partial size and kernel limit were not
+observed. The correction is a policy decision, not a measured cause or a
+capacity result; the public release binary's size is not a derived-size
+prediction. No local compile, probe or size measurement accompanies it.
+
 ## Explicit empty-image recipe
 
 Local correction under disposition 6424990314 changes only the image creation
@@ -264,7 +297,7 @@ attach failure and execute failure. No claim is made that Go opens no sockets.
 
 Synthetic tests use mocked processes, HTTP transports and filesystem metadata.
 Do not run `build.py` locally. Review `bounds.json` and the exact source packet
-before any hosted action. BUILDs 40369808285, 40382992497 and 40392033737 were consumed;
+before any hosted action. BUILDs 40369808285, 40382992497, 40392033737 and 40404832511 were consumed;
 retries remain zero.
 The independent actual verdict
 [6425115159](https://github.com/lossyrob/telex/issues/172#issuecomment-6425115159)
@@ -273,7 +306,11 @@ passing and no material field-report contradiction. It is not pending or
 authority for this child. The later actual verdict
 [6426534955](https://github.com/lossyrob/telex/issues/172#issuecomment-6426534955)
 is also FINAL CHANGES-REQUIRED for failed compilation in 40392033737, with
-conservation passing and no material field-report contradiction. Next is
+conservation passing and no material field-report contradiction. Actual
+[6428238479](https://github.com/lossyrob/telex/issues/172#issuecomment-6428238479)
+is FINAL CHANGES-REQUIRED for failed compilation in 40404832511, with
+conservation passing and no material field-report contradiction or omission.
+It does not establish a measured limit, partial-file size or cause. Next is
 whole owner replay/integration, then fresh
 whole-source independent APPROVE, a NEW finite-attempt disposition and a NEW
 genuine owner freeze. This local correction authorizes none. HOLD is unchanged.

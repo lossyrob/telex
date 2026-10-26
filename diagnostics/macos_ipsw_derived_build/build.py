@@ -461,6 +461,7 @@ class Runner:
         self.bounds, self.work, self.evidence = bounds, work, evidence
         self.deadline, self.cleanup_deadline = deadline - 60, deadline
         self.records, self.logs = [], []
+        self.file_limit_configurations = []
         self.metadata_seconds = 0
         self.phase_deadline = self.deadline
         self.log_root = evidence.root
@@ -483,11 +484,21 @@ class Runner:
         require(timeout is None or timeout > 0, "phase deadline before command")
         stop = min(absolute_stop, started + (timeout if timeout is not None else 120))
         index = len(self.records)
+        file_limit = (limits["compile_file_bytes"] if label == "compile" else
+                      limits["binary_bytes"] if label == "ad-hoc-sign" else None)
+        configured_limits = {
+            "command_index": index, "label": label,
+            "compile_file_bytes": limits["compile_file_bytes"], "binary_bytes": limits["binary_bytes"],
+            "RLIMIT_FSIZE": None if file_limit is None else {"soft_bytes": file_limit, "hard_bytes": file_limit},
+            "basis": "Configured child preexec request only; no kernel or nested-child limit readback.",
+        }
+        self.file_limit_configurations.append(configured_limits)
         record = {"label": label, "argv": requested, "pid": None, "rc": None, "errors": [],
                   "reaped": False, "reap_state": "not-started", "wait_attempted": False,
                   "group_kill_before_reap": False, "group_signal_attempted": False,
                   "signal_authority_sealed": False, "streams": {}, "complete": False,
-                  "command_deadline": stop, "controller_deadline": self.cleanup_deadline}
+                  "command_deadline": stop, "controller_deadline": self.cleanup_deadline,
+                  "configured_file_limits": configured_limits}
         self.records.append(record)
         data, eof, process, poller = {"stdout": bytearray(), "stderr": bytearray()}, set(), None, None
         can_signal, interrupted, phase = False, None, "spawn"
@@ -523,10 +534,10 @@ class Runner:
 
         try:
             def file_bound():
-                resource.setrlimit(resource.RLIMIT_FSIZE, (limits["binary_bytes"], limits["binary_bytes"]))
+                resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
             process = subprocess.Popen(requested.copy(), cwd=self.work, env=env, stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-                preexec_fn=file_bound if label in ("compile", "ad-hoc-sign") else None)
+                preexec_fn=file_bound if file_limit is not None else None)
             can_signal = True
             record["pid"] = process.pid
             record["reap_state"] = "owned-unwaited"
@@ -922,6 +933,9 @@ def execute(bounds, output, work, provenance, runner, ledger):
     binary = mount / "output" / "ipsw"
     arguments = [str(go), "build", *[a.replace("{output}", str(mount / "output")) for a in bounds["build"]["flags"]]]
     runner.command("compile", arguments, env, "compile", compile_deadline - time.monotonic())
+    produced = binary.lstat()
+    require(stat.S_ISREG(produced.st_mode) and produced.st_size <= limits["binary_bytes"],
+            "produced ipsw type/size bound immediately after compile")
     modules_unchanged()
     runner.command("modules-verify-after", [str(go), "mod", "verify"], env, "compile", compile_deadline - time.monotonic())
     modules_unchanged()
@@ -976,7 +990,8 @@ def main():
     output = Evidence(evidence, bounds["limits"])
     runner = Runner(bounds, work, output, time.monotonic() + bounds["limits"]["controller_seconds"])
     provenance, ledger, code = {"disposition": "failed-return-to-design", "ipsw_executed": False,
-                               "inherited_input_names": input_names}, [], 1
+                               "inherited_input_names": input_names,
+                               "child_file_limit_configurations": runner.file_limit_configurations}, [], 1
     try:
         execute(bounds, output, work, provenance, runner, ledger)
         code = 0
