@@ -46,7 +46,10 @@ jobs:
 
       - name: Full telex-watcher lib suite without recording
         timeout-minutes: 25
-        run: cargo test -p telex-watcher --lib --locked
+        run: |
+          # Mirrors ci.yml ordering: runtime_tests needs the workspace telex binary.
+          cargo build --workspace --locked
+          cargo test -p telex-watcher --lib --locked
 
       - name: Focused workload with recording
         timeout-minutes: 5
