@@ -1659,6 +1659,372 @@
         "attributionBoundary": "The full public gate and field bodies, merge and closure identity, and bounded main run/job terminal metadata were checked. Gate source-review, PR CI, hosted dump, regression and timing conclusions, and field source, native-crash, capture and discovery conclusions remain attributed. They are not a new source, log, dump, archive or runtime replay. Original observations and same-head rerun authority remain exact history.",
         "conservation": "Only the existing #203 status, dispositionAuthority and terminalPath fields and this qualification change; all three prior values are saved. The owner is unchanged, and all five gate debts and the process debt remain open. The other 10 records, ledger root and order, full Local workstream, both graphs, #166 debts and wakes, and all prior evidence remain exact. No other repair or debt acceptance, scheduler, staffing, wake, release, hardening or freeze credit follows. Recording does not delay active owners."
       }
+    },
+    {
+      "sourceNodeId": "copilot-session-state-classifier",
+      "requiredness": "Required in the existing #199 detector scope, with #200 guidance and #201 validation follow-through; not required to reopen or expand completed #198.",
+      "disposition": "absorb",
+      "target": {
+        "id": "copilot-group-stall-detector",
+        "tracker": "https://github.com/lossyrob/telex/issues/199",
+        "owners": [
+          "Existing #199 owner 65da0181-23ea-4b66-8a43-d0ddf4a4f495"
+        ],
+        "followThrough": [
+          "https://github.com/lossyrob/telex/issues/200",
+          "https://github.com/lossyrob/telex/issues/201"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01XptNJYT2dvk1dQoWUgG4VP and gate 6418110367 require separate discovered-work retention; owning Watcher toolu_01SWvBiLjvgsswJcyDUYbCNa confirms #199 as home under steward decisions 6402758809/6402777694.",
+      "completionDebtBoundary": "All seven #198 gate debts, including the discovery/body-documentation debt, and process debt stay retained-open under a96926b1-3e4f-4578-a197-33de51d669c7. Routing these limitations does not clear debt or transfer the entire #198 debt obligation. No local sample or probe receives gate/coverage credit.",
+      "terminalPath": "Existing #199 implements the bounded requirement; #200 guidance and #201 staged validation follow. No new node, edge, tracker, implementation launch or acceptance is created by this discovered-work row.",
+      "id": "copilot-stall-background-work-observability-limit",
+      "description": "A session waiting for a background shell may look idle when its launch tool call has completed. Background agents remain unverified. #199 may count background work only when it observes it with evidence; otherwise its event must explicitly mark background work unobserved per member. Do not infer absence from App idleness, timing or parsed tool-result prose.",
+      "evidence": [
+        {
+          "source": "public-steward-disposition",
+          "url": "https://github.com/lossyrob/telex/issues/197#issuecomment-6402758809",
+          "file": "complete198-steward197-body.txt",
+          "body": "Design steward decision: how #199, #200 and #201 treat background work. This follows the #198 owner's observation (#198 comment 6402709899, recorded in ADR 0056 on #202).\n\n**Finding.** A session that ends its turn while a background shell runs looks idle in its log, because the shell's tool call completes at launch. Background agents are unverified. The App may also show such a session as idle, so the design must not rely on the root's App confirmation to catch this case.\n\n**Decision.** The stall condition stays as designed, and background work remains a wake source. What changes is how each item handles it:\n\n- **#199 (detector).** Count background work as a wake source only where the detector can observe it with evidence. It may investigate a bounded, read-only source, such as the session's live child processes, but is not required to. Where background work is not observed, the stall event's snapshot must say so for each member, so the root does not read it as confirmed absence. No parsing of tool result text and no guessing from timing.\n- **#200 (guidance).** A member that ends a turn to wait on a background shell or agent sets its own state to parked with a reason, and back to active when woken. On a stall event the root confirms, then rings. A member that is rung while legitimately waiting replies with what it is waiting for and stays parked.\n- **#201 (gate).** Add one staged case: an active member idle while its background shell runs. It passes if no stall is reported (when #199 observes background work), or if the event marks background work as unobserved and the root's ring gets the member's reply without disturbing the work.\n\n**Why.** A false stall costs one ring to an idle member. A missed stall leaves the workstream sitting still, which is the failure this design exists to prevent. A reported stall that the root checks is the better error.\n\nThis does not change the graph: the four items, their order, their dependencies and the stall-detection-validated checkpoint are unchanged, and nothing is narrowed. The open questions above are unchanged.\r\n",
+          "bytes": 2089,
+          "sha256": "7742f9ff5f10a101994f1e96636ccb5582deeceedba0a494a09440520e9fd47a"
+        }
+      ],
+      "rationale": "Preserve the stall condition and background-work wake source. #200 provides park/ring guidance; #201 adds the staged active-member/background-shell case. These are existing downstream requirements, not #198 expansion.",
+      "targetCompletionQualification": {
+        "status": "completed-with-retained-debt",
+        "tracker": "https://github.com/lossyrob/telex/issues/199",
+        "gate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "ownerSessionId": "65da0181-23ea-4b66-8a43-d0ddf4a4f495",
+        "retainedDebtNumbers": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "boundary": "Accepted bounded #199 completion is not clearance of #198 debts, end-to-end #201 validation, a #200 launch or additional runtime authority."
+      },
+      "later199Debt4Disposition": {
+        "debtNumber": 4,
+        "disposition": "moved-to-new-required-task",
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "target": {
+          "id": "stall-detector-inbox-history",
+          "tracker": "https://github.com/lossyrob/telex/issues/216",
+          "status": "planned"
+        },
+        "authority": [
+          "https://github.com/lossyrob/telex/issues/197#issuecomment-6420988993",
+          "https://github.com/lossyrob/telex/pull/211#issuecomment-6420990411"
+        ],
+        "prior199OwnerNoLongerHoldsThisDebt": true,
+        "debtCleared": false,
+        "otherDebtNumbersUnchanged": [
+          2,
+          3,
+          5,
+          6,
+          7
+        ],
+        "boundary": "The earlier #199 completion qualification and node summary retain their original acceptance snapshot; they do not renew a current #199-owner hold for debt 4. This later disposition changes only debt 4. Other debt routes, including the separate #215 work, are unchanged. No owner launch, runtime acceptance, #198 debt clearance or #201 validation is claimed."
+      }
+    },
+    {
+      "sourceNodeId": "copilot-session-state-classifier",
+      "requiredness": "Required in the existing #199 detector scope, with #200 guidance and #201 validation follow-through; not required to reopen or expand completed #198.",
+      "disposition": "absorb",
+      "target": {
+        "id": "copilot-group-stall-detector",
+        "tracker": "https://github.com/lossyrob/telex/issues/199",
+        "owners": [
+          "Existing #199 owner 65da0181-23ea-4b66-8a43-d0ddf4a4f495"
+        ],
+        "followThrough": [
+          "https://github.com/lossyrob/telex/issues/200",
+          "https://github.com/lossyrob/telex/issues/201"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign toolu_01XptNJYT2dvk1dQoWUgG4VP and gate 6418110367 require separate discovered-work retention; owning Watcher toolu_01SWvBiLjvgsswJcyDUYbCNa confirms #199 as home under steward decisions 6402758809/6402777694.",
+      "completionDebtBoundary": "All seven #198 gate debts, including the discovery/body-documentation debt, and process debt stay retained-open under a96926b1-3e4f-4578-a197-33de51d669c7. Routing these limitations does not clear debt or transfer the entire #198 debt obligation. No local sample or probe receives gate/coverage credit.",
+      "terminalPath": "Existing #199 implements the bounded requirement; #200 guidance and #201 staged validation follow. No new node, edge, tracker, implementation launch or acceptance is created by this discovered-work row.",
+      "id": "copilot-stall-session-start-error-unknown-limit",
+      "description": "The public steward reports session.start and session.error classified unknown in the owner sample. A persistently quiet member in either state must not silently suppress group alerting: #199 must recognize it with evidence or make sure the root hears about it. The owner chooses the mechanism; a degraded/unknown state must not hide a stuck member indefinitely.",
+      "evidence": [
+        {
+          "source": "public-steward-disposition",
+          "url": "https://github.com/lossyrob/telex/issues/199#issuecomment-6402777694",
+          "file": "complete198-steward199-body.txt",
+          "body": "Design steward input for #199, from the #198 owner's follow-up sample (#198 comment 6402770548): all seven unknowns came from `session.start` (six) and `session.error` (one).\n\n`session.error` matters most. A member whose last event is an error has probably stopped and is waiting for input. That is a common reason for a group to stall. Today it classifies as unknown, unknown makes the detector degraded, and a degraded run reaches no one. So one errored member could silently hold off stall detection for its whole group.\n\nRequirement for #199: a member left quiet after `session.error` must not silently suppress alerting. Either recognize it with evidence, as its own reason, so the stall condition can count it, or make sure the root hears about it. The owner chooses the mechanism. The same applies to a member that stays at `session.start` with no later activity, though kickoff prompts make that rare. This partly answers the open question in #197 about persistent unknown: unknown may still mean degraded, but it must not hide a stuck member indefinitely.\n\nNothing changes in #198, the graph or the checkpoint.\r\n",
+          "bytes": 1121,
+          "sha256": "ff962c930e245aa534435b12b0e2984e643d66a4ef22fbc085408761b8845e65"
+        }
+      ],
+      "rationale": "Finite sample counts and state/causal interpretation remain attributed to the owner and steward, not new fleet validation. No change to #198, graph geometry or the checkpoint is implied.",
+      "targetCompletionQualification": {
+        "status": "completed-with-retained-debt",
+        "tracker": "https://github.com/lossyrob/telex/issues/199",
+        "gate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "ownerSessionId": "65da0181-23ea-4b66-8a43-d0ddf4a4f495",
+        "retainedDebtNumbers": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "boundary": "Accepted bounded #199 completion is not clearance of #198 debts, end-to-end #201 validation, a #200 launch or additional runtime authority."
+      },
+      "later199Debt4Disposition": {
+        "debtNumber": 4,
+        "disposition": "moved-to-new-required-task",
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "target": {
+          "id": "stall-detector-inbox-history",
+          "tracker": "https://github.com/lossyrob/telex/issues/216",
+          "status": "planned"
+        },
+        "authority": [
+          "https://github.com/lossyrob/telex/issues/197#issuecomment-6420988993",
+          "https://github.com/lossyrob/telex/pull/211#issuecomment-6420990411"
+        ],
+        "prior199OwnerNoLongerHoldsThisDebt": true,
+        "debtCleared": false,
+        "otherDebtNumbersUnchanged": [
+          2,
+          3,
+          5,
+          6,
+          7
+        ],
+        "boundary": "The earlier #199 completion qualification and node summary retain their original acceptance snapshot; they do not renew a current #199-owner hold for debt 4. This later disposition changes only debt 4. Other debt routes, including the separate #215 work, are unchanged. No owner launch, runtime acceptance, #198 debt clearance or #201 validation is claimed."
+      }
+    },
+    {
+      "id": "watcher-unwind-safe-test-fixture-drops",
+      "sourceNodeId": "copilot-session-state-classifier",
+      "description": "Test-only unwind-safe cleanup in the existing cli_v2 Fixture and Host Drops and classifier LocalHome Drop. This separately staffed out-of-graph item targets #203 deferred item 3 and #198 gate debt 3; it does not extend product runtime scope.",
+      "requiredness": "Tracked follow-up to the two retained debts; not a reopening of completed #198/#203 and not a new graph gate.",
+      "disposition": "external",
+      "target": {
+        "tracker": "https://github.com/lossyrob/telex/issues/210",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/213",
+        "owners": [
+          "Watcher #210 owner session 1ad2264e-cecd-4c2f-9d76-bbf7a1d73660"
+        ],
+        "routing": "Campaign-directed, Watcher-owned, out-of-graph follow-up; no graph node."
+      },
+      "status": "completed",
+      "decisionState": "accepted",
+      "rationale": "Retain the already-authorized owner and link both cleanup debts without duplicating either issue, creating a graph task or claiming that either retained debt is repaired.",
+      "dispositionAuthority": "Watcher toolu_01MF24iympMS8NJ2tTaEaBHu reports Campaign direction toolu_01F5TT6rPiJgecHikhdSiurr and launch; toolu_013ctZu5sYdSt56YRrGxnRko records later public work start. This recording does not launch or inspect the owner.",
+      "linkedDebts": [
+        {
+          "issue": 203,
+          "item": 3,
+          "url": "https://github.com/lossyrob/telex/issues/203#issuecomment-6417840481",
+          "state": "retained-open"
+        },
+        {
+          "issue": 198,
+          "item": 3,
+          "url": "https://github.com/lossyrob/telex/pull/202#issuecomment-6418110367",
+          "state": "retained-open"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "owner-launch-work-start-and-pr-chronology",
+          "launchDirection": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01MF24iympMS8NJ2tTaEaBHu",
+            "receipt": {
+              "file": "complete198-owner210-launch-intake.json",
+              "bytes": 1358,
+              "sha256": "0e50cb28817d5b12cac725dd0244140b0beb4e7e18a569ab4218a8ee379f6f90"
+            },
+            "summary": "Watcher reports the scoped fixture cleanup follow-up under Campaign authority; initial planned state precedes work start."
+          },
+          "workStart": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013ctZu5sYdSt56YRrGxnRko",
+            "receipt": {
+              "file": "complete198-owner210-workstart-intake.json",
+              "bytes": 724,
+              "sha256": "8fd8a6f32407aec818636579a891f8e8044d719010981882c5e39588c45d4ca8"
+            },
+            "summary": "Public work-start comment 6418720851 at 14:36:40Z; Watcher maps runtime 98c6c90c-1214-42e9-8cb8-2ee17e50607a to the same App owner and reports branch rename to lossyrob-unwind-safe-test-drops."
+          },
+          "draftPr": {
+            "sessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "source": "call_7g0ScJTgZkvoFEtRaMYbam4l",
+            "receipt": {
+              "file": "complete198-owner210-pr-intake.json",
+              "bytes": 443,
+              "sha256": "077fe355678d8e0ca01bd381826fa33e41dc1d27fe9123c6f8f9a1f677f98348"
+            },
+            "summary": "Owner reports draft #213 first at head 13ac7077b971a6332e8354bc21aee50787ccb7fa, only the two scoped test files, hosted CI and independent exact-head review pending, design impact none. These remain attributed snapshot claims, not a current review head or acceptance."
+          },
+          "readinessAtFirstHead": {
+            "sessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "source": "call_dQRhdj67sIYJyep2wxNIl6KK",
+            "receipt": {
+              "file": "complete198-owner210-ready-intake.json",
+              "bytes": 508,
+              "sha256": "628fe8b161f13623894a9491a373819a4a39f865499585a3d3298bb9d60565c6"
+            },
+            "summary": "Owner later reported #213 ready/non-draft at 13ac7077b971a6332e8354bc21aee50787ccb7fa, with hosted/review readiness assertions and Campaign doorbell. This historical readiness receipt is superseded by the later owner-reported head replacement; no Campaign acceptance is inferred."
+          },
+          "laterHeadReplacement": {
+            "sessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "source": "call_agdECZhlUnvq4spEiM2LkRzo",
+            "receipt": {
+              "file": "complete198-owner210-head-replacement-intake.json",
+              "bytes": 455,
+              "sha256": "827d443d656689a6973aebcec93e28411b288be21f765fcee76db67f04097b80"
+            },
+            "summary": "At that captured cutoff, the owner report explicitly superseded the first-head ready receipt: merging main b5bad893 into the PR branch produced 247473328c9d5ab586781f9b5ce395b12f8783b0 without rebasing. CI run 40347009547 and exact-head delta review were pending at that report. Identical scoped files/unchanged patch are owner-attributed, not independently inspected; no readiness or debt clearance carries."
+          },
+          "launchMetadataOnly": {
+            "sessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "originalBranch": "lossyrob-super-meme",
+            "canonicalBase": "d8a382a4961b5246f6ca1aca28dae7d152e9e310",
+            "createdAt": "2026-10-26T14:34:26.438Z",
+            "bindings": [
+              {
+                "file": "owner210-launch-binding.json",
+                "bytes": 2048,
+                "sha256": "10280e5cab94dfb71ad4147d899272395f6d7d00ab1129a36b3bc07cf1b73c1d"
+              },
+              {
+                "file": "owner210-kickoff.md",
+                "bytes": 16813,
+                "sha256": "3fa60f2ab9c45b5a78b4c736c5974b860993047de912f820b4554f5883928104"
+              },
+              {
+                "file": "owner210-creation-receipt.json",
+                "bytes": 1962,
+                "sha256": "e8c497b6e43f0e67635e4c779faa68c55926cf9afb9192ea907c8232cbf5bccc"
+              }
+            ],
+            "creationCustody": {
+              "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+              "source": "toolu_017SzuuB8VVgX1ZuUTyaNEFR",
+              "receipt": {
+                "file": "complete198-owner210-custody-intake.json",
+                "bytes": 1373,
+                "sha256": "6bcdee8138c47a13925b87d914a56a4ecebe80002e6be324048015660e5d5fa9"
+              },
+              "summary": "Watcher explicitly states the creation receipt was written after the fact; no receipt was retained at launch and there was no separate delivery message. The reconstructed create-session prompt points by file reference to the byte-bound kickoff. Its tool-result and creation inspection are coordinator-attributed, not independently replayed."
+            },
+            "receiptReconstructedAfterFact": true,
+            "launchTimeReceiptUnavailable": true,
+            "noSeparateDeliveryMessage": true,
+            "privatePathsAndPromptNotProjected": true,
+            "noRecipientInspection": true
+          }
+        }
+      ],
+      "terminalPath": "Campaign has accepted #210 completed with retained debt. The same owner retains exact-merge main CI and the field report without a completion hold. Gate debts 1 and 2 stay with #210; debt 3 homes on the existing #199/#211 gate. The separately linked #203/#198 debts remain open. No graph node, owner, wake, runtime action or debt clearance is created.",
+      "completionQualification": {
+        "authority": {
+          "campaign": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_014qniyg2xjam96f8wcbA4Qz"
+          },
+          "watcherSources": [
+            "toolu_018Mkw5uujXxFLNQGS8fwUte",
+            "toolu_015pMbxyo3fqt18d4foaez5x"
+          ],
+          "receipt": {
+            "file": "complete198v3-owner210-completion-intake.json",
+            "bytes": 3280,
+            "sha256": "ce864f2e60932e643d5fda9ebfde65a54a81e61eb015e5195ca5a4c55892d4f3"
+          }
+        },
+        "acceptedOutcome": "Campaign accepts #210 completed with retained debt after PR #213 merge; no field-report or main-CI hold. The historical draft, readiness withdrawal and pending-gate reports remain chronology, not current operational state.",
+        "publicIdentity": {
+          "pr": {
+            "number": 213,
+            "url": "https://github.com/lossyrob/telex/pull/213",
+            "merge": "f3cce4e9835d6492ecf78a685dc7f2b73616e1eb",
+            "head": "247473328c9d5ab586781f9b5ce395b12f8783b0",
+            "mergedAt": "2026-10-26T15:33:50Z"
+          },
+          "issue": {
+            "number": 210,
+            "url": "https://github.com/lossyrob/telex/issues/210",
+            "state": "closed",
+            "stateReason": "completed",
+            "closedAt": "2026-10-26T15:33:52Z"
+          }
+        },
+        "gate": {
+          "url": "https://github.com/lossyrob/telex/pull/213#issuecomment-6420074604",
+          "file": "complete198v3-owner210-gate-body.txt",
+          "bytes": 1784,
+          "sha256": "5b6974bcc775896bd015da9446857e9a2cedaec441a50f778c6e7e92717405c8",
+          "body": "## Campaign merge gate: MERGE (#213 @ 247473328c9d5ab586781f9b5ce395b12f8783b0)\n\n**Verdict:** merge + debt (high confidence). No hard stop, no operator fork. Care/posture: balanced/craft. Consequence: low (test-only).\n\n**Floor (verified by Campaign at the exact head)**\n- Head 24747332 = merge of reviewed 13ac7077 with main b5bad893 (no rebase). PR net delta is unchanged: telex-watcher/tests/cli_v2.rs and tests/copilot_session_state.rs, +60/-5, byte-identical to the reviewed head.\n- CI run 40347009547: attempt 1, 21/21 success at this head. No rerun, no waiver.\n- Receipts: source review 6418835089 (no findings, at 13ac7077) and delta review 6419606902 (no findings, merge equivalence verified at this head).\n- closingIssuesReferences == [210]. MERGEABLE/CLEAN. 0 unresolved threads. Main drift: none (base == main b5bad893).\n- Body: Closes #210, consequence, hosted-only validation, discoveries/deferred present.\n\n**Merits (Campaign direct review of the 60-line diff)**\nThe Drop impls for Fixture and Host (cli_v2.rs) and LocalHome (copilot_session_state.rs) still attempt cleanup. Strict failure is kept outside unwinding and suppressed only while `std::thread::panicking()`. Four directory regressions run hosted on Ubuntu and Windows.\n\n**Debt (retained, non-blocking)**\n1. The Host Drop status/kill error paths under unwinding have no fault-injection test (disclosed in the body).\n2. Temp roots still leak when cleanup is skipped during unwinding (by design, disclosed).\n3. Same-family Drop unwrap/expect sites remain in PR #211's new test files (stall_detect_tests.rs, tests/copilot_stall_detect.rs). These are recorded on #211's gate, not here.\n\n**Follow-through:** owner owns main CI at the merge commit and the #210 field report. No field-report hold on node completion."
+        },
+        "debts": [
+          {
+            "number": 1,
+            "gateText": "1. The Host Drop status/kill error paths under unwinding have no fault-injection test (disclosed in the body).",
+            "state": "retained-open",
+            "ownerSessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "tracker": "https://github.com/lossyrob/telex/issues/210"
+          },
+          {
+            "number": 2,
+            "gateText": "2. Temp roots still leak when cleanup is skipped during unwinding (by design, disclosed).",
+            "state": "retained-open",
+            "ownerSessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+            "tracker": "https://github.com/lossyrob/telex/issues/210"
+          },
+          {
+            "number": 3,
+            "gateText": "3. Same-family Drop unwrap/expect sites remain in PR #211's new test files (stall_detect_tests.rs, tests/copilot_stall_detect.rs). These are recorded on #211's gate, not here.",
+            "state": "homed-on-199-gate-not-210",
+            "ownerSessionId": "65da0181-23ea-4b66-8a43-d0ddf4a4f495",
+            "tracker": "https://github.com/lossyrob/telex/issues/199",
+            "gateUrl": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231"
+          }
+        ],
+        "debtThreeBoundary": "The gate refers the same-family sites in the new #211 tests to the #199/#211 gate. Watcher reports that gate comment was not yet available at the addendum; no comment, new task, dependency, clearance or acceptance is invented here.",
+        "priorLinkedDebts": "Existing #203 deferred item 3 and #198 gate debt 3 remain retained-open. Recording #210 completion is not authority to retire either linked debt.",
+        "earlierReadiness": {
+          "source": "call_HkIcW0OeFW2cBRKfgl5gR6qs",
+          "sessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+          "summary": "Before merge, the owner reported renewed readiness at 247473328c9d5ab586781f9b5ce395b12f8783b0 and public receipt 6420057374. Those CI/review claims remain attributed, separate from Campaign acceptance and post-merge evidence."
+        },
+        "followThrough": {
+          "ownerSessionId": "1ad2264e-cecd-4c2f-9d76-bbf7a1d73660",
+          "mainCi": {
+            "run": 40350552596,
+            "head": "f3cce4e9835d6492ecf78a685dc7f2b73616e1eb",
+            "stateAtWatcherReport": "queued",
+            "source": "toolu_015pMbxyo3fqt18d4foaez5x",
+            "boundary": "Watcher-reported registration and pending snapshot only; no terminal/main-CI acceptance is inferred."
+          },
+          "fieldReport": "Due from the same owner; no completion hold."
+        },
+        "noDebtClearance": true,
+        "noNewGraphNodeOwnerWakeOrRuntimeAuthority": true,
+        "later199DebtHomingQualification": {
+          "campaignSource": "toolu_01VH8YEigrpPdMyA71SZDKEM",
+          "gateUrl": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+          "counterpartDebtNumber": 2,
+          "state": "retained-open",
+          "ownerSessionId": "65da0181-23ea-4b66-8a43-d0ddf4a4f495",
+          "boundary": "The previously unavailable #199 gate now exists. Its debt 2 retains both detector-test Drop unwrap sites from #213 debt 3. Its resolved debt 1 covers cli_v2 only, not these sites and not retirement of #203/#198 debt."
+        }
+      }
     }
   ]
 }
