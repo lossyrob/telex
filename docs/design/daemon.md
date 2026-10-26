@@ -169,6 +169,38 @@ failure. The original finite wait deadline bounds every attempt and retry delay.
 If that deadline expires before or at the recovery deadline, the outcome is
 `Timeout`; otherwise exhausted recovery returns `BackendUnavailable`.
 
+PostgreSQL candidate fetches use one additional connection per backend, separate
+from the transactional command/status client. It is opened eagerly with the
+backend's already-resolved connection configuration, without another credential
+invocation. Every backend instance incurs this extra connection and setup cost,
+even if it never fetches candidates; this is not a per-wait connection pool.
+Waiters and push candidate readers clone its shared handle and pipeline their
+autocommit materialization and reads without holding the client mutex. This
+removes command/status mutex queueing from candidate materialization and reads,
+not from the entire timed attempt. Optional durable-clock and delivery-ownership
+proof still use the ordinary client inside that attempt and can queue behind
+command/status work. Readers can also queue SQL on the shared candidate
+connection.
+
+The unchanged recovery and idle deadlines bound the caller's await, not
+server-side SQL execution or lock waits. Dropping the timed fetch does not itself
+cancel already-submitted SQL or close the shared retained driver. Submitted work
+may continue after the caller times out and delay later work on that connection.
+
+Only replacement of a closed candidate connection is serialized. Replacement
+resolves the profile's credentials afresh within the existing wait budget; a
+waiter queued behind that replacement reports `acquisition`, while its owner
+reports `credential` or `connect`. No credential retry policy or budget changes.
+Each attempt retains its current phase across cancellation: `acquisition`,
+`credential`, `connect` (including connection/session setup), `materialization`,
+`primary-read`, or `cc-read`. The surrounding optional clock and delivery-fence
+operations report `durable-clock` and `ownership-proof`; backends without finer
+instrumentation report `candidate-read`. Exhaustion detail includes the phase
+and the 3,000 ms recovery budget, both in the error and the existing status
+`last_waiter_detail`. It identifies where the budget expired, not an auth/PIM
+diagnosis or proof that that phase consumed the entire budget. Exit 7 still
+leaves the station registered and explicitly unattended with no live waiter.
+
 Authentication, configuration, schema, and other permanent errors retain their
 ordinary error path. Recovery never bypasses membership, liveness, or epoch
 checks, and does not consume a message. The independent PostgreSQL `LISTEN` loop
