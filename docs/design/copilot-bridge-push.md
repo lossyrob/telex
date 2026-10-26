@@ -38,29 +38,44 @@ tax at its root, because the fragile thing (the agent-managed waiter) is gone.
 
 ## Host capability boundary
 
-Push requires an already-loaded, live bridge or a supported host loader. Copilot
-CLI can expose `extensions_reload` when Copilot Extensions is enabled under
-`/experimental`; that setting and tool are not universal Copilot App capabilities.
-An App session with an already-live bridge keeps push. For first-time App setup
-without a supported live bridge loader, use the existing Telex-owned
-`copilot fallback prepare` path described in the
-[operator guide](../guide/src/guides/copilot-push.md#fallback) and binary-owned
-`telex copilot skill`. This selects the existing pull path; it adds no host API or
-transport and does not change the issue #53 push contract.
+Push requires a live bridge. Keep an already-loaded, live bridge; first-time
+loading can use a supported live loader or startup extension discovery after
+provisioning. Copilot CLI can expose `extensions_reload` when Copilot Extensions
+is enabled under `/experimental`; that setting and tool are not universal
+Copilot App capabilities.
+
+For first-time App setup without an advertised live loader, provision with
+`telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
+then run `telex --address <addr> copilot resume`. Verify
+`telex --address <addr> --json status` reports `station_health: attended_push` and
+`push_registered: true`; where available, call `telex_bridge_info` for supporting
+bridge evidence. Resume re-arms daemon attendance and rescans unacked backlog;
+the host's startup discovery, not the resume command, loads the bridge.
 
 Provisioning bridge files and registering the handler do not prove the bridge
-loaded. Startup discovery is usable only on hosts that support it; restarting or
-clearing a session cannot substitute for an unavailable loader or prove first-time
-load. Live-bridge evidence, pushed-turn evidence, and pull-completion evidence
-must remain distinct.
+loaded. A restart is not proof by itself.
+[Issue #230](https://github.com/lossyrob/telex/issues/230) records Campaign's
+startup-loading and pushed-message observation on one Windows App build, not
+every App build or a plain conversation clear. Liveness verification, not an App
+version, is the gate. Liveness is not end-to-end delivery proof; live-bridge,
+pushed-turn and pull-completion evidence must remain distinct.
+
+When a live bridge is unavailable and a restart is unacceptable or liveness does
+not verify, use the existing Telex-owned `copilot fallback prepare` path in the
+[operator guide](../guide/src/guides/copilot-push.md#fallback) and binary-owned
+`telex copilot skill`. These are existing loading and delivery paths; this
+guidance adds no host API or transport and does not change the issue #53 push contract.
 
 Fallback preparation leaves push unchanged until its generated launcher starts.
 The task runner launches exactly one detached wait; the agent reads `exit.code`
 and the run's completion artifacts, dedupes/acks by message id, records disposition,
 and explicitly prepares the next run. Live push refuses downgrade unless
 `prepare --force` was intentional. Returning to push requires stopping pull first
-and a supported loader or an already-live bridge. Stop without re-arming when
-attendance ends. No shell polling loop or replacement launcher is required.
+and choosing an already-live bridge, supported live loader, or startup discovery
+with an acceptable session restart. Verify liveness after loading; if it does not
+verify, return to prepared pull fallback rather than claiming attended push.
+Stop without re-arming when attendance ends. No shell polling loop or replacement
+launcher is required.
 Preparing fallback or passing source-text tests does not demonstrate real App
 wakeup; wait-setup/backend failures remain failures requiring separate repair.
 
@@ -73,11 +88,13 @@ wakeup; wait-setup/backend failures remain failures requiring separate repair.
    needs the bridge to be running yet. `--wake-on-cc` is an additional per-bind opt-in:
    the daemon records a CC lower bound and pushes only live CC observer messages after
    that point.
-2. **Load (once, on a loader-capable host).** The agent uses the supported loader,
-   such as `extensions_reload` when exposed. Copilot forks the bridge as a child
+2. **Load (once, on a host supporting live reload or startup discovery).** The agent
+   uses the supported live loader, such as `extensions_reload` when exposed, or
+   restarts the App session after provisioning and runs `copilot resume`.
+   Copilot forks the bridge as a child
    process; it calls `joinSession()` to attach to the live foreground session,
    opens a private local endpoint, and writes a registry entry keyed by the
-   Copilot session id.
+   Copilot session id. Verify liveness before treating push as attended.
 3. **Deliver (per message).** When a durable message is committed for the
    address (or, with `--wake-on-cc`, live CC traffic is committed for the address),
    the daemon execs the registered handler argv. `telex copilot push`
@@ -105,7 +122,7 @@ response to a concrete constraint, not a stylistic preference.
 - **Namra:** install the extension at user scope so it loads in every Copilot
   session automatically.
 - **Change:** telex writes the bridge into the *session* discovery dir at bind
-  time, and the agent loads it through the host's supported loader.
+  time, then the host loads it through supported live reload or startup discovery.
 - **Why:** memory pressure on sessions that never use telex. An extension is a
   forked Node child process. Measured here (Node v24): a bridge-shaped extension
   is roughly 50-65 MB RSS / ~25 MB private per session. Auto-loading it at user
@@ -219,15 +236,17 @@ response to a concrete constraint, not a stylistic preference.
 Load-on-bind needs a symmetric **unload-on-detach**, because a session-scoped
 extension is durable. The bridge `extension.mjs` lives in
 `session-state/<sessionId>/extensions/telex-bridge/`, and that directory
-**persists across session resume**. So a bridge left there reloads every time
-the session is resumed -- not just for the run that bound it. Without an unbind
-step, a session that used telex once keeps forking the bridge forever.
+**persists across session resume**. On hosts with startup extension discovery,
+a bridge left there can reload when the session is resumed -- not just for the
+run that bound it. Without an unbind step, that session can keep loading the
+bridge after its Telex work ends.
 
 The full push lifecycle, on a host supporting extension loading:
 
 - **Bind** -- `telex --address <addr> copilot attach --copilot-bridge` writes the embedded
   `extension.mjs` into the session extension dir and registers the daemon
-  on-deliver handler. The agent uses the supported loader to load it.
+  on-deliver handler. Use supported live reload or startup discovery, then verify
+  liveness.
 - **Unbind** -- `telex --address <addr> copilot detach` deregisters the handler and **removes the
   `extension.mjs`** (so it will not reload on a later resume); the agent uses
   a supported reload to unload the live process now, or it ends with the session.
@@ -243,7 +262,8 @@ The full push lifecycle, on a host supporting extension loading:
   elevated-permission prompt on every resume; dropping it removes the prompt.)
 - **Orphan safety (closed without detach)** -- if a session is killed or closed
   before `telex --address <addr> copilot detach`, the file persists and the bridge
-  reloads silently on the next resume. Mitigations, in order of cost: (a) silent load
+  can reload silently on the next resume on hosts with startup discovery.
+  Mitigations, in order of cost: (a) silent load
   means it is harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep)
   prunes session-bridge dirs whose session ids telex no longer binds; (c) optionally
   the bridge self-exits on load if telex shows no binding for its session id, keeping

@@ -1,8 +1,10 @@
 # Copilot push delivery
 
 GitHub Copilot CLI and Copilot App can receive messages as **turns** through a live
-Telex bridge, without running or re-arming a waiter. First-time App sessions
-without a supported live bridge loader use the existing Telex-owned pull fallback.
+Telex bridge, without running or re-arming a waiter. On hosts with startup
+extension discovery, first-time App setup can load the bridge after provisioning
+and a session restart, even without a live reload tool. Verify liveness before
+treating push as attended; the existing Telex-owned pull fallback remains available.
 The full, version-matched Copilot workflow is printed by the installed binary:
 
 ```sh
@@ -22,13 +24,15 @@ response when progress stops.
 - **Supported live bridge loader available:** provision and load the bridge below.
   On Copilot CLI only, enable Copilot Extensions under `/experimental` if needed
   to expose `extensions_reload`.
-- **No supported live bridge loader:** use [pull fallback](#fallback) for first-time
-  App setup. Neither an absent `extensions_reload` tool nor CLI-only
-  `/experimental` is an App requirement.
+- **App startup discovery without a live loader:** provision the bridge, restart
+  the App session, then run `copilot resume` and verify liveness as described below.
+- **Restart is unacceptable or liveness does not verify:** use
+  [pull fallback](#fallback). Neither an absent `extensions_reload` tool nor
+  CLI-only `/experimental` is an App requirement.
 
-Bridge files and push registration do not prove the bridge loaded. Restarting or
-clearing a session does not establish first-time loading on a host without a
-supported loader. Check bridge liveness and actual delivery separately.
+Bridge files and push registration do not prove the bridge loaded. A restart is
+not proof by itself. Check bridge liveness and actual delivery separately; a
+plain conversation clear is not an established first-time App loader.
 
 ## Install the plugin
 
@@ -48,29 +52,48 @@ exit or one-shot CLI completion.
 
 ## Bind and provision the bridge
 
-Use this path when the host exposes a supported loader or the bridge is already
-loaded and live:
+Choose an already-loaded, live bridge, a supported live loader, or startup
+discovery with an acceptable App session restart. Provision with:
 
 ```sh
 telex --address <addr> copilot attach --copilot-bridge --description "<work>"
 ```
 
-Use the supported loader for first-time provisioning (`extensions_reload` where
-available; Telex cannot invoke it). Verify bridge liveness before treating push as
-available. Delivered messages arrive as turns labelled `[telex] from <addr>
-(<attention>)`.
+Keep an already-loaded, live bridge. If the host exposes a supported live loader,
+use it after provisioning (`extensions_reload` where available; Telex cannot
+invoke it).
 
-Telex preserves session-scoped bridge files across normal close/resume. On hosts
-with startup extension discovery, check that the bridge is live, then run
-`telex --address <addr> copilot resume --description "<work>"` to re-arm daemon
-attendance and rescan unacked backlog; this normal path does not depend on an
-in-session `extensions_reload`.
+For **first-time App setup without an advertised `extensions_reload`**, use
+startup discovery when a restart is acceptable: after provisioning, restart the
+App session, then run:
+
+```sh
+telex --address <addr> copilot resume --description "<work>"
+telex --address <addr> --json status
+```
+
+`copilot resume` re-provisions the push registration, re-arms daemon attendance
+and rescans unacked backlog; it does not load the extension itself. Telex
+preserves session-scoped bridge files across normal close/resume, so hosts with
+startup extension discovery can also load those files on resume.
+
+After either loading path, verify `--json status` reports
+`station_health: attended_push` and `push_registered: true` for the address.
+Where available, call `telex_bridge_info` for supporting bridge evidence; do not
+require that tool when it is absent. Restart, provisioning, registration and tool
+availability alone are not end-to-end delivery proof. Delivered messages arrive
+as turns labelled `[telex] from <addr> (<attention>)`.
+
+[Issue #230](https://github.com/lossyrob/telex/issues/230) records startup loading
+and a pushed message on one Windows App build. It does not establish support in
+every App build or loading after a plain conversation clear. Liveness
+verification, not an App version, is the gate.
 
 For recovery on a loader-capable host, re-provision with
 `telex --address <addr> copilot resume --description "<work>"` and use its supported
-loader. If the bridge is not live and the host has no supported loader, use
-[pull fallback](#fallback) or detach with `telex --address <addr> copilot detach`.
-Do not repeat unavailable-tool calls.
+live loader, or use the attach/restart/resume path above. If a restart is
+unacceptable or liveness does not verify, use [pull fallback](#fallback) or detach
+with `telex --address <addr> copilot detach`. Do not repeat unavailable-tool calls.
 
 ## Receive and disposition
 
@@ -94,8 +117,8 @@ with `--wake-on-cc`:
 telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<work>"
 ```
 
-Load the bridge with the supported loader if needed. Without `--wake-on-cc`, CC copies are still
-buffered and visible in `telex inbox --all`, but are not delivered as turns.
+Use the loading path and liveness check above if needed. Without `--wake-on-cc`,
+CC copies are still buffered and visible in `telex inbox --all`, but are not delivered as turns.
 (In Copilot pull fallback use `prepare --wake-on-cc`; do not start a waiter
 alongside push.)
 
@@ -113,9 +136,9 @@ Inspect stale bridge files left by other sessions with `telex copilot gc --dry-r
 
 ## Fallback
 
-For first-time App setup without a supported live bridge loader, or when the
-bridge cannot load during recovery, push is unavailable. Surface that plainly and
-prepare one Telex-owned pull fallback run:
+When a live bridge is unavailable and a restart is unacceptable or liveness does
+not verify, use this path for first-time setup or recovery. Surface that push is
+unavailable and prepare one Telex-owned pull fallback run:
 
 ```sh
 telex --address <addr> copilot fallback prepare --description "<work>"
@@ -169,18 +192,21 @@ and pull coverage. A busy App turn can also report `push_delivery: deferred`;
 this means the bridge is reachable and will retry at turn-idle, not that the
 station is unattended.
 
-To return to push, first confirm a supported loader or an already-loaded, live
-bridge. Stop the waiter before binding:
+To return to push, first choose an already-loaded, live bridge, a supported live
+loader, or startup discovery with an acceptable App session restart. Stop the
+waiter before binding:
 
 ```sh
 telex --address <addr> station stop --session "$COPILOT_AGENT_SESSION_ID"
 telex --address <addr> copilot attach --copilot-bridge --description "<work>"
 ```
 
-Use the supported loader (`extensions_reload` where available) if needed and
-verify bridge liveness. To end fallback, run `station stop` and do not prepare
-another run. The version-matched `telex copilot skill` contains the full artifact,
-timeout, recovery, and re-arm procedure.
+Use the supported live loader if needed, or restart the App session and run
+`copilot resume` for startup discovery. Then verify bridge liveness with
+`--json status` as above. If liveness does not verify, return to the prepared
+pull fallback; do not claim push is attended. To end fallback, run `station stop`
+and do not prepare another run. The version-matched `telex copilot skill` contains
+the full artifact, timeout, recovery, and re-arm procedure.
 
 ## Compatibility
 

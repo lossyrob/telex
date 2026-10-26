@@ -102,13 +102,30 @@ telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge -
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
 
-For first-time App setup without a supported live bridge loader, use
-`telex --address <addr> copilot fallback prepare` and launch exactly one returned
-command as a detached task. Follow its completion-artifact and explicit re-arm
-procedure in `telex copilot skill`; do not write a polling loop. Provisioning
-bridge files does not prove they loaded, and preparing fallback does not prove
-the host was woken. CLI-only `/experimental` and an absent `extensions_reload`
-tool are not App requirements.
+For first-time App setup without a supported live loader, hosts with startup
+extension discovery can load the bridge after provisioning and restart:
+
+```sh
+telex --address <addr> copilot attach --copilot-bridge --description "<work>"
+# Restart the App session, then:
+telex --address <addr> copilot resume --description "<work>"
+telex --address <addr> --json status
+```
+
+Verify `station_health: attended_push` and `push_registered: true`; where available,
+call `telex_bridge_info` for supporting bridge evidence. Provisioning bridge files
+does not prove they loaded, and a restart is not proof by itself.
+[Issue #230](https://github.com/lossyrob/telex/issues/230) reports startup loading
+and pushed delivery on one Windows App build, not every App build or a plain
+conversation clear. Liveness and end-to-end delivery are separate checks.
+
+When a live bridge is unavailable and a restart is unacceptable or liveness does
+not verify, use `telex --address <addr> copilot fallback prepare` and launch
+exactly one returned command as a detached task. Follow its completion-artifact
+and explicit re-arm procedure in `telex copilot skill`; do not write a polling
+loop. Preparing fallback does not prove the host was woken; report setup/backend
+failures. CLI-only `/experimental` and an absent `extensions_reload` tool are not
+App requirements.
 
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
 harnesses. Marketplace install is the supported plugin channel (the plugin lives

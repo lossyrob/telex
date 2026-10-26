@@ -41,13 +41,25 @@ prove it is live. On a host with a supported live loader, re-provision with
 `telex --address <addr> copilot resume` and load the bridge (`extensions_reload`
 where available). On Copilot CLI only, enabling Copilot Extensions under
 `/experimental` may expose that tool. For an App session without a supported live
-loader, use the supported
+loader, startup extension discovery is another loading path: provision with
+`telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
+then run `telex --address <addr> copilot resume`. Verify
+`telex --address <addr> --json status` reports `station_health: attended_push` and
+`push_registered: true`; where available, call `telex_bridge_info` for supporting
+bridge evidence.
+
+Keep an already-loaded, live bridge in push mode regardless of host. A restart is
+not proof by itself. [Issue #230](https://github.com/lossyrob/telex/issues/230)
+reports startup loading and pushed delivery on one Windows App build, not every
+App build or a plain conversation clear. Liveness and end-to-end delivery are
+separate checks.
+
+When a live bridge is unavailable and a restart is unacceptable or liveness does
+not verify, use the supported
 [Copilot pull fallback](copilot-push.md#fallback) with
 `telex --address <addr> copilot fallback prepare`, or detach with
 `telex --address <addr> copilot detach`.
-Keep an already-loaded, live bridge in push mode regardless of host. Restarting
-or clearing the session is not proof of first-time loading. Preparing fallback
-also does not prove a waiter started or woke the App: follow the generated
+Preparing fallback does not prove a waiter started or woke the App: follow the generated
 single-shot launch and completion-artifact procedure, and report any setup/backend
 failure rather than treating it as successful delivery.
 
@@ -84,8 +96,8 @@ Look at the `station_intent` line:
 |---|---|---|
 | `deferred_lease` | Waiting for a crashed predecessor's lease to go stale. **Not an error.** | Wait; `next_attempt_ms` says when it retries. |
 | `deferred_pull_waiter` | A live `telex wait` owns the address; pull wins. | Stop the waiter (`telex station stop`) if you want push back. |
-| `legacy_producer` | The bridge predates the liveness probe, so it cannot be proved alive. | Resume and load on a loader-capable host; otherwise use [pull fallback](copilot-push.md#fallback). |
-| `unverifiable` | The producer or its credential could not be resolved (bridge gone, registry stale). | Resume and load on a loader-capable host; otherwise use [pull fallback](copilot-push.md#fallback). |
+| `legacy_producer` | The bridge predates the liveness probe, so it cannot be proved alive. | Follow [bridge recovery](#copilot-messages-do-not-arrive-as-turns) using live reload or attach/restart/resume and verify liveness; otherwise use [pull fallback](copilot-push.md#fallback). |
+| `unverifiable` | The producer or its credential could not be resolved (bridge gone, registry stale). | Follow [bridge recovery](#copilot-messages-do-not-arrive-as-turns) using live reload or attach/restart/resume and verify liveness; otherwise use [pull fallback](copilot-push.md#fallback). |
 | `insecure` | A permissions check failed on the bridge directory or credential file. | Fix the permissions (owner-only), then resume. |
 | `incompatible` | This daemon cannot reconcile the recorded intent (version skew). | `telex --address <addr> copilot resume`. |
 | `quarantined` | Ten consecutive genuine failures; now retrying hourly. | Fix the underlying cause, then resume to reset it. |
@@ -118,14 +130,15 @@ degrading.
 restored, and telex refused to create a **pull-only** member over it rather than silently
 downgrading your delivery mode.
 
-Either restore push on a host with a supported loader or an already-live bridge:
+Either restore push with an already-live bridge or a supported live loader:
 
 ```bash
 telex --address <addr> copilot resume   # use the supported loader if needed
 ```
 
-or use the [prepared pull fallback](copilot-push.md#fallback) when no loader is
-available. To give up attendance explicitly:
+or follow the [attach/restart/resume startup-discovery path](#copilot-messages-do-not-arrive-as-turns)
+and verify liveness. When a restart is unacceptable or liveness does not verify,
+use the [prepared pull fallback](copilot-push.md#fallback). To give up attendance explicitly:
 
 ```bash
 telex --address <addr> copilot detach
