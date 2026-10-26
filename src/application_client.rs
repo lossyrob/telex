@@ -1179,10 +1179,16 @@ impl ApplicationClient {
                     }),
                 ) if attempt < retries => {
                     attempt += 1;
+                    crate::daemon::record_bootstrap_diagnostic(|| {
+                        format!("reconcile repair-retry attempt={attempt} error={error:?}")
+                    });
                     tokio::time::sleep(std::time::Duration::from_millis(50 * attempt as u64)).await;
                     let _ = error;
                 }
                 Err(error) => {
+                    crate::daemon::record_bootstrap_diagnostic(|| {
+                        format!("reconcile repair-final attempt={attempt} error={error:?}")
+                    });
                     if let Some(existing) = self.memberships.lock().unwrap().get_mut(&spec.address)
                     {
                         existing.recovering = false;

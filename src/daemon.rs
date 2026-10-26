@@ -2187,8 +2187,12 @@ async fn connect_existing_against_resolved(
     .map_err(|error| {
         let observed = platform::observe_connected_server(&conn);
         record_bootstrap_diagnostic(|| {
+            let detail = observed
+                .pid
+                .map(platform::describe_server_process)
+                .unwrap_or_default();
             format!(
-                "stage=peer-generation outcome=PeerCapabilityPending cap_pid={server_pid} observed={observed:?} error={error}"
+                "stage=peer-generation outcome=PeerCapabilityPending cap_pid={server_pid} observed={observed:?} server={detail} error={error}"
             )
         });
         DaemonError::PeerCapabilityPending(format!(
@@ -2202,6 +2206,13 @@ async fn connect_existing_against_resolved(
     if let Some(sel) = resolved.selection.as_ref() {
         verify_helloack_against_selection(&client.ack, sel)?;
     }
+    record_bootstrap_diagnostic(|| {
+        format!(
+            "stage=authenticated cap_pid={server_pid} cap_instance={} server={}",
+            cap.instance_id,
+            platform::describe_server_process(server_pid)
+        )
+    });
     if resolved.selection.is_some() {
         debug_assert!(
             parent_admission.is_some(),
@@ -2228,6 +2239,13 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
     let mut last_err: Option<DaemonError>;
     let existing_probe_deadline = Instant::now() + Duration::from_millis(250);
     let mut authenticated_peer_pending = false;
+    let call = next_bootstrap_diagnostic_call();
+    record_bootstrap_diagnostic(|| {
+        format!(
+            "call={call} phase=enter store_key={store_key} thread={:?}",
+            std::thread::current().id()
+        )
+    });
 
     loop {
         match tokio::time::timeout(
@@ -2236,17 +2254,28 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
         )
         .await
         {
-            Ok(Ok((client, _))) => return Ok(client),
+            Ok(Ok((client, _))) => {
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe connected")
+                });
+                return Ok(client);
+            }
             Ok(Err(e @ (DaemonError::Unauthorized(_) | DaemonError::Incompatible(_)))) => {
-                record_bootstrap_diagnostic(|| format!("phase=existing-probe terminal error={e}"));
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe terminal error={e}")
+                });
                 return Err(e);
             }
             Ok(Err(e @ DaemonError::Bootstrap(_))) => {
-                record_bootstrap_diagnostic(|| format!("phase=existing-probe terminal error={e}"));
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe terminal error={e}")
+                });
                 return Err(e);
             }
             Ok(Err(e @ DaemonError::PeerCapabilityPending(_))) => {
-                record_bootstrap_diagnostic(|| format!("phase=existing-probe pending error={e}"));
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe pending error={e}")
+                });
                 authenticated_peer_pending = true;
                 last_err = Some(e);
                 if Instant::now() >= deadline {
@@ -2257,13 +2286,21 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
                 continue;
             }
             Ok(Err(e)) => {
-                record_bootstrap_diagnostic(|| format!("phase=existing-probe retry error={e}"));
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe retry error={e}")
+                });
                 last_err = Some(e);
             }
-            Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+            Err(_) => {
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=existing-probe attempt-timeout")
+                });
+                last_err = Some(DaemonError::Timeout("connect attempt timed out".into()))
+            }
         }
         if authenticated_peer_pending {
             if Instant::now() >= deadline {
+                record_bootstrap_diagnostic(|| format!("call={call} phase=pending-deadline"));
                 return Err(last_err.unwrap_or_else(|| {
                     DaemonError::PeerCapabilityPending(
                         "authenticated peer did not finish capability publication".into(),
@@ -2283,6 +2320,7 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
     while Instant::now() < deadline {
         launches.retain(|t| t.elapsed() < CRASHLOOP_WINDOW);
         if launches.len() >= CRASHLOOP_MAX {
+            record_bootstrap_diagnostic(|| format!("call={call} phase=crashloop"));
             return Err(DaemonError::Timeout(format!(
                 "daemon failed readiness {CRASHLOOP_MAX} times within {:?}",
                 CRASHLOOP_WINDOW
@@ -2312,7 +2350,7 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             #[cfg(windows)]
             Some(&resolved.exe_witness),
         )?;
-        record_bootstrap_diagnostic(|| "phase=spawn spawned successor".to_string());
+        record_bootstrap_diagnostic(|| format!("call={call} phase=spawn spawned successor"));
         // Keep the parent's selector admission through the post-spawn
         // pre-Hello peer authentication and successful HelloAck. The child
         // independently acquires its own shared lease before publishing
@@ -2326,6 +2364,9 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
                 .as_deref()
                 .and_then(crate::daemon_bootstrap::take_child_bootstrap_failure)
             {
+                record_bootstrap_diagnostic(|| {
+                    format!("call={call} phase=post-spawn child-failure failure={failure:?}")
+                });
                 return Err(DaemonError::Bootstrap(failure));
             }
             match tokio::time::timeout(
@@ -2335,6 +2376,9 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             .await
             {
                 Ok(Ok(client)) => {
+                    record_bootstrap_diagnostic(|| {
+                        format!("call={call} phase=post-spawn connected")
+                    });
                     if let Some(path) = &bootstrap_result {
                         let _ = std::fs::remove_file(path);
                     }
@@ -2342,14 +2386,23 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
                     return Ok(client);
                 }
                 Ok(Err(e @ DaemonError::Bootstrap(_))) => {
-                    record_bootstrap_diagnostic(|| format!("phase=post-spawn terminal error={e}"));
+                    record_bootstrap_diagnostic(|| {
+                        format!("call={call} phase=post-spawn terminal error={e}")
+                    });
                     return Err(e);
                 }
                 Ok(Err(e)) => {
-                    record_bootstrap_diagnostic(|| format!("phase=post-spawn retry error={e}"));
+                    record_bootstrap_diagnostic(|| {
+                        format!("call={call} phase=post-spawn retry error={e}")
+                    });
                     last_err = Some(e);
                 }
-                Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+                Err(_) => {
+                    record_bootstrap_diagnostic(|| {
+                        format!("call={call} phase=post-spawn attempt-timeout")
+                    });
+                    last_err = Some(DaemonError::Timeout("connect attempt timed out".into()))
+                }
             }
             tokio::time::sleep(backoff).await;
             backoff = std::cmp::min(backoff.saturating_mul(2), BACKOFF_MAX);
@@ -2358,9 +2411,14 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             .as_deref()
             .and_then(crate::daemon_bootstrap::take_child_bootstrap_failure)
         {
+            record_bootstrap_diagnostic(|| {
+                format!("call={call} phase=deadline child-failure failure={failure:?}")
+            });
             return Err(DaemonError::Bootstrap(failure));
         }
     }
+
+    record_bootstrap_diagnostic(|| format!("call={call} phase=readiness-timeout"));
 
     Err(DaemonError::Timeout(format!(
         "daemon did not return HelloAck before readiness timeout; last error: {}",
@@ -2586,7 +2644,11 @@ fn bootstrap_error_from_peer(
 ) -> DaemonError {
     let observed = platform::observe_connected_server(conn);
     record_bootstrap_diagnostic(|| {
-        format!("stage={stage} outcome=ForeignDaemon observed={observed:?} error={error}")
+        let detail = observed
+            .pid
+            .map(platform::describe_server_process)
+            .unwrap_or_default();
+        format!("stage={stage} outcome=ForeignDaemon observed={observed:?} server={detail} error={error}")
     });
     // Once the OS endpoint is connected, every failure in the peer-verifier
     // or capability-evidence check means the peer is foreign or
@@ -2597,7 +2659,7 @@ fn bootstrap_error_from_peer(
 
 /// Debug-only bootstrap trace for hosted process proofs. Appends one line per
 /// event to `TELEX_TEST_BOOTSTRAP_DIAGNOSTIC_LOG` when that variable is set.
-fn record_bootstrap_diagnostic(event: impl FnOnce() -> String) {
+pub(crate) fn record_bootstrap_diagnostic(event: impl FnOnce() -> String) {
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("TELEX_TEST_BOOTSTRAP_DIAGNOSTIC_LOG") {
         use std::io::Write;
@@ -2610,11 +2672,16 @@ fn record_bootstrap_diagnostic(event: impl FnOnce() -> String) {
             .append(true)
             .open(path)
         {
-            let _ = writeln!(file, "{millis} client={} {}", std::process::id(), event());
+            let _ = writeln!(file, "{millis} pid={} {}", std::process::id(), event());
         }
     }
     #[cfg(not(debug_assertions))]
     let _ = event;
+}
+
+fn next_bootstrap_diagnostic_call() -> u64 {
+    static NEXT_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 fn bootstrap_spawn_env(
@@ -3027,6 +3094,7 @@ fn spawn_daemon_process_windows_native(
     if ok == 0 {
         return Err(io_err("spawning daemon", std::io::Error::last_os_error()));
     }
+    record_bootstrap_diagnostic(|| format!("spawned child_pid={}", process_info.dwProcessId));
     unsafe {
         CloseHandle(process_info.hThread);
         CloseHandle(process_info.hProcess);
@@ -3142,6 +3210,16 @@ async fn handshake_connected(
 }
 
 pub async fn serve() -> Result<()> {
+    record_bootstrap_diagnostic(|| "daemon serve-start".to_string());
+    let result = serve_inner().await;
+    record_bootstrap_diagnostic(|| match &result {
+        Ok(()) => "daemon serve-exit ok".to_string(),
+        Err(error) => format!("daemon serve-exit error={error}"),
+    });
+    result
+}
+
+async fn serve_inner() -> Result<()> {
     // Child-side installed-current admission: when a spawned daemon inherits
     // TELEX_DAEMON_SELECTION_TOKEN, it must independently acquire shared
     // selector admission, prove a fresh InstalledCurrent resolution matches
@@ -3152,6 +3230,7 @@ pub async fn serve() -> Result<()> {
     let bootstrap_admission = match crate::daemon_bootstrap::child_validate_bootstrap_env().await {
         Ok(admission) => admission,
         Err(error) => {
+            record_bootstrap_diagnostic(|| format!("daemon bootstrap-refused error={error:?}"));
             crate::daemon_bootstrap::publish_child_bootstrap_failure(error);
             return Err(DaemonError::Bootstrap(error));
         }
@@ -3159,18 +3238,32 @@ pub async fn serve() -> Result<()> {
     let bootstrap_evidence = bootstrap_admission
         .as_ref()
         .map(crate::daemon_bootstrap::ChildBootstrapAdmission::evidence);
+    record_bootstrap_diagnostic(|| {
+        format!(
+            "daemon bootstrap-validated selected={}",
+            bootstrap_admission.is_some()
+        )
+    });
     let paths = DaemonPaths::current()?;
-    let mut listener = platform::Listener::bind(&paths.endpoint)?;
+    let mut listener = platform::Listener::bind(&paths.endpoint).inspect_err(|error| {
+        record_bootstrap_diagnostic(|| format!("daemon bind-error error={error}"));
+    })?;
+    record_bootstrap_diagnostic(|| "daemon bound".to_string());
     #[cfg(debug_assertions)]
     if let Ok(raw) = std::env::var("TELEX_TEST_CAP_PUBLICATION_DELAY_MS") {
         if let Ok(marker) = std::env::var("TELEX_TEST_CAP_PUBLICATION_DELAY_MARKER") {
             let _ = std::fs::write(marker, b"endpoint-bound");
         }
         if let Ok(delay_ms) = raw.parse::<u64>() {
+            record_bootstrap_diagnostic(|| format!("daemon cap-delay-start ms={delay_ms}"));
             tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+            record_bootstrap_diagnostic(|| "daemon cap-delay-end".to_string());
         }
     }
-    let state = Arc::new(new_state(paths, bootstrap_evidence)?);
+    let state = Arc::new(new_state(paths, bootstrap_evidence).inspect_err(|error| {
+        record_bootstrap_diagnostic(|| format!("daemon cap-publish-error error={error}"));
+    })?);
+    record_bootstrap_diagnostic(|| format!("daemon cap-published instance={}", state.instance_id));
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
     // Readiness is now published: endpoint is bound, capability file is
@@ -3187,13 +3280,17 @@ pub async fn serve() -> Result<()> {
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let conn = accepted?;
+                let conn = accepted.inspect_err(|error| {
+                    record_bootstrap_diagnostic(|| format!("daemon accept-error error={error}"));
+                })?;
+                record_bootstrap_diagnostic(|| "daemon accepted".to_string());
                 listener.ready_for_next()?;
                 let state = state.clone();
                 let drain_tx = drain_tx.clone();
                 tokio::spawn(async move {
                     match handle_client(conn, state).await {
                         Ok(ClientAction::Drain) => {
+                            record_bootstrap_diagnostic(|| "daemon drain-requested".to_string());
                             let _ = drain_tx.send(());
                         }
                         Ok(ClientAction::Continue) => {}
@@ -16127,6 +16224,10 @@ mod platform {
         }
     }
 
+    pub fn describe_server_process(pid: u32) -> String {
+        format!("pid={pid} detail=unavailable")
+    }
+
     /// Extended peer verification that additionally checks the peer image's
     /// platform file identity when the caller supplies one. Used by the
     /// InstalledCurrent connect path so a peer running a canonical-path-match
@@ -16570,6 +16671,50 @@ mod platform {
             ConnectedServerProcess::Running
         } else {
             ConnectedServerProcess::Exited
+        }
+    }
+
+    /// Debug diagnostic detail for a server pid: exit code plus creation and
+    /// exit FILETIMEs (100ns units since 1601), as far as they are observable.
+    pub fn describe_server_process(pid: u32) -> String {
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process == 0 {
+            return format!(
+                "pid={pid} open_error={}",
+                std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or_default()
+            );
+        }
+        let process = Handle(process);
+        let mut code = 0u32;
+        let exit_code = if unsafe { GetExitCodeProcess(process.0, &mut code) } != 0 {
+            format!("{code:#010x}")
+        } else {
+            format!(
+                "error{}",
+                std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or_default()
+            )
+        };
+        let mut creation: FILETIME = unsafe { std::mem::zeroed() };
+        let mut exit: FILETIME = unsafe { std::mem::zeroed() };
+        let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
+        let mut user: FILETIME = unsafe { std::mem::zeroed() };
+        let filetime = |time: FILETIME| -> u64 {
+            (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
+        };
+        if unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) }
+            != 0
+        {
+            format!(
+                "pid={pid} exit_code={exit_code} created_100ns={} exited_100ns={}",
+                filetime(creation),
+                filetime(exit)
+            )
+        } else {
+            format!("pid={pid} exit_code={exit_code} times=unavailable")
         }
     }
 
@@ -17235,6 +17380,10 @@ mod platform {
             process: ConnectedServerProcess::Unknown,
             pipe: ConnectedServerPipe::Unknown,
         }
+    }
+
+    pub fn describe_server_process(pid: u32) -> String {
+        format!("pid={pid} detail=unavailable")
     }
 }
 
