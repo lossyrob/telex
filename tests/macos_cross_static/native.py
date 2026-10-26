@@ -307,7 +307,8 @@ class NativeBinding:
         result = self.run.command("resolve-otool", [policy["xcrun"], "--sdk", "macosx", "--find", "otool"])
         require(result["stdout"].strip() == policy["otool"], "xcrun selected an unfrozen otool path")
         sdk = self.run.command("resolve-sdk", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-path"])
-        require(sdk["stdout"].strip() == policy["sdk_path"], "xcrun selected an unfrozen SDK")
+        require(sdk["stdout"].strip() in (policy["sdk_path"], policy["sdk_canonical_path"]),
+                "xcrun selected an unfrozen SDK")
         version = self.run.command("resolve-sdk-version", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-version"])
         require(version["stdout"].strip() == policy["sdk_version"], "SDK version mismatch")
         require(str(Path(policy["sdk_path"]).resolve(strict=True)) == policy["sdk_canonical_path"],

@@ -1,4 +1,5 @@
 import copy
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -705,6 +706,117 @@ class NativeBindingTests(unittest.TestCase):
             self.assertTrue(entry["detached"])
             self.assertEqual([call.args[1][0] for call in command.call_args_list],
                              ["/frozen/hdiutil", "/frozen/hdiutil"])
+
+
+class SDKResolutionTests(unittest.TestCase):
+    @contextmanager
+    def sdk_case(self, stdout, version="26.5", alias_target=None, alias_error=None):
+        policy = run.BOUNDS["native_binding"]
+        events = []
+        responses = {"resolve-otool": policy["otool"] + "\n", "resolve-sdk": stdout,
+                     "resolve-sdk-version": version + "\n", "native-xcrun-version": "synthetic-version\n"}
+
+        def command(name, arguments):
+            events.append(("command", name, arguments))
+            return {"rc": 0, "stdout": responses[name], "stderr": ""}
+
+        def resolve(path, strict=False):
+            events.append(("resolve", str(path), strict))
+            self.assertTrue(strict)
+            if str(path) == policy["sdk_path"]:
+                if alias_error is not None:
+                    raise alias_error
+                return Path(alias_target or policy["sdk_canonical_path"])
+            self.assertIn(str(path), [policy[name] for name in ("hdiutil", "xcrun", "otool")])
+            return path
+
+        controller = SimpleNamespace(bounds=run.BOUNDS, command=command,
+            output=SimpleNamespace(json=lambda name, value: events.append(("output", name, value))))
+        with patch.dict("os.environ", {}, clear=True):
+            binding = native.NativeBinding(controller)
+            with patch.object(Path, "resolve", resolve), \
+                    patch.object(binding, "snapshot", return_value={"synthetic_snapshot": True}) as snapshot:
+                yield binding, events, snapshot
+
+    def test_both_declared_sdk_spellings_retain_mandatory_alias_check(self):
+        policy = run.BOUNDS["native_binding"]
+        for spelling in (policy["sdk_path"], policy["sdk_canonical_path"]):
+            with self.subTest(spelling=spelling), self.sdk_case(spelling + "\n") as (binding, events, snapshot):
+                binding.resolve()
+                self.assertEqual(binding.resolution["sdk"], spelling)
+                self.assertEqual(binding.resolution["sdk_version"], policy["sdk_version"])
+                self.assertIn(("resolve", policy["sdk_path"], True), events)
+                self.assertEqual(binding.policy["developer_sdk_identity_files"], policy["developer_sdk_identity_files"])
+                self.assertEqual(binding.run.otool_path, policy["otool"])
+                self.assertEqual(binding.run.hdiutil_path, policy["hdiutil"])
+                snapshot.assert_called_once_with()
+                self.assertEqual(events[-1][0:2], ("output", "native-binding-before.json"))
+
+    def test_undeclared_alias_is_rejected_even_if_it_would_resolve_to_same_sdk(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case("/some/other/alias.sdk\n") as (binding, events, snapshot), \
+                patch.object(Path, "resolve", return_value=Path(policy["sdk_canonical_path"])) as resolver:
+            with self.assertRaisesRegex(cache.EvidenceError, "xcrun selected an unfrozen SDK"):
+                binding.resolve()
+            resolver.assert_not_called()
+            snapshot.assert_not_called()
+            self.assertFalse(any(e[0] == "output" for e in events))
+
+    def test_wrong_missing_or_nonliteral_sdk_output_fails_before_snapshot(self):
+        policy = run.BOUNDS["native_binding"]
+        for stdout in ("", "\n", policy["sdk_canonical_path"].replace("26.5.sdk", "26.4.sdk") + "\n",
+                       policy["sdk_path"] + "/\n", policy["sdk_path"] + "\n" + policy["sdk_canonical_path"]):
+            with self.subTest(stdout=stdout), self.sdk_case(stdout) as (binding, _, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "xcrun selected an unfrozen SDK"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+
+    def test_canonical_output_does_not_bypass_wrong_or_missing_sdk_version(self):
+        policy = run.BOUNDS["native_binding"]
+        for version in ("26.4", ""):
+            with self.subTest(version=version), self.sdk_case(policy["sdk_canonical_path"] + "\n", version) as (
+                    binding, _, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "SDK version mismatch"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+
+    def test_both_spellings_still_reject_nominal_alias_mismatch(self):
+        policy = run.BOUNDS["native_binding"]
+        for spelling in (policy["sdk_path"], policy["sdk_canonical_path"]):
+            with self.subTest(spelling=spelling), self.sdk_case(
+                    spelling + "\n", alias_target="/different/SDK.sdk") as (binding, _, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+
+    def test_canonical_output_still_requires_existing_accessible_nominal_alias(self):
+        policy = run.BOUNDS["native_binding"]
+        for error in (FileNotFoundError("synthetic missing nominal SDK"),
+                      PermissionError("synthetic inaccessible nominal SDK")):
+            with self.subTest(error=type(error).__name__), self.sdk_case(
+                    policy["sdk_canonical_path"] + "\n", alias_error=error) as (binding, _, snapshot):
+                with self.assertRaises(type(error)):
+                    binding.resolve()
+                snapshot.assert_not_called()
+
+    def test_post_decoder_recheck_still_resolves_nominal_after_canonical_output(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case(policy["sdk_canonical_path"] + "\n") as (binding, _, snapshot):
+            binding.resolve()
+            binding.use_record = {"synthetic_exact_child": True}
+            snapshot.reset_mock()
+            with patch.object(Path, "resolve", return_value=Path("/changed/SDK.sdk")) as resolver:
+                with self.assertRaisesRegex(cache.EvidenceError, "bound SDK resolution changed"):
+                    binding.recheck()
+                resolver.assert_called_once_with(strict=True)
+            snapshot.assert_not_called()
+            self.assertFalse(binding.decoder_confirmed)
+
+    def test_canonical_xcrun_output_does_not_relax_sdkroot_environment(self):
+        policy = run.BOUNDS["native_binding"]
+        with patch.dict("os.environ", {"SDKROOT": policy["sdk_canonical_path"]}, clear=True):
+            with self.assertRaisesRegex(cache.EvidenceError, "developer/SDK environment override"):
+                native.NativeBinding(SimpleNamespace(bounds=run.BOUNDS))
 
 
 if __name__ == "__main__":
