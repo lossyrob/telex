@@ -926,6 +926,105 @@
           "bytes": 73044878,
           "reportedZipSha256": "79e20a5d2311a67e8b09d89580222f5bfe60855d8a536b40f57f4a03fda36a65",
           "details": "Artifact 12617062276 reports 73,044,878 bytes. The ZIP digest and ID are upload metadata only, not verification against downloaded bytes. No archive, dump, executable or PDB was downloaded, inspected or executed; dump presence and native stack availability remain unknown."
+        },
+        {
+          "source": "later-public-harness-occurrence",
+          "url": "https://github.com/lossyrob/telex/issues/203#issuecomment-6406469417",
+          "createdAt": "2026-10-26T01:52:41Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/40254795271",
+          "job": "https://github.com/lossyrob/telex/actions/runs/40254795271/job/121354231596",
+          "details": "Second reported #203 occurrence: PR #196 event head b0ab5f2cf067f08afbb20bd807a89af1e0affb46, attempt 1, ordinary Windows job 121354231596, executed merge c95bfa63e7a540d86bf095b71c8102ba3a2e109e with ordered parents 77fdf504a994b993e449c02c10ccb19a56e3fc01 and b0ab5f2cf067f08afbb20bd807a89af1e0affb46. The event head is not the executed commit. The telex-watcher --lib harness telex_watcher-adb209575102230f.exe announced 60 tests, printed 37 ok and 1 ignored, then exited 0xc0000409 without an aggregate result or named failing test. These are progress counts, not a completed result or a classification of unprinted tests. The last printed startup_health_waits_for_the_first_membership_reconciliation test was ok; output position does not locate the culprit or failing phase.",
+          "classificationPacket": {
+            "file": "watch203second-local-intake.json",
+            "bytes": 4258,
+            "sha256": "0ab975c5cd3ff8f341a01090326a9d4077c0de1cee31999f200f3dbac4374a93",
+            "originalFile": "pr196-run40254795271-watcher-harness-intake-20261025.json",
+            "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "captureReceipt": "watch203second-source-capture.json"
+          },
+          "retainedLocalClassification": {
+            "kind": "local-public-evidence-handoff-to-owning-watcher",
+            "issue": "https://github.com/lossyrob/telex/issues/203",
+            "recipient": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "sourceReport": {
+              "session": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+              "toolCall": "toolu_017b3ums6VtfQzPUjxHqf3xb",
+              "qualification": "Initial report said 59/60 and called this a sixth observation. Those statements are not adopted: direct public-log inspection finds 37 printed ok and 1 ignored, and this is separate Watcher intake, not a sixth #166 native-child case."
+            },
+            "publicIdentity": {
+              "pullRequest": "https://github.com/lossyrob/telex/pull/196",
+              "eventHead": "b0ab5f2cf067f08afbb20bd807a89af1e0affb46",
+              "runId": 40254795271,
+              "attempt": 1,
+              "jobId": 121354231596,
+              "jobName": "Build and test (windows-latest)",
+              "jobUrl": "https://github.com/lossyrob/telex/actions/runs/40254795271/job/121354231596",
+              "jobStatus": "completed",
+              "jobConclusion": "failure",
+              "jobStartedAt": "2026-10-26T01:34:13Z",
+              "jobCompletedAt": "2026-10-26T01:43:54Z",
+              "executedMerge": "c95bfa63e7a540d86bf095b71c8102ba3a2e109e",
+              "executedTree": "e639fcc58e02d5357e9366dc7ea3569f08f84375",
+              "orderedParents": [
+                "77fdf504a994b993e449c02c10ccb19a56e3fc01",
+                "b0ab5f2cf067f08afbb20bd807a89af1e0affb46"
+              ],
+              "geometryVerification": "Completed-job log lines 111 and 114 identify the executed merge; the public GitHub git/commits endpoint independently confirms its full SHA, tree and ordered parents. The event head is not the executed commit."
+            },
+            "localPublicCapture": {
+              "file": "run40254795271-job121354231596-public.log",
+              "bytes": 374442,
+              "sha256": "8a7e6dd564640502ba7797c08d3a13667ccca368856564f54411e1be17626cf0",
+              "source": "gh api repos/lossyrob/telex/actions/jobs/121354231596/logs --allow-escape-sequences",
+              "custody": "Independently retrieved completed-job response bytes; not copied from d7. Bytes match the owner's reported length and hash. The raw capture contains 1637 NUL bytes elsewhere. The inspected harness segment, original lines 2598-2644, contains no NULs and was counted without normalization. The retained raw file is unchanged."
+            },
+            "harness": {
+              "target": "telex-watcher --lib",
+              "executable": "telex_watcher-adb209575102230f.exe",
+              "startLine": 2598,
+              "announcedTests": 60,
+              "printedOk": 37,
+              "printedIgnored": 1,
+              "printedFailed": 0,
+              "aggregateResultPresent": false,
+              "namedFailingTestPresent": false,
+              "lastPrintedTest": "runtime::tests::startup_health_waits_for_the_first_membership_reconciliation",
+              "lastPrintedTestResult": "ok",
+              "lastPrintedTestLine": 2638,
+              "abnormalExitLine": 2642,
+              "abnormalExitAt": "2026-10-26T01:43:38.8718701Z",
+              "exitCode": "0xc0000409",
+              "cargoStatusLabel": "STATUS_STACK_BUFFER_OVERRUN",
+              "stepExitCode": 1,
+              "limits": "No named failing test or aggregate outcome was printed. Output order does not locate the failing test or phase; unprinted tests cannot be classified as passed or failed. The status label alone proves neither stack-buffer corruption nor panic/abort mechanism."
+            },
+            "archive": {
+              "artifactId": 12622441529,
+              "ownerReport": "Only probe dumps were present; no failing-process dump was captured.",
+              "localInspection": "Not downloaded or inspected by Local. Dump absence is owner-attributed, not an independent Local archive finding."
+            },
+            "routing": {
+              "requestedDisposition": "Owning Watcher should deduplicate this run/job and retain it under existing #203, coordinating any further work with its current owner and canonical reconciler.",
+              "classification": "Another Windows Watcher library-harness abnormal-exit signature, separate from #166's five native Telex child observations and from the named-pipe race job's reached Mio panic.",
+              "commonCause": "Unknown. Matching 0xc0000409 or temporal proximity does not connect the two jobs or identify the upstream submitted-I/O defect.",
+              "authority": "Evidence handoff only: no new tracker, owner, graph edge, retry, runtime, repair, waiver, hedge, merge or readiness authority. No canonical artifact edits by Local."
+            }
+          },
+          "publicCommentCapture": {
+            "rawFile": "watch203second-comment-raw.json",
+            "bodyFile": "watch203second-comment-body.txt",
+            "bodyBytes": 1359,
+            "bodySha256": "4fd65fffded0257861f53d098bd9bf8dc334731949119c6c60e9f9ada89e8243",
+            "updatedAt": "2026-10-26T01:52:41Z"
+          },
+          "owningWatcherDirection": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01EmuDKphKs1gs1v7zSWVPX9",
+            "receipt": "watch203second-watcher-request.json",
+            "verification": "Watcher reports independently matching the Local packet and retained log hashes and checking the counts and lines. The reconciler matches only the complete packet bytes/hash, reads the complete public comment and independently verifies public merge SHA/tree/ordered parents; it does not read or recount the raw log."
+          },
+          "limits": "Artifact 12622441529 remains uninspected here and by Local. The claim that it contains only probe dumps and no failing-process dump is owner-attributed, not an independent archive finding. Cargo labels the exit STATUS_STACK_BUFFER_OVERRUN; that label proves neither actual stack-buffer corruption nor a panic/abort mechanism. Matching status or temporal proximity establishes no common cause with the separate Mio race-job panic or the #166 native command-child observations, and no PR source causality. The initial 59/60 and sixth-observation wording is explicitly not adopted in the exact Local packet. The current #203 owner and hosted-only/no-retry scope remain unchanged; this append grants no new authority.",
+          "conservation": "Evidence-only second occurrence on existing #203. Existing owner b8e0a6cc and in-progress status, all original evidence and owner-launch qualification, all other records, both graphs and the entire Local tree remain exact. No culprit, actual stack-buffer-overrun, panic/abort mechanism, common cause, PR source causality, new owner or #166 case, retry/waiver/flake exception, graph/dependency/spec/outcome/boundary change, runtime, repair/review/CI/readiness/merge, wake, debt/HOLD or freeze credit."
         }
       ],
       "limits": "This update records the existing Campaign-authorized owner launch and hosted-only repair scope, not a new reconciler launch, diagnosis, culprit, overrun finding, common cause, PR attribution, retry/waiver/flake exception, workstation machine-state change, repair/review/CI/readiness/merge, debt/HOLD or freeze credit. All original observations, exact Local packet and artifact-metadata limits remain unchanged. Historical no-owner/no-probe intake statements describe the original capture; the later single-owner authority supersedes only that staffing deferral and authorizes hosted diagnosis/repair as specified. Keep #166 command-child cases distinct, all Local recovery/launch/heap/alias qualifications and both pending #193/#198 product-repair-merge wakes exact. No graph node/edge or automatic #198/#202 relationship is created.",
