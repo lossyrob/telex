@@ -2370,6 +2370,18 @@ daemon is running **and** this producer proves it is alive, restore this exact p
   scan before reclamation and scans again before reporting the remaining exact count. It fails closed
   if the daemon state, existing scope, or supported-local-storage floor cannot be established.
 
+The arming-proof unit fixtures use an explicit test-only fixed acquisition clock
+when seeding a real pending record. They retain native locking, private-file
+validation and manifest writes, and assert that the pending record exists before
+registration. This seam is scoped to setup; registration still uses production
+admission. It supplies no elapsed-budget evidence. Independent lock tests cover
+pre-attempt expiry, native-call cost, sleep overshoot, attempt exhaustion and
+late-guard release, alongside real-clock native contention, non-theft and
+persistent-file release. Refusal diagnostics name the admission branch and
+attempt count; they do not establish the cause of a historical combined error.
+The hosted station-intent boundary runs these checks and the proof-write refusal
+test on Linux, macOS and Windows; the default workspace suite remains required.
+
 ### 18.2 States
 
 Persisted: `pending`, `live`, `revoked`. Everything else is a runtime projection held in an

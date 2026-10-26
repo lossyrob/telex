@@ -8545,7 +8545,18 @@ mod p3_tests {
             &state.paths.singleton_hash,
         );
         let id = intent.id();
-        intent_scope(state).write_pending(&intent).expect("seed");
+        let scope = intent_scope(state);
+        assert_eq!(
+            scope.write_pending_fixture(&intent).expect("seed"),
+            crate::station_intent::PendingWrite::Created { generation: 1 }
+        );
+        let seeded = scope.load(&id).expect("the pending seed must exist");
+        assert_eq!(
+            seeded.state,
+            crate::daemon_ipc::IntentRecoveryState::Pending
+        );
+        assert_eq!(seeded.generation, 1);
+        assert!(!seeded.is_armed(), "the register must earn its own proof");
         id
     }
 
