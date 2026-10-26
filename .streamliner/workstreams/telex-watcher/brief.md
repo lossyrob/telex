@@ -1281,3 +1281,176 @@ No credential values may appear in the evidence.
 The builder's ruling closes this issue. Findings that need product work are filed as discovered work and routed.
 
 ```
+
+
+## #222 same owner, implementation published/in review, not operator-ready (2026-10-26)
+
+Watcher `toolu_01UyJYEkRbKr4nquJn5iH55q` reports sole existing owner `e292322d-c271-432d-8703-5fc14a4c63c3`, starting from published bootstrap `331c4da1ed9970771e3d7213d13dc2ed068d31e7`, initial branch `lossyrob-ubiquitous-meme`. Reported kickoff delivery is 20:38:10Z, 19,302 bytes / `6cd974fb4d3d6db79b25621d2ba0155dbea4ae5b5e527715b443831c3b6f802d`, with Step-4 checks passed. Those publication/duplicate/checkout/context/kickoff/delivery checks are coordinator-attributed, not replayed here. Initially the node stayed planned until a public claim. The subsequent owner draft PR report and owning in-progress confirmation meet that condition for this same node/row; record in-progress, attention watch unchanged. No second owner, node, family, row or occurrence is created.
+
+The complete binding version is 2,796 bytes / `200b77a992b76bb88a630a97ab1c7bc7dfa3234c84680019a39e6d182c47f676`, captured 20:40:38.889Z, with updatedAt 20:40:02Z after the initial launch intake. Retain its later branchRenamedTo `lossyrob-watcher-installation-bootstrap` without dating the rename or proving current branch/checkout. Only seven named absolute private-path leaves become checkout/context/document names; restoring them recovers the complete original object. No referenced context, handoff, kickoff, launch adapter, domain note, workflow or recipient was inspected. Declared gpt-6.1-sol/high/default/interactive and coordinateWithCreator=false remain recorded requested snapshots, not effective profile, capacity, activity, current HEAD/cleanliness or runtime delivery.
+
+Owner `call_KW1VlAILudESTB7dEkRbQNbE` reports draft [PR #228](https://github.com/lossyrob/telex/pull/228), first head `b75c417f8d1c2896f8f45647aea5050fe3d177b9`, Closes #222, implementation published/in review as a normal consequence. Independent App PR review, exact-head steward inspection and hosted CI were requested/pending at that source. This is not a source diff/review/CI inspection, accepted product, Campaign gate, merge or current/exact-head readiness; later reports remain separate qualifications. Shared-file changes are reported limited to stall installation/root-mode wording; #223/PR #226 App-delivery slices stay separate. No live installation changed was reported. Do not mark operator-ready.
+
+The complete original bootstrap contract, dependencies and other fields remain exact: existing profiles/auth, installation/runtime/shutdown/rollback/older-installation handling, distinct bridge-push versus supported pull-fallback modes. No Task Markdown or runtime action is added. No silent install modification, bridge loading/wake, supported-wait/root test, five-minute release, #201 validation/rearm, #224 repair, cleanup, debt credit, implementation completion or new worker follows. The original planned/unassigned labels remain prelaunch history, not a present work hold.
+
+### Complete actual owner implementation source
+
+```text
+Reconcile #222 as implementation published, in review: draft https://github.com/lossyrob/telex/pull/228 at b75c417f8d1c2896f8f45647aea5050fe3d177b9, Closes #222, normal consequence. Independent App PR review, exact-head steward inspection and hosted CI are requested/pending. Shared-file edit is only stall installation/root-mode wording; #223/PR #226 slices remain separate. No live installation changed. Do not mark operator-ready yet.
+```
+
+### Exact later owning #222-only excerpt
+
+Source `toolu_01WzN28S1CERA3BRZ8U9xfdC`; complete private intake bound separately, unrelated #225/private-path text neither published nor followed.
+
+```text
+Separately, #222 is in progress: owner e292322d draft PR https://github.com/lossyrob/telex/pull/228 (Closes #222), already in your intake.
+```
+
+
+### Later readiness, accepted merge and owning bounded completion
+
+The later same owner reports readiness at `a6581875c1a36aafcb9c083d8d1cf071aee266ad` after exact-head design, independent review and all21 hosted jobs. Preserve the independent review first-run Windows HOME-probe timeout and its unchanged-head9.05s rerun; later owner/Campaign receipts supply the previously pending Linux execution report. No source/job/log/runtime replay is claimed here.
+
+Campaign `toolu_01VX657ifrdVjxL5eN8d466o` reports PR #228 merged `7036e7103aae4416cf0a0e2030175dc901ece893` at22:04:03Z; public issue222 closed/completed22:04:04Z and parsed closing refs are exactly[222]. Owning Watcher `toolu_01A7jSrD2dsSLansvrrrRY92` explicitly marks this node completed. Record same-node/row completed/watch; owner remains historical, no duplicate worker or geometry. All earlier planned/pending/in-review text is preserved chronological source history, not a current denial. Runtime-hardening #222 edge is satisfied by this existing-node completion; no edge/node/status is otherwise altered. Its five-minute/examples gates remain separate.
+
+Campaign gate retains owner exact-merge mainCI/Docs/field follow-through; terminal receipts are not supplied at this owning completion source and are not invented as passed. No installed migration, live runtime, #201/#224 credit, five-minute outcome/start, examples, macOS or debt clearance follows. Later Campaign priority-hold lift/root discovery and tracker232 are separate qualifications; this packet does not deny them, launch their runner/subjects or execute an installation/test.
+
+Complete actual owner readiness source:
+
+```text
+#222 / PR #228 is Ready for operator at exact a6581875c1a36aafcb9c083d8d1cf071aee266ad: https://github.com/lossyrob/telex/pull/228#issuecomment-6428394245. Exact-head DESIGN PASS6428153664 and independent APPROVE6428243977; all21 CI jobs in run40407195526 passed, including Linux guard/restored-pair detector tests. Approval validation notes acknowledged without weakening tests. Ready/CLEAN/MERGEABLE, closing only #222, normal consequence. Current main cb747a8f adds only Streamliner metadata, so no further rebase/push. Operator owns merge; read-only lifecycle monitoring and postmerge field report remain mine. App restart recovery reconciled live GitHub and dead observer manifests; no duplicate push/comment.
+```
+
+Exact owning #222 completion section:
+
+```text
+Two Watcher status changes:
+1. watcher-installation-bootstrap (#222) -> completed. PR https://github.com/lossyrob/telex/pull/228 merged 22:04:03Z at merge commit 7036e7103aae4416cf0a0e2030175dc901ece893 (head a6581875). Campaign merge-gate record: https://github.com/lossyrob/telex/pull/228#issuecomment-6428413609. CI 21/21 at the exact head (run 40407195526). Issue #222 closed 22:04:04Z. Owner e292322d is historical. runtime-hardening's #222 edge is now satisfied; it still waits on five-minute-custom-watch-gate and examples-accelerate-gate.
+```
+
+### Complete independentReview receipt 6428243977 (raw 3246 bytes / 8b617705abb2ca37d8551998c8ae6a03a1f8689d5c30326380abb126561a78f4; CRLF-to-LF display only)
+
+```text
+🐾 PAW Review: +1
+
+Independent verdict: APPROVE for PR #228 at exact published head `a6581875c1a36aafcb9c083d8d1cf071aee266ad`, against #222. This supersedes my historical f006 verdict for the current review gate. No blocking product findings and no additional non-blocking product findings.
+
+I reviewed the full main-to-head change from `f4c58eed5fe9336408750d69d59ae446707c9f88`, including the Linux repair. Local range-diff confirms both earlier implementation patches are unchanged by the rebase. D1/D2 remain resolved.
+
+The repair meets the requested bootstrap behavior: the helper path is derived only as `watcher_process_guard` beside the recorded Watcher; Linux rejects missing/non-file/non-owner-executable helpers and verifies the recorded hash; Windows requires `processGuardSha256` to be null ([installation.ps1:171-180](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/telex-watcher/installation.ps1#L171-L180), [241-250](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/telex-watcher/installation.ps1#L241-L250)). The guide requires same-build pair retention and upgrade/rollback, and includes the standalone-copy detector lesson ([guide:40-51](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/docs/guide/src/guides/watcher-installation.md#L40-L51), [292-301](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/docs/guide/src/guides/watcher-installation.md#L292-L301)). The test-only error wrapper prints the terminating exception message and exits 1; the exact Entra feature-refusal assertion remains intact ([installation.rs:108-115](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/telex-watcher/tests/installation.rs#L108-L115), [517-527](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/telex-watcher/tests/installation.rs#L517-L527)).
+
+### Independent validation and non-blocking limitations
+
+- Rebuilt both Telex and Watcher at this head. PowerShell parsing and patch whitespace checks passed; all 14 `copilot_plugin` tests passed.
+- The Windows installation run had 7 passes, 1 failure, and 1 ignored shared subprocess role. The failure was the preliminary 15-second `pwsh` `$HOME` probe timing out before installation code ran ([installation.rs:163-168](https://github.com/lossyrob/telex/blob/a6581875c1a36aafcb9c083d8d1cf071aee266ad/telex-watcher/tests/installation.rs#L163-L168)). Its unchanged-head targeted rerun passed in 9.05 seconds. This repeats the earlier local probe timeout and is a non-blocking test-reliability observation, not an all-green first-run claim or a demonstrated bootstrap defect.
+- Linux-specific guard execution was not run locally. [Exact-head hosted CI](https://github.com/lossyrob/telex/actions/runs/40407195526) still had both Windows and Linux workspace test steps in progress when checked. The Linux-only refusal/restoration test and retained-pair detector proof therefore still require hosted execution evidence.
+- This scope-limited review does not establish production installation or real root-turn delivery, and is not a merge-readiness claim. No GitHub self-approval review or merge was performed.
+```
+
+### Complete designReview receipt 6428153664 (raw 1723 bytes / 527b1fefb4dd1a40f2742f422d629a5a3a83cabe21814ee28f0e0d5579d5f95c; CRLF-to-LF display only)
+
+```text
+Design steward recheck at exact head a6581875c1a36aafcb9c083d8d1cf071aee266ad: DESIGN PASS. The Linux process-guard addition meets the five conditions I gave the owner, and D1/D2 from https://github.com/lossyrob/telex/pull/228#issuecomment-6427578746 still hold.
+
+Checked read only. The head is three commits on main f4c58eed. The two earlier commits are the rebased f006 implementation; the guard commit is a6581875.
+1. Derived path only: `Get-ProcessGuardHash` builds `watcher_process_guard` from the recorded Watcher executable's directory. That is the same place process.rs looks (current_exe directory). The record has no guard-path field. The exact 14-key set rejects extra keys.
+2. On Linux, a missing guard, a non-file guard, no owner-execute bit, a malformed hash or a hash mismatch throws. `Assert-Record` serves create, verify and preflight, so the check runs before launch.
+3. Elsewhere, `processGuardSha256` must be null. Non-null is rejected. The tool still refuses platforms other than Windows and Linux (line 22).
+4. The guide states pair handling. Retention puts the same-build guard in the same directory. Upgrade and rollback retain, copy, verify and swap the Watcher/guard pair together and preserve the previous pair. A new Watcher must never sit beside an old guard.
+5. The guide states the standalone-copy lesson in one line.
+
+This adds no runtime contract. The guard and its lookup are unchanged from main.
+
+The Entra test fix only reports the raw exception message. The exact assertion is unchanged, which is the right handling.
+
+Linux execution is proven only when hosted run 40407195526 passes. CI and independent review remain the mechanical gates. This is a design result, not merge approval.
+
+```
+
+### Complete ownerReadiness receipt 6428394245 (raw 1372 bytes / b63a38524f9829100ea6252a88fa03f0b4c1cea0b5f6e409f7dee6c115c17e4c; CRLF-to-LF display only)
+
+```text
+Ready for operator at a6581875c1a36aafcb9c083d8d1cf071aee266ad.
+
+Exact-head gates are complete: DESIGN PASS in comment 6428153664, independent APPROVE in comment 6428243977, and all 21 jobs in CI run 40407195526 passed. Linux logs confirm the guard refusal/restoration test, retained-pair detector proof and unchanged Entra refusal assertion executed successfully; the Windows installation cases also passed.
+
+Approval notes were read in full and triaged. Retaining the reviewer's initial Windows result of 7 passes, 1 preliminary HOME-probe timeout and 1 ignored shared role alongside its successful unchanged-head rerun (9.05 seconds). This recurring pre-product startup timeout remains a non-blocking test-reliability observation; no timeout or assertion was weakened in this PR. Hosted results now supply the Linux execution evidence that was pending during review. Production installation and real root-turn delivery remain outside this proof.
+
+The current head is unchanged, GitHub reports CLEAN/MERGEABLE, there are no review threads or outstanding product findings, and the only closing reference is #222. Main's subsequent cb747a8f commit changes only Streamliner metadata; no rebase or repeated push was needed. Consequence: normal. Operator owns merge; this session will continue read-only lifecycle monitoring and post-merge validation without merging.
+
+```
+
+### Complete campaignGate receipt 6428413609 (raw 1462 bytes / c4a280532d37f933e5ab595500c42dd302ba40ce19d44359a320aab596c5d7ec; CRLF-to-LF display only)
+
+```text
+Campaign gate: MERGE at exact head a6581875c1a36aafcb9c083d8d1cf071aee266ad (Closes #222).
+
+Floor:
+- PR open, not draft, MERGEABLE/CLEAN. Closing refs exactly [222]. 0 unresolved review threads.
+- CI run 40407195526 attempt 1: pull_request, completed/success, 21/21 jobs success, headSha a6581875.
+- Receipts at exact head: design steward DESIGN PASS 6428153664; independent PAW review APPROVE 6428243977; owner readiness 6428394245.
+- Final-main drift: merge-base f4c58eed..current main cb747a8f changes only .streamliner/workstreams/local-daemon/* (4 files). That is disjoint from the PR's 10 product/docs/test files, so the disjoint-drift exception applies and no re-run is required.
+
+Merits (Campaign read): installation.ps1 creates, verifies or preflights a non-secret installation record only. It never installs binaries or starts a runtime. It requires absolute paths and refuses linked/reparse or foreign-owned/foreign-writable ancestors on Windows and Linux. cli.rs only adds a long_version stating the build's backend and Entra features. Guidance and tests bind the stall guide to the default record lookup (TELEX_HOME, otherwise ~/.telex) and keep pull fallback and explicit re-arm text. No runtime, auth, ACL or production state is changed by this PR.
+
+Not credited: #201 acceptance, #224 repair, the five-minute custom-watch gate outcome, or any installed-Watcher migration. After merge, the owner owns exact-merge main CI/Docs and the field report.
+```
+
+
+### Later exact-merge field and Campaign acceptance
+
+Actual Campaign `toolu_01P2hV91frZ3muRGj7wzKTvn` now accepts owner field6428776300 and exact-merge7036 CI40409517934/Docs40409517942 follow-through. This later qualification fulfills the previously pending obligation; all earlier source-time pending statements above remain exact history. The owner is historical and the same #222 node/row is completed/watch, without new staffing. Only complete field and bounded run metadata were independently matched. Reported CI21/21/Docs2/2, installation8pass1ignored per Windows/Linux, plugin14, isolated detector/guard/refusal/registry and design/source methods remain attributed. The field retains the preliminary HOME-probe timeout/9.05s rerun and packaging/error-format lesson without weakening assertions. No installed migration, root/App wake, #201/#224, five-minute gate or debt outcome follows.
+
+Complete later field (4614 bytes / be3a9e066c07aa7e3bae30961b19319d7a85a2d5c720a412f0ca093e08c3152c; CRLF-to-LF display only):
+
+```text
+## Field report: Watcher installation bootstrap
+
+Delivered in [PR #228](https://github.com/lossyrob/telex/pull/228), merged at `7036e7103aae4416cf0a0e2030175dc901ece893`. Post-merge validation is complete at that exact SHA:
+
+- [Main CI 40409517934](https://github.com/lossyrob/telex/actions/runs/40409517934): completed successfully, all 21 jobs passed.
+- [Main Docs 40409517942](https://github.com/lossyrob/telex/actions/runs/40409517942): guide build and GitHub Pages deployment both passed.
+- The merge introduced only the previously accepted Streamliner metadata drift relative to reviewed head `a6581875`; product files are unchanged. [Merge gate](https://github.com/lossyrob/telex/pull/228#issuecomment-6428413609).
+
+### What changed
+
+The [PowerShell 7.4+ bootstrap](https://github.com/lossyrob/telex/blob/7036e7103aae4416cf0a0e2030175dc901ece893/telex-watcher/installation.ps1) exclusively creates a private schema-v1 record and its hashed companion verifier. Lookup uses an explicit operator record path, otherwise exactly `<TELEX_HOME or ~/.telex>/watcher/installation.json`. Verification is credential-value-free; launch preflight separately checks the required environment. The record pins selected Telex identity, retained Watcher and, on Linux, the derived adjacent process guard. Windows requires a null guard hash.
+
+The [installation guide](https://github.com/lossyrob/telex/blob/7036e7103aae4416cf0a0e2030175dc901ece893/docs/guide/src/guides/watcher-installation.md) and mirrored stall templates now provide record discovery, feature prerequisites, launch, readiness, shutdown and explicit older-installation/rollback handling. Bridge push and single-shot pull fallback remain distinct delivery modes.
+
+### What held
+
+The exact-merge [Linux job](https://github.com/lossyrob/telex/actions/runs/40409517934/job/121876137054) and [Windows job](https://github.com/lossyrob/telex/actions/runs/40409517934/job/121876137030) each ran the installation target successfully: 8 passed, 1 shared subprocess-role fixture ignored. Logs confirm default/explicit discovery, exclusive creation and refusal cases, credential-free verification versus preflight, live isolated registration, successful detector execution, shutdown and retained registry. Linux additionally passed guard absence/non-file/non-executable/hash-change refusal and exact-pair restoration. The unchanged authentication-feature refusal assertion passed on both platforms. All 14 Copilot plugin/source-contract tests passed on the main Windows job.
+
+The initial Linux failure at the earlier head exposed a packaging prerequisite: Watcher alone can start and attach but cannot execute Linux detectors. Retaining the same-build adjacent guard repaired the fixture and procedure. The second failure was PowerShell's wrapped stderr splitting the expected feature diagnostic; tests now emit raw exception messages without weakening the assertion. Exact-head [design inspection](https://github.com/lossyrob/telex/pull/228#issuecomment-6428153664) and [independent review](https://github.com/lossyrob/telex/pull/228#issuecomment-6428243977) passed before merge.
+
+### Successor guidance and evidence limits
+
+Runtime hardening should consume this documented 14-field schema rather than infer installation values. Retain, verify and swap Watcher and its same-build Linux guard as one pair in a separate directory. Each record has its own private directory; creation refuses an existing record, companion tool or registry. A copied verifier left after a late record-write failure is retained, never overwritten. Run preflight in the actual launch environment and use the guide's explicit cutover procedure for older installations.
+
+Retain the independent review's local reliability evidence: 7 installation passes, 1 preliminary 15-second PowerShell HOME-probe timeout before product code, and 1 ignored role; its unchanged-head targeted rerun passed in 9.05 seconds. This recurring harness-startup observation was reported to the coordinator for test-sentinel/#182 routing. No bootstrap outcome failure was established, and no timeout or assertion was relaxed.
+
+This proves the isolated Windows/Linux bootstrap outcome and published documentation, not production installation, root-turn delivery, #201 acceptance or a live installed-Watcher migration. Issue #222 remains closed.
+
+**Design impact: updated-docs.** The approved installation/discovery contract and Linux pair requirement are documented; the runtime contract, backend authentication and release-upgrade mechanisms are unchanged. No design decision remains open.
+
+```
+
+Complete actual owner terminal source:
+
+```text
+#222 / watcher-installation-bootstrap is delivered and post-merge validated; field report: https://github.com/lossyrob/telex/issues/222#issuecomment-6428776300. Exact merge7036e710 CI40409517934 passed21/21 jobs and Docs40409517942 built/deployed successfully; design impact updated-docs, issue stays closed, Campaign acceptance requested.
+```
+
+Complete actual campaign terminal source:
+
+```text
+#222 follow-through accepted. Owner e292322d posted field report 6428776300. Main CI 40409517934 passed 21/21 and Docs 40409517942 passed 2/2 at merge 7036e710. Node `watcher-installation-bootstrap` is completed. No #201 or #224 credit.
+```
+
+Complete actual owningWatcher terminal source:
+
+```text
+Campaign accepted #222 completion (Campaign message toolu_013nrrGWN5yqLnx16jXbs1YH), adding to my earlier completion report. Owner e292322d's follow-through is accepted at merge 7036e710: main CI passed 21/21 and Docs 2/2. Field report: https://github.com/lossyrob/telex/issues/222#issuecomment-6428776300.
+```
