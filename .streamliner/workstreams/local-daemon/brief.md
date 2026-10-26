@@ -1348,3 +1348,102 @@ here. Its owner does not wait for this recording. No lock theft/removal,
 retry-budget weakening, local runtime, new owner/tracker/node/edge, debt
 clearance, downstream acceptance, release or workstation-freeze credit follows.
 Recording does not delay owners, authorized reruns or the Sentinel.
+
+## Accepted #193 completion with six retained debts and hosted follow-through
+
+Campaign direction `toolu_01MWLGRfT4D1iSaxC2faBPhi` accepts [#193](https://github.com/lossyrob/telex/issues/193) completed after [PR #194](https://github.com/lossyrob/telex/pull/194) merged as `b90eacc26f2dcbad90352d58ece25dddd4e9fde2` from reviewed head `6567bb497802f872680195e10249383488f7c98e`. The existing node is completed/watch; owner `519693a5-0607-4aba-a968-345f3b1cd1b5` is unchanged. All six Campaign debts remain retained under that owner. There is no field-report hold. Prior launch, preparation, source scope and evidence remain exact history, not a renewed pending assignment or implementation instruction.
+
+The first Campaign gate held only the body: a negated closing-keyword sentence would also close #208, and the Deferred section was missing. Clearance verified GitHub parsed closing references exactly `[193]`, an unchanged source head and the added section, while expressly carrying debts 1-6. Debt 4 below is the original historical wording, not a claim that the merged body still lacks a section. The owner field reports the body floor resolved; this reconciler does not infer a separate retirement of the carried debt record.
+
+Independent public metadata verifies PR CI 40338051684 attempt 1 at `6567bb49` and merged-main CI 40343448362 attempt 1 at the exact `b90eacc2` merge, each with all 21 jobs successful. Complete frozen and live job identity/timing/ordered-step receipts match. This is bounded hosted metadata, not source/log/per-test/artifact replay or proof of historical cause. Owner `call_t3nKy7rMpMdCev7VFJNXUz31` reports delivery complete, consequence low, design impact updated-docs, sole wait done and scheduler absent. Those source/per-test/artifact/process conclusions remain attributed; no scheduler or recipient was inspected. No rerun or local runtime is triggered here.
+
+**#208 is NOT repaired and remains open.** Its Live-fixture setup and the broader #209 routing remain separate from #193. The field report below predates Campaign's later #209 completion; that later completion and its five retained debts are separate intake, not pilot-stage-2 authority or broader fixture acceptance. #212 staffing, the seven-native historical packet and the two distinct non-native candidates are not absorbed here. #166 completion, all eight debts and both already-sent wakes remain exact. No new owner, launch, wake, graph edge, native reopening or debt clearance is granted.
+
+### Original Campaign body-only hold and six-debt gate
+
+[Original Campaign body-only hold and six-debt gate](https://github.com/lossyrob/telex/pull/194#issuecomment-6418988704), raw 2674 bytes / SHA-256 `20381682e7815f2bc5504ebcd08a704f1e7ff791501602aea0bba8c840bcf1b0`. Retained verbatim.
+
+```text
+## Campaign merge gate: changes-required (body only); merits merge + debt (high)
+
+HOLD at `6567bb497802f872680195e10249383488f7c98e`. No fork, no hard stop: the change is a test seam plus refusal diagnostics, and production admission policy is unchanged.
+
+**Blocking (floor)**
+- The body sentence "Closing #193 through this PR does not close #208." contains the GitHub closing keyword `close #208`. `closingIssuesReferences` currently returns [193, 208], so merging would close #208, which this PR explicitly does not repair.
+- Fix: reword it without a closing keyword before #208, e.g. "#208 stays open after this PR merges". Also add a Deferred work section.
+- A body edit does not move the head. Campaign will re-check that `closingIssuesReferences == [193]` and merge at this head without gating the merits again.
+
+**Floor checks**
+- **CI:** run 40338051684, attempt 1, at the exact head: 21/21 jobs succeeded.
+  - The target test passed on hosted Windows (station job 121624833423, default workspace 121624833354), macOS and Ubuntu.
+  - The 4 new lock tests ran on all 3 OSes.
+- **Source review at the head:** issuecomment-6418317623, by an independent reviewer session; it names 6567bb49.
+- **Design:** issuecomment-6418511627, at the head.
+- **PR body and state:** Closes #193; consequence low; #208 listed under Discoveries as NOT repaired and recorded in discovered-work.json; 0 threads; MERGEABLE/CLEAN.
+- **Main drift:** since d8a382a4, only `.streamliner/` files changed. No conflicts with #206, #211 or #213.
+- **ci.yml:** one additive step (the exact proof-write refusal test, on 3 OSes); all existing steps are retained.
+
+**Process debt:** none from local runs. The owner's local checks were compile-only, and no credit was claimed. Separately, the #208 closing keyword passed the owner's, reviewer's, steward's and Local's text checks because none of them checked GitHub's parsed closing references.
+
+**Debt (non-blocking)**
+1. The historical cause is still unknown. The diagnostics only help with future failures, and one green attempt is not proof. Watch main Windows CI.
+2. The same family of production-clock setup remains at `daemon.rs:8656` and `:8876`, and in copilot.rs and station_intent tests. Route it to #208/#209.
+3. Registration's proof-commit admission still uses production timing. A stall there could yield the same typed refusal the test expects.
+4. The body has no Deferred work section.
+5. Refusal text nit: "1 contended attempts".
+6. The new native tests leak their temp roots on panic.
+
+**Deferred:** #208 (scoped-scan Live-fixture seed, not repaired) and #209 (the cross-family CI approach). The #193 field report is due after main CI.
+```
+
+### Campaign clearance with all six debts retained
+
+[Campaign clearance with all six debts retained](https://github.com/lossyrob/telex/pull/194#issuecomment-6419049801), raw 304 bytes / SHA-256 `10dd8bebd607ca8382df0f40eaadaa3a90443b715db851ca52cf051ac80a1f1d`. Retained verbatim.
+
+```text
+Campaign: the hold is cleared. The body edit is verified: closingIssuesReferences == [193], the head is unchanged at 6567bb49, and there is a Deferred work section. Main drift is still .streamliner only. Merging at the exact head; the merits verdict and debts 1-6 from issuecomment-6418988704 carry over.
+```
+
+### Owner field report
+
+[Owner field report](https://github.com/lossyrob/telex/issues/193#issuecomment-6419556610), raw 5873 bytes / SHA-256 `95d307c7241bf91be34c5ac9ca1fbcc7bcdc62d82c7584141547d0fe842004d0`. Display normalizes CRLF to LF: 5839 bytes / SHA-256 `b309b9abef2b7868addbf74cdd59d54af07fae3f701b25921105781542c389de`; raw capture remains exact.
+
+```text
+## Field report: merged repair and hosted main validation
+
+[PR #194](https://github.com/lossyrob/telex/pull/194) merged at `b90eacc26f2dcbad90352d58ece25dddd4e9fde2`, tree `914277a2134f3382f30470c9aeeaad2d4388dfb5`. [Main push CI 40343448362, attempt 1](https://github.com/lossyrob/telex/actions/runs/40343448362) completed successfully at that exact merge: all 21 actual jobs passed. This is fresh merged-main evidence, separate from the earlier PR-head run.
+
+The sole CI coordinator retained the complete terminal receipt, including Windows default workspace job `121643973933`, heap diagnostics `121643973926`, all three station-intent boundaries (`121643973764`, `121643973812`, `121643973821`) and all eight Windows token-user profiles. The station-intent boundary includes the exact pending-seed/proof-write-refusal target and independent native/budget coverage. No job was omitted or waived, and no rerun was used. The observation is done; no active waits remain and the scheduler was cleared and verified absent.
+
+Retained hosted artifacts: [windows-heap-diagnostics, 12660592540](https://api.github.com/repos/lossyrob/telex/actions/artifacts/12660592540/zip), 64,875,533 bytes; [released-v021-upgrade-proof, 12660297001](https://api.github.com/repos/lossyrob/telex/actions/artifacts/12660297001/zip), 14,377,479 bytes. No artifact download or independent dump inspection is claimed.
+
+## What changed and what held
+
+Pending-proof fixture setup now has an explicit test-only fixed acquisition clock while retaining owner-private filesystem validation, real native locking and shared generation-safe pending persistence. Setup reloads the real manifest and checks generation 1, Pending state and absence of armed proof before registration. Deliberate corruption, typed refusal and the no-member assertion remain.
+
+Production retains its real monotonic 480ms budget, 25-attempt cap, WouldBlock-only retries, capped sleeps, persistent locks, non-theft, generation fencing and late-guard disposal. Refusal diagnostics now identify the acquisition branch; a late guard is explicitly released before refusal. Independent native and real-clock coverage remains separate from fixture setup.
+
+Consequence: low. Production admission policy and durable format are unchanged. This successful main run supports the bounded fixture outcome; it does not prove the historical cause or eliminate unrelated fixture/timing failures. No local tests, runtime proofs or wider live soak were performed.
+
+## Campaign debts 1-6 and successor disposition
+
+The following preserves every debt in [Campaign's merge gate](https://github.com/lossyrob/telex/pull/194#issuecomment-6418988704):
+
+1. **Historical cause unknown; retained debt.** The original combined error did not identify contention, expiry, native-call latency or scheduling cause. New diagnostics apply to future observations only. The required post-merge Windows observation passed here, but one green attempt establishes neither a cause nor future reliability. Cross-family evidence remains with [#209](https://github.com/lossyrob/telex/issues/209).
+2. **Other production-clock setup sites remain.** Campaign identified `src\daemon.rs:8656` and `:8876`, plus cases in `src\commands\copilot.rs` and station-intent tests (locations at the reviewed source). This repair did not change those setup paths. Scoped-scan Live-fixture work remains with [#208](https://github.com/lossyrob/telex/issues/208); the broader fixture inventory and bounded hosted approach remain with [#209](https://github.com/lossyrob/telex/issues/209). Do not automatically generalize this test seam or widen production admission.
+3. **Proof-commit admission timing remains a possible assertion confounder.** Registration still uses production timing. A refusal there could satisfy the same typed-refusal assertion without demonstrating the intended corruption branch. This is retained coverage debt for the #209 investigation, not a claimed diagnosis of either historical failure and not repaired here.
+4. **Missing Deferred work section was resolved before merge.** The PR body now lists the separate trackers, remaining setup sites and this post-main-CI field report. Campaign also caught an unintended GitHub closing reference in a negated sentence. The body was reworded and GitHub's parsed `closingIssuesReferences` was verified as exactly `[193]`, without moving the accepted source head. Successors should inspect parsed closing references rather than infer them from prose.
+5. **Diagnostic wording nit remains.** A singular count can produce `1 contended attempts`. It is recorded non-blocking wording debt in the gate and Deferred work section; no follow-up code change was included.
+6. **Panic-path native-test temporary roots remain.** The new native tests can leave their temporary roots after panic. This remains recorded cleanup debt in the gate and Deferred work section. It was not repaired or locally exercised/cleaned during this item.
+
+**#208 is NOT repaired by PR194 and stays open.** Its scoped-scan fixture seeds Live records through `write_atomic` and production-clock locking, outside the pending-proof helper. Its original failed attempt is retained despite a green same-head rerun; shared refusal text does not establish a common cause. The repair in this issue must not be treated as resolving that separate finding.
+
+## Design impact and completion
+
+Design impact: **updated-docs**. The daemon design now explains the setup-versus-admission coverage boundary; the production lock contract is unchanged.
+
+The requested hosted merged-main validation and this field report complete the bounded #193 delivery. #193 remains completed; #208 and #209 retain their separate unresolved work. Reopen #193 only if evidence shows its stated outcome failing, rather than for those distinct successor findings.
+
+```
+
+Only this existing Local node and record receive the completion projection; the brief is append-only. All 48 Local records, 29 Local nodes, 15 Watcher records and 22 Watcher nodes retain their geometry and identities. Other records, owner bindings, workstreams, design links, pending/completed evidence and debt/wake histories remain unchanged. Recording does not delay authorized owners.

@@ -7857,7 +7857,7 @@
       "target": "local-daemon/intent-seed-precondition-repair / https://github.com/lossyrob/telex/issues/193",
       "owner": "Actual single owner 519693a5-0607-4aba-a968-345f3b1cd1b5 launched under Local; later same-checkout branch observed as lossyrob-intent-seed-preconditions. The following promotion-time pending-assignment snapshot is historical: Local aeae4fa9 coordinates one Campaign-authorized193 v2 owner; concrete identity pending canonical preparation/launch. No root fix is assigned to Watcher.",
       "terminalPath": "One separate PR closes193 after a discriminating hosted check, minimal justified correction, exact-head source review with reviewer-origin public receipt, design inspection and Campaign gate. Preserve480ms/non-theft/fencing and meaningful native/budget regressions.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01X4YTjtnHnE76rNwKipSSUn accepts the fixture-defect assessment and authorizes immediate bounded staffing. Local coordinates launch; source/design/hosted CI and the Campaign gate still control the closing PR.",
       "actualOwnerLaunchQualification": {
@@ -7941,6 +7941,186 @@
         "qualification": "One existing owner and checkout, one actual launch only. Original launch branch/head/binding/kickoff and all older pending/no-owner snapshots remain historical. The later branch change is not a second preparation or owner. Configuration is not independent effective-capacity proof. Owner-reported integration and repair plan are not source/design/CI or readiness approval. The product/Cargo/design main advance is not artifact-only; no evidence carries.",
         "reconcilerEvidenceBoundary": "Read and matched immutable launch/supplement bytes and source attribution only. Preparation, guide/context/kickoff equality and App identity/path/branch/busy checks are Local-reported. No reconciler target-checkout/source/runtime/CI/provider/observer inspection or new owner launch.",
         "unchangedGates": "Production 480ms/non-theft/fencing; no widening/retry/flake exception; hosted cause-discriminating/default Windows coverage, reviewer-origin public source receipt, design/CI/Campaign gates and workstation freeze remain. No Watcher edge/status change, #181/#187 reversal, implementation/delivery/admission/debt/HOLD/release clearance."
+      },
+      "completionQualification": {
+        "authority": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01MWLGRfT4D1iSaxC2faBPhi",
+          "receipt": {
+            "file": "main8dv3-campaign-direction.json",
+            "bytes": 547,
+            "sha256": "552cbb0ef403fcdd3ab2c293253a7d7b4b873103d214424a1fa77c12522e1039"
+          }
+        },
+        "acceptedOutcome": "Campaign accepts #193 completed with retained debts 1-6 under the same owner after PR #194 merge. No field-report hold, owner change, wake resend or graph dependency is created.",
+        "priorFieldBoundary": "All preceding promotion, owner-launch and terminal-path fields remain exact history. They do not renew a pending launch or completion hold; this qualification records the current completed disposition without retiring the retained debts.",
+        "publicIdentity": {
+          "pr": {
+            "url": "https://github.com/lossyrob/telex/pull/194",
+            "head": "6567bb497802f872680195e10249383488f7c98e",
+            "merge": "b90eacc26f2dcbad90352d58ece25dddd4e9fde2",
+            "mergedAt": "2026-10-26T14:50:37Z"
+          },
+          "issue": {
+            "url": "https://github.com/lossyrob/telex/issues/193",
+            "state": "closed",
+            "stateReason": "completed",
+            "closedAt": "2026-10-26T14:50:38Z"
+          },
+          "closingIssueNumbers": [
+            193
+          ]
+        },
+        "gate": {
+          "hold": {
+            "file": "complete193-hold-body.txt",
+            "bytes": 2674,
+            "sha256": "20381682e7815f2bc5504ebcd08a704f1e7ff791501602aea0bba8c840bcf1b0"
+          },
+          "clearance": {
+            "file": "complete193-gate-body.txt",
+            "bytes": 304,
+            "sha256": "10dd8bebd607ca8382df0f40eaadaa3a90443b715db851ca52cf051ac80a1f1d"
+          },
+          "originalFloor": "The original body-only hold and mistaken parsed closing reference are retained history. Clearance verified [193], an unchanged source head and the added Deferred section before merge; the six debts expressly carried over."
+        },
+        "debts": [
+          {
+            "number": 1,
+            "gateText": "1. The historical cause is still unknown. The diagnostics only help with future failures, and one green attempt is not proof. Watch main Windows CI.",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          },
+          {
+            "number": 2,
+            "gateText": "2. The same family of production-clock setup remains at `daemon.rs:8656` and `:8876`, and in copilot.rs and station_intent tests. Route it to #208/#209.",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          },
+          {
+            "number": 3,
+            "gateText": "3. Registration's proof-commit admission still uses production timing. A stall there could yield the same typed refusal the test expects.",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          },
+          {
+            "number": 4,
+            "gateText": "4. The body has no Deferred work section.",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          },
+          {
+            "number": 5,
+            "gateText": "5. Refusal text nit: \"1 contended attempts\".",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          },
+          {
+            "number": 6,
+            "gateText": "6. The new native tests leak their temp roots on panic.",
+            "state": "retained-open",
+            "ownerSessionId": "519693a5-0607-4aba-a968-345f3b1cd1b5"
+          }
+        ],
+        "historicalDebtFourBoundary": "Debt 4 is the original missing-section wording, not a claim that the merged body still lacks it. The clearance resolved that body floor but expressly carried debts 1-6; the reconciler records no separate debt retirement.",
+        "hostedCi": {
+          "pr": {
+            "run": 40338051684,
+            "head": "6567bb497802f872680195e10249383488f7c98e",
+            "attempt": 1,
+            "latestAttempt": 1,
+            "event": "pull_request",
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "jobIds": [
+              121624832872,
+              121624832978,
+              121624833073,
+              121624833197,
+              121624833282,
+              121624833313,
+              121624833323,
+              121624833341,
+              121624833343,
+              121624833354,
+              121624833408,
+              121624833423,
+              121624833465,
+              121624833468,
+              121624833502,
+              121624833679,
+              121624833772,
+              121624833788,
+              121624833793,
+              121624833921,
+              121624834098
+            ],
+            "source": {
+              "file": "complete193-pr-ci-jobs-raw.json",
+              "bytes": 61800,
+              "sha256": "a1b6114b6d64a6de81778817f71f2449c713e3f197a45511d318e56e8e921011"
+            },
+            "boundary": "All job identities, timestamps and complete ordered step objects match the frozen public metadata. No logs, per-test behavior, artifact contents or runtime mechanism were replayed."
+          },
+          "main": {
+            "run": 40343448362,
+            "head": "b90eacc26f2dcbad90352d58ece25dddd4e9fde2",
+            "attempt": 1,
+            "latestAttempt": 1,
+            "event": "push",
+            "status": "completed",
+            "conclusion": "success",
+            "totalJobs": 21,
+            "jobIds": [
+              121643973606,
+              121643973715,
+              121643973728,
+              121643973764,
+              121643973774,
+              121643973793,
+              121643973812,
+              121643973813,
+              121643973818,
+              121643973821,
+              121643973871,
+              121643973926,
+              121643973933,
+              121643974016,
+              121643974032,
+              121643974061,
+              121643974131,
+              121643974165,
+              121643974300,
+              121643974326,
+              121643974578
+            ],
+            "source": {
+              "file": "complete193-main-ci-jobs-raw.json",
+              "bytes": 61170,
+              "sha256": "d74fb7e20c342ffcd9001a58ffa73002e8fa3da4b54312e08f27ac3c3ab19ee6"
+            },
+            "boundary": "All job identities, timestamps and complete ordered step objects match the frozen public metadata. No logs, per-test behavior, artifact contents or runtime mechanism were replayed."
+          }
+        },
+        "fieldReport": {
+          "url": "https://github.com/lossyrob/telex/issues/193#issuecomment-6419556610",
+          "source": "call_t3nKy7rMpMdCev7VFJNXUz31",
+          "receipt": {
+            "file": "complete193-owner-field-intake.json",
+            "bytes": 552,
+            "sha256": "b954beaf02cde8f60ba67e23a3809169e9c262504d5e0cb217a9a649642a30b9"
+          },
+          "body": {
+            "file": "complete193-field-body.txt",
+            "bytes": 5873,
+            "sha256": "95d307c7241bf91be34c5ac9ca1fbcc7bcdc62d82c7584141547d0fe842004d0"
+          },
+          "summary": "Owner reports bounded delivery complete, consequence low, design impact updated-docs, sole wait done and scheduler absent. Source/per-test/diagnostic/artifact/waiter conclusions remain owner-attributed; no recipient, scheduler, artifact, log or product runtime replay."
+        },
+        "successorBoundary": "#208 remains open and explicitly NOT repaired; #209 retains cross-family routing. No shared-error cause, broader fixture acceptance, #212 promotion, seven-native historical occurrence or two non-native candidate is absorbed.",
+        "noDebtClearance": true,
+        "noNativeReopeningOrRuntimeAuthority": true
       }
     },
     {
