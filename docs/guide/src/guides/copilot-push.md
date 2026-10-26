@@ -146,6 +146,18 @@ preparing another run. For `5`, inspect status: do not re-arm pull if mode is
 If `exit.code` is absent, inspect for a live waiter before retrying the same
 unfinished run. Re-arm explicitly, one run at a time.
 
+`6` (`delivery-quarantined`) means read and preserve `status.json.quarantine`,
+not `message.json`/`delivery.json`; do not ack the undelivered message. If
+`may_continue` is true and attendance is still required, explicitly call
+`fallback prepare` for the next single-shot run so later deliveries can progress.
+Otherwise report the quarantine condition before continuing.
+
+`7` (`backend-unavailable`) means inspect and report `status.json.detail` for
+exhausted backend recovery, not delivery, idle timeout or daemon death.
+Re-arm only after recovery, using `fallback prepare`. Older peers may report
+this failure as exit `1`; the [exit-code reference](../reference/exit-codes.md)
+describes recovery-capability compatibility.
+
 Preparation is not evidence of a running wait or a real App completion wake.
 Backend or wait-setup errors remain failures; guidance and source-contract tests
 prove neither fallback wakeup nor bridge loading.

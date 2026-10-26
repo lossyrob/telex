@@ -483,6 +483,8 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
         "**`2` (idle timeout):**",
         "**`3` / `4` (daemon gone/hung):**",
         "**`5` (presence ended):**",
+        "**`6` (delivery-quarantined):**",
+        "**`7` (backend-unavailable):**",
         "status.json.detail",
         "dedupe by message id",
         "then ack and disposition",
@@ -502,6 +504,36 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
             fallback.contains(required),
             "Copilot fallback must preserve {required:?}"
         );
+    }
+}
+
+#[test]
+fn copilot_completion_guidance_preserves_quarantine_and_backend_failure() {
+    for text in [
+        include_str!("../copilot/COPILOT.md"),
+        include_str!("../docs/guide/src/guides/copilot-push.md"),
+    ] {
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for required in [
+            "`6`",
+            "delivery-quarantined",
+            "read and preserve `status.json.quarantine`",
+            "not `message.json`/`delivery.json`",
+            "do not ack the undelivered message",
+            "If `may_continue` is true and attendance is still required",
+            "explicitly call `fallback prepare` for the next single-shot run",
+            "`7`",
+            "backend-unavailable",
+            "inspect and report `status.json.detail`",
+            "Re-arm only after recovery",
+            "Older peers may report",
+            "exit `1`",
+        ] {
+            assert!(
+                normalized.contains(required),
+                "Copilot completion guidance must preserve {required:?}"
+            );
+        }
     }
 }
 

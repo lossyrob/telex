@@ -273,6 +273,18 @@ task's reported process exit code.
   only if the station should still be attended. If no active member/mode is
   reported, the station is stopped; leave it stopped unless the workflow still
   requires attendance.
+- **`6` (delivery-quarantined):** read and preserve `status.json.quarantine`,
+  not `message.json`/`delivery.json`. The historical delivery could not fit the
+  frame limit; do not ack the undelivered message. If `may_continue` is true and
+  attendance is still required, explicitly call `fallback prepare` for the next
+  single-shot run so later deliveries can progress. Otherwise report the
+  quarantine condition before continuing.
+- **`7` (backend-unavailable):** inspect and report `status.json.detail`; backend
+  recovery was exhausted. This is not delivery, idle timeout or daemon death.
+  Re-arm only after recovery, using `fallback prepare`. Older peers may report
+  the backend failure as exit `1`; inspect the error detail rather than treating
+  it as success. See the [exit-code reference](https://lossyrob.github.io/telex/reference/exit-codes.html)
+  for recovery-capability compatibility.
 
 If a task completion arrives but `exit.code` is absent, inspect status before
 launching anything: a live waiter means the original run is still active. Otherwise
