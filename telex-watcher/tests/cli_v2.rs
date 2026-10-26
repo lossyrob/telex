@@ -100,7 +100,10 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).expect("remove isolated CLI fixture");
+        let removed = std::fs::remove_dir_all(&self.root);
+        if !std::thread::panicking() {
+            removed.expect("remove isolated CLI fixture");
+        }
     }
 }
 
@@ -108,11 +111,39 @@ struct Host(Child);
 
 impl Drop for Host {
     fn drop(&mut self) {
-        if self.0.try_wait().unwrap().is_none() {
-            self.0.kill().unwrap();
-        }
+        let status = self.0.try_wait();
+        let killed = if matches!(&status, Ok(Some(_))) {
+            Ok(())
+        } else {
+            self.0.kill()
+        };
         let _ = self.0.wait();
+        if !std::thread::panicking() {
+            let _ = status.expect("query isolated CLI host");
+            killed.expect("kill isolated CLI host");
+        }
     }
+}
+
+#[test]
+fn fixture_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let fixture = Fixture::new();
+        std::fs::remove_dir_all(&fixture.root).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
+}
+
+#[test]
+fn fixture_cleanup_failure_without_unwinding_still_fails() {
+    let fixture = Fixture::new();
+    std::fs::remove_dir_all(&fixture.root).unwrap();
+    assert!(std::panic::catch_unwind(|| drop(fixture)).is_err());
 }
 
 fn parse(arguments: &[&str]) -> Cli {

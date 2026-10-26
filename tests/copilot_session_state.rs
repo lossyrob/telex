@@ -63,8 +63,32 @@ impl LocalHome {
 
 impl Drop for LocalHome {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).unwrap();
+        let removed = std::fs::remove_dir_all(&self.0);
+        if !std::thread::panicking() {
+            removed.expect("remove isolated Copilot home");
+        }
     }
+}
+
+#[test]
+fn local_home_cleanup_failure_while_unwinding_preserves_the_original_panic() {
+    let unwound = std::panic::catch_unwind(|| {
+        let home = LocalHome::new();
+        std::fs::remove_dir_all(&home.0).unwrap();
+        panic!("original test failure");
+    })
+    .unwrap_err();
+    assert_eq!(
+        unwound.downcast_ref::<&str>(),
+        Some(&"original test failure")
+    );
+}
+
+#[test]
+fn local_home_cleanup_failure_without_unwinding_still_fails() {
+    let home = LocalHome::new();
+    std::fs::remove_dir_all(&home.0).unwrap();
+    assert!(std::panic::catch_unwind(|| drop(home)).is_err());
 }
 
 #[test]

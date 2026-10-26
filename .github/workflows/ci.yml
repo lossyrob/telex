@@ -10,6 +10,8 @@ jobs:
   build-test:
     name: Build and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Keep GitHub's existing 360-minute default on the other axis.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 360 }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +79,40 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - name: Record Windows execution context
+        if: runner.os == 'Windows'
+        timeout-minutes: 2
+        shell: pwsh
+        env:
+          TELEX_CI_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $checkoutSha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "reading the checked-out source identity failed"
+          }
+          $rustcVersion = rustc --version --verbose
+          if ($LASTEXITCODE -ne 0) {
+            throw "reading the installed Rust toolchain identity failed"
+          }
+          $context = [ordered]@{
+            schema_version = 1
+            observed_at_utc = [DateTime]::UtcNow.ToString("o")
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            event_name = $env:GITHUB_EVENT_NAME
+            event_head_sha = $env:TELEX_CI_EVENT_HEAD_SHA
+            provider_sha = $env:GITHUB_SHA
+            checkout_sha = $checkoutSha
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            image_os = $env:ImageOS
+            image_version = $env:ImageVersion
+            logical_processors_exposed = [Environment]::ProcessorCount
+            rustc_version = $rustcVersion -join "`n"
+          }
+          Write-Output ("TELEX_CI_CONTEXT " + ($context | ConvertTo-Json -Depth 3 -Compress))
+
       - name: Install Linux TLS dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
@@ -125,6 +161,7 @@ jobs:
             -EvidenceName workspace -SnapshotSymbols
 
       - name: Test
+        timeout-minutes: ${{ runner.os == 'Windows' && 30 || 360 }}
         run: cargo test --workspace --verbose
 
       - name: Check Windows crashes after workspace tests
@@ -156,6 +193,7 @@ jobs:
         # consumer fixture, and the isolated InstalledCurrent process proofs all
         # spawn real daemons from an isolated installed layout, so they run on
         # both OS axes with the SQLite backend selected explicitly.
+        timeout-minutes: ${{ runner.os == 'Windows' && 15 || 360 }}
         run: >-
           cargo test --no-default-features --features sqlite
           --test application_client_conformance
@@ -183,6 +221,7 @@ jobs:
           -EvidenceName postgres -SnapshotSymbols
 
       - name: Credential invocation lifecycle
+        timeout-minutes: ${{ runner.os == 'Windows' && 5 || 360 }}
         run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
 
       - name: Check Windows crashes after Postgres process tests
@@ -289,6 +328,12 @@ jobs:
         run: >-
           cargo test --locked --no-default-features --features sqlite
           --lib platform_fs::tests:: -- --nocapture
+
+      - name: Exercise real pending seed and proof-write refusal
+        run: >-
+          cargo test --locked --no-default-features --features sqlite
+          --lib daemon::p3_tests::a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member
+          -- --exact --nocapture
 
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
