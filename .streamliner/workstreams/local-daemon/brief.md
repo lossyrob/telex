@@ -1275,3 +1275,53 @@ geometry and all evidence remain unchanged. No CI result, #166 debt
 clearance/causality, #167/#203/#207 acceptance, new wake, release,
 hardening or freeze credit follows. Owners, reruns and Sentinel do not
 wait on this recording.
+
+## Main 8d7815a8: one store-lock occurrence and later green CI/Docs
+
+Local intake `call_1UttL409xWlB8RRLaWbch40q` records the ordinary Windows Build job
+[121591124574](https://github.com/lossyrob/telex/actions/runs/40328433964/job/121591124574)
+at exact main `8d7815a8d0fb8c6f465d441904044bd20f7dcc7b`. Retain exactly one
+attempt-1 occurrence on `local-daemon-windows-station-restart-lockfileex-33`.
+The test is
+`station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one`.
+The CLI exited 1 with an explicit SQLite store-lock / LockFileEx os-error-33
+refusal, not an outer timeout. The post-drain side-station attach, source anchors,
+failure segment and diagnostics are Local-attributed. The prior not-running
+check does not establish kernel rundown, lock release or a holder. The 61.18
+seconds is target duration, not attach latency.
+
+The complete original 6,077-byte packet is retained with its original
+pending-attempt-2 state. The later Local supplement
+`call_32zBsiFzX792fUpGLID5Z6Ny` forwards Campaign's terminal direction
+`toolu_01UPPDy9BrhDdh9Pbx9yhMyA`; that Campaign report remains Local-attributed.
+The later terminal supplement's inference of 21 fresh executions is retained
+as history but explicitly superseded by Local correction
+`call_Ikpc7KuKK6HUqUKU7vt2bvCN` and direct Campaign direction
+`toolu_01MWLGRfT4D1iSaxC2faBPhi`. Independent bounded timestamp and full-step
+receipt comparisons, without logs or runtime replay, confirm:
+
+- Run 40328433964, attempt 2, succeeded at unchanged `8d7815a8`: 21 successful
+  aggregate entries represent **one re-executed Windows Build** (121598826679)
+  and **20 reused prior successes**. Those 20 pairs have identical job name,
+  head, start/end, status, conclusion and every step receipt. New IDs and
+  `run_attempt=2` alone do not establish fresh execution.
+- The original attempt-1 job 121591124574 remains one retained failure.
+- Docs run 40328433981 succeeded at the same head, attempt 1, with both actual
+  attempt-1 jobs 121591123899 and 121593338791.
+
+Only Git blob identity was checked for the source anchors. No product source,
+raw log, archive, dump, native runtime, scheduler or recipient was replayed.
+Earlier same-test evidence with different head/job/source anchors remains exact.
+This is not #193 intent admission, #204 ForeignDaemon or a reported native
+#166 recurrence. No common cause or causal repair is inferred from green CI.
+
+#166 remains completed under the same owner. Its full prior completion and
+pending-CI snapshots, all eight open debts and both already-sent #193/#198 wakes
+remain exact. Neither wake is resent or reinterpreted as downstream execution.
+The prior candidate/proposed fields stay exact in this evidence-only pre-promotion
+predecessor; they do not renew a current staffing hold. Local reports later
+authorized #212 staffing, recorded separately and neither blocked nor revoked
+here. Its owner does not wait for this recording. No lock theft/removal,
+retry-budget weakening, local runtime, new owner/tracker/node/edge, debt
+clearance, downstream acceptance, release or workstation-freeze credit follows.
+Recording does not delay owners, authorized reruns or the Sentinel.
