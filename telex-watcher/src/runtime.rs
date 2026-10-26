@@ -83,7 +83,8 @@ impl Runtime {
             &config.registry,
             config.retention_warning_rows,
             config.retention_warning_bytes,
-        )?;
+        )
+        .context("registry open")?;
         let id = format!("watcher-runtime-{}", Uuid::new_v4());
         let containment_directory = registry.containment_directory();
         let clients = Clients::new(registry.responsibility.clone(), config.daemon);
@@ -117,17 +118,24 @@ impl Runtime {
 
     /// Owns scheduling and administration until Shutdown or a registry failure.
     pub async fn run(mut self) -> Result<()> {
-        let previous = lock(&self.registry)?.unfinished_containment()?;
+        let previous = lock(&self.registry)
+            .and_then(|registry| registry.unfinished_containment())
+            .context("runtime start: unfinished containment")?;
         let mut proofs = Vec::new();
         for (_, evidence) in &previous {
             if let Some(value) = evidence {
                 proofs.push((value.clone(), containment_ended(value).await));
             }
         }
-        lock(&self.registry)?.start_runtime(&self.id, now_ms(), |evidence| {
-            evidence
-                .is_none_or(|value| proofs.iter().any(|(prior, ended)| prior == value && *ended))
-        })?;
+        lock(&self.registry)
+            .and_then(|mut registry| {
+                registry.start_runtime(&self.id, now_ms(), |evidence| {
+                    evidence.is_none_or(|value| {
+                        proofs.iter().any(|(prior, ended)| prior == value && *ended)
+                    })
+                })
+            })
+            .context("runtime start: registry record")?;
         let registry = self.registry.clone();
         let id = self.id.clone();
         let (heartbeat_error, mut heartbeat_failure) = mpsc::channel(1);
@@ -155,12 +163,14 @@ impl Runtime {
                     registry.save_runtime(&health)
                 })();
                 if let Err(error) = update {
-                    let _ = heartbeat_error.send(error).await;
+                    let _ = heartbeat_error
+                        .send(error.context("runtime heartbeat"))
+                        .await;
                     break;
                 }
             }
         })));
-        let result = self.run_inner(&mut heartbeat_failure).await;
+        let mut result = self.run_inner(&mut heartbeat_failure).await;
         self.stopping = true;
         for (_, cancel) in std::mem::take(&mut self.cancellations) {
             let _ = cancel.send(());
@@ -187,7 +197,11 @@ impl Runtime {
                     }
                 }
                 Err(error) => {
-                    eprintln!("watcher attempt task failed during shutdown: {error}");
+                    if result.is_ok() {
+                        result =
+                            Err(anyhow::Error::from(error)
+                                .context("runtime shutdown: attempt task"));
+                    }
                 }
             }
         }

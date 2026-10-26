@@ -25,6 +25,17 @@ required Watcher product capability tracked in
 [#165](https://github.com/lossyrob/telex/issues/165); this delivery does not claim
 macOS containment.
 
+## Runtime failure diagnostics
+
+If the host exits 1 with `runtime-failed`, inspect its stderr for the failing
+stage and cause chain. This works even when startup fails before a runtime
+record exists. Capture both streams when supervising the host: stdout retains
+the ordinary human or JSON response; stderr carries the redacted diagnostic.
+Its 4096-byte UTF-8 limit includes the final newline, and `[truncated]` marks an
+omitted tail. Environment values, credential-like text and connection strings
+are omitted; review diagnostics before exporting them. See the
+[exit-code reference](guide/src/reference/exit-codes.md#watcher-runtime-host).
+
 ## Detached user process
 
 On Windows, a normal PowerShell launcher can start the ordinary runtime and

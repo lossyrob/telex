@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+#[cfg(any(target_os = "linux", windows))]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,6 +19,7 @@ use tokio::sync::oneshot;
 pub const MAX_STDIN_BYTES: usize = 1024 * 1024;
 pub const MAX_STDOUT_BYTES: usize = 256 * 1024;
 pub const MAX_STDERR_BYTES: usize = 64 * 1024;
+#[cfg(any(target_os = "linux", windows))]
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
@@ -108,6 +111,7 @@ impl ProcessFailure {
         }
     }
 
+    #[cfg(any(target_os = "linux", windows))]
     fn io(error: impl std::fmt::Display) -> Self {
         Self::new(ProcessFailureKind::Io, error.to_string())
     }

@@ -35,3 +35,19 @@ its bounded reconnect grace.
 For the authoritative flags of any command, run its `--help` (see the
 [CLI reference](cli.md)). The hidden `telex copilot` and `telex daemon` families
 are documented by `telex copilot --help` and `telex daemon --help`.
+
+## Watcher runtime host
+
+`telex-watcher run` (also the default when no subcommand is given) returns 1
+when startup or runtime execution fails. With `--json`, stdout remains one
+versioned error envelope. A `runtime-failed` envelope points to stderr for a
+stage-labeled cause chain, including failures before any runtime record exists.
+The diagnostic is redacted and capped at 4096 UTF-8 bytes, including the final
+newline; `[truncated]` marks an omitted tail. It distinguishes registry open,
+endpoint bind, runtime start/run, heartbeat and management-server failures.
+
+Capture stderr alongside stdout when running the host under a supervisor.
+Diagnostics omit environment values, connection strings and credential-like
+text; review them before sharing. They are not persisted startup records.
+Specific errors such as `registry-already-owned`, transport errors and input
+errors retain their existing codes and do not gain a `runtime-failed` diagnostic.
