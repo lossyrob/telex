@@ -368,7 +368,9 @@ async fn reconcile_attempt(
 /// admin capability authenticates the drain, so the exit observed is the drained instance's own.
 /// `timeout_ms` is one end-to-end deadline across connect, `Ack`, and exit.
 async fn stop_drain(ctx: &Ctx, timeout_ms: u64) -> Result<i32> {
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));
+    let deadline = Instant::now()
+        .checked_add(Duration::from_millis(timeout_ms.max(1)))
+        .ok_or_else(|| anyhow!("--drain-timeout-ms {timeout_ms} is too large"))?;
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
     let (Some(pid), Some(start_time)) = (cap.server_pid, cap.server_start_time) else {

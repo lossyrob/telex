@@ -246,9 +246,51 @@ mod platform {
         None
     }
 
+    /// Start time of `pid` if, in one read, it is an exited-but-unreaped (zombie) process; `None`
+    /// if it is not a zombie or that cannot be determined.
+    #[cfg(target_os = "linux")]
+    fn zombie_start_time(pid: u32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_name = stat.rsplit_once(") ")?;
+        let fields: Vec<&str> = after_name.1.split_whitespace().collect();
+        if *fields.first()? != "Z" {
+            return None;
+        }
+        fields.get(19)?.parse::<u64>().ok()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn zombie_start_time(pid: u32) -> Option<u64> {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: `info` is a correctly sized, writable `proc_bsdinfo`.
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                &mut info as *mut _ as *mut libc::c_void,
+                info_size,
+            )
+        };
+        if bytes != info_size || info.pbi_status != libc::SZOMB {
+            return None;
+        }
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn zombie_start_time(_pid: u32) -> Option<u64> {
+        None
+    }
+
     /// Unix has no retained process handle here, so the watch re-probes the exact pid/start-time
-    /// identity: the process is gone once the pid no longer exists or carries a different start
-    /// time.
+    /// identity: the process has exited once the pid no longer exists, carries a different start
+    /// time, or is that same instance as an exited-but-unreaped zombie. A zombie has already
+    /// terminated (its descriptors are closed); only its parent's reap is outstanding, which a
+    /// supervisor may legitimately do only after `stop --drain` returns.
     pub struct ExitHandle {
         pid: u32,
         start_time: u64,
@@ -280,7 +322,10 @@ mod platform {
     ) -> Result<bool, super::ExitWatchError> {
         loop {
             let probe = process_probe(handle.pid);
-            if !probe.alive || probe.start_time.is_some_and(|t| t != handle.start_time) {
+            if !probe.alive
+                || probe.start_time.is_some_and(|t| t != handle.start_time)
+                || zombie_start_time(handle.pid) == Some(handle.start_time)
+            {
                 return Ok(true);
             }
             let now = std::time::Instant::now();
@@ -430,6 +475,42 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
+    /// An exited child its parent has not yet reaped (a zombie) is still the same pid/start-time
+    /// instance; the exit watch must report it exited instead of waiting out its deadline, since a
+    /// supervisor that spawned the daemon may only reap it after `stop --drain` returns.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn exit_watch_reports_an_unreaped_exited_child_as_exited() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read _"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id();
+        let start = capture_process_start_time(pid).expect("child start time");
+        let watch = super::ProcessExitWatch::open(pid, start).expect("watch live child");
+        assert_eq!(
+            watch.wait_until(Instant::now() + Duration::from_millis(50)),
+            Ok(false),
+            "a live child must not be reported exited"
+        );
+
+        let mut stdin = child.stdin.take().expect("child stdin");
+        let _ = stdin.write_all(b"\n");
+        drop(stdin);
+        let began = Instant::now();
+        let exited = watch.wait_until(Instant::now() + Duration::from_secs(10));
+        let waited = began.elapsed();
+        child.wait().expect("reap child");
+        assert_eq!(exited, Ok(true));
+        assert!(
+            waited < Duration::from_secs(5),
+            "the unreaped child was not recognized as exited ({waited:?})"
+        );
+    }
     use super::{
         capture_process_start_time, process_alive, process_alive_with_start_time,
         resolve_session_pid, SessionBinding, UnboundReason,
