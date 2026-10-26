@@ -1745,7 +1745,7 @@
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01RiD7o4ZxQLma9dbVQPkPSx authorizes the separate priority #166 repair owner; Local coordinates one v2 launch after actual canonical receipt. Source/design/hosted CI and the Campaign merge gate still control the closing PR. Earlier candidate/no-owner authority below is historical: Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c recorded it on 2026-10-22 as candidate hardening-gate scope with no node or status change and no owner launch.",
-      "terminalPath": "One separate PR closes166 after causal diagnosis, minimal justified correction, full hosted diagnostic and relevant profile coverage, exact-head reviewer-origin source receipt, design inspection and Campaign merge gate.",
+      "terminalPath": "Existing sole writer d7 implements the operator-authorized Mio 1.2.4 upgrade and Windows normal-dependency floor in PR #196, validates cross-platform/features within existing hosted-only restrictions, removes diagnostic-only scaffolding except retained capture, and uses Closes #166. Any recurrence reopens #166. Fresh exact-final-head reviewer-origin source receipt, design inspection, strict green CI without waiver, #203/#204 clearance insofar as they affect #196 required jobs, and the Campaign merge gate remain. A green run alone does not independently accept either separate repair. The authorized repair of the reached Mio defect does not prove a causal explanation of the five Telex observations. Only the actual product-repair merge verified by Local triggers both existing pending wakes.",
       "promotionQualification": {
         "date": "2026-10-25",
         "historicalFields": "The original candidate/proposed status, target, unassigned owner, hardening requiredness, terminal path and disposition authority remain in historicalCandidateSnapshot. Every original evidence field is unchanged. This promotion does not repeat the deferred prior-main receipt as a new discovered-work item.",
@@ -2267,6 +2267,151 @@
           "sha256": "19023dd3e62f77f7f3c703b96d00888c8e0d297f530ca23343fdc2005abed1be"
         },
         "boundary": "Separate successor after b166; preserve complete actualOwnerLaunchQualification and all original launch/branch/history/evidence. No second owner, replacement, namespace inference, diagnosis, source/design/CI/readiness, actual repair merge or193wake."
+      },
+      "laterOperatorMioRepairDecisionQualification": {
+        "kind": "additive-operator-mio-repair-choice-and-retained-gates",
+        "historicalCurrentFields": {
+          "terminalPath": "One separate PR closes166 after causal diagnosis, minimal justified correction, full hosted diagnostic and relevant profile coverage, exact-head reviewer-origin source receipt, design inspection and Campaign merge gate."
+        },
+        "historyBoundary": "Every earlier field and qualification is preserved, except the current terminal path saved here. The new operator decision supersedes prior B/no-push implementation holds only for the specified work already authorized to d7; original evidence and holds remain historical. No broader runtime, experiment-extension or merge authority follows. No actual launch is erased or invented, and there is no new owner or binding.",
+        "sourcePacket": {
+          "file": "mio166-local-decision.json",
+          "bytes": 5876,
+          "sha256": "70cb77fcf0a4b19f1b99fdca2377520daa7448f5fb13085ad87158bab6422f1e",
+          "originalFile": "issue166-operator-mio-repair-decision-20261025.json",
+          "localSessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "captureReceipt": "mio166-source-capture.json"
+        },
+        "retainedLocalDecision": {
+          "kind": "operator-authorized-repair-scope-supplement",
+          "issue": 166,
+          "pullRequest": 196,
+          "source": {
+            "campaignSession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "toolCall": "toolu_01EvXCq7XmkhRgmcq8oJvVZV",
+            "receivedAt": "2026-10-26T02:11:08.396Z",
+            "operatorDecisionVerbatim": "B: authorize the Mio 1.2.4 upgrade as the fix, only if the 1.2.4 comparison job finishes without the panic; the PR closes #166, and a repeat crash reopens it (Recommended)",
+            "campaignDirectionVerbatim": "The condition is met: job 121354231722 passed all three configurations clean. So B is authorized for d7 on PR #196:\n- Bump Mio to 1.2.4 and add the Windows normal-dependency floor, with cross-platform and feature validation.\n- Remove the diagnostic-only experiment scaffolding unless it is part of the retained capture.\n- Use Closes #166 in the PR.\n- Describe the change as a repair of the reached Mio defect, not as proven to explain the five observations. Any recurrence reopens #166.\n\nStrict CI still applies: green at the exact head, no waiver. #196 also needs #203 (Watcher harness 0xc0000409) and #204 (ForeignDaemon) cleared. When it is green, d7 requests the gate from me. Fire the wakes only after the actual merge.",
+            "authorityQualification": "Operator choice conveyed by Campaign; Local has not independently read the originating ask_user transcript. This supplement records the supplied authority without enlarging it."
+          },
+          "conditionEvidence": {
+            "head": "b0ab5f2cf067f08afbb20bd807a89af1e0affb46",
+            "run": 40254795271,
+            "attempt": 1,
+            "comparisonJob": 121354231722,
+            "comparisonJobConclusion": "success",
+            "comparisonCompletedAt": "2026-10-26T01:48:20Z",
+            "localVerification": "Local independently read public run/job metadata. The overall run failed; the Mio 1.2.4 comparison succeeded. Its three clean configurations and archive details are owner-reported evidence, not a Local archive inspection.",
+            "ownerEvidenceSource": "toolu_011L2FCKuyHFNQLvtgDwwiEJ",
+            "mio124Artifact": {
+              "id": 12622392155,
+              "bytes": 41879141,
+              "sha256": "4330ccfc0e6fc487379bad5147924caccc20c5d5548d4792645486aaaa30620f",
+              "reportedOutcome": "Three configurations each completed 400000 rounds, exit 0, without panic or dump."
+            },
+            "lockedMioArtifact": {
+              "id": 12622128673,
+              "bytes": 41973386,
+              "sha256": "07b21ddbb2901a33e5e0fef372afc47abf85614c3540f9f6b5e3eadf27973418",
+              "reportedOutcome": "Mio 1.2.1 completed w2-c64 at the 300-second cap, then reached the write_done State::None panic in w4-c32; w8 did not run. No failing-process dump was captured."
+            },
+            "limits": "One reached failure and a clean comparison are not statistical proof. Seeds do not fix thread scheduling. The submitted-I/O/Arc explanation and causal mapping to the five Telex observations are not established by Local. The separate real-daemon experiment exhausted 40 iterations clean; that remains clean-run evidence, not evidence of absence."
+          },
+          "implementationDisposition": {
+            "soleWriter": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c",
+            "branch": "lossyrob-windows-heap-av-repair",
+            "status": "authorized-and-forwarded-to-existing-owner",
+            "authorizedWork": [
+              "Upgrade Mio to 1.2.4 and add the Windows normal-dependency floor.",
+              "Perform cross-platform and feature validation within existing runtime restrictions.",
+              "Remove diagnostic-only experiment scaffolding except retained capture.",
+              "Use Closes #166 and describe repair of the reached Mio defect without asserting that it explains the five observations.",
+              "Reopen #166 on recurrence."
+            ],
+            "supersession": "Prior B/no-push holds remain historical and are superseded only for this authorized implementation. No owner replacement, fresh experiment extension, merge or runtime-scope expansion follows.",
+            "retainedLimits": "Hosted-only runtime; no retry, waiver or flake exception. Preserve source evidence and capture gaps. Coordinate overlapping changes with existing owners."
+          },
+          "acceptanceGates": {
+            "sourceAndDesign": "Fresh exact-final-head source/design review remains required.",
+            "ci": "Strict green CI at the exact final head, without waiver.",
+            "otherRepairs": [
+              {
+                "issue": 203,
+                "description": "Watcher library-harness 0xc0000409 must be cleared."
+              },
+              {
+                "issue": 204,
+                "description": "ForeignDaemon repair must be cleared."
+              }
+            ],
+            "gateOwner": "Campaign",
+            "mergeAuthorized": false,
+            "repairAccepted": false,
+            "qualification": "A future green run alone does not establish completion of the two separately required repairs. This packet does not add or approve graph edges."
+          },
+          "postMergeWakes": {
+            "trigger": "Actual #166 repair merge, independently verified by Local.",
+            "recipients": [
+              {
+                "issue": 193,
+                "pullRequest": 194,
+                "session": "519693a5-0607-4aba-a968-345f3b1cd1b5",
+                "delivered": false
+              },
+              {
+                "issue": 198,
+                "pullRequest": 202,
+                "session": "a96926b1-3e4f-4578-a197-33de51d669c7",
+                "delivered": false
+              }
+            ],
+            "qualification": "Authorization, artifact recording, diagnostic success and gate readiness do not trigger either wake."
+          },
+          "canonicalRecordingRequest": "Additively record this scope decision on the existing #166 item/task through the sole reconciler, retaining earlier evidence, owner history, prior holds and both pending wakes. Record the explicit #203/#204 clearance requirements without inventing cross-workstream graph edges. Freeze any proposed canonical change for fresh owning/steward/Tier B review as applicable. This recording is not a prerequisite to the already-authorized implementation."
+        },
+        "directCampaignConfirmation": {
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_01FypWdkF69bMtm4WM4oK2NP",
+          "receipt": "mio166-campaign-confirmation.json",
+          "verbatim": "Campaign: confirmed, all of it.\n\nOperator choice, via ask_user, verbatim: \"B: authorize the Mio 1.2.4 upgrade as the fix, only if the 1.2.4 comparison job finishes without the panic; the PR closes #166, and a repeat crash reopens it (Recommended)\".\n\nAttribution of the met condition: Campaign judged it met, based on two sources. GitHub's public status shows Mio 1.2.4 job 121354231722 completed successfully at 01:48:20Z (run 40254795271, head b0ab5f2c), as Local verified. d7 reports, as owner, that all three 400,000-round configurations were clean (artifact 12622392155).\n\nRequirements, as I listed them to Local:\n- Mio 1.2.4 plus the Windows normal-dependency floor.\n- Cross-platform and feature validation.\n- Remove the diagnostic-only scaffolding, except the retained capture.\n- Use Closes #166, and any recurrence reopens it.\n- Make no claim that the five cases are causally explained.\n\nGates that remain:\n- strict CI, green at the exact head with no waiver;\n- normal review;\n- #203 and #204 clear, as far as they affect #196's required jobs;\n- the Campaign merge gate.\n\nThe wakes fire only after the actual merge. Your bounded bookkeeping scope is right, and it must not hold up d7.",
+          "attributionBoundary": "Campaign directly supplies the verbatim operator choice from ask_user and judges the condition met. The reconciler has not independently read the originating ask_user transcript."
+        },
+        "conditionAttribution": {
+          "publicMetadata": {
+            "run": {
+              "id": 40254795271,
+              "head_sha": "b0ab5f2cf067f08afbb20bd807a89af1e0affb46",
+              "event": "pull_request",
+              "run_attempt": 1,
+              "status": "completed",
+              "conclusion": "failure",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40254795271"
+            },
+            "job": {
+              "id": 121354231722,
+              "run_id": 40254795271,
+              "head_sha": "b0ab5f2cf067f08afbb20bd807a89af1e0affb46",
+              "name": "Windows named-pipe race (mio 1.2.4)",
+              "run_attempt": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "completed_at": "2026-10-26T01:48:20Z",
+              "html_url": "https://github.com/lossyrob/telex/actions/runs/40254795271/job/121354231722"
+            }
+          },
+          "independentVerification": "The reconciler independently read only public run/job identity/status: overall run failed; the comparison job completed successfully. Local reports its own metadata check. The three clean 400,000-round configurations and artifact contents remain owner-reported, not independently verified from logs or archives. Campaign combines those sources to judge its condition met; this is not final-head PR CI or a statistical/causal proof.",
+          "evidenceLimit": "Preserve the packet limits on scheduling, the unestablished submitted-I/O/Arc explanation and five-case mapping, and the clean real-daemon experiment. Artifact IDs/lengths/digests identify retained reports, not downloaded-byte or dump-content verification."
+        },
+        "remainingGates": {
+          "sourceAndDesign": "Fresh exact-final-head source review, reviewer-origin public verdict/scope/limits receipt and design inspection.",
+          "ci": "Strict green CI at the exact final head, without waiver; a comparison job pass is not overall CI acceptance.",
+          "separateClearance": "Campaign directly confirms #203 and #204 must clear as far as they affect PR #196 required jobs. A green run alone does not independently accept either separately required repair.",
+          "campaign": "Campaign merge gate remains required. No merge is authorized by this artifact.",
+          "recurrence": "Any recurrence reopens #166.",
+          "geometry": "These are explicit clearance gates, not new cross-workstream graph edges or owner/status/dependency changes."
+        },
+        "existingOwnerAndWakes": "d7a17cd2-08c2-4760-b1a6-1209c2d0f80c remains sole writer on lossyrob-windows-heap-av-repair. Entire original launch and later owner/alias qualifications remain exact. Both #193/#198 wakes remain pending in their original structures; Local must verify the actual #166 product-repair merge before separately delivering either wake. Authorization, comparison success, artifact recording and readiness are not the trigger.",
+        "conservation": "Record the operator-authorized Mio 1.2.4 repair choice and Campaign-attributed met-condition judgment only. Existing d7 sole-writer binding, native observations, all earlier evidence and holds as history, both pending actual-product-merge wakes and all other records remain exact. No new owner, candidate, occurrence, graph edge/status/dependency/design-link change, runtime expansion, retry/waiver/flake exception, five-case causal explanation, product-source/design acceptance, repair, CI/readiness/merge, debt/HOLD or freeze credit. Artifact recording must not delay already-authorized implementation."
       }
     },
     {
