@@ -137,6 +137,21 @@ the setup root is empty after tests; the root itself is discarded with the
 hosted runner. Windows uses a home inside the existing isolated fixture root
 and needs no additional setup.
 
+The Windows scheduled-host stall gate is a separate validation target:
+
+```text
+cargo build --locked --workspace --bins
+cargo test --locked -p telex-watcher --test stall_gate
+```
+
+It uses the shared isolated installed-current process harness, temporary
+LOCALAPPDATA and synthetic session logs. It covers the detector calling its
+own running host's public management endpoint, suppression, durable episode
+delivery and long history. The harness retains its isolated root after daemon
+cleanup for process-identity safety. This automated target does not replace the
+real App root confirm/ring and background-shell cases; see the
+[Windows gate evidence](docs/copilot-stall-gate-report.md).
+
 ## Windows CI bounds and execution evidence
 
 The Windows `build-test` job has independent hosted ceilings around whole steps:
