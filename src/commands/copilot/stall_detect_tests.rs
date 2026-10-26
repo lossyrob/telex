@@ -294,6 +294,32 @@ fn unknown_advisory_requires_old_evidence_and_no_busy_operator_wait_or_wake() {
         .unwrap()
         .timestamp = at(0);
     assert_eq!(run(60, Value::Null, &[recent]).outcome, Outcome::Degraded);
+    let mut recent_idle = observation("idle", SessionState::Idle);
+    recent_idle
+        .session
+        .as_mut()
+        .unwrap()
+        .activity
+        .as_mut()
+        .unwrap()
+        .timestamp = at(0);
+    let observations = [recent_idle, observation("unknown", SessionState::Unknown)];
+    assert_eq!(
+        run(60, Value::Null, &observations).outcome,
+        Outcome::Degraded
+    );
+    assert_eq!(run(61, Value::Null, &observations).outcome, Outcome::Event);
+    let mut no_timestamp = observation("not-loaded", SessionState::NotLoaded);
+    no_timestamp.session.as_mut().unwrap().activity = None;
+    assert_eq!(
+        run(
+            0,
+            Value::Null,
+            &[no_timestamp, observation("unknown", SessionState::Unknown)]
+        )
+        .outcome,
+        Outcome::Event
+    );
     let mut missing = observation("unknown", SessionState::Unknown);
     missing.session.as_mut().unwrap().activity = None;
     assert_eq!(

@@ -169,9 +169,10 @@ degraded, never an empty group.
 
 Inactive members remain in event snapshots but do not require session logs or
 wake-source queries. An empty group, or one with no active members, is
-successfully evaluated as non-stalled and clears the prior episode. If the
-root includes itself as active, its own armed monitoring watch counts as a
-wake source; there is no special exemption for circular watches.
+successfully evaluated as non-stalled and clears the prior episode. The root
+may itself be an active member. The detector excludes exactly the requesting
+`request.watch.id` from wake sources, so its own monitoring watch cannot hide
+a stall. Every other watch counts, including circular dependencies on idle members.
 
 ## Detection and distribution
 
@@ -269,7 +270,10 @@ without clearing an already-emitted event. Wall-clock time is not monotonic.
 unknown members instead produce one `copilot.group.attention-needed` advisory
 when every active member is idle/not-loaded/unknown, no wake source is observed,
 and every unknown member has a valid evidence timestamp strictly older than
-grace. This includes a quiet `session.error`, `session.start` or any other
+grace. Active known idle/not-loaded members with a timestamp must also have
+evidence older than grace; known members with no timestamp do not block the
+advisory. This prevents an old error beside a just-idled member from ringing
+after each of the latter's turns. This includes a quiet `session.error`, `session.start` or any other
 unsupported event; the classifier still reports unknown. The advisory does
 not need a second observation grace after the evidence has already aged.
 An unknown with no retained evidence timestamp, or one with invalid/future

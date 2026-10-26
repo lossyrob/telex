@@ -20,7 +20,7 @@ use crate::watcher_protocol::{
 
 const MAX_MEMBERS: usize = 32;
 const MAX_MEMBER_BYTES: usize = 4096;
-const MAX_INBOX_ITEMS: i64 = 1024;
+const MAX_INBOX_ITEMS: usize = 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -289,7 +289,7 @@ async fn message_wakes(
         bail!("invalid unacknowledged message count");
     }
     let inbox = backend
-        .inbox(&member.address, true, MAX_INBOX_ITEMS + 1)
+        .inbox(&member.address, true, i64::try_from(MAX_INBOX_ITEMS + 1)?)
         .await?;
     let deferred_messages = inbox
         .iter()
@@ -309,7 +309,7 @@ async fn message_wakes(
     })
 }
 
-async fn observe(parameters: &Parameters) -> Result<Vec<Observation>> {
+async fn observe(parameters: &Parameters, requesting_watch_id: &str) -> Result<Vec<Observation>> {
     let members = read_members(&parameters.group_directory)?;
     let mut observations = Vec::new();
     if members
@@ -335,10 +335,9 @@ async fn observe(parameters: &Parameters) -> Result<Vec<Observation>> {
         let (session, wake_sources) = if member.state == MemberState::Active {
             let session = classify_local(&member.session_id)?;
             let mut wakes = message_wakes(backend.as_ref(), member, &pending).await?;
-            for watch in watches
-                .iter()
-                .filter(|watch| watch.registration.target == member.address)
-            {
+            for watch in watches.iter().filter(|watch| {
+                watch.id != requesting_watch_id && watch.registration.target == member.address
+            }) {
                 let (_, watch_profile) =
                     crate::profiles::resolve(Some(&watch.registration.backend_profile), None)?;
                 if crate::profiles::store_key(&watch_profile, None) == store_key {
@@ -456,10 +455,12 @@ fn evaluate(
                 .session
                 .as_ref()
                 .expect("quiet requires session");
-            session.state != SessionState::Unknown
-                || session.activity.as_ref().is_some_and(|activity| {
+            match &session.activity {
+                Some(activity) => {
                     timestamp_ms(&activity.timestamp).is_ok_and(|at| now.saturating_sub(at) > grace)
-                })
+                }
+                None => session.state != SessionState::Unknown,
+            }
         })
     {
         return Ok(degraded());
@@ -560,7 +561,12 @@ pub async fn run() -> Result<i32> {
     let parameters: Parameters = serde_json::from_value(request.watch.parameters.clone())
         .context("invalid stall detector parameters")?;
     parameters.validate()?;
-    let result = match tokio::time::timeout(Duration::from_secs(15), observe(&parameters)).await {
+    let result = match tokio::time::timeout(
+        Duration::from_secs(15),
+        observe(&parameters, &request.watch.id),
+    )
+    .await
+    {
         Ok(Ok(observations)) => evaluate(&request, &parameters, &observations)?,
         Ok(Err(error)) => {
             eprintln!("telex copilot stall-detect: {error:#}");

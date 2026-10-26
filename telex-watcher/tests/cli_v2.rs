@@ -170,6 +170,18 @@ async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() 
     )
     .unwrap();
     let mut host = fixture.start_host();
+    // The root is active at member:a; its own monitoring watch must not suppress detection.
+    let own_watch = fixture.file(
+        "own-watch.json",
+        serde_json::to_vec(&json!({
+            "schemaVersion":2,"id":"group-stall","command":[&telex,"copilot","stall-detect"],
+            "intervalSeconds":86400,"timeoutSeconds":1,"backendProfile":"fixture",
+            "sender":"service:fixture","target":"member:a"
+        }))
+        .unwrap(),
+    );
+    let (_, own_registered) = fixture.execute(&["register", own_watch.to_str().unwrap()]);
+    assert_eq!(own_registered["ok"], true);
     let parameters = json!({
         "groupDirectory":group,"backendProfile":"fixture","watcherExecutable":env!("CARGO_BIN_EXE_telex-watcher"),
         "watcherRegistry":fixture.root.join("registry.sqlite"),"graceSeconds":60
