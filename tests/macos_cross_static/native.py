@@ -278,21 +278,14 @@ def equal_binding(before, after):
     require(before == after, "bound native component/developer/SDK/cache changed before acceptance")
 
 
-def declared_sdk_diagnostics(policy):
+def sdk_symlink_diagnostics(policy):
     observations = {}
-    for key in ("sdk_path", "sdk_canonical_path"):
+    for key in ("sdk_canonical_path", "sdk_versioned_path"):
         path = Path(policy[key])
         try:
             observations[key] = {"path": str(path), "is_symlink": stat.S_ISLNK(path.lstat().st_mode)}
         except OSError as error:
             observations[key] = {"path": str(path), "error_type": type(error).__name__, "error": str(error)}
-    canonical = Path(policy["sdk_canonical_path"])
-    try:
-        observations["canonical_resolution"] = {
-            "path": str(canonical), "resolved_path": str(canonical.resolve(strict=True)), "strict": True}
-    except (OSError, RuntimeError) as error:
-        observations["canonical_resolution"] = {
-            "path": str(canonical), "strict": True, "error_type": type(error).__name__, "error": str(error)}
     return observations
 
 
@@ -313,12 +306,47 @@ class NativeBinding:
         require(not any("DYLD" in key or key in ("LD_LIBRARY_PATH", "LD_PRELOAD", "SIMULATOR_ROOT",
                         "IPHONE_SIMULATOR_ROOT") for key in os.environ), "unapproved loader/search/insertion override")
         for key, value in (("DEVELOPER_DIR", policy["developer_dir"]),
-                           ("TOOLCHAINS", policy["toolchain"]), ("SDKROOT", policy["sdk_path"])):
+                           ("TOOLCHAINS", policy["toolchain"]), ("SDKROOT", policy["sdk_canonical_path"])):
             require(not os.environ.get(key) or os.environ[key] == value, "developer/SDK environment override")
             if set_values:
                 os.environ[key] = value
             else:
                 require(os.environ.get(key) == value, "bound developer/SDK environment changed")
+
+    def check_sdk_identity(self, checkpoint):
+        require(checkpoint in ("prebinding", "postdecoder"), "invalid SDK identity checkpoint")
+        policy = self.policy
+        filename = "sdk-identity-" + checkpoint + ".json"
+        command_name = "resolve-sdk-version" if checkpoint == "prebinding" else "recheck-sdk-version"
+        version = self.run.command(command_name, [policy["xcrun"], "--sdk", "macosx", "--show-sdk-version"])
+        observed_version = version["stdout"].strip()
+        receipt = {
+            "checkpoint": checkpoint, "canonical_path_A": policy["sdk_canonical_path"],
+            "versioned_path_B": policy["sdk_versioned_path"],
+            "expected_version": policy["sdk_version"], "observed_version": observed_version,
+            "version_source": "frozen xcrun --sdk macosx --show-sdk-version, not the versioned filename",
+            "relations": [], "observations_are_sequential": True}
+        self.run.output.json(filename, receipt)
+        require(observed_version == policy["sdk_version"], "SDK version mismatch")
+        errors = {}
+        for role, key in (("A", "sdk_canonical_path"), ("B", "sdk_versioned_path")):
+            relation = {"role": role, "input_path": policy[key],
+                        "expected_path": policy["sdk_canonical_path"], "strict": True}
+            try:
+                relation["resolved_path"] = str(Path(policy[key]).resolve(strict=True))
+            except (OSError, RuntimeError) as error:
+                relation.update(error_type=type(error).__name__, error=str(error))
+                errors[role] = error
+            receipt["relations"].append(relation)
+        receipt["diagnostics_only"] = sdk_symlink_diagnostics(policy)
+        self.run.output.json(filename, receipt)
+        for relation in receipt["relations"]:
+            role = relation["role"]
+            if role in errors:
+                raise errors[role]
+            require(relation["resolved_path"] == policy["sdk_canonical_path"],
+                    "SDK " + role + " strict resolution differs from canonical A")
+        return observed_version
 
     def resolve(self):
         policy = self.policy
@@ -326,23 +354,15 @@ class NativeBinding:
         result = self.run.command("resolve-otool", [policy["xcrun"], "--sdk", "macosx", "--find", "otool"])
         require(result["stdout"].strip() == policy["otool"], "xcrun selected an unfrozen otool path")
         sdk = self.run.command("resolve-sdk", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-path"])
-        require(sdk["stdout"].strip() in (policy["sdk_path"], policy["sdk_canonical_path"]),
+        require(sdk["stdout"].strip() in (policy["sdk_canonical_path"], policy["sdk_versioned_path"]),
                 "xcrun selected an unfrozen SDK")
-        version = self.run.command("resolve-sdk-version", [policy["xcrun"], "--sdk", "macosx", "--show-sdk-version"])
-        require(version["stdout"].strip() == policy["sdk_version"], "SDK version mismatch")
-        nominal_sdk_resolved = str(Path(policy["sdk_path"]).resolve(strict=True))
-        self.run.output.json("resolve-sdk-nominal.json", {
-            "nominal_path": policy["sdk_path"], "resolved_path": nominal_sdk_resolved,
-            "expected_path": policy["sdk_canonical_path"], "strict": True,
-            "diagnostics_only": declared_sdk_diagnostics(policy)})
-        require(nominal_sdk_resolved == policy["sdk_canonical_path"],
-                "SDK symlink resolution differs from frozen policy")
+        sdk_version = self.check_sdk_identity("prebinding")
         for name in ("hdiutil", "xcrun", "otool"):
             require(str(Path(policy[name]).resolve(strict=True)) == policy[name],
                     "native executable resolves outside its allowed absolute path")
         xcrun_version = self.run.command("native-xcrun-version", [policy["xcrun"], "--version"])
         self.resolution = {"otool": result["stdout"].strip(), "sdk": sdk["stdout"].strip(),
-                           "sdk_version": version["stdout"].strip(),
+                           "sdk_version": sdk_version,
                            "otool_version_source": "LC_SOURCE_VERSION when present; see native_tools.otool.macho_slices",
                            "xcrun_version": xcrun_version["stdout"].strip()}
         self.run.otool_path = policy["otool"]
@@ -398,8 +418,7 @@ class NativeBinding:
     def recheck(self):
         require(self.before is not None and self.use_record is not None, "acceptance lacks actual decoder use evidence")
         self.check_environment()
-        require(str(Path(self.policy["sdk_path"]).resolve(strict=True)) == self.policy["sdk_canonical_path"],
-                "bound SDK resolution changed")
+        self.check_sdk_identity("postdecoder")
         after = self.snapshot()
         self.run.output.json("native-binding-after.json", after)
         equal_binding(self.before, after)

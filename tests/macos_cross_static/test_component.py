@@ -710,177 +710,182 @@ class NativeBindingTests(unittest.TestCase):
 
 class SDKResolutionTests(unittest.TestCase):
     @contextmanager
-    def sdk_case(self, stdout, version="26.5", alias_target=None, alias_error=None,
-                 canonical_target=None, canonical_error=None, symlink_error=None):
+    def sdk_case(self, stdout=None, versions=None, targets=None, errors=None, symlink_error=None):
         policy = run.BOUNDS["native_binding"]
         events = []
-        responses = {"resolve-otool": policy["otool"] + "\n", "resolve-sdk": stdout,
-                     "resolve-sdk-version": version + "\n", "native-xcrun-version": "synthetic-version\n"}
+        targets = targets if targets is not None else {}
+        errors = errors if errors is not None else {}
+        versions = versions if versions is not None else {"prebinding": "26.5", "postdecoder": "26.5"}
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
 
         def command(name, arguments):
             events.append(("command", name, arguments))
-            return {"rc": 0, "stdout": responses[name], "stderr": ""}
+            responses = {"resolve-otool": policy["otool"] + "\n",
+                         "resolve-sdk": b + "\n" if stdout is None else stdout,
+                         "resolve-sdk-version": versions["prebinding"] + "\n",
+                         "recheck-sdk-version": versions["postdecoder"] + "\n",
+                         "native-xcrun-version": "synthetic-version\n"}
+            return {"rc": 0, "stdout": responses[name], "stderr": "", "argv": arguments}
 
         def resolve(path, strict=False):
             events.append(("resolve", str(path), strict))
             self.assertTrue(strict)
-            if str(path) == policy["sdk_path"]:
-                if alias_error is not None:
-                    raise alias_error
-                return Path(alias_target or policy["sdk_canonical_path"])
-            if str(path) == policy["sdk_canonical_path"]:
-                if canonical_error is not None:
-                    raise canonical_error
-                return Path(canonical_target or policy["sdk_canonical_path"])
+            if str(path) in (a, b):
+                if str(path) in errors:
+                    raise errors[str(path)]
+                return Path(targets.get(str(path), a))
             self.assertIn(str(path), [policy[name] for name in ("hdiutil", "xcrun", "otool")])
             return path
 
         original_lstat = Path.lstat
         def lstat(path):
-            if str(path) not in (policy["sdk_path"], policy["sdk_canonical_path"]):
+            if str(path) not in (a, b):
                 return original_lstat(path)
             events.append(("lstat", str(path)))
             if symlink_error is not None:
                 raise symlink_error
-            return SimpleNamespace(st_mode=native.stat.S_IFLNK if str(path) == policy["sdk_path"]
+            return SimpleNamespace(st_mode=native.stat.S_IFLNK if str(path) == b
                                    else native.stat.S_IFDIR)
 
-        controller = SimpleNamespace(bounds=run.BOUNDS, command=command,
-            output=SimpleNamespace(json=lambda name, value: events.append(("output", name, value))))
-        with patch.dict("os.environ", {}, clear=True):
+        controller = SimpleNamespace(bounds=run.BOUNDS, command=command, job="ARM24", receipt={},
+            output=SimpleNamespace(json=lambda name, value: events.append(("output", name, copy.deepcopy(value)))))
+        with patch.dict("os.environ", {"GITHUB_SHA": "synthetic-sha", "GITHUB_RUN_ATTEMPT": "1"}, clear=True):
             binding = native.NativeBinding(controller)
             with patch.object(Path, "resolve", resolve), patch.object(Path, "lstat", lstat), \
-                    patch.object(binding, "snapshot", return_value={"synthetic_snapshot": True}) as snapshot:
+                    patch.object(binding, "snapshot", return_value={"synthetic_first_metadata_hash": "fixture"}) as snapshot:
                 yield binding, events, snapshot
 
-    def test_nominal_resolution_receipt_precedes_the_same_equality_guard(self):
+    def test_policy_uses_only_the_two_declared_literals_with_new_roles(self):
         policy = run.BOUNDS["native_binding"]
-        original_require = native.require
-        for resolved in (policy["sdk_canonical_path"], "/synthetic/mismatch.sdk"):
-            with self.subTest(resolved=resolved), self.sdk_case(
-                    policy["sdk_canonical_path"] + "\n", alias_target=resolved) as (binding, events, snapshot):
-                def guarded(condition, reason):
-                    if reason == "SDK symlink resolution differs from frozen policy":
-                        events.append(("equality-guard", condition, reason))
-                    return original_require(condition, reason)
-                with patch.object(native, "require", side_effect=guarded):
-                    if resolved == policy["sdk_canonical_path"]:
-                        binding.resolve()
-                        snapshot.assert_called_once_with()
-                    else:
-                        with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
-                            binding.resolve()
-                        snapshot.assert_not_called()
-                resolutions = [e for e in events if e[0] == "resolve" and e[1] == policy["sdk_path"]]
-                self.assertEqual(resolutions, [("resolve", policy["sdk_path"], True)])
-                self.assertEqual([e for e in events if e[0] == "resolve" and e[1] == policy["sdk_canonical_path"]],
-                                 [("resolve", policy["sdk_canonical_path"], True)])
-                self.assertEqual([e for e in events if e[0] == "lstat"],
-                                 [("lstat", policy["sdk_path"]), ("lstat", policy["sdk_canonical_path"])])
-                receipt = ("output", "resolve-sdk-nominal.json", {
-                    "nominal_path": policy["sdk_path"], "resolved_path": resolved,
-                    "expected_path": policy["sdk_canonical_path"], "strict": True,
-                    "diagnostics_only": {
-                        "sdk_path": {"path": policy["sdk_path"], "is_symlink": True},
-                        "sdk_canonical_path": {"path": policy["sdk_canonical_path"], "is_symlink": False},
-                        "canonical_resolution": {"path": policy["sdk_canonical_path"],
-                                                 "resolved_path": policy["sdk_canonical_path"], "strict": True}}})
-                self.assertIn(receipt, events)
-                guard_index = next(i for i, e in enumerate(events) if e[0] == "equality-guard")
-                self.assertLess(events.index(receipt), guard_index)
+        prefix = "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/"
+        self.assertEqual(policy["sdk_canonical_path"], prefix + "MacOSX.sdk")
+        self.assertEqual(policy["sdk_versioned_path"], prefix + "MacOSX26.5.sdk")
+        self.assertNotIn("sdk_path", policy)
+        self.assertEqual(policy["sdk_version"], "26.5")
+        self.assertIn(prefix + "MacOSX.sdk/SDKSettings.plist", policy["developer_sdk_identity_files"])
+        self.assertNotIn(prefix + "MacOSX26.5.sdk/SDKSettings.plist", policy["developer_sdk_identity_files"])
 
-    def test_mismatch_resolution_receipt_fits_existing_output_sink(self):
+    def test_both_declared_stdout_spellings_require_both_relations_pre_and_post(self):
         policy = run.BOUNDS["native_binding"]
-        with tempfile.TemporaryDirectory() as temp:
-            evidence = Path(temp)
-            with self.sdk_case(policy["sdk_canonical_path"] + "\n",
-                               alias_target="/synthetic/mismatch.sdk") as (binding, events, snapshot):
-                binding.run.output = cache.Output(evidence, run.BOUNDS["limits"])
-                with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
-                    binding.resolve()
-                snapshot.assert_not_called()
-                receipt = evidence / "resolve-sdk-nominal.json"
-                payload = json.loads(receipt.read_text())
-                self.assertEqual({k: v for k, v in payload.items() if k != "diagnostics_only"}, {
-                    "nominal_path": policy["sdk_path"], "resolved_path": "/synthetic/mismatch.sdk",
-                    "expected_path": policy["sdk_canonical_path"], "strict": True})
-                self.assertEqual(payload["diagnostics_only"]["sdk_path"]["is_symlink"], True)
-                self.assertLess(receipt.stat().st_size, 4096)
-                self.assertEqual([p.name for p in evidence.iterdir()], [receipt.name])
-
-    def test_failed_resolution_has_no_fabricated_result_or_retry(self):
-        policy = run.BOUNDS["native_binding"]
-        with self.sdk_case(policy["sdk_canonical_path"] + "\n",
-                           alias_error=FileNotFoundError("synthetic missing path")) as (binding, events, snapshot):
-            with self.assertRaises(FileNotFoundError):
-                binding.resolve()
-            snapshot.assert_not_called()
-            self.assertEqual([e for e in events if e[0] == "resolve"],
-                             [("resolve", policy["sdk_path"], True)])
-            self.assertFalse(any(e[0] == "output" for e in events))
-
-    def test_resolution_receipt_failure_prevents_advancing(self):
-        policy = run.BOUNDS["native_binding"]
-        with self.sdk_case(policy["sdk_canonical_path"] + "\n") as (binding, events, snapshot):
-            with patch.object(binding.run.output, "json", side_effect=cache.EvidenceError("output budget exhausted")):
-                with self.assertRaisesRegex(cache.EvidenceError, "output budget exhausted"):
-                    binding.resolve()
-            snapshot.assert_not_called()
-            self.assertEqual([e for e in events if e[0] == "resolve"],
-                             [("resolve", policy["sdk_path"], True), ("resolve", policy["sdk_canonical_path"], True)])
-
-    def test_optional_diagnostic_errors_do_not_change_nominal_guard_outcome(self):
-        policy = run.BOUNDS["native_binding"]
-        for nominal in (policy["sdk_canonical_path"], "/synthetic/mismatch.sdk"):
-            with self.subTest(nominal=nominal), self.sdk_case(
-                    policy["sdk_canonical_path"] + "\n", alias_target=nominal,
-                    canonical_error=RuntimeError("synthetic canonical loop"),
-                    symlink_error=PermissionError("synthetic status denied")) as (binding, events, snapshot):
-                if nominal == policy["sdk_canonical_path"]:
-                    binding.resolve()
-                    snapshot.assert_called_once_with()
-                else:
-                    with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
-                        binding.resolve()
-                    snapshot.assert_not_called()
-                payload = next(e[2] for e in events if e[0:2] == ("output", "resolve-sdk-nominal.json"))
-                self.assertEqual(payload["resolved_path"], nominal)
-                self.assertEqual(payload["diagnostics_only"]["canonical_resolution"]["error_type"], "RuntimeError")
-                self.assertEqual(payload["diagnostics_only"]["sdk_path"]["error_type"], "PermissionError")
-                self.assertEqual(payload["diagnostics_only"]["sdk_canonical_path"]["error_type"], "PermissionError")
-
-    def test_optional_canonical_target_never_supplies_acceptance(self):
-        policy = run.BOUNDS["native_binding"]
-        for nominal in (policy["sdk_canonical_path"], "/synthetic/shared-other-target.sdk"):
-            with self.subTest(nominal=nominal), self.sdk_case(
-                    policy["sdk_canonical_path"] + "\n", alias_target=nominal,
-                    canonical_target="/synthetic/shared-other-target.sdk") as (binding, events, snapshot):
-                if nominal == policy["sdk_canonical_path"]:
-                    binding.resolve()
-                    snapshot.assert_called_once_with()
-                else:
-                    with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs from frozen policy"):
-                        binding.resolve()
-                    snapshot.assert_not_called()
-                payload = next(e[2] for e in events if e[0:2] == ("output", "resolve-sdk-nominal.json"))
-                self.assertEqual(payload["diagnostics_only"]["canonical_resolution"]["resolved_path"],
-                                 "/synthetic/shared-other-target.sdk")
-                self.assertFalse(any(e[0] in ("resolve", "lstat") and e[1] == "/synthetic/shared-other-target.sdk"
-                                     for e in events))
-
-    def test_both_declared_sdk_spellings_retain_mandatory_alias_check(self):
-        policy = run.BOUNDS["native_binding"]
-        for spelling in (policy["sdk_path"], policy["sdk_canonical_path"]):
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for spelling in (a, b):
             with self.subTest(spelling=spelling), self.sdk_case(spelling + "\n") as (binding, events, snapshot):
                 binding.resolve()
                 self.assertEqual(binding.resolution["sdk"], spelling)
-                self.assertEqual(binding.resolution["sdk_version"], policy["sdk_version"])
-                self.assertIn(("resolve", policy["sdk_path"], True), events)
-                self.assertEqual(binding.policy["developer_sdk_identity_files"], policy["developer_sdk_identity_files"])
-                self.assertEqual(binding.run.otool_path, policy["otool"])
-                self.assertEqual(binding.run.hdiutil_path, policy["hdiutil"])
+                self.assertEqual(binding.resolution["sdk_version"], "26.5")
+                self.assertEqual(native.os.environ["SDKROOT"], a)
+                self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (a, b)],
+                                 [("resolve", a, True), ("resolve", b, True)])
                 snapshot.assert_called_once_with()
-                self.assertEqual(events[-1][0:2], ("output", "native-binding-before.json"))
+                binding.use_record = {"synthetic_exact_child": True}
+                binding.recheck()
+                self.assertEqual(snapshot.call_count, 2)
+                self.assertTrue(binding.decoder_confirmed)
+                self.assertEqual([e for e in events if e[0] == "resolve" and e[1] in (a, b)],
+                                 [("resolve", a, True), ("resolve", b, True)] * 2)
+                self.assertEqual([e[1] for e in events if e[0] == "command" and "sdk-version" in e[1]],
+                                 ["resolve-sdk-version", "recheck-sdk-version"])
+                for checkpoint in ("prebinding", "postdecoder"):
+                    receipt = [e[2] for e in events if e[:2] == ("output", f"sdk-identity-{checkpoint}.json")][-1]
+                    self.assertEqual(receipt["observed_version"], "26.5")
+                    self.assertEqual([r["expected_path"] for r in receipt["relations"]], [a, a])
+                    self.assertEqual([r["resolved_path"] for r in receipt["relations"]], [a, a])
+                    self.assertTrue(receipt["observations_are_sequential"])
+
+    def test_either_relation_mismatch_is_recorded_before_its_guard_even_with_stdout_A(self):
+        policy = run.BOUNDS["native_binding"]
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        original_require = native.require
+        for role, path in (("A", a), ("B", b)):
+            with self.subTest(role=role), self.sdk_case(a + "\n", targets={path: "/synthetic/wrong.sdk"}) as (
+                    binding, events, snapshot):
+                def guarded(condition, reason):
+                    if reason.startswith("SDK ") and "strict resolution differs" in reason:
+                        events.append(("guard", reason, condition))
+                    return original_require(condition, reason)
+                with patch.object(native, "require", side_effect=guarded), \
+                        self.assertRaisesRegex(cache.EvidenceError, f"SDK {role} strict resolution differs"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+                receipt_index = max(i for i, e in enumerate(events) if e[:2] == ("output", "sdk-identity-prebinding.json"))
+                guard_index = next(i for i, e in enumerate(events) if e[0] == "guard")
+                self.assertLess(receipt_index, guard_index)
+                relations = events[receipt_index][2]["relations"]
+                self.assertEqual(next(r for r in relations if r["role"] == role)["resolved_path"], "/synthetic/wrong.sdk")
+                self.assertEqual([e for e in events if e[0] == "resolve"], [("resolve", a, True), ("resolve", b, True)])
+
+    def test_common_third_target_is_not_dynamically_accepted(self):
+        policy = run.BOUNDS["native_binding"]
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for stdout in (a, b):
+            with self.subTest(stdout=stdout), self.sdk_case(stdout + "\n",
+                    targets={a: "/synthetic/common.sdk", b: "/synthetic/common.sdk"}) as (binding, events, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "SDK A strict resolution differs"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+                self.assertFalse(any(e[0] == "resolve" and e[1] == "/synthetic/common.sdk" for e in events))
+
+    def test_old_alias_direction_and_self_resolving_B_are_rejected(self):
+        policy = run.BOUNDS["native_binding"]
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for targets in ({a: b, b: b}, {a: a, b: b}, {a: b, b: a}):
+            with self.subTest(targets=targets), self.sdk_case(b + "\n", targets=targets) as (binding, _, snapshot):
+                with self.assertRaisesRegex(cache.EvidenceError, "strict resolution differs from canonical A"):
+                    binding.resolve()
+                snapshot.assert_not_called()
+
+    def test_missing_inaccessible_or_looping_either_literal_fails_with_explicit_receipt(self):
+        policy = run.BOUNDS["native_binding"]
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for role, path in (("A", a), ("B", b)):
+            for error in (FileNotFoundError("synthetic missing"), PermissionError("synthetic denied"),
+                          RuntimeError("synthetic alias loop")):
+                with self.subTest(role=role, error=type(error).__name__), self.sdk_case(
+                        a + "\n", errors={path: error}) as (binding, events, snapshot):
+                    with self.assertRaises(type(error)):
+                        binding.resolve()
+                    snapshot.assert_not_called()
+                    receipt = [e[2] for e in events if e[:2] == ("output", "sdk-identity-prebinding.json")][-1]
+                    relation = next(r for r in receipt["relations"] if r["role"] == role)
+                    self.assertEqual(relation["error_type"], type(error).__name__)
+                    self.assertNotIn("resolved_path", relation)
+                    self.assertEqual([e for e in events if e[0] == "resolve"], [("resolve", a, True), ("resolve", b, True)])
+
+    def test_version_query_not_B_filename_controls_pre_and_post(self):
+        policy = run.BOUNDS["native_binding"]
+        b = policy["sdk_versioned_path"]
+        for checkpoint in ("prebinding", "postdecoder"):
+            for bad in ("", "26.4", "26.5\n26.4"):
+                versions = {"prebinding": "26.5", "postdecoder": "26.5"}
+                with self.subTest(checkpoint=checkpoint, version=bad), self.sdk_case(
+                        b + "\n", versions=versions) as (binding, events, snapshot):
+                    if checkpoint == "postdecoder":
+                        binding.resolve()
+                        binding.use_record = {"synthetic_child": True}
+                        snapshot.reset_mock()
+                        events.clear()
+                    versions[checkpoint] = bad
+                    with self.assertRaisesRegex(cache.EvidenceError, "SDK version mismatch"):
+                        binding.resolve() if checkpoint == "prebinding" else binding.recheck()
+                    snapshot.assert_not_called()
+                    self.assertFalse(binding.decoder_confirmed)
+                    self.assertFalse(any(e[0] == "resolve" for e in events))
+                    version_call = next(e for e in events if e[0] == "command" and "sdk-version" in e[1])
+                    self.assertEqual(version_call[2], [policy["xcrun"], "--sdk", "macosx", "--show-sdk-version"])
+
+    def test_version_command_failure_is_not_a_filename_fallback(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case(policy["sdk_versioned_path"] + "\n") as (binding, events, snapshot):
+            command = binding.run.command
+            def fail_version(name, args):
+                if name == "resolve-sdk-version":
+                    raise cache.EvidenceError("synthetic command failure")
+                return command(name, args)
+            with patch.object(binding.run, "command", side_effect=fail_version), \
+                    self.assertRaisesRegex(cache.EvidenceError, "synthetic command failure"):
+                binding.resolve()
+            snapshot.assert_not_called()
+            self.assertFalse(any(e[0] == "resolve" for e in events))
 
     def test_undeclared_alias_is_rejected_even_if_it_would_resolve_to_same_sdk(self):
         policy = run.BOUNDS["native_binding"]
@@ -894,59 +899,198 @@ class SDKResolutionTests(unittest.TestCase):
 
     def test_wrong_missing_or_nonliteral_sdk_output_fails_before_snapshot(self):
         policy = run.BOUNDS["native_binding"]
-        for stdout in ("", "\n", policy["sdk_canonical_path"].replace("26.5.sdk", "26.4.sdk") + "\n",
-                       policy["sdk_path"] + "/\n", policy["sdk_path"] + "\n" + policy["sdk_canonical_path"]):
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for stdout in ("", "\n", b.replace("26.5.sdk", "26.4.sdk") + "\n", a + "/\n", a + "\n" + b):
             with self.subTest(stdout=stdout), self.sdk_case(stdout) as (binding, _, snapshot):
                 with self.assertRaisesRegex(cache.EvidenceError, "xcrun selected an unfrozen SDK"):
                     binding.resolve()
                 snapshot.assert_not_called()
 
-    def test_canonical_output_does_not_bypass_wrong_or_missing_sdk_version(self):
+    def test_either_relation_retargeted_postdecoder_blocks_snapshot_and_semantics(self):
         policy = run.BOUNDS["native_binding"]
-        for version in ("26.4", ""):
-            with self.subTest(version=version), self.sdk_case(policy["sdk_canonical_path"] + "\n", version) as (
-                    binding, _, snapshot):
-                with self.assertRaisesRegex(cache.EvidenceError, "SDK version mismatch"):
-                    binding.resolve()
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        for role, path in (("A", a), ("B", b)):
+            targets = {}
+            with self.subTest(role=role), self.sdk_case(a + "\n", targets=targets) as (binding, events, snapshot):
+                binding.resolve()
+                binding.use_record = {"synthetic_exact_child": True}
+                snapshot.reset_mock()
+                events.clear()
+                targets[path] = "/synthetic/retargeted.sdk"
+                with self.assertRaisesRegex(cache.EvidenceError, f"SDK {role} strict resolution differs"):
+                    binding.recheck()
                 snapshot.assert_not_called()
+                self.assertFalse(binding.decoder_confirmed)
+                self.assertEqual([e for e in events if e[0] == "resolve"], [("resolve", a, True), ("resolve", b, True)])
 
-    def test_both_spellings_still_reject_nominal_alias_mismatch(self):
+    def test_either_relation_missing_or_inaccessible_postdecoder_blocks(self):
         policy = run.BOUNDS["native_binding"]
-        for spelling in (policy["sdk_path"], policy["sdk_canonical_path"]):
-            with self.subTest(spelling=spelling), self.sdk_case(
-                    spelling + "\n", alias_target="/different/SDK.sdk") as (binding, _, snapshot):
-                with self.assertRaisesRegex(cache.EvidenceError, "SDK symlink resolution differs"):
+        for role, path in (("A", policy["sdk_canonical_path"]), ("B", policy["sdk_versioned_path"])):
+            for error in (FileNotFoundError("missing post"), PermissionError("denied post")):
+                errors = {}
+                with self.subTest(role=role, error=type(error).__name__), self.sdk_case(
+                        errors=errors) as (binding, events, snapshot):
                     binding.resolve()
-                snapshot.assert_not_called()
+                    binding.use_record = {"synthetic_exact_child": True}
+                    snapshot.reset_mock()
+                    errors[path] = error
+                    with self.assertRaises(type(error)):
+                        binding.recheck()
+                    snapshot.assert_not_called()
+                    self.assertFalse(binding.decoder_confirmed)
 
-    def test_canonical_output_still_requires_existing_accessible_nominal_alias(self):
+    def test_common_third_target_postdecoder_is_rejected(self):
         policy = run.BOUNDS["native_binding"]
-        for error in (FileNotFoundError("synthetic missing nominal SDK"),
-                      PermissionError("synthetic inaccessible nominal SDK")):
-            with self.subTest(error=type(error).__name__), self.sdk_case(
-                    policy["sdk_canonical_path"] + "\n", alias_error=error) as (binding, _, snapshot):
-                with self.assertRaises(type(error)):
-                    binding.resolve()
-                snapshot.assert_not_called()
-
-    def test_post_decoder_recheck_still_resolves_nominal_after_canonical_output(self):
-        policy = run.BOUNDS["native_binding"]
-        with self.sdk_case(policy["sdk_canonical_path"] + "\n") as (binding, _, snapshot):
+        targets = {}
+        with self.sdk_case(targets=targets) as (binding, events, snapshot):
             binding.resolve()
             binding.use_record = {"synthetic_exact_child": True}
+            targets.update({policy["sdk_canonical_path"]: "/synthetic/common.sdk",
+                            policy["sdk_versioned_path"]: "/synthetic/common.sdk"})
             snapshot.reset_mock()
-            with patch.object(Path, "resolve", return_value=Path("/changed/SDK.sdk")) as resolver:
-                with self.assertRaisesRegex(cache.EvidenceError, "bound SDK resolution changed"):
-                    binding.recheck()
-                resolver.assert_called_once_with(strict=True)
+            with self.assertRaisesRegex(cache.EvidenceError, "SDK A strict resolution differs"):
+                binding.recheck()
             snapshot.assert_not_called()
             self.assertFalse(binding.decoder_confirmed)
 
-    def test_canonical_xcrun_output_does_not_relax_sdkroot_environment(self):
+    def test_optional_status_errors_do_not_supply_or_remove_relation_acceptance(self):
         policy = run.BOUNDS["native_binding"]
-        with patch.dict("os.environ", {"SDKROOT": policy["sdk_canonical_path"]}, clear=True):
+        for target in (policy["sdk_canonical_path"], "/synthetic/wrong.sdk"):
+            with self.subTest(target=target), self.sdk_case(
+                    targets={policy["sdk_versioned_path"]: target},
+                    symlink_error=PermissionError("synthetic status denied")) as (binding, events, snapshot):
+                if target == policy["sdk_canonical_path"]:
+                    binding.resolve()
+                    snapshot.assert_called_once_with()
+                else:
+                    with self.assertRaises(cache.EvidenceError):
+                        binding.resolve()
+                    snapshot.assert_not_called()
+                receipt = [e[2] for e in events if e[:2] == ("output", "sdk-identity-prebinding.json")][-1]
+                self.assertTrue(all(r["error_type"] == "PermissionError"
+                                    for r in receipt["diagnostics_only"].values()))
+
+    def test_relation_receipt_fits_existing_sink_and_error_still_blocks(self):
+        policy = run.BOUNDS["native_binding"]
+        with tempfile.TemporaryDirectory() as temp, self.sdk_case(
+                targets={policy["sdk_versioned_path"]: "/synthetic/mismatch.sdk"}) as (binding, _, snapshot):
+            evidence = Path(temp)
+            binding.run.output = cache.Output(evidence, run.BOUNDS["limits"])
+            with self.assertRaises(cache.EvidenceError):
+                binding.resolve()
+            snapshot.assert_not_called()
+            receipt = evidence / "sdk-identity-prebinding.json"
+            self.assertLess(receipt.stat().st_size, 4096)
+            self.assertEqual(json.loads(receipt.read_text())["relations"][1]["resolved_path"], "/synthetic/mismatch.sdk")
+
+    def test_receipt_sink_failure_cannot_become_sdk_acceptance(self):
+        with self.sdk_case() as (binding, events, snapshot):
+            with patch.object(binding.run.output, "json", side_effect=cache.EvidenceError("bounded output failure")), \
+                    self.assertRaisesRegex(cache.EvidenceError, "bounded output failure"):
+                binding.resolve()
+            snapshot.assert_not_called()
+            self.assertFalse(any(e[0] == "resolve" for e in events))
+
+    def test_relation_receipt_failure_after_evaluation_stops_before_binding(self):
+        policy = run.BOUNDS["native_binding"]
+        with self.sdk_case() as (binding, events, snapshot):
+            original = binding.run.output.json
+            def reject_relations(name, value):
+                if name == "sdk-identity-prebinding.json" and value["relations"]:
+                    raise cache.EvidenceError("relation receipt limit")
+                return original(name, value)
+            with patch.object(binding.run.output, "json", side_effect=reject_relations), \
+                    self.assertRaisesRegex(cache.EvidenceError, "relation receipt limit"):
+                binding.resolve()
+            snapshot.assert_not_called()
+            self.assertEqual([e for e in events if e[0] == "resolve"], [
+                ("resolve", policy["sdk_canonical_path"], True), ("resolve", policy["sdk_versioned_path"], True)])
+
+    def test_sdkroot_accepts_A_only_not_B(self):
+        policy = run.BOUNDS["native_binding"]
+        a, b = policy["sdk_canonical_path"], policy["sdk_versioned_path"]
+        with patch.dict("os.environ", {"SDKROOT": a}, clear=True):
+            binding = native.NativeBinding(SimpleNamespace(bounds=run.BOUNDS))
+            self.assertEqual(native.os.environ["SDKROOT"], a)
+            native.os.environ["SDKROOT"] = b
+            with self.assertRaisesRegex(cache.EvidenceError, "developer/SDK environment override"):
+                binding.check_environment()
+        with patch.dict("os.environ", {"SDKROOT": b}, clear=True):
             with self.assertRaisesRegex(cache.EvidenceError, "developer/SDK environment override"):
                 native.NativeBinding(SimpleNamespace(bounds=run.BOUNDS))
+
+    def test_metadata_snapshot_uses_A_and_binds_first_actual_hash_without_prior_value(self):
+        policy = run.BOUNDS["native_binding"]
+        a_metadata = str(Path(policy["sdk_canonical_path"]) / "SDKSettings.plist")
+        self.assertEqual(policy["developer_sdk_identity_files"][1], a_metadata)
+        with self.sdk_case() as (binding, _, snapshot), patch.dict("os.environ",
+                {"GITHUB_SHA": "synthetic-sha", "GITHUB_RUN_ATTEMPT": "1"}):
+            binding.run.deadline = time.monotonic() + 10
+            paths = []
+            def hash_file(path, budget, deadline):
+                paths.append(str(path))
+                return {"path": str(path), "sha256": "first-actual-fixture-hash"}
+            with patch.object(native, "bind_hash", side_effect=hash_file), \
+                    patch.object(native, "file_machos", return_value=[{"uuid": "fixture"}]), \
+                    patch.object(native, "loaded_parallel", return_value=(object(), {"uuid": "fixture"})), \
+                    patch.object(native, "backing_binding", return_value={"fixture": True}):
+                receipt = native.NativeBinding.snapshot(binding)
+            self.assertIn(a_metadata, paths)
+            self.assertNotIn(str(Path(policy["sdk_versioned_path"]) / "SDKSettings.plist"), paths)
+            self.assertEqual(receipt["developer_sdk_files"][a_metadata]["sha256"], "first-actual-fixture-hash")
+            self.assertFalse(any(key.endswith("sha256") for key in policy["sdk_identity_policy"]))
+
+    def test_changed_postdecoder_metadata_hash_blocks_even_when_both_relations_match(self):
+        with self.sdk_case() as (binding, _, snapshot):
+            binding.resolve()
+            binding.use_record = {"synthetic_exact_child": True}
+            snapshot.reset_mock()
+            snapshot.return_value = {"synthetic_first_metadata_hash": "changed"}
+            with self.assertRaisesRegex(cache.EvidenceError, "bound native component"):
+                binding.recheck()
+            snapshot.assert_called_once_with()
+            self.assertFalse(binding.decoder_confirmed)
+
+    def test_postdecoder_checks_precede_snapshot_and_confirmation(self):
+        with self.sdk_case() as (binding, events, snapshot):
+            binding.resolve()
+            binding.use_record = {"synthetic_exact_child": True}
+            events.clear()
+            def observed_snapshot():
+                events.append(("snapshot", "postdecoder"))
+                return binding.before
+            snapshot.side_effect = observed_snapshot
+            binding.recheck()
+            version = next(i for i, e in enumerate(events) if e[:2] == ("command", "recheck-sdk-version"))
+            relation_receipt = max(i for i, e in enumerate(events) if e[:2] == ("output", "sdk-identity-postdecoder.json"))
+            hashed = events.index(("snapshot", "postdecoder"))
+            confirmation = next(i for i, e in enumerate(events) if e[:2] == ("output", "native-binding-acceptance.json"))
+            self.assertLess(version, relation_receipt)
+            self.assertLess(relation_receipt, hashed)
+            self.assertLess(hashed, confirmation)
+
+    def test_final_metadata_hash_check_is_not_an_alias_or_version_observation(self):
+        policy = run.BOUNDS["native_binding"]
+        metadata = str(Path(policy["sdk_canonical_path"]) / "SDKSettings.plist")
+        for observed_hash in ("first", "changed"):
+            with self.subTest(hash=observed_hash), self.sdk_case() as (binding, events, _):
+                binding.before = {"native_tools": {}, "developer_sdk_files": {
+                    metadata: {"path": metadata, "sha256": "first"}}}
+                binding.decoder_confirmed = True
+                binding.run.deadline = time.monotonic() + 10
+                with patch.object(native, "bind_hash", return_value={"path": metadata, "sha256": observed_hash}) as hasher, \
+                        patch.object(binding, "check_sdk_identity") as identities, \
+                        patch.object(binding.run, "command") as command, patch.object(Path, "resolve") as resolver:
+                    if observed_hash == "first":
+                        binding.recheck_tools_after_semantics()
+                    else:
+                        with self.assertRaisesRegex(cache.EvidenceError, "bound native component"):
+                            binding.recheck_tools_after_semantics()
+                    self.assertEqual(hasher.call_args.args[0], Path(metadata))
+                    identities.assert_not_called()
+                    command.assert_not_called()
+                    resolver.assert_not_called()
+        self.assertIn("NOT a new alias or SDK-version observation", policy["final_sdk_precision"])
 
 
 if __name__ == "__main__":

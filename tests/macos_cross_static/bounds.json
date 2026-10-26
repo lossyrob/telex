@@ -1,6 +1,6 @@
 {
   "component": "arm24-intel25-static-v1",
-  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977],
+  "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431],
   "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
   "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
   "prelaunch_status": {
@@ -75,12 +75,25 @@
     "developer_dir": "/Applications/Xcode_26.6.app/Contents/Developer",
     "toolchain": "com.apple.dt.toolchain.XcodeDefault",
     "otool": "/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/otool",
-    "sdk_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
-    "sdk_canonical_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+    "sdk_canonical_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+    "sdk_versioned_path": "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
     "sdk_version": "26.5",
+    "sdk_identity_policy": {
+      "design_disposition": "https://github.com/lossyrob/telex/issues/172#issuecomment-6406113431",
+      "canonical_A": "sdk_canonical_path",
+      "declared_versioned_B": "sdk_versioned_path",
+      "xcrun_result": "Only the exact literal A or B after the existing whitespace trim; no other alias is resolved into acceptance.",
+      "SDKROOT": "Only exact A.",
+      "required_checkpoints": ["before native binding and transfers", "after decoder and before semantic processing"],
+      "required_relations": ["resolve(A, strict=True) == exact literal A", "resolve(B, strict=True) == exact literal A"],
+      "version_identity": "Require26.5 from the frozen xcrun version command at both checkpoints, never from B filename.",
+      "metadata_identity": "A/SDKSettings.plist: first actual hash binds under6401453292 with no prior expected hash. Post-decoder and final metadata hashes must equal that first value.",
+      "no_dynamic_adoption": true,
+      "observations_are_sequential_not_atomic_stability_proof": true
+    },
     "developer_sdk_identity_files": [
       "/Applications/Xcode_26.6.app/Contents/version.plist",
-      "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/SDKSettings.plist"
+      "/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/SDKSettings.plist"
     ],
     "library": "/usr/lib/libParallelCompression.dylib",
     "query_provider": "/usr/lib/libSystem.B.dylib",
@@ -99,7 +112,7 @@
     "actual_load_binding": "Three obligations under6401764977: (1) concrete controller-loaded decoder/header/UUID/ABI/slide and backing-cache hashes before transfers; (2) recorded direct native ARM64 pinned ipsw launch and fixed absolute dlopen route, with effective search/insertion/translation overrides excluded, justify same-image resolution under trusted provider loader; (3) complete loader trace from the exact owned Popen child must match path/UUID, followed by full unchanged-component recheck BEFORE returning decoder output for semantic processing. Unrelated child events cannot supply the match; trace does not observe slide/cachehash/call/PAC.",
     "acceptance_order": "before-transfer manifest -> prelaunch relation/environment -> exact child with bounded raw stdio -> exact-child UUID/path validation -> full post-decoder manifest equality -> permit semantic image processing -> final unchanged hdiutil/otool/developer/SDK and pinned ipsw/7zz hashes. No third backing-cache hash snapshot or retroactive child slide assertion.",
     "consumer_trace_classification": "Classify dyld PID and complete UUID/absolute-path fields before selected-image filtering. Any malformed exact-child record, selected UUID at a partial/wrong path, or ambiguous selected-path prefix fails even alongside a valid selected event. Complete other images may be ignored only after classification. Known unrelated-child records never supply exact-child evidence.",
-    "final_sdk_precision": "The final post-semantics check rehashes the original canonical SDK metadata files. It is not a new observation of nominal SDK alias resolution; that resolution was checked at prebinding and the post-decoder/pre-semantics recheck.",
+    "final_sdk_precision": "The final post-semantics check rehashes the originally bound A/SDKSettings.plist and developer metadata. It is NOT a new alias or SDK-version observation; version26.5, strict A->A and B->A were required at prebinding and after decoder/before semantics.",
     "trust": "Trust the declared provider decoder host, Python native query provider, Apple toolchain and dyld load trace. Observed hashes identify this execution, not independent pre-run authentication or adversarial integrity attestation. No exhaustive transitive OS dependency audit.",
     "validation_at_preparation": "Only local synthetic tests; this concrete native binding has not been exercised before the proposed launch."
   },
