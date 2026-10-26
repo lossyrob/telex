@@ -496,25 +496,292 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
     wait_for_fixture_process_completion(&second).await;
 }
 
+/// Issue #167 phase evidence for the delayed inherited writer on Windows.
+///
+/// The writer records its PID and script-start time through atomic marker
+/// files. The test retains a query/synchronize handle (never a terminate
+/// right) so creation and exit times stay readable after the writer exits.
+/// All times share the system FILETIME clock.
+#[cfg(windows)]
+mod delayed_writer_phases {
+    use std::fmt::Write as _;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::path::PathBuf;
+    use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE,
+    };
+
+    const ZERO: FILETIME = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+
+    fn ticks(time: FILETIME) -> u64 {
+        (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
+    }
+
+    fn now() -> u64 {
+        let mut time = ZERO;
+        unsafe { GetSystemTimePreciseAsFileTime(&mut time) };
+        ticks(time)
+    }
+
+    fn span(from: Option<u64>, to: Option<u64>) -> String {
+        match (from, to) {
+            (Some(from), Some(to)) => format!("{:.1}", (to as i64 - from as i64) as f64 / 10_000.0),
+            _ => "unobserved".into(),
+        }
+    }
+
+    fn open(pid: u32) -> Option<OwnedHandle> {
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
+        (handle != 0).then(|| unsafe { OwnedHandle::from_raw_handle(handle as *mut _) })
+    }
+
+    /// Creation time, and exit time once the process object is signaled.
+    fn times(handle: &OwnedHandle) -> (Option<u64>, Option<u64>) {
+        let raw = handle.as_raw_handle() as isize;
+        let (mut created, mut exited, mut kernel, mut user) = (ZERO, ZERO, ZERO, ZERO);
+        if unsafe { GetProcessTimes(raw, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+            return (None, None);
+        }
+        let ended = unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0;
+        (Some(ticks(created)), ended.then(|| ticks(exited)))
+    }
+
+    struct Writer {
+        pid: u32,
+        script_started: u64,
+        handle: Option<OwnedHandle>,
+    }
+
+    pub struct Observer {
+        root: PathBuf,
+        invoked: u64,
+        writer: Option<Writer>,
+    }
+
+    impl Observer {
+        pub fn new() -> Self {
+            let root = std::env::current_dir()
+                .unwrap()
+                .join("target")
+                .join("credential-command-fixtures")
+                .join(format!(
+                    "telex-credential-delayed-writer-{}-{}",
+                    std::process::id(),
+                    telex::model::now_ms(),
+                ));
+            assert!(!root.to_string_lossy().contains('\''));
+            std::fs::create_dir_all(&root).unwrap();
+            Self {
+                root,
+                invoked: 0,
+                writer: None,
+            }
+        }
+
+        /// Wrap the delayed writer with atomic start/written markers. The
+        /// stdout contract is unchanged; marker failures only reach stderr.
+        pub fn script(&self, body: &str) -> String {
+            let root = self.root.display();
+            format!(
+                "$m='{root}'; \
+                 [IO.File]::WriteAllText(\"$m\\started.tmp\", \"$PID \" + [DateTime]::UtcNow.ToFileTimeUtc()); \
+                 [IO.File]::Move(\"$m\\started.tmp\", \"$m\\started\"); \
+                 {body}; \
+                 [IO.File]::WriteAllText(\"$m\\written.tmp\", [string][DateTime]::UtcNow.ToFileTimeUtc()); \
+                 [IO.File]::Move(\"$m\\written.tmp\", \"$m\\written\")"
+            )
+        }
+
+        pub fn invoked(&mut self) {
+            self.invoked = now();
+        }
+
+        pub fn poll(&mut self) {
+            if self.writer.is_some() {
+                return;
+            }
+            let Ok(text) = std::fs::read_to_string(self.root.join("started")) else {
+                return;
+            };
+            let mut fields = text.split_whitespace();
+            let (Some(Ok(pid)), Some(Ok(script_started))) = (
+                fields.next().map(str::parse::<u32>),
+                fields.next().map(str::parse::<u64>),
+            ) else {
+                return;
+            };
+            self.writer = Some(Writer {
+                pid,
+                script_started,
+                handle: open(pid),
+            });
+        }
+
+        pub fn report(&mut self, outcome: &str) -> String {
+            let finished = now();
+            self.poll();
+            let written = std::fs::read_to_string(self.root.join("written"))
+                .ok()
+                .and_then(|text| text.trim().parse::<u64>().ok());
+            let invoked = Some(self.invoked);
+            let mut line = format!(
+                "[issue-167 delayed-writer phases] outcome={outcome} total_ms={}",
+                span(invoked, Some(finished)),
+            );
+            match &self.writer {
+                Some(writer) => {
+                    let (created, exited) = writer.handle.as_ref().map_or((None, None), times);
+                    let script = Some(writer.script_started);
+                    write!(
+                        line,
+                        " writer_pid={} handle_retained={} writer_exited={} \
+                         invoked_to_writer_created_ms={} writer_created_to_script_ms={} \
+                         script_to_written_ms={} written_to_writer_exit_ms={} \
+                         writer_exit_to_outcome_ms={}",
+                        writer.pid,
+                        writer.handle.is_some(),
+                        exited.is_some(),
+                        span(invoked, created),
+                        span(created, script),
+                        span(script, written),
+                        span(written, exited),
+                        span(exited, Some(finished)),
+                    )
+                    .unwrap();
+                }
+                None => line.push_str(" writer_script=unobserved"),
+            }
+            if outcome != "ok" || self.writer.is_none() {
+                write!(line, " processes={}", self.snapshot()).unwrap();
+            }
+            line
+        }
+
+        /// Shell children of this test process and PowerShell processes
+        /// created since invocation, with exit state. Observation only.
+        fn snapshot(&self) -> String {
+            let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+            if raw == INVALID_HANDLE_VALUE {
+                return format!(
+                    "snapshot-error:{:?}",
+                    std::io::Error::last_os_error().raw_os_error()
+                );
+            }
+            let snapshot = unsafe { OwnedHandle::from_raw_handle(raw as *mut _) };
+            let raw = snapshot.as_raw_handle() as isize;
+            let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut found = Vec::new();
+            let mut more = unsafe { Process32FirstW(raw, &mut entry) } != 0;
+            while more {
+                let length = entry
+                    .szExeFile
+                    .iter()
+                    .position(|unit| *unit == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name =
+                    String::from_utf16_lossy(&entry.szExeFile[..length]).to_ascii_lowercase();
+                let candidate = (name == "cmd.exe"
+                    && entry.th32ParentProcessID == std::process::id())
+                    || name == "powershell.exe";
+                if let Some(handle) = candidate.then(|| open(entry.th32ProcessID)).flatten() {
+                    let (created, exited) = times(&handle);
+                    if created.is_some_and(|created| created >= self.invoked) {
+                        found.push(format!(
+                            "{name}:{}:parent={}:created_ms={}:exited={}",
+                            entry.th32ProcessID,
+                            entry.th32ParentProcessID,
+                            span(Some(self.invoked), created),
+                            exited.is_some(),
+                        ));
+                    }
+                }
+                more = unsafe { Process32NextW(raw, &mut entry) } != 0;
+            }
+            format!("[{}]", found.join(","))
+        }
+    }
+
+    impl Drop for Observer {
+        fn drop(&mut self) {
+            if !std::thread::panicking() {
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+    }
+}
+
+/// Write past libtest output capture so passing hosted runs retain measured phases.
+#[cfg(windows)]
+fn emit_uncaptured(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
     #[cfg(windows)]
+    let mut phases = delayed_writer_phases::Observer::new();
+    #[cfg(windows)]
     let command = format!(
         "start /b {}",
-        encoded_powershell(
+        encoded_powershell(&phases.script(
             "Start-Sleep -Milliseconds 150; [Console]::Out.Write('  delayed-non-secret  ')",
-        )
+        ))
     );
     #[cfg(unix)]
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
-    let (config, _) = tokio::time::timeout(
-        Duration::from_secs(5),
-        pg_connect_config(&profile(&command)),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let profile = profile(&command);
+    let operation = pg_connect_config(&profile);
+    tokio::pin!(operation);
+    // Same five-second budget as tokio::time::timeout (the operation is polled
+    // first), but the pending operation stays alive until phase evidence and
+    // owned obligations are recorded, before cancellation runs.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    #[cfg(windows)]
+    phases.invoked();
+    let outcome = loop {
+        tokio::select! {
+            biased;
+            result = &mut operation => break Some(result),
+            _ = tokio::time::sleep_until(deadline) => break None,
+            _ = tokio::time::sleep(Duration::from_millis(5)) => {
+                #[cfg(windows)]
+                phases.poll();
+            }
+        }
+    };
+    #[cfg(windows)]
+    let report = phases.report(if outcome.is_some() { "ok" } else { "elapsed" });
+    #[cfg(unix)]
+    let report = String::new();
+    let Some(result) = outcome else {
+        let obligations = telex::profiles::credential_command_obligations();
+        panic!(
+            "delayed inherited writer was not collected within the 5s budget; \
+             obligations={obligations:?} {report}"
+        );
+    };
+    #[cfg(windows)]
+    emit_uncaptured(&report);
+    let (config, _) = result.unwrap();
     assert_eq!(
         config.get_password(),
         Some(b"delayed-non-secret".as_slice())
