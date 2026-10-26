@@ -123,6 +123,7 @@ fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text(
             "CREATE TABLE watcher_v2_meta (
                 singleton INTEGER PRIMARY KEY, version INTEGER, revision INTEGER,
                 responsibility TEXT);
+             INSERT INTO watcher_v2_meta VALUES(1,2,0,'fixture');
              CREATE TRIGGER fail_startup BEFORE INSERT ON watcher_v2_meta BEGIN
                 SELECT RAISE(ABORT, '{secret} {dsn} token=hidden {private_text}');
              END;"
@@ -140,6 +141,7 @@ fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text(
     assert_runtime_failure(&output, &envelope);
     let diagnostic = String::from_utf8(output.stderr).unwrap();
     assert!(diagnostic.contains("SQLite"), "{diagnostic}");
+    assert!(diagnostic.contains("Error code 1811:"), "{diagnostic}");
     for value in [secret, dsn, "hidden", private_text] {
         assert!(!diagnostic.contains(value), "{diagnostic}");
         assert!(!String::from_utf8_lossy(&output.stdout).contains(value));
