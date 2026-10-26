@@ -88,6 +88,29 @@ exposure without removing the positive case or neighboring deadline, admission,
 cancellation, and permit-retention checks. Historical ten-run results are not
 evidence for a newer source head.
 
+## Native macOS Watcher management coverage
+
+The macOS leg of `station-intent-lock` reuses its exact-source checkout and
+SQLite-only build for ten existing Watcher management cases, selected by
+`tests/watcher_macos_management.ps1`. Eight library cases exercise same-user
+native sockets, physical registry aliases, missing/stale owners, framing and
+endpoint lifecycle. Two executable CLI cases cover offline refusal and ordinary
+management with safe output. The runner verifies the exact inventory before
+execution; missing cases and native-command failures fail CI.
+
+Execution uses a new short, private child of the disposable runner's home for
+Unix management sockets, while preserving the original Cargo/Rustup homes.
+No existing directory permissions change and no sudo is needed. The actual
+socket-path budget and successful endpoint cleanup are checked; only that
+invocation's temporary home is removed. The detector fixture is not selected,
+and these results do not establish macOS detector containment.
+
+`TELEX_WATCHER_MACOS_MANAGEMENT` records build/run elapsed milliseconds and
+candidate, provider and actual checkout SHAs separately. These added phases
+measure their own cost, including execution setup and cleanup; whole-job
+before/after timings still depend on caches and hosted-runner conditions.
+Linux/Windows commands and all existing station-intent checks are unchanged.
+
 ## Credential-command lifecycle tests
 
 Run the real OS lifecycle targets on Windows, Linux, and macOS:
