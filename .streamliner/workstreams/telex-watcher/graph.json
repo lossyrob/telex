@@ -564,11 +564,11 @@
       "id": "watcher-runtime-backend-resilience",
       "type": "item",
       "title": "Watcher runtime survives Telex daemon restart and backend connection loss",
-      "summary": "A Watcher runtime keeps running across a Telex daemon restart or replacement and a backend connection loss. Affected senders go not ready, attempts pause without duplicate sends, and the runtime reattaches on its normal cycle. Scope: state the contract in the design and runtime docs; add Windows and Linux tests against an isolated daemon and backend; fix any Watcher path that exits or does not recover, filing Application Client or daemon defects upstream. Opened after the #201 runtime (binary 343b9d95, pre-#225) stopped unattended on 2026-10-26 with only a postgres connection-ended log line; that stop's cause is not attributed. No #201 installation, restart or upgrade authority; no macOS work.",
+      "summary": "Campaign accepted PR239 merge aae96d3afc5a3a10fbc6dd65a6480121e09d0227 and exact-merge attempt1 CI40449436237/22 successful results, DocsN/A by path filter, field6433958638/updated-docs for #234. Existing node completed/watch; historical single owner 9591bf30-573a-4cd0-a946-31d8cf2bfd03. This metadata records no owner release or external installation/upgrade/migration outcome; Campaign retained that owner for a separately authorized bounded external upgrade in the quoted acceptance. No Watcher node becomes ready from234, no checkpoint/HOLD/debt/167/182cause/195consumer or new launch credit follows. The full outage/no-duplicate/typed-original-handle recovery contract and satisfied238 external edge are unchanged. Earlier planned/start/draft/finding/correction/awaiting238/merge/follow-through-owed statements below are retained source-time history, not denials of later accepted234completion: A Watcher runtime keeps running across a Telex daemon restart or replacement and a backend connection loss. Affected senders go not ready, attempts pause without duplicate sends, and the runtime reattaches on its normal cycle. Scope: state the contract in the design and runtime docs; add Windows and Linux tests against an isolated daemon and backend; fix any Watcher path that exits or does not recover, filing Application Client or daemon defects upstream. Opened after the #201 runtime (binary 343b9d95, pre-#225) stopped unattended on 2026-10-26 with only a postgres connection-ended log line; that stop's cause is not attributed. No #201 installation, restart or upgrade authority; no macOS work.",
       "repoIds": [
         "telex"
       ],
-      "status": "planned",
+      "status": "completed",
       "attention": "watch",
       "tracker": {
         "type": "github",

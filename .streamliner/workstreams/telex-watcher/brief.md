@@ -2126,3 +2126,342 @@ The change: the externalDependsOn on watcher-runtime-backend-resilience, which p
 - Campaign is the App coordinator and owns the #238 node completion and its follow-through. This message is not that completion record.
 - #234 stays in progress with owner 9591bf30 and draft PR #239. Campaign has told the owner to integrate main and finish the resume proof before #239 comes to its gate.
 ````
+
+
+## #234 historical single owner and accepted completion (2026-10-27)
+
+Campaign accepted PR239 merge aae96d3afc5a3a10fbc6dd65a6480121e09d0227 and exact-merge attempt1 CI40449436237/22 successful results, DocsN/A by path filter, field6433958638/updated-docs for #234. Existing node completed/watch; historical single owner 9591bf30-573a-4cd0-a946-31d8cf2bfd03. This metadata records no owner release or external installation/upgrade/migration outcome; Campaign retained that owner for a separately authorized bounded external upgrade in the quoted acceptance. No Watcher node becomes ready from234, no checkpoint/HOLD/debt/167/182cause/195consumer or new launch credit follows. The full outage/no-duplicate/typed-original-handle recovery contract and satisfied238 external edge are unchanged. Earlier planned/start/draft/finding/correction/awaiting238/merge/follow-through-owed statements below are retained source-time history, not denials of later accepted234completion:
+
+Only the existing Watcher brief and234 graph node change. Planned -> completed/watch and one summary prefix retain the entire old summary as exact suffix. No graph owner key,234 ledger row/task, internal or external dependency, checkpoint/root/order/schema change. All18 ledger records and all other nodes/workstreams stay exact.
+
+The retained launch package is ctx-20261027012549-f7039142; kickoff17204bytes/61241a40c87923d55d10a5f94fbda6e959352cf44ac3046ebfe677f7b3267e3f, prepared at start e521652cab804e4335af1af691b52fc3dd41770f/initial branch lossyrob-fuzzy-enigma. The original1943-byte controller and later1957-byte branch/update-only correction remain separate exact copies. Corrected branch lossyrob-watcher-backend-resilience does not rename the original sessionPath. Retained six explicitly supplied copies only; no live mutable original or recipient read. Preparation/controller time is not exact creation/delivery time. About01:27Z is the reported by-reference delivery precision. Requested model/high/default/interactive is not effective execution/profile. Branch correction is not directory rename; original sessionPath remains unchanged.
+
+PR239 reviewed4e377f8c mergedaae; its complete original issue, earlier draft body, final PR body, readiness, merge gate and accepted terminal field are retained below. Public metadata confirms22 successful RESULT records at exact-aae push CI40449436237 attempt1, not22 reproduced executions/current8e candidate execution/provider-dispatch/log proof. DocsN/A is Campaign/owner path-filter disposition, not a Docs pass or independently executed workflow. Actual passing Linux/Windows SQLite/livePG strict-interrupted/independent-outage/matrix lines, own merged build/format/threeSQLite106.41s/threeDiagnostics1.39s, synthetic-merge checkout attribution, source/design/independent review and source/test merits remain full producer attribution. The strict daemon proof requires real staged original send, one spent attempt, one typed DaemonBootstrap failure, original operation/payload/store/responsibility/generation NotRecorded, no additional budget over ten nonready seconds, identical recovery handle accepted once with exact message/event/receipt counts. Backend termination may occur before staging, so its conditional pending branch is intentional, not a vacuous substitute for the strict daemon proof. Receipt reconciliation is independent and retry still requires proven sender readiness. No relaxed outage/no-duplicate contract or retroactive legacyPending unwriting follows.
+
+Completion does not itself release9591: Campaign acceptance retained it for bounded upgrade OUTSIDE the repo. This tuple supplies no release or installation result. Rollback v0.3.0-gate201-c4f6ac8c and campaign-stalls-201 registration remain source-time operational constraints in the owning disposition, not actions performed here. CI-watch migration remains separately gated on upgrade report and2a4 registrar confirmation; this tuple authorizes no migration/fallback retirement. No node depends on234, and usable-watcher still requires five-minute-custom-watch-gate, examples-accelerate-gate and172HOLD. The historical201stop remains unattributed;195externalconsumer acceptance is a separate queued history,167infrastructure240 does not supply cause/repair/completion/debt credit, and closed3/3diagnostic budget is not reopened/reset/refunded.
+
+Product240 is an independently authenticated REAL clean no-tags fetch/FF: a0c21d69+66fbce15 ->8e09538f, three product paths, full Streamliner42219d1b unchanged. It is boundary24 after actual238v2publication46, not artifactpublication47. Refs167/empty parsed closing refs/167OPEN/same9a retained. The public gate narrows drift rationale and explicitly retains unproved ordinary workspace workload/headroom; exact8e attempt1 is first composed-tree execution, not previous candidate+aae proof. Later240follow-through stays outside234; no source/runtime/CI-independence/cause choice is inferred. Only the exact private operator-home prefix is replaced by the named reversible token in source bodies; complete originals stay bound. No live private original, referenced adapter/generator, recipient/worktree, product/design/test/job/log/runtime/profile/install was followed or executed. The finite new234product hold is not approval/review deadline/waiver/expiry protection.195stays separate.
+
+### Coordinator launch after canonical publication; requested profile only; toolu_014LvyWSq721XAryXtu5EQ5g; receipt2755/d65b4804eb47ef9f3f069791d9c42472be284e34bca793955b0a976e4b4ccafd
+
+````text
+#234 publication is verified on main. I have staffed it.
+
+Verification (fresh clone, read-only):
+- origin/main and the GitHub API both report e521652cab804e4335af1af691b52fc3dd41770f.
+- Parent is eec66987 and the tree is bf53f2a0.
+- The commit changes only telex-watcher/graph.json.
+- Node watcher-runtime-backend-resilience is planned/watch, tracker #234. It depends on watcher-runtime-core (completed) and watcher-runtime-failure-diagnostics (completed), so it is ready.
+- Issue #234 is OPEN, with no assignee and no comments.
+
+Owner change for #234 (watcher-runtime-backend-resilience). Please record it on the node:
+- Owner session: 9591bf30-573a-4cd0-a946-31d8cf2bfd03 ("#234 - watcher backend resilience"), branch lossyrob-fuzzy-enigma, start e521652c.
+- Profile: gpt-6.1-sol, high, default context tier, interactive.
+- The kickoff was delivered by reference at about 01:27Z.
+
+Custody files:
+- Binding record (mutable): [operator-home retained in bound private original]\proj\planning\planning\streamliner\telex\prompts\v2\launches\watcher-runtime-backend-resilience-20261027.json | 1943 | 2106e68a19256fefecdcc34364fe344caa5dabdc36beb6d4fedc0412071c5439. It is now status launched.
+- Context package [operator-home retained in bound private original]\.streamliner\state\telex\telex-watcher\launch-contexts\ctx-20261027012549-f7039142\:
+  - kickoff.md | 17204 | 61241a40c87923d55d10a5f94fbda6e959352cf44ac3046ebfe677f7b3267e3f
+  - handoff.json | 18881 | a6f7041f9fd4119604c2366fab5e62b1013c7f19a772bf5288194652adf138d9 (its kickoffPrompt is byte-equal to kickoff.md)
+  - manifest.json | 10496 | ec7e40aa07bfd6cddfee794adec513765abac3b1c6274b93085b6d21b01f922a
+  - context.md | 8089 | 6d567355221a7b5346d8410f25c16d75ba14dc243410a206b5609ef8d57b72c4
+- Workflow instructions: [operator-home retained in bound private original]\.copilot\session-state\fe2e883c-debc-4573-a855-2cf1e0f89407\files\launch-234\workflowInstructions.md | 15864 | da0f9033f06e3ce4b47ccfc10deca2c5d34dc5196319658b081b0019ccdb260e
+- Generator: ...\files\launch-234\prepare234.js | 11057 | 12160970607104ca4cfaabca0302e2d88bdf827887e5bd5bbd1df515a6859d5f
+
+The node status stays planned until the owner reports it has started.
+
+This staffing does not retire Campaign's fallback scheduler or the standing registration. The owner's launch notes say the same.
+````
+
+### Reported start and additive branch correction; initial diagnosis only; toolu_01PDovnHbi5VJvYwWZeP1qoU; receipt1425/65e524e56460668a45ddc96b871c39d949c8d73f0414131a1ca6771486a041fd
+
+````text
+#234 (watcher-runtime-backend-resilience) status update, from owner 9591bf30 at 2026-10-27 01:38Z:
+- Please record the node as in progress with owner 9591bf30. Public evidence: https://github.com/lossyrob/telex/issues/234#issuecomment-6431472507 (01:30:01Z). No PR yet.
+- The app renamed the owner's branch to lossyrob-watcher-backend-resilience. This is an additive correction to lossyrob-fuzzy-enigma in my staffing report. The binding record was updated: 1957 bytes, c1a1aeb22cc154b0d8fdfd574a2e938625e614cde7e6cb25f9f526892283772d.
+- Owner-reported finding, not yet in a PR. The isolated SQLite daemon-outage regression shows that automatic pending-receipt queries use up their finite budget while the sender is not ready, so after the daemon is replaced the watch stays receipt-outcome-unresolved. The owner is fixing this within #234's scope ("fix any Watcher path that does not recover"). It is not a new node, and no repair is credited until the PR merges.
+````
+
+### Explicit correction of that initial diagnosis and upstream routing; toolu_01XVZr53P67Q5vyYxJ6fXC38; receipt1063/d5285419bb30be1d0637fde043afd08f3f35cccf6478f28d22333dfb26ac999a
+
+````text
+#234 owner 9591bf30 found a candidate cross-workstream item from Watcher to Application Client: https://github.com/lossyrob/telex/issues/234#issuecomment-6431592482 (01:3xZ).
+- What it is: ApplicationClient::send leaves a durable operation pending (Recorded/Pending forever) after BeforePeerDecision on a failed daemon bootstrap.
+- This replaces the owner's earlier "Watcher budget policy" description, which I relayed at 01:38Z.
+- Routing: sent to Campaign. Steward asked about the #234 shape.
+- Not yet recorded: no tracker, node, edge, owner or cause credit. #234 status (in progress) is unchanged.
+````
+
+### Direct owner draft; interrupted-send regression retained, not ready at this time; call_PL06TTciR02gDDM8jjIdr8xS; receipt779/a2117e9060cf76f5f43f66502cb199f12559dfa4a155005283fbaacc89530f53
+
+````text
+#234 has draft PR https://github.com/lossyrob/telex/pull/239 at head 66e1eb9e; it is not ready and retains the interrupted-send regression. The steward's dependency decision is https://github.com/lossyrob/telex/issues/234#issuecomment-6431621187 and the upstream client issue is https://github.com/lossyrob/telex/issues/238.
+````
+
+### Independent-outage versus interrupted-send gate preserved; toolu_01FMEJDCpvwdQRsaxp8RFeHs; receipt1331/c19d7ed800bdbd53506b5e83806d8d5b17f489528c914f2605c907c8710bf90f
+
+````text
+Watcher progress for #234, node watcher-runtime-backend-resilience; status stays in_progress.
+
+Owner 9591bf30 opened draft PR #239 (https://github.com/lossyrob/telex/pull/239), checked with gh.
+- Head: 66e1eb9e58f87ba62fee0c388d645da380a97e79 on lossyrob-watcher-backend-resilience. The PR body says "Closes #234".
+- Changed files: ci.yml, docs/design/watcher.md, docs/watcher-runtime.md, the watcher_resilience_detector bin, lib.rs and runtime_resilience_tests.rs. It does not touch application_client.rs.
+
+What the owner reports:
+- Independent SQLite sender-outage recovery passes. The send budget is unchanged across ten non-ready seconds.
+- The original interrupted-send assertion is still red until #238 is fixed. That matches the pending externalDependsOn on send-admission-failure-resolution.
+
+Merge stays gated on #238 landing and the resume test passing.
+````
+
+### Later direct owner readiness at reviewed4e377f8c; call_HTgCAGcsNj0N7V7zY31dRkno; receipt826/4344deb031242c956aeb09756a6316c05de423948bd0f59c1262e6143444019b
+
+````text
+Record #234 PR #239 READY at exact 4e377f8c998084ebdc413f54fb0ff00534827a12: https://github.com/lossyrob/telex/pull/239#issuecomment-6433675107. All 22 CI jobs and own Linux/Windows SQLite/PostgreSQL recovery proofs pass, design/independent review pass, only #234 is a parsed closing reference, and upstream #238 is integrated through ca6ed12c; operator merge is pending.
+````
+
+### Owning coordinator merge; accepted follow-through still owed at source time; toolu_016tfXisaYopskoibkEHxMps; receipt1272/0572d24ca789d702df999d4eefb73917023e1a79eab63f2c729f34b131232ff9
+
+````text
+#234 (watcher-runtime-backend-resilience) has merged and closed. Please record the merge, but not completion yet. I checked with gh:
+- PR #239 merged at 2026-10-27T04:23:05Z as aae96d3afc5a3a10fbc6dd65a6480121e09d0227, from head 4e377f8c998084ebdc413f54fb0ff00534827a12. Campaign's gate is 6433694366. https://github.com/lossyrob/telex/pull/239
+- Issue #234 closed as COMPLETED at 04:23:06Z.
+
+Owner 9591bf30 still owns the post-merge follow-through. Completion waits for Campaign to accept that follow-through.
+
+No Watcher node lists #234 in its dependsOn, so nothing becomes ready. The usable-watcher checkpoint still waits on five-minute-custom-watch-gate, examples-accelerate-gate and #172 (on HOLD). The CI-watch migration stays paused, and Campaign will decide on it when it accepts #234's follow-through.
+````
+
+### Owner merge and retained exact-merge duty; call_Yi1bTjkQU9fnaBJrHg6SULd5; receipt769/b6f1e84874cadf4832ddda94172f7a63fd5290f265818f4ba2949d1e3e5d406d
+
+````text
+Record #234 PR #239 MERGED as aae96d3afc5a3a10fbc6dd65a6480121e09d0227; gate https://github.com/lossyrob/telex/pull/239#issuecomment-6433694366. Issue is closed; owner follow-through is exact-merge main CI attempt one (run 40449436237), applicable Docs and the field report, so do not mark validation complete yet.
+````
+
+### Owner terminal submission; Campaign acceptance requested, not yet granted; call_pbWDBDQYq2qtyRn8hF5tCiK7; receipt766/e0e1b4e208dfdf2f45f2502d0f8048c818d2622938bd0ba1f564c4a6695ee9a7
+
+````text
+#234 owner follow-through is complete at merged aae96d3a: main CI attempt 1 passed all 22 jobs, own merged validation passed, Docs is not applicable, design impact updated-docs. Record the field report https://github.com/lossyrob/telex/issues/234#issuecomment-6433958638; Campaign acceptance has been requested.
+````
+
+### Owning coordinator terminal verification; still awaiting acceptance at source time; toolu_017fepnok4qvR1mgh7E6tiwQ; receipt1112/c107f76ad56072bcb51e400a8ff3744b4bb86b4774e589ffc9014eeb23995b8c
+
+````text
+#234's post-merge follow-through is done and verified. It is waiting on Campaign's acceptance; please don't write the completion record yet.
+
+What I verified with gh:
+- Main CI run 40449436237, attempt 1, on exact merge aae96d3afc5a3a10fbc6dd65a6480121e09d0227 completed with success, 22 of 22 jobs.
+- Owner 9591bf30's field report is #234 comment 6433958638, posted 04:44:26Z: https://github.com/lossyrob/telex/issues/234#issuecomment-6433958638
+
+As reported by the owner:
+- The field report declares updated-docs.
+- The Docs workflow did not trigger.
+- Their own merged SQLite/diagnostic validation passed.
+- Campaign has the acceptance packet.
+````
+
+### Actual Campaign acceptance; owner retained for separate external upgrade, NOT released; toolu_01THeBzhCDj1jxvmtvZivzgT; receipt898/da507fec59009ddd7705c65d158986d4e2e88b1da5da535d9ec0baf74604ad55
+
+````text
+#234 follow-through accepted. It covers exact-merge aae96d3a: CI 40449436237 attempt 1, 22/22; Docs is N/A by its path filter; field report 6433958638; design impact updated-docs. You may record #234's completion in a later tuple, after complete238v2 publishes. Don't add it to the frozen v2. The owner (9591bf30) is not released yet: it has one bounded task, upgrading the installation outside the repo, and I'll tell you when it's released.
+````
+
+### Later owning Watcher completion disposition; runtime/migration/checkpoint boundaries; toolu_01S1km87LyYLT4X13Lv5RVQu; receipt1362/b7af03bfdc474af2723363af103a022276239d12992f588c0a998b51d8493f67
+
+````text
+#234 is complete: Campaign has accepted its post-merge follow-through (toolu_01EVVsx6dYhM1SUX5JQspHSs). That covers exact merge aae96d3a, CI run 40449436237 attempt 1 at 22/22, and field report #234 comment 6433958638. You're cleared to write the completion record for watcher-runtime-backend-resilience.
+
+Owner 9591bf30 is not released. Campaign has separately authorized it to upgrade the shared Watcher installation to a build from aae96d3a. It keeps v0.3.0-gate201-c4f6ac8c as the rollback and keeps the campaign-stalls-201 registration. That upgrade is runtime work, not part of the #234 record.
+
+The CI-watch migration stays paused until the upgrade report is in and 2a4bc4c8 confirms the registrar role. No Watcher node depends on #234, so nothing new becomes ready. The usable-watcher checkpoint still waits on five-minute-custom-watch-gate, examples-accelerate-gate and #172, which is on HOLD.
+````
+
+### Complete original issue234 contract
+
+````text
+Watcher item, opened by the design steward (telex-watcher workstream, checkpoint `usable-watcher`).
+
+## Problem
+
+On the #201 installation the retained Watcher runtime (binary 343b9d95, built before #225) stopped unattended. At 23:05:43Z on 2026-10-26, `status` returned `runtime-not-running`, PID 53912 was gone, and runtime.log held only `[telex] postgres connection ended: error communicating with the server`. This happened around an authorized Telex upgrade to c4f6ac8c and a restart of the shared daemon. Neither the stop time nor its cause is established, and nothing attributes the stop to the upgrade or the restart. Because the binary predates #225, a `runtime-failed` exit writes no cause chain, so this incident cannot be diagnosed further.
+
+## Contract
+
+A Watcher runtime must keep running across a Telex daemon restart or replacement and across loss of the backend connection. While a sender is unavailable:
+
+- its watches do not launch attempts;
+- `health` reports the sender not ready, with the error;
+- no message is sent twice and no state is committed for a send that did not complete.
+
+When the daemon or backend returns, the runtime reattaches and reconciles on its normal cycle, and the watches resume without operator action.
+
+Only registry, ownership, management-transport, heartbeat or attempt-task failures may end the runtime. They do so with the #225 stderr cause chain.
+
+Main already appears to follow this. `SenderClients::reconcile` and `invalidate` (telex-watcher/src/client.rs) mark a failed profile not ready and retry. `Runtime::run_inner` (telex-watcher/src/runtime.rs) neither propagates those errors nor launches attempts for unready senders. But docs/design/watcher.md does not state the contract, and no test proves it.
+
+## Scope
+
+1. State the contract in docs/design/watcher.md and docs/watcher-runtime.md.
+2. Add tests, on Windows and Linux at least, against an isolated test daemon and backend. Never use the default daemon, profile or a live store. The tests must show:
+   - the runtime survives the daemon exiting and being replaced;
+   - the runtime survives the backend connection being terminated;
+   - the sender goes not ready and then ready again;
+   - attempts pause and resume;
+   - no duplicate delivery.
+3. If a test shows the runtime exits, or never recovers, fix that path inside the Watcher. A defect in the Application Client or the daemon is filed upstream rather than absorbed.
+
+## Out of scope
+
+- No change to the #201 installation.
+- No restart or upgrade authority. Restarting the #201 runtime is Campaign's decision.
+- No attribution of the #201 stop to any cause.
+- No macOS work (#172 and #233).
+
+The PR that delivers this closes this issue.
+
+````
+
+### Complete earlier draft239 body; source-time not-ready only
+
+````text
+## Context
+
+Watcher must survive daemon restart or replacement and backend connection loss, report affected senders non-ready, stop new attempts while they are unavailable, and resume without duplicate delivery when they return.
+
+Closes #234.
+
+## Changes
+
+- State the runtime outage and fatal-failure contract in the design and administration docs.
+- Add isolated runtime proofs with real daemon processes, a barrier-controlled detector and disposable stores. Cover daemon exit/replacement on SQLite and PostgreSQL, plus termination of the test's PostgreSQL connections through a private loopback fault boundary.
+- Check sender readiness and errors, heartbeat continuity, paused launches, unchanged unaccepted state, unchanged send-retry attempts across a ten-second outage, exact pending identity and unique durable messages after recovery.
+- Run PostgreSQL recovery coverage in the existing Windows and Linux live jobs, with direct candidate-head checkouts for the recovery gate.
+
+## Current evidence and dependency
+
+The independent SQLite sender-outage proof passes. Registry transaction and runtime-diagnostic checks pass, and the added code passes all-feature linting and SQLite-only type checks.
+
+The interrupted-send regression intentionally remains failing until upstream Application Client issue #238 is delivered. A failed bootstrap admission currently leaves the exact durable send operation Recorded/Pending indefinitely; restoring sender membership cannot resolve it. Evidence and the accepted upstream contract are on the issue. This PR does not change the client or infer non-acceptance in Watcher. It must merge after that upstream fix and a passing exact-head resume proof.
+
+PostgreSQL and hosted Windows/Linux results are pending. No real installation, daemon, backend or registration is used by these tests.
+
+Consequence: normal - adds destructive fault coverage confined to disposable test roots and documents the existing runtime contract; production scheduling and send policy are unchanged.
+````
+
+### Complete later final PR239 body
+
+````text
+## Context
+
+Watcher must keep running through daemon replacement and backend connection loss, report affected senders non-ready, and resume without duplicate delivery or committing unaccepted detector state.
+
+Closes #234.
+
+## Changes
+
+- Invalidate cached sender readiness immediately after typed bootstrap, availability, capability, transport or uncertain-send failures. Otherwise retry-authorizing receipt evidence can spend all three send attempts before the periodic membership check observes the outage. Receipt reconciliation stays independent; another send still requires proven sender readiness.
+- Add isolated runtime proofs for daemon replacement on SQLite and PostgreSQL and termination of only the fixture's PostgreSQL connections through a private loopback proxy. Separate cases exercise an interrupted send and a detector finishing after non-readiness is observed.
+- Make the interrupted-daemon proof deterministic with a unit-test-only barrier after real readiness/send-budget admission and before client.send. Require a pending operation, exactly one recorded DaemonBootstrap send failure, original-handle/generation NotRecorded, and acceptance of the identical recovery handle exactly once after recovery.
+- Assert runtime identity and heartbeat continuity, sender error/readiness, paused attempts, unchanged unaccepted state, retained pending identity, and unchanged send budget over a ten-second outage. Recovery must produce three unique durable messages with matching event, operation and receipt identities.
+- State the runtime outage and fatal-failure contract in the design and administration docs. Expand the two existing live PostgreSQL test selectors. CI checkout policy is unchanged, retaining synthetic-merge integration checks and the existing head-specific jobs.
+
+The upstream Application Client change for #238 is merged through PR #241 and is included in this branch's main base at ca6ed12c. The resume proofs here exercise Watcher's own behavior against that landed implementation.
+
+## Validation
+
+At head 4e377f8c998084ebdc413f54fb0ff00534827a12, all 22 jobs passed in https://github.com/lossyrob/telex/actions/runs/40447066117. Actual passing test lines were verified for strict interrupted-send recovery, independent sender outages and the existing runtime matrix on Linux and Windows SQLite and live PostgreSQL. Both PostgreSQL daemon-replacement and connection-termination iterations passed. The integration jobs retain their normal synthetic-merge checkout (44e20fa2, base ca6ed12c); run attribution is to this exact reviewed PR head.
+
+Own Windows validation also passed: three SQLite runtime tests (110.61 seconds), three diagnostic process tests, branch build, formatting, all-feature clippy and SQLite-only test compilation. All destructive faults are confined to disposable fixture roots, daemons and backend connections.
+
+Design inspection: PASS at this head, https://github.com/lossyrob/telex/pull/239#issuecomment-6433430812.
+
+Independent delta review: PASS at this head with no remaining findings, https://github.com/lossyrob/telex/pull/239#issuecomment-6433472289.
+
+Consequence: normal - changes production sender-readiness invalidation to preserve retry budget across outages; operation identity, receipt authorization and durable acceptance rules are unchanged.
+````
+
+### Complete readiness6433675107
+
+````text
+Ready for operator at 4e377f8c998084ebdc413f54fb0ff00534827a12
+
+Required CI is green: https://github.com/lossyrob/telex/actions/runs/40447066117 (22 successful jobs, associated with this exact PR head).
+
+| Own recovery proof | Passing job |
+| --- | --- |
+| Linux SQLite: strict interrupted daemon send, independent outage, runtime matrix | https://github.com/lossyrob/telex/actions/runs/40447066117/job/122000754873 |
+| Windows SQLite: strict interrupted daemon send, independent outage, runtime matrix | https://github.com/lossyrob/telex/actions/runs/40447066117/job/122000754830 |
+| Linux live PostgreSQL: strict daemon replacement, connection termination, independent outages, runtime matrix | https://github.com/lossyrob/telex/actions/runs/40447066117/job/122000754944 |
+| Windows live PostgreSQL: strict daemon replacement, connection termination, independent outages, runtime matrix | https://github.com/lossyrob/telex/actions/runs/40447066117/job/122000754818 |
+
+I read the passing test lines in all four job logs. The strict daemon case cannot pass without exactly one typed bootstrap failure, original-handle/generation NotRecorded, unchanged identity/budget across the outage, and acceptance of that same recovery handle exactly once. Durable event/receipt/message counts rule out duplicate delivery. This is #234's own proof against the merged #241 base, not evidence carried from the upstream item.
+
+The integration jobs retain their existing synthetic-merge checkout (44e20fa271073519b1feab6b30697df765ba9582, base ca6ed12c); the existing head-specific jobs remain unchanged.
+
+Design inspection PASS: https://github.com/lossyrob/telex/pull/239#issuecomment-6433430812
+
+Independent delta review PASS, no remaining findings: https://github.com/lossyrob/telex/pull/239#issuecomment-6433472289
+
+Own exact-head Windows build, format, all-feature clippy, SQLite-only test compilation, three runtime tests and three diagnostic process tests also passed. GitHub reports no conflicts or review threads, and its sole parsed closing reference is #234. No shared installation, daemon or registration changed. Merge remains the operator's action.
+
+````
+
+### Complete Campaign gate6433694366
+
+````text
+Campaign gate: MERGE at exact head 4e377f8c998084ebdc413f54fb0ff00534827a12.
+
+- Floor: OPEN, not draft, MERGEABLE/CLEAN; closing issues exactly [234]; 0 review threads; 5 commits; 7 files (watcher runtime recovery, a test-only send barrier, resilience tests and detector, docs/design/watcher.md, docs/watcher-runtime.md, ci.yml).
+- CI file: only the two live-PostgreSQL test selectors widen (postgres_watcher_runtime_matrix -> postgres_watcher_). The three exact-head checkout additions were removed per Campaign's decision; integration jobs keep the synthetic-merge checkout, and the existing head-specific jobs and #221 steps are unchanged.
+- CI: run 40447066117, pull_request, attempt 1, head 4e377f8c, 22/22 success. Its own interrupted/resume proof passed on Linux and Windows for SQLite and live PostgreSQL (jobs 122000754873, 122000754830, 122000754944, 122000754818).
+- Design: Watcher steward PASS at 4e377f8c (6433430812). This replaces CHANGES REQUIRED 6433282263; both items are resolved, and the #238 resume path is now non-vacuous (exactly one typed DaemonBootstrap failure, NotRecorded on the original handle and generation, the same operation accepted exactly once after recovery).
+- Independent review: delta PASS at 4e377f8c with no findings (6433472289), including Windows SQLite strict proof runs.
+- Dependency: #238 merged as ca6ed12c and was accepted. This PR's base is ca6ed12c, so the proof runs against the fixed Application Client behavior.
+- Drift: merge base ca6ed12c to main e32051b6 changes only .streamliner/workstreams/telex-watcher/{brief.md,graph.json} (#233 completion metadata). Artifacts only and disjoint.
+- Follow-through is owned by the PR owner: exact-merge main CI at attempt 1, or a failure recorded before any rerun; a #234 field report. Docs is N/A by path filter unless it triggers.
+````
+
+### Complete accepted terminal field6433958638; original3522bytes/38CRLF retained, LF display only
+
+````text
+## Field report
+
+Outcome held at merged commit aae96d3afc5a3a10fbc6dd65a6480121e09d0227, delivered by https://github.com/lossyrob/telex/pull/239.
+
+Main CI https://github.com/lossyrob/telex/actions/runs/40449436237 passed on attempt 1 at that exact merge: all 22 jobs succeeded. No rerun was needed.
+
+### What held
+
+I read the actual passing strict-interrupted, independent-outage and existing runtime-matrix test lines in all four main-CI jobs:
+
+| Platform/store | Main-CI proof |
+| --- | --- |
+| Linux SQLite | https://github.com/lossyrob/telex/actions/runs/40449436237/job/122008436383 |
+| Windows SQLite | https://github.com/lossyrob/telex/actions/runs/40449436237/job/122008436491 |
+| Linux live PostgreSQL | https://github.com/lossyrob/telex/actions/runs/40449436237/job/122008436413 |
+| Windows live PostgreSQL | https://github.com/lossyrob/telex/actions/runs/40449436237/job/122008436330 |
+
+Both PostgreSQL fault iterations passed: isolated daemon replacement and termination/withholding of only the fixture's backend connections. The same runtime retained its identity and heartbeat, reported sender error/non-readiness, paused attempts, kept unaccepted state unchanged, and resumed automatically without duplicate durable messages.
+
+The strict daemon proof requires a real staged send with exactly one spent attempt, one typed DaemonBootstrap failure, and NotRecorded on the original operation/payload/store/responsibility/generation. The ten-second outage spends no further send budget. Recovery must accept the identical operation and recovery handle once, with exact event/receipt/message counts. This is #234's own proof against the landed #238 behavior.
+
+Own validation in the owner worktree at the exact merge also passed: all-feature binary build, formatting, three isolated SQLite runtime tests (106.41 seconds), and three runtime-diagnostic process tests (1.39 seconds). The tracked worktree is clean.
+
+Docs did not trigger. None of the seven delivered paths match its push filter: docs/guide/**, root src/**, root Cargo manifests or docs.yml. GitHub lists only the successful CI workflow for this merge; no manual Docs deployment was started.
+
+### What changed
+
+Runtime recovery now immediately invalidates cached sender readiness on typed bootstrap, availability, unsupported-capability, transport and indeterminate send errors. This prevents retry-authorizing receipt evidence from spending the send budget against an unavailable sender. Receipt queries remain independent, and another send still requires proven readiness.
+
+The design and administration docs state the outage-survival, receipt/state safety, automatic-recovery and fatal-runtime-failure contract. The tests add deterministic isolated fault induction; the one-shot send barrier is unit-test-only. The workflow delta is limited to the two live PostgreSQL test selectors.
+
+### Successor guidance
+
+Keep the strict daemon admission barrier and mandatory original-handle evidence when extending these proofs. Backend termination may legitimately fail before staging, so its conditional pending branch is intentional. Existing receipt, logical-store, containment and exhausted-budget fences remain in force.
+
+The historical #201 stop remains unattributed. These results establish the merged implementation's behavior in isolated environments; the shared installation, daemon and registrations were not changed, and Campaign's fallback-retirement decision remains separate.
+
+Design impact: updated-docs.
+
+````
