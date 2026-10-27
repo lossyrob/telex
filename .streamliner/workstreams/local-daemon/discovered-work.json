@@ -8265,6 +8265,133 @@
         "successorBoundary": "#208 remains open and explicitly NOT repaired; #209 retains cross-family routing. No shared-error cause, broader fixture acceptance, #212 promotion, seven-native historical occurrence or two non-native candidate is absorbed.",
         "noDebtClearance": true,
         "noNativeReopeningOrRuntimeAuthority": true
+      },
+      "laterNaturalMainCapSetupObservation": {
+        "kind": "single-additive-natural-main-observation-in-existing-residual-inventory",
+        "association": {
+          "existingNode": "intent-seed-precondition-repair",
+          "completedIssue": 193,
+          "retainedDebt": 2,
+          "linkedResidualIssue": 209,
+          "historicalMergedPr": 194,
+          "authority": {
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_QIMSrDXs86aC3U4T5fYX6vPa",
+            "receipt": {
+              "file": "local-main86-cap-setup-natural-observation-intake.json",
+              "bytes": 2788,
+              "sha256": "a840ed69d08641767a6c7ca296380b5746eafd29f7c2b16b6836500a626e9bb2"
+            },
+            "originEvent": {
+              "id": "c57a4d5c-95b7-4ca6-8fc4-fb2f781bc8fb",
+              "timestamp": "2026-10-27T07:14:25.164Z",
+              "bytes": 5725,
+              "sha256": "26e229f0ae94e4cbf7b4df182958e724396450c08bd6d2a953f0e4dff678c3e0"
+            }
+          },
+          "meaning": "Local site/refusal-branch association, not common cause, a new family, repaired pending-intent outcome, named #208 scoped-scan case or #167 discrimination.",
+          "priorSampleReference": "Prior PR #240 sample 1 at public #182 comment 6432295605; exact blob equality and historical association are Local/Sentinel attribution, not a new occurrence or cohort rewrite."
+        },
+        "publicRecord": {
+          "url": "https://github.com/lossyrob/telex/issues/182#issuecomment-6435998190",
+          "id": 6435998190,
+          "author": "lossyrob",
+          "createdAt": "2026-10-27T07:12:40Z",
+          "updatedAt": "2026-10-27T07:15:39Z",
+          "sourceTimeAcceptedCompleteBody": {
+            "file": "main86-observation-accepted-comment-body.txt",
+            "bytes": 2928,
+            "sha256": "61907c0015a97e65bd630b5f6132b1b897ed697e0938519beb298b2847bbb8a0"
+          },
+          "currentCompleteBody": {
+            "file": "main86-observation-revised-comment-body.txt",
+            "bytes": 4344,
+            "sha256": "f457904dea81dd1eb865eed1c083cffef675e3aeacb3254e83f761a0a43cc575"
+          },
+          "laterAppend": {
+            "file": "main86-observation-later-comment-append.txt",
+            "bytes": 1416,
+            "sha256": "d83c610d9aa51c0c06d633ff202c09902507e35e24e932a25f3f084911648faf"
+          },
+          "acceptedBodyIsExactPrefix": true,
+          "revisionBoundary": "The Local-read 2928-byte source-time body is an authenticated exact prefix, not the current complete 4344-byte body. The later 1416-byte amendment and its reported Campaign dispositions remain producer attribution; this tuple does not independently adopt its #242 ruling or all metadata-delta claims."
+        },
+        "observation": {
+          "run": 40463549751,
+          "attempt": 1,
+          "event": "push",
+          "eventProviderCheckout": "7ebac7730abc8fc9f1d3c17ce0fd849708d70b32",
+          "failedWindowsJob": 122053497821,
+          "terminalJobs": 22,
+          "successfulJobs": 21,
+          "failedJobs": 1,
+          "failedTestStep": 20,
+          "skippedCredentialStep": 29,
+          "test": "station_intent::tests::write_cap_produces_a_typed_error_and_never_deletes",
+          "site": "src/station_intent.rs:3788:41",
+          "sourceBlob": "bf909638a1937d2706b565addc537b29442cdfe9",
+          "rawCliStdout": {
+            "bytes": 364269,
+            "sha256": "15c8fcaa51d7cf44725702c8b9b568596af1223fe13eb7a9606a1cfe0e6071b9",
+            "nulBytes": 1637,
+            "transport": "Retained gh job-log stdout, not HTTP-byte identity"
+          },
+          "independentlyMatchedRawExcerpts": 6,
+          "independentlyMatchedImmutableSourceExcerpts": 4
+        },
+        "admission": {
+          "writeUnderCapLine": 3788,
+          "writeAtomicLine": 1685,
+          "productionInstantLockLine": 1987,
+          "policyMilliseconds": 480,
+          "maximumAttempts": 25,
+          "refusal": "Late successful first acquisition rejected and released before this call reached write_atomic_held.",
+          "currentHeldMutationReached": false,
+          "earlierSetupIterationsNotClaimedMutationFree": true,
+          "underCapIteration": "unknown",
+          "cause": "unknown",
+          "laterAssertions": "Overflow, guidance, count and rewrite assertions were not reached."
+        },
+        "suiteResult": {
+          "passed": 610,
+          "failed": 1,
+          "ignored": 5,
+          "seconds": 57.58,
+          "measurementBoundary": "Whole library-suite elapsed time, not failed-call acquisition latency, contention time or causal timing evidence."
+        },
+        "diagnosticBoundary": {
+          "closedRunsUsed": 3,
+          "closedRunBudget": 3,
+          "iterationsUsed": 40,
+          "iterationBudget": 60,
+          "closed": true,
+          "markerClaim": "Local/Sentinel report zero observed credential iteration/phase/runner markers in this capture plus skipped credential step 29; not absence of work everywhere.",
+          "effect": "No #167 sample credit, refund, reset, owner reactivation or reopened diagnostic work."
+        },
+        "laterRerun": {
+          "authority": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_013XfvMXzhsxmRYat9KfazYp",
+            "receipt": {
+              "file": "campaign-main86-new-finite-product-hold-intake.json",
+              "bytes": 1737,
+              "sha256": "29efd2dcfd7cbfd3741b7c745ca19ff809b1a778f00e680f57adc064afed8e8f"
+            },
+            "originEvent": {
+              "id": "bb9a1198-d72e-4674-a76c-314a87be1bf2",
+              "timestamp": "2026-10-27T07:33:39.861Z",
+              "bytes": 2851,
+              "sha256": "6222ed8aa472fd3180019ac1d75e21e1037d77facbe155706dc96a6ed94ffe84"
+            }
+          },
+          "reportedRun": 40463549751,
+          "reportedAttempt": 2,
+          "boundary": "Campaign separately reports its failed-job rerun after immutable attempt-1 capture. No attempt-2 outcome, new observation, diagnostic credit, rerun request or source/runtime/CI action is supplied by this tuple."
+        },
+        "retainedState": "Completed #193 and its six retained debts, same historical owner, all old cohorts/qualifications, #181 single-slot/absolute deadline plus grace/mandatory-page and fail-closed 480 ms / 25-attempt policy remain unchanged.",
+        "excludedClaims": "Producer packet sourceDelta/cost/critical-path and public-amendment #242 dispositions are not independently adjudicated here; they remain attributed and routed separately to Campaign. No metadata-advance, repair, cause, latest-main-green, runtime-health, #167 or other-family credit.",
+        "privateSourceBoundary": "Full Local canonical body contains a private packet path and stays privately bound, not quoted or sanitized into canonical output. Its safe association facts are separately attributed. Full private raw origins remain bound; no new recipient/private-original/controller/profile/runtime traversal.",
+        "scopeBoundary": "One final additive qualification in the existing #193 row and one summary prefix in the existing #193 node, plus brief append only. No new family, node, row, edge, owner, checkpoint, reopened debt, duplicate occurrence record, cohort change or launch."
       }
     },
     {
