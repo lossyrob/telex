@@ -1458,12 +1458,8 @@ impl ApplicationClient {
             retry_budget: request.retry_budget as i64,
             created_at_ms: now_ms(),
         };
-        match self
-            .backend
-            .begin_application_operation(&operation)
-            .await
-            .map_err(unavailable)?
-        {
+        let (begin, admitted) = self.begin_admitted_message_operation(&operation).await?;
+        match begin {
             ApplicationOperationBegin::FingerprintMismatch(existing) => {
                 return Err(ApplicationClientError::OperationMismatch {
                     operation_id: request.operation_id,
@@ -1574,9 +1570,13 @@ impl ApplicationClient {
             operation_id: request.operation_id.0.clone(),
             payload_fingerprint: operation.payload_fingerprint.clone(),
         };
-        let response = match self.request_staged(daemon_request, false).await {
+        let mut daemon = match admitted {
+            Some(daemon) => daemon,
+            None => self.admit_request(true, false).await?,
+        };
+        let response = match daemon.request(&daemon_request).await {
             Ok(response) => response,
-            Err(RequestFailure::WriteBoundaryUnknown(error)) => {
+            Err(error) => {
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1589,11 +1589,10 @@ impl ApplicationClient {
                     )
                     .await;
                 return Err(ApplicationClientError::Indeterminate {
-                    detail: error.to_string(),
+                    detail: transport_uncertain(error).to_string(),
                     recovery: Box::new(recovery),
                 });
             }
-            Err(RequestFailure::BeforePeerDecision(error)) => return Err(error),
         };
         match response {
             Response::Sent { receipt } => {
@@ -1658,6 +1657,45 @@ impl ApplicationClient {
         }
     }
 
+    async fn begin_admitted_message_operation(
+        &self,
+        operation: &NewApplicationOperation,
+    ) -> Result<
+        (
+            ApplicationOperationBegin,
+            Option<crate::daemon::DaemonClient>,
+        ),
+        ApplicationClientError,
+    > {
+        if let Some(existing) = self
+            .backend
+            .application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+            )
+            .await
+            .map_err(unavailable)?
+        {
+            let begin = if existing.payload_fingerprint == operation.payload_fingerprint {
+                ApplicationOperationBegin::Replay(existing)
+            } else {
+                ApplicationOperationBegin::FingerprintMismatch(existing)
+            };
+            return Ok((begin, None));
+        }
+
+        // Admission writes no application request. Reserve only after it succeeds,
+        // so an outage cannot strand a new pending record or require durable undo.
+        let daemon = self.admit_request(true, false).await?;
+        let begin = self
+            .backend
+            .begin_application_operation(operation)
+            .await
+            .map_err(unavailable)?;
+        Ok((begin, Some(daemon)))
+    }
+
     pub async fn reply(&self, request: ReplyRequest) -> Result<SendResult, ApplicationClientError> {
         self.require_sender(&request.sender)?;
         let fingerprint = reply_fingerprint(&request)?;
@@ -1674,12 +1712,8 @@ impl ApplicationClient {
             retry_budget: request.retry_budget as i64,
             created_at_ms: now_ms(),
         };
-        match self
-            .backend
-            .begin_application_operation(&operation)
-            .await
-            .map_err(unavailable)?
-        {
+        let (begin, admitted) = self.begin_admitted_message_operation(&operation).await?;
+        match begin {
             ApplicationOperationBegin::FingerprintMismatch(existing) => {
                 return Err(ApplicationClientError::OperationMismatch {
                     operation_id: request.operation_id,
@@ -1773,27 +1807,28 @@ impl ApplicationClient {
             ApplicationOperationBegin::Started(_) => {}
         }
 
-        let response = self
-            .request_staged(
-                Request::ApplicationReply {
-                    store_key: self.store_key.clone(),
-                    session_id: self.runtime_id.0.clone(),
-                    from_addr: request.sender.clone(),
-                    message_id: request.message_id,
-                    kind: request.kind,
-                    attention: request.attention,
-                    requires_disposition: request.requires_disposition,
-                    subject: request.subject,
-                    cc: normalize_cc(&request.cc),
-                    body: request.body,
-                    metadata: request.metadata,
-                    logical_store_id: self.logical_store_id.0.clone(),
-                    application_responsibility: self.responsibility.0.clone(),
-                    operation_id: request.operation_id.0.clone(),
-                    payload_fingerprint: operation.payload_fingerprint.clone(),
-                },
-                false,
-            )
+        let mut daemon = match admitted {
+            Some(daemon) => daemon,
+            None => self.admit_request(true, false).await?,
+        };
+        let response = daemon
+            .request(&Request::ApplicationReply {
+                store_key: self.store_key.clone(),
+                session_id: self.runtime_id.0.clone(),
+                from_addr: request.sender.clone(),
+                message_id: request.message_id,
+                kind: request.kind,
+                attention: request.attention,
+                requires_disposition: request.requires_disposition,
+                subject: request.subject,
+                cc: normalize_cc(&request.cc),
+                body: request.body,
+                metadata: request.metadata,
+                logical_store_id: self.logical_store_id.0.clone(),
+                application_responsibility: self.responsibility.0.clone(),
+                operation_id: request.operation_id.0.clone(),
+                payload_fingerprint: operation.payload_fingerprint.clone(),
+            })
             .await;
         match response {
             Ok(Response::Sent { receipt }) => {
@@ -1855,7 +1890,7 @@ impl ApplicationClient {
                     .await?)
             }
             Ok(_) => Err(unexpected_response("reply")),
-            Err(RequestFailure::WriteBoundaryUnknown(error)) => {
+            Err(error) => {
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1868,11 +1903,10 @@ impl ApplicationClient {
                     )
                     .await;
                 Err(ApplicationClientError::Indeterminate {
-                    detail: error.to_string(),
+                    detail: transport_uncertain(error).to_string(),
                     recovery: Box::new(recovery),
                 })
             }
-            Err(RequestFailure::BeforePeerDecision(error)) => Err(error),
         }
     }
 
@@ -3205,7 +3239,22 @@ impl ApplicationClient {
         request: Request,
         spawn: bool,
     ) -> Result<Response, RequestFailure> {
-        let mut client = match &self.bootstrap {
+        let mut client = self
+            .admit_request(Self::is_application_request(&request), spawn)
+            .await
+            .map_err(RequestFailure::BeforePeerDecision)?;
+        client
+            .request(&request)
+            .await
+            .map_err(|error| RequestFailure::WriteBoundaryUnknown(transport_uncertain(error)))
+    }
+
+    async fn admit_request(
+        &self,
+        application_request: bool,
+        spawn: bool,
+    ) -> Result<crate::daemon::DaemonClient, ApplicationClientError> {
+        let client = match &self.bootstrap {
             Some(policy) => {
                 if spawn {
                     crate::daemon::connect_or_spawn_with_bootstrap(&self.store_key, policy)
@@ -3221,31 +3270,26 @@ impl ApplicationClient {
                 if spawn {
                     crate::daemon::connect_or_spawn(&self.store_key)
                         .await
-                        .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
+                        .map_err(unavailable)?
                 } else {
                     crate::daemon::connect_existing(&self.store_key)
                         .await
-                        .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
+                        .map_err(unavailable)?
                 }
             }
         };
-        if Self::is_application_request(&request)
+        if application_request
             && !client
                 .ack
                 .capabilities
                 .iter()
                 .any(|capability| capability == crate::daemon_ipc::CAP_APPLICATION_CLIENT_V1)
         {
-            return Err(RequestFailure::BeforePeerDecision(
-                ApplicationClientError::UnsupportedCapability(
-                    "daemon does not advertise application_client_v1".to_string(),
-                ),
+            return Err(ApplicationClientError::UnsupportedCapability(
+                "daemon does not advertise application_client_v1".to_string(),
             ));
         }
-        client
-            .request(&request)
-            .await
-            .map_err(|error| RequestFailure::WriteBoundaryUnknown(transport_uncertain(error)))
+        Ok(client)
     }
 
     fn is_application_request(request: &Request) -> bool {
@@ -3808,13 +3852,11 @@ fn transport_uncertain(error: impl fmt::Display) -> ApplicationClientError {
 /// Bootstrap failures are typed and never expose raw authority paths;
 /// underlying daemon transport failures fall through the same
 /// `unavailable`/`transport_uncertain` projection used by the legacy path.
-fn map_bootstrap_or_transport(error: crate::daemon::DaemonError) -> RequestFailure {
+fn map_bootstrap_or_transport(error: crate::daemon::DaemonError) -> ApplicationClientError {
     if let crate::daemon::DaemonError::Bootstrap(failure) = &error {
-        return RequestFailure::BeforePeerDecision(ApplicationClientError::DaemonBootstrap(
-            *failure,
-        ));
+        return ApplicationClientError::DaemonBootstrap(*failure);
     }
-    RequestFailure::BeforePeerDecision(unavailable(error))
+    unavailable(error)
 }
 
 fn invalid(error: impl fmt::Display) -> ApplicationClientError {
