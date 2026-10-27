@@ -37,6 +37,18 @@ pub fn credential_command_obligations() -> Vec<CredentialCommandObligation> {
     password_command::pending()
 }
 
+#[cfg(feature = "postgres")]
+#[doc(hidden)]
+pub use password_command::DrainObservation as CredentialCommandDrain;
+
+/// Diagnostic read of owner drain progress. Unlike
+/// [`credential_command_obligations`], it never joins, reaps or publishes.
+#[cfg(feature = "postgres")]
+#[doc(hidden)]
+pub fn credential_command_drain_observations() -> Vec<CredentialCommandDrain> {
+    password_command::drain_observations()
+}
+
 /// The on-disk `config.toml`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConfigFile {
