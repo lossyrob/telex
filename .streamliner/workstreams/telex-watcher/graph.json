@@ -579,6 +579,19 @@
       "dependsOn": [
         "watcher-runtime-core",
         "watcher-runtime-failure-diagnostics"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-send-admission-failure-resolution",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "send-admission-failure-resolution"
+          },
+          "label": "Application Client gives a send or reply that fails before any request bytes are written (bootstrap, connect or capability failure) a determinable, retry-authorizing typed outcome for the exact operation, never Recorded/Pending forever, with an uncertain write boundary kept indeterminate and an isolated exactly-once recovery test; #234's no-duplicate resume criterion depends on it; #234 is not narrowed",
+          "url": "https://github.com/lossyrob/telex/issues/238",
+          "status": "pending"
+        }
       ]
     }
   ],

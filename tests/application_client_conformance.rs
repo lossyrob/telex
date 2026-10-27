@@ -36,10 +36,11 @@ use telex::application_client::{
     AckResult, AddressLifecycleResult, AddressSpec, ApplicationCapability, ApplicationClient,
     ApplicationClientConfig, ApplicationClientError, ApplicationDaemonBootstrap,
     ApplicationResponsibility, ApplicationStoreMaintenance, CompensationAction,
-    CompoundDispositionRequest, CompoundStep, EvidenceState, LifecycleOperationKind,
-    LogicalStoreId, MembershipLossReason, OperationId, OperationReconciliation,
-    PrincipalVerification, RecordedOperationOutcome, RecoveryHandle, RecoveryPolicy, ReplyRequest,
-    SendRequest, SourceReference, SourceResolution,
+    CompoundDispositionRequest, CompoundStep, DaemonBootstrapFailure, EvidenceState,
+    LifecycleOperationKind, LogicalStoreId, MembershipLossReason, OperationId,
+    OperationReconciliation, PrincipalVerification, RecordedOperationOutcome, RecoveryHandle,
+    RecoveryPolicy, RejectionRetryability, ReplyRequest, SendRequest, SourceReference,
+    SourceResolution,
 };
 use telex::backend::Backend;
 use telex::model::{
@@ -85,6 +86,8 @@ const COVERAGE: &[(&str, &str)] = &[
     ("receipt_axes_are_independent_after_durable_acceptance", "e"),
     ("ack_after_durable_ingest_survives_restart", "e"),
     ("operation_replay_is_retry_stable_and_input_sensitive", "f"),
+    ("admission_failure_preserves_exact_retry_after_restart", "f"),
+    ("contenders_preserve_existing_outcomes", "f"),
     ("not_recorded_is_exact_and_retention_boundary_is_typed", "f"),
     ("accepted_send_indeterminate_window_exposes_recovery", "f"),
     ("post_restart_reconciliation_maps_pending_operation", "f"),
@@ -1340,6 +1343,327 @@ async fn operation_replay_is_retry_stable_and_input_sensitive(ctx: &Ctx<'_>) {
     }
 }
 
+async fn admission_failure_preserves_exact_retry_after_restart(ctx: &Ctx<'_>) {
+    let mut client = ctx.client("station").await;
+    let sender = ctx.spec("admission-sender", ApplicationCapability::Bidirectional);
+    let station = ctx.spec("admission-station", ApplicationCapability::Bidirectional);
+    attach_one(&client, &sender).await;
+    attach_one(&client, &station).await;
+    let parent = client
+        .send(send_request(
+            "admission-parent",
+            &station.address,
+            &sender.address,
+            "reply source",
+        ))
+        .await
+        .expect("send reply source");
+
+    for failure in ["connection", "bootstrap"] {
+        let request = send_request(
+            &format!("admission-send-{failure}"),
+            &sender.address,
+            &station.address,
+            failure,
+        );
+        let reply = ReplyRequest {
+            operation_id: OperationId(format!("admission-reply-{failure}")),
+            sender: sender.address.clone(),
+            message_id: parent.message_id,
+            cc: Vec::new(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: true,
+            subject: Some("admission reply".into()),
+            body: failure.into(),
+            metadata: Some(r#"{"probe":true}"#.into()),
+            retry_budget: 1,
+        };
+        let send_handle = client.prepare_send(&request).await.expect("prepare send");
+        let reply_handle = client.prepare_reply(&reply).await.expect("prepare reply");
+        ctx.iso.stop_daemon();
+        let current = ctx.iso.install_root.join("current");
+        let held = ctx.iso.install_root.join("withheld-current");
+        if failure == "bootstrap" {
+            std::fs::rename(&current, &held).expect("withhold disposable selector");
+        }
+
+        for error in [
+            client
+                .send(request.clone())
+                .await
+                .expect_err("send admission"),
+            client
+                .reply(reply.clone())
+                .await
+                .expect_err("reply admission"),
+        ] {
+            assert!(
+                matches!(
+                    (failure, &error),
+                    ("connection", ApplicationClientError::Unavailable(_))
+                        | (
+                            "bootstrap",
+                            ApplicationClientError::DaemonBootstrap(
+                                DaemonBootstrapFailure::MissingCurrent
+                            )
+                        )
+                ),
+                "{failure}: synchronous failure must preserve typed admission evidence: {error:?}"
+            );
+        }
+        for handle in [&send_handle, &reply_handle] {
+            assert_exact_not_recorded(&client, handle).await;
+        }
+
+        if failure == "bootstrap" {
+            std::fs::rename(&held, &current).expect("restore disposable selector");
+        }
+        let replacement = ctx.client("station").await;
+        assert_ne!(replacement.runtime_id(), client.runtime_id());
+        client = replacement;
+        attach_one(&client, &sender).await;
+        attach_one(&client, &station).await;
+        for handle in [&send_handle, &reply_handle] {
+            assert_exact_not_recorded(&client, handle).await;
+        }
+        let sent = client
+            .send(request.clone())
+            .await
+            .expect("retry exact send");
+        let replied = client
+            .reply(reply.clone())
+            .await
+            .expect("retry exact reply");
+        assert_eq!(sent.operation_id, send_handle.operation_id);
+        assert_eq!(replied.operation_id, reply_handle.operation_id);
+        assert_eq!(sent.payload_identity, send_handle.payload_identity);
+        assert_eq!(replied.payload_identity, reply_handle.payload_identity);
+
+        // Durable replay must not require the daemon to pass admission again.
+        std::fs::rename(&current, &held).expect("withhold selector after acceptance");
+        let replayed_send = client
+            .send(request.clone())
+            .await
+            .expect("offline send replay");
+        let replayed_reply = client.reply(reply).await.expect("offline reply replay");
+        assert!(replayed_send.replayed && replayed_reply.replayed);
+        assert_eq!(replayed_send.message_id, sent.message_id);
+        assert_eq!(replayed_reply.message_id, replied.message_id);
+        let mut changed = request;
+        changed.body.push_str("-changed");
+        assert!(matches!(
+            client.send(changed).await,
+            Err(ApplicationClientError::OperationMismatch { .. })
+        ));
+        std::fs::rename(&held, &current).expect("restore selector after replay");
+
+        let history = client
+            .history(Some(station.address.clone()), false, None, None, None, 50)
+            .await
+            .expect("accepted messages");
+        for message_id in [sent.message_id, replied.message_id] {
+            assert_eq!(
+                history
+                    .iter()
+                    .filter(|item| item.message.id == message_id)
+                    .count(),
+                1,
+                "retry must produce exactly one message"
+            );
+        }
+        assert_eq!(history.len(), if failure == "connection" { 2 } else { 4 });
+    }
+}
+
+async fn assert_exact_not_recorded(client: &ApplicationClient, handle: &RecoveryHandle) {
+    match client
+        .reconcile_operation(handle)
+        .await
+        .expect("reconcile exact handle")
+    {
+        OperationReconciliation::NotRecorded(evidence) => {
+            assert_eq!(evidence.logical_store_id, handle.logical_store_id);
+            assert_eq!(evidence.responsibility, handle.responsibility);
+            assert_eq!(evidence.operation_id, handle.operation_id);
+            assert_eq!(evidence.payload_identity, handle.payload_identity);
+            assert_eq!(
+                Some(evidence.retention_generation),
+                handle.retention_generation
+            );
+        }
+        other => panic!("admission failure must leave authoritative absence: {other:?}"),
+    }
+}
+
+async fn contenders_preserve_existing_outcomes(ctx: &Ctx<'_>) {
+    let client = ctx.client("station").await;
+    let sender = ctx.spec("contender-sender", ApplicationCapability::SendOnly);
+    let station = ctx.spec("contender-station", ApplicationCapability::Bidirectional);
+    attach_one(&client, &sender).await;
+    attach_one(&client, &station).await;
+    let parent = client
+        .send(send_request(
+            "contender-parent",
+            &station.address,
+            &sender.address,
+            "reply source",
+        ))
+        .await
+        .expect("contender reply source");
+    let backend = ctx.backend().await;
+    ctx.iso.stop_daemon();
+    let current = ctx.iso.install_root.join("current");
+    let held = ctx.iso.install_root.join("withheld-current");
+    std::fs::rename(&current, &held).expect("withhold selector from contenders");
+    for kind in ["send", "reply"] {
+        for state in ["pending", "indeterminate", "rejected"] {
+            let request = send_request(
+                &format!("{kind}-{state}"),
+                &sender.address,
+                &station.address,
+                state,
+            );
+            let reply = ReplyRequest {
+                operation_id: request.operation_id.clone(),
+                sender: request.sender.clone(),
+                message_id: parent.message_id,
+                cc: Vec::new(),
+                kind: request.kind.clone(),
+                attention: request.attention.clone(),
+                requires_disposition: request.requires_disposition,
+                subject: request.subject.clone(),
+                body: request.body.clone(),
+                metadata: request.metadata.clone(),
+                retry_budget: request.retry_budget,
+            };
+            let handle = if kind == "send" {
+                client.prepare_send(&request).await
+            } else {
+                client.prepare_reply(&reply).await
+            }
+            .expect("prepare contender");
+            // State induction models a different call that owns the write boundary.
+            backend
+                .begin_application_operation(&NewApplicationOperation {
+                    logical_store_id: handle.logical_store_id.0.clone(),
+                    application_responsibility: handle.responsibility.0.clone(),
+                    operation_id: handle.operation_id.0.clone(),
+                    operation_kind: kind.into(),
+                    sender: request.sender.clone(),
+                    recipients_json: if kind == "send" {
+                        serde_json::to_string(&(request.to.clone(), request.cc.clone())).unwrap()
+                    } else {
+                        serde_json::to_string(&(reply.message_id, reply.cc.clone())).unwrap()
+                    },
+                    payload_fingerprint: handle.payload_identity.digest.clone(),
+                    retry_budget: request.retry_budget as i64,
+                    created_at_ms: now_ms(),
+                })
+                .await
+                .expect("begin first attempt");
+            if state != "pending" {
+                let rejection = ApplicationClientError::RejectedBeforeAcceptance {
+                    code: "test-rejection".into(),
+                    retryability: RejectionRetryability::Permanent,
+                    detail: "prior definite rejection".into(),
+                };
+                backend
+                    .complete_application_operation(
+                        &handle.logical_store_id.0,
+                        &handle.responsibility.0,
+                        &handle.operation_id.0,
+                        state,
+                        (state == "rejected")
+                            .then(|| serde_json::to_string(&rejection).unwrap())
+                            .as_deref(),
+                        Some(&serde_json::to_string(&handle).unwrap()),
+                    )
+                    .await
+                    .expect("induce existing outcome");
+            }
+            let error = if kind == "send" {
+                client.send(request).await
+            } else {
+                client.reply(reply).await
+            }
+            .expect_err("contender during outage");
+            assert!(
+                matches!(
+                    (state, error),
+                    (
+                        "pending",
+                        ApplicationClientError::DaemonBootstrap(
+                            DaemonBootstrapFailure::MissingCurrent
+                        )
+                    ) | (
+                        "indeterminate",
+                        ApplicationClientError::Indeterminate { .. }
+                    ) | (
+                        "rejected",
+                        ApplicationClientError::RejectedBeforeAcceptance {
+                            retryability: RejectionRetryability::Permanent,
+                            ..
+                        }
+                    )
+                ),
+                "admission failure must not change an existing {state} operation"
+            );
+            let OperationReconciliation::Recorded(record) = client
+                .reconcile_operation(&handle)
+                .await
+                .expect("reconcile contender")
+            else {
+                panic!("the first attempt must remain recorded");
+            };
+            assert!(matches!(
+                (state, record.outcome),
+                ("pending", RecordedOperationOutcome::Pending { .. })
+                    | (
+                        "indeterminate",
+                        RecordedOperationOutcome::Indeterminate { .. }
+                    )
+                    | ("rejected", RecordedOperationOutcome::Rejected(_))
+            ));
+        }
+    }
+    std::fs::rename(&held, &current).expect("restore selector for concurrent send");
+    attach_one(&client, &sender).await;
+    attach_one(&client, &station).await;
+    let request = send_request(
+        "concurrent",
+        &sender.address,
+        &station.address,
+        "concurrent",
+    );
+    let handle = client.prepare_send(&request).await.expect("prepare race");
+    let (first, second) = tokio::join!(client.send(request.clone()), client.send(request));
+    assert!(
+        first.is_ok() || second.is_ok(),
+        "one concurrent attempt must succeed"
+    );
+    for result in [first, second] {
+        assert!(matches!(
+            result,
+            Ok(_) | Err(ApplicationClientError::Indeterminate { .. })
+        ));
+    }
+    assert!(matches!(
+        client.reconcile_operation(&handle).await.expect("reconcile race"),
+        OperationReconciliation::Recorded(record)
+            if matches!(record.outcome, RecordedOperationOutcome::Accepted(_))
+    ));
+    let history = client
+        .history(Some(station.address.clone()), false, None, None, None, 50)
+        .await
+        .expect("contender history");
+    assert_eq!(
+        history.len(),
+        1,
+        "only the owning attempt may author a message"
+    );
+}
+
 async fn not_recorded_is_exact_and_retention_boundary_is_typed(ctx: &Ctx<'_>) {
     let client = ctx.client("station").await;
     let sender = ctx.spec("retain-sender", ApplicationCapability::SendOnly);
@@ -2525,6 +2849,8 @@ async fn run_battery(iso: &Isolation, leg: &dyn Leg, profiles: &Profiles) -> Vec
     run!(receipt_axes_are_independent_after_durable_acceptance);
     run!(ack_after_durable_ingest_survives_restart);
     run!(operation_replay_is_retry_stable_and_input_sensitive);
+    run!(admission_failure_preserves_exact_retry_after_restart);
+    run!(contenders_preserve_existing_outcomes);
     run!(not_recorded_is_exact_and_retention_boundary_is_typed);
     run!(accepted_send_indeterminate_window_exposes_recovery);
     run!(post_restart_reconciliation_maps_pending_operation);
