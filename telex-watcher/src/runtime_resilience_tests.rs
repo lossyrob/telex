@@ -260,6 +260,13 @@ async fn exercise(
     backend_fault: Option<&ConnectionFault>,
     release_before_observation: bool,
 ) {
+    #[cfg(unix)]
+    {
+        let telex::daemon::Endpoint::UnixSocket(path) =
+            telex::daemon::DaemonPaths::current().unwrap().endpoint;
+        std::os::unix::net::SocketAddr::from_pathname(&path)
+            .unwrap_or_else(|error| panic!("isolated daemon endpoint {}: {error}", path.display()));
+    }
     let (runtime, management) = Runtime::open(RuntimeConfig::installed(
         iso.root.join("registry.sqlite"),
         iso.trusted_root(),
@@ -379,7 +386,7 @@ async fn sqlite_watcher_sender_outage() {
 #[cfg(feature = "sqlite")]
 async fn sqlite_proof(release_before_observation: bool) {
     let _lock = isolation::ENV_LOCK.lock().await;
-    let iso = Isolation::new("watcher-resilience-sqlite");
+    let iso = Isolation::new("wr-sqlite");
     let _restore = iso.apply_env();
     let profile = telex::profiles::implicit_sqlite(Some(iso.db_path.to_str().unwrap()));
     iso.write_config(&ConfigFile {
@@ -427,7 +434,7 @@ async fn postgres_proof(release_before_observation: bool) {
     );
     let quote = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
     for terminate_backend in [false, true] {
-        let iso = Isolation::new("watcher-resilience-postgres");
+        let iso = Isolation::new("wr-pg");
         let _restore = iso.apply_env();
         let schema = format!("resilience_{}", uuid::Uuid::new_v4().simple());
         let mut profile = telex::profiles::implicit_sqlite(None);
