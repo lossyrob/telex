@@ -2854,9 +2854,9 @@
         "id": "watcher-runtime-failure-diagnostics",
         "tracker": "https://github.com/lossyrob/telex/issues/225"
       },
-      "status": "planned",
+      "status": "completed",
       "decisionState": "accepted",
-      "owner": "Unassigned/unlaunched; Watcher coordinator reports instructions ready and launches one owner only after verified canonical publication.",
+      "owner": "Watcher; historical implementation owner 23511e04-e331-4bf3-b44d-c5b97f011a52 (PR #229 merged; later exact-merge CI/Docs/field accepted, no remaining assigned follow-through duty or new launch).",
       "terminalPath": "A separate product PR closing #225, with independent exact-head source, design, hosted and Campaign gates. No macOS-native evidence is required to close #225; #195 consumes the diagnostics afterwards under its steward gate.",
       "dispositionAuthority": "toolu_01R872e2ciDWRcqikEuCpnZz / public decision 6425865009, with owning readiness toolu_013hXzYq7X45TS3HAq1m3CcX. Shape/readiness, not merge approval.",
       "evidence": {
@@ -2936,7 +2936,761 @@
         "platform": "Automated coverage on every platform where the binary builds; tests must check actual byte cap/stage/redaction/envelope, not infer a native #195 cause."
       },
       "externalConsumerHold": "Steward decision 6425865009 keeps #195 / PR #221 draft with no further test-only diagnostics, reruns or pushes for this cause question until #225 merges. Then #195 may rebase; ordinary CI on that head is the next single diagnostic run. A fixture or test-environment cause remains in #195; a product cause or deliberate platform limit returns to the steward. This is reported authority, not a current rerun, rebase or merge authorization by the reconciler.",
-      "exclusions": "No #195 cause/containment completion, new logging/persisted record subsystem, other-node status/edge, owner/observer/runtime/profile/install/ACL action, root validation, implementation/repair acceptance or debt clearance."
+      "exclusions": "No #195 cause/containment completion, new logging/persisted record subsystem, other-node status/edge, owner/observer/runtime/profile/install/ACL action, root validation, implementation/repair acceptance or debt clearance.",
+      "actualOwnerQualification": {
+        "kind": "same-planned-node-later-owner-public-claim-and-initial-implementation-history",
+        "sources": {
+          "launch": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01WzN28S1CERA3BRZ8U9xfdC",
+            "originEvent": {
+              "id": "7732b128-f795-4d18-9171-d2a12731e9b9",
+              "timestamp": "2026-10-26T21:10:19.579Z",
+              "bytes": 2748,
+              "sha256": "50822e2158098dbb8126c94d84cc275fd4695315d83c30735f60a4d8dead254c"
+            },
+            "receipt": {
+              "file": "watcher225-actual-owner-launch-intake.json",
+              "bytes": 1296,
+              "sha256": "cc7bc1abbd97f320415ae045ae4704e0e8dd672c0cc6e3bbb4f5cf6f129a881c"
+            }
+          },
+          "publicClaim": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01U6brZ9MwvKJLggkk3KhY1V",
+            "originEvent": {
+              "id": "55ce5aae-ef2d-4170-9316-9b2ebf4fe013",
+              "timestamp": "2026-10-26T21:14:31.087Z",
+              "bytes": 2330,
+              "sha256": "c8834937ca72c2f804ac9510b690235686420042a09dec346447ca2b97571c1e"
+            },
+            "receipt": {
+              "file": "watcher225-public-owner-claim-intake.json",
+              "bytes": 1087,
+              "sha256": "6f60acaa057dcb1e015e5ea227d59d9ec9e88270ab8f9fdda53bb2dd1ebede8c"
+            },
+            "verbatim": "#225 status change: watcher-runtime-failure-diagnostics is now in-progress. Public owner claim and plan: https://github.com/lossyrob/telex/issues/225#issuecomment-6427435102 (21:12:02Z). It names CLI session d501f9e9-f5a6-46ea-843d-7b05cc720178, which resolves to the app session 23511e04-e331-4bf3-b44d-c5b97f011a52 I launched, so this is the same single owner. The branch is now lossyrob-watcher-failure-diagnostics. There is no PR yet. Scope note: #225 will carry PR #221's three cfg-only telex-watcher/src/process.rs warning fixes so its macOS diagnostics tests build under -D warnings. There is no containment behavior change."
+          },
+          "firstPr": {
+            "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+            "source": "call_YLt2ZB9UWwN5tbQqyAKhA45j",
+            "originEvent": {
+              "id": "479bb33b-fe12-4d55-8638-170591326046",
+              "timestamp": "2026-10-26T21:21:46.142Z",
+              "bytes": 1562,
+              "sha256": "73b954ea967423384e81805e821ebb06601f562349b8b4b0f6ef05281d9365be"
+            },
+            "receipt": {
+              "file": "watcher225-first-pr-intake.json",
+              "bytes": 687,
+              "sha256": "f9017dcba7c5520b071ed81fa4cb2213b39b32b43a9c73db26cb16ba30155888"
+            },
+            "verbatim": "#225 has draft PR https://github.com/lossyrob/telex/pull/229 at de96d59ec0d77e4143a9cd999f0c58505f889985. Implementation and local regressions are complete; independent exact-head review, design inspection and hosted CI are pending."
+          },
+          "initialMacosFailure": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013acG63pFo9ga8En1E2HwGU",
+            "originEvent": {
+              "id": "84627ae9-de94-43be-986f-10cfef332765",
+              "timestamp": "2026-10-26T21:30:03.947Z",
+              "bytes": 2384,
+              "sha256": "ffe488e44a0ea9c41b8b0f5a622baf0139f6c46c01bfa4a6bad9566415683b6e"
+            },
+            "receipt": {
+              "file": "watcher225-first-macos-test-failure-intake.json",
+              "bytes": 1114,
+              "sha256": "3f38ba3510cd6856a4b4cdf8c8580c79fda6a185004c1c6fd7d403fb17fc4bd9"
+            },
+            "verbatim": "#225 evidence: draft PR https://github.com/lossyrob/telex/pull/229 (Closes #225), head de96d59ec0d77e4143a9cd999f0c58505f889985, branch lossyrob-watcher-failure-diagnostics, opened 21:21:07Z by the sole owner 23511e04. Status stays in-progress. Initial CI run 40403620740, job 121855619687, failed the new test registry_ownership_and_input_codes_do_not_gain_runtime_failure_diagnostics on macOS: Runtime::open hit \"registry open -> database is locked\". The owner is reworking that test to hold the Unix ownership lock directly rather than depend on SQLite startup. This is retained evidence for the #195 startup question, not a cause fix and not readiness."
+          }
+        },
+        "controllerSource": {
+          "file": "watcher225-owner-controller-source.json",
+          "bytes": 2403,
+          "sha256": "96ab97a3b3581c193b6c94ee9d54cea76bda9dd9c57cba62780dd36de48967b9"
+        },
+        "controllerCapture": {
+          "file": "watcher225-owner-controller-capture.json",
+          "bytes": 1579,
+          "sha256": "4b8efaa30fe3ac859e4e5d5d8b1927e8f2c91388cf5b37ad20650f6679e954c7"
+        },
+        "controller": {
+          "schema": "telex-v2-launch-binding/1",
+          "nodeId": "watcher-runtime-failure-diagnostics",
+          "workstreamId": "telex-watcher",
+          "issue": 225,
+          "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+          "sessionName": "#225 - watcher runtime-failed diagnostic",
+          "projectId": "d53b5ea1-97fc-4e7c-a48c-8c2dbee13d54",
+          "sessionPath": "lossyrob-probable-robot",
+          "branch": "lossyrob-probable-robot",
+          "contextPackage": "ctx-20261026210729-4eec17f3",
+          "handoffPath": "ctx-20261026210729-4eec17f3\\handoff.json",
+          "kickoffSha256": "83d39d35670935370da00988b2445fcea3d6ed9069b5c60fccb30a1c2e3b4faf",
+          "status": "launched",
+          "updatedAt": "2026-10-26T21:09:38Z",
+          "coordinator": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+          "designSteward": "88943d7d-c3de-40ec-bb86-a4774d0fdb74",
+          "authority": "Steward decision https://github.com/lossyrob/telex/pull/221#issuecomment-6425865009; node published canonical main fc962a6ab7d12f40b004b4eed6b5d18700292a34 / tree d27ffc17f4a169a8ae7da457320e151bc0930ac7 (reconciler diagnostics225v2 doorbell 2026-10-26 21:03Z, single owner launch authorized); deps watcher-runtime-core and watcher-cli-ux completed on canonical main.",
+          "profile": {
+            "model": "gpt-6.1-sol",
+            "reasoningEffort": "high",
+            "contextTier": "default",
+            "mode": "interactive"
+          },
+          "coordinateWithCreator": false,
+          "launchAdapter": "telex-v2-app-launch-adapter.md",
+          "domainNotes": "telex-v2-watcher-domain-notes.md",
+          "workflowInstructionsPath": "launch-225\\workflowInstructions.md",
+          "workflowInstructionsSha256": "41d078bd95c61f2485544f211575e4d7a1e20f3c65b9217fb0d3971378efe1a8",
+          "startCommit": "fc962a6ab7d12f40b004b4eed6b5d18700292a34",
+          "branchRenamedTo": "lossyrob-watcher-failure-diagnostics",
+          "cliSessionId": "d501f9e9-f5a6-46ea-843d-7b05cc720178",
+          "publicClaim": "https://github.com/lossyrob/telex/issues/225#issuecomment-6427435102"
+        },
+        "projection": {
+          "fields": {
+            "sessionPath": "lossyrob-probable-robot",
+            "contextPackage": "ctx-20261026210729-4eec17f3",
+            "handoffPath": "ctx-20261026210729-4eec17f3\\handoff.json",
+            "launchAdapter": "telex-v2-app-launch-adapter.md",
+            "domainNotes": "telex-v2-watcher-domain-notes.md",
+            "workflowInstructionsPath": "launch-225\\workflowInstructions.md"
+          },
+          "boundary": "Complete controller retained with exactly six named private-path leaves replaced by checkout/context/document names; restoring those six values exactly recovers the original object. No referenced context, handoff, kickoff, adapter, domain or workflow file was read."
+        },
+        "versionChronology": "The complete 2403-byte source version was captured at 2026-10-26T21:35:13.859Z. Its literal updatedAt 2026-10-26T21:09:38Z predates the included public claim at 21:12:02Z; neither that value nor this later measured copy dates the addition of publicClaim/branchRenamedTo/cliSessionId or proves rename timing/mechanics. Both initial and later branch snapshots remain.",
+        "identityBoundary": "Watcher reports the public CLI ID resolves to the same sole App owner; no independent recipient/native lookup or second worker is claimed. Requested binding profile is a coordinator-recorded snapshot, not current/effective model, reasoning, context, mode or capacity.",
+        "kickoff": {
+          "reportedDelivered": "2026-10-26T21:09Z",
+          "contextName": "ctx-20261026210729-4eec17f3",
+          "file": "kickoff.md",
+          "reportedBytes": 16491,
+          "reportedSha256": "83d39d35670935370da00988b2445fcea3d6ed9069b5c60fccb30a1c2e3b4faf",
+          "boundary": "Delivery, bytes, Step-4 prerequisite checks and launch remain Watcher-attributed; this reconciler did not read/replay kickoff, delivery, owner checkout HEAD or runtime."
+        },
+        "currentPhaseBoundary": "The reported public claim meets the earlier planned-until-public-claim condition; record in-progress/watch. Initial no-PR and subsequent draft-PR/pending-gates statements remain chronological source snapshots, not denials of later reports or exact-head authority.",
+        "reportedScope": "Watcher reports adopting PR #221 three cfg-only telex-watcher/src/process.rs warning fixes so macOS diagnostics tests build under -D warnings, without containment behavior change. This is attributed scope/build-prerequisite information, not a source diff or runtime inspection.",
+        "initialMacosEvidence": {
+          "reportedRun": "40403620740",
+          "reportedJob": "121855619687",
+          "reportedHead": "de96d59ec0d77e4143a9cd999f0c58505f889985",
+          "reportedTest": "registry_ownership_and_input_codes_do_not_gain_runtime_failure_diagnostics",
+          "reportedError": "Runtime::open: registry open -> database is locked",
+          "reportedNextStep": "Owner reworks the test to hold the Unix ownership lock directly rather than depend on SQLite startup.",
+          "boundary": "Owning Watcher report only; no CI run/job/log, product source, fixture or runtime was read/replayed. Retain as #195 startup-question evidence, not the actual native stage/cause, fixture/product disposition, cause fix, recurrence family or readiness."
+        },
+        "publicSourceIdentity": {
+          "claim": {
+            "id": 6427435102,
+            "url": "https://github.com/lossyrob/telex/issues/225#issuecomment-6427435102",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T21:12:02Z",
+            "updatedAt": "2026-10-26T21:12:02Z",
+            "raw": {
+              "file": "owner225-public-owner-claim-raw.json",
+              "bytes": 2771,
+              "sha256": "fc577233dd8305676860e9fca1dd3a08bb6a157f977b94127952962c438b3abb"
+            },
+            "body": {
+              "file": "owner225-public-owner-claim-body.txt",
+              "bytes": 885,
+              "sha256": "aa8b427ff2aa30ed7f2cef64553d859fa2e6b3419f34c6905c27a9e5f93da72f"
+            },
+            "completeBodyVerbatim": "Owner: session d501f9e9-f5a6-46ea-843d-7b05cc720178\r\n\r\nI will attach stage context at the registry, endpoint, runtime startup/execution, heartbeat and management-server boundaries, then emit one bounded, redacted stderr cause chain for runtime-failed. The JSON envelope shape, specific error codes and exit status remain unchanged; the generic message will point to stderr.\r\n\r\nCoverage will force startup failure and check redaction, the 4096-byte cap with a truncation marker, and the CLI contract. Linux/Windows workspace CI will run the new tests; a focused macOS job will run them with warnings denied. I will reuse PR #221's three cfg-only warning fixes without changing containment behavior.\r\n\r\nThe runtime guide, design and exit-code reference will describe the diagnostic. The macOS startup cause stays with #195 after this item lands; installation bootstrap stays with #222.\r\n"
+          },
+          "pr": {
+            "number": 229,
+            "url": "https://github.com/lossyrob/telex/pull/229",
+            "state": "closed",
+            "draft": false,
+            "head": "12b164a51765420a60b0eeadfd7be8f5635edebe",
+            "branch": "lossyrob-watcher-failure-diagnostics",
+            "createdAt": "2026-10-26T21:21:07Z",
+            "merged": true,
+            "parsedClosingReferences": [
+              225
+            ]
+          },
+          "boundary": "Complete public claim and bounded current PR/closing-reference metadata only. First reported de96d59e and later public head are distinct snapshots; no source/CI review, run/job/log, runtime, App/CLI lookup, implementation acceptance or current exact-head readiness is inferred.",
+          "laterComments": [
+            {
+              "role": "macosWriteFixture",
+              "id": 6428609612,
+              "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6428609612",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:15:28Z",
+              "updatedAt": "2026-10-26T22:15:28Z",
+              "raw": {
+                "file": "owner225-macos-write-fixture-raw.json",
+                "bytes": 3237,
+                "sha256": "b07cfff4c120e19ca4a36f7a7875f2411b9e32c56c0bc2aa7c4bcdff0f42514b"
+              },
+              "body": {
+                "file": "owner225-macos-write-fixture-body.txt",
+                "bytes": 1323,
+                "sha256": "1b0c43b182e49dfaedf3254ed5d5159efe4d28d3e31e72c7c3df38b5e418fd8b"
+              },
+              "completeBodyVerbatim": "Integrated-head CI observation, not a #195 cause finding:\r\n\r\n- Head: d331499f72bd859e20ee1d4878d54d39882b12fb\r\n- Run: https://github.com/lossyrob/telex/actions/runs/40410492025\r\n- Job: https://github.com/lossyrob/telex/actions/runs/40410492025/job/121879665853\r\n- Test: sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text\r\n- Failure: the executable reports SQLite code 5 before reaching the fixture's code-1811 trigger.\r\n\r\nExact relevant excerpt:\r\n\r\n```text\r\nthread 'sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text' (12400) panicked at telex-watcher/tests/runtime_diagnostics.rs:144:5:\r\nruntime-failed\r\n  caused by: runtime open\r\n  caused by: registry open\r\n  caused by: SQLite: Error code 5: The database file is locked\r\n  caused by: Error code 5: The database file is locked\r\n```\r\n\r\nAll 11 binary/unit tests and the other two executable diagnostics tests passed in this job. The strengthened exact-code assertion correctly exposed that the secret-bearing trigger was not reached on macOS; this is not a reason to weaken the assertion, skip the macOS executable test, or fix product startup behavior within #225.\r\n\r\nThis is further evidence for the separately owned #195 diagnostic lead, not attribution of its early exit. No unchanged-head rerun has been requested.\r\n"
+            },
+            {
+              "role": "macosReadFixture",
+              "id": 6428718574,
+              "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6428718574",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:21:35Z",
+              "updatedAt": "2026-10-26T22:21:35Z",
+              "raw": {
+                "file": "owner225-macos-read-fixture-raw.json",
+                "bytes": 4406,
+                "sha256": "5584f54591562aa341b39fb43c92a7ff0c56d71b862523377bf63a12ae4f5f6d"
+              },
+              "body": {
+                "file": "owner225-macos-read-fixture-body.txt",
+                "bytes": 2478,
+                "sha256": "e1cc8f79afb744d53321a1824345ffa36fe1370724fd97edee1521daa4a3d2ae"
+              },
+              "completeBodyVerbatim": "PR #229 is blocked on the macOS executable SQLite diagnostic path at head 718b705f3058052e5066e6b2c982d198e6803760.\r\n\r\n- Run: https://github.com/lossyrob/telex/actions/runs/40411290147\r\n- Job: https://github.com/lossyrob/telex/actions/runs/40411290147/job/121882332938\r\n- Test: sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text\r\n- The raw schema-read assertions completed: the fixture produces SQLITE_CORRUPT code 11 and contains private text.\r\n- The branch executable instead returned SQLite code 5 before the expected code-11 assertion. The test failed rather than accepting a substitute error.\r\n\r\nExact excerpt:\r\n\r\n```text\r\nthread 'sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text' (13262) panicked at telex-watcher/tests/runtime_diagnostics.rs:164:5:\r\nruntime-failed\r\n  caused by: runtime open\r\n  caused by: registry open\r\n  caused by: SQLite: Error code 5: The database file is locked\r\n  caused by: Error code 5: The database file is locked\r\n```\r\n\r\nThe 11 binary/unit tests, executable I/O diagnostic and ownership/input precedence tests passed. The earlier write-time trigger fixture also returned code 5 in the executable (run 40410492025, job 121879665853; preserved in comment 6428609612). Changing the injection to a verified read-time error did not unblock the required executable assertion.\r\n\r\nNo further fixture workaround, platform skip, broadened accepted code, unchanged-head rerun, or product startup fix is being attempted here. This is additional evidence for the separately owned macOS startup lead, not a claim about #195's early-exit cause. The PR remains draft and not ready; the coordinator has been asked to route the prerequisite within the agreed boundary.\r\n\r\nIndependent review passed at this same head: https://github.com/lossyrob/telex/pull/229#issuecomment-6428684988. Both non-blocking notes have been read and dispositioned:\r\n\r\n- Pre-existing heartbeat/cleanup error precedence is unchanged. Preserving multiple simultaneous failures is outside #225's requirement; no change is requested or included here.\r\n- Separate Rust panic-hook output is not part of this formatter's diagnostic. The review demonstrated no production input path to the synthetic panic; adding a global panic/logging framework is not justified within this item.\r\n\r\nThese are recorded scope dispositions, not outstanding requested changes. Neither review pass nor design pass substitutes for the failed hosted CI gate.\r\n"
+            },
+            {
+              "role": "stewardTestBoundary",
+              "id": 6428753387,
+              "url": "https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:23:28Z",
+              "updatedAt": "2026-10-26T22:23:28Z",
+              "raw": {
+                "file": "watcher233-public-boundary-raw.json",
+                "bytes": 4628,
+                "sha256": "497db12b90c795bde8d8d9ab2ec392fc8b71210c1c2c5f9e6988fd0d2620d798"
+              },
+              "body": {
+                "file": "watcher233-public-boundary-body.txt",
+                "bytes": 2726,
+                "sha256": "976a48cbf1bb8f721862ba816b5a269eb1879cdb97a01616de0cce4649e5b847"
+              },
+              "completeBodyVerbatim": "Steward decision: test boundary for #225 (PR #229), and a new upstream item #233 for the macOS registry-open lock. Option (c) from the coordinator.\n\n**Why this is a real boundary.** On hosted macOS, the Watcher executable fails at `registry open` with SQLite code 5 before it can reach any injected SQLite cause. Two independent fixtures both failed this way: the write-time trigger and the verified read-time SQLITE_CORRUPT (https://github.com/lossyrob/telex/pull/229#issuecomment-6428718574). Fixing startup is outside #225 by its node definition (\"Do not diagnose/fix the #195 macOS cause\"), and widening #225 to do it would mix a product repair into a diagnostics item. So #225's requirement to test \"on every platform where the binary builds\" is narrowed for exactly one case: the end-to-end SQLite-cause executable test on macOS. That case moves to #233.\n\n**Required change to PR #229 (test only):**\n\n1. On `sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text` only, add `#[cfg_attr(target_os = \"macos\", ignore = \"blocked by #233: macOS registry open returns SQLITE_BUSY\")]`. The test is reported as ignored, with its reason, on macOS.\n2. Do not change the test body, the exact `Error code 11:` assertion, or the redaction assertions.\n3. Do not skip, relax or replace any other test on any platform.\n4. The macOS I/O, ownership/input-precedence and unit diagnostics tests keep running there.\n5. State the boundary and #233 in the PR description.\n\nEverything else in PR #229 is unchanged; the design passes at d331499f and 718b705f carry forward.\n\n**Readiness:**\n\n- **#225 / PR #229.** The design returns to PASS at the head that adds only that attribute, after I confirm the delta. That head still needs green hosted CI, including macOS, plus Campaign's gate. The independent review at 718b705f covers the test body, but whether the attribute-only delta needs another review is the reviewer's and Campaign's call. Merging closes #225.\n- **#233** (new node `watcher-macos-sqlite-registry-open`) depends on #225. Its closing PR fixes the macOS cause, removes the attribute, and passes hosted macOS at its exact head. Staffing and priority are the coordinator's.\n- **#195.** Its plan does not change: after #229 merges, it runs one rebased diagnostic. If that run shows `runtime open -> registry open -> SQLite code 5`, #195 becomes blocked on #233. The reconciler adds that edge on that evidence without coming back to me. If the run shows a different cause, #195 proceeds on its own evidence and no edge is added. Either way, PR #221's post-merge run is attribution evidence only; it is not a fix and not a reason for #195 to absorb #233.\n\nNo change to #172's HOLD or to Windows/Linux behavior.\r\n"
+            }
+          ],
+          "mergedPr": {
+            "number": 229,
+            "url": "https://github.com/lossyrob/telex/pull/229",
+            "head": "12b164a51765420a60b0eeadfd7be8f5635edebe",
+            "commit": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+            "mergedAt": "2026-10-26T22:47:41Z",
+            "parsedClosingReferences": [
+              225
+            ]
+          },
+          "issue": {
+            "number": 225,
+            "url": "https://github.com/lossyrob/telex/issues/225",
+            "state": "closed",
+            "stateReason": "completed",
+            "closedAt": "2026-10-26T22:47:42Z"
+          },
+          "accepted": {
+            "campaign": {
+              "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "source": "toolu_01MRuxaXXyYpkLBr1vF7nLqm",
+              "verbatim": "#229 merged at 00c0edfa (gate 6429148380; ledger cedd23d) and closes #225. The reviewer's PASS was carried to the exact head over the 4-line macOS ignore deferred to #233; design 6428803538; CI 22/22. The drift exception for 7036e710..c4f6ac8c is file- and API-disjoint. Owner 23511e04 owns the follow-through. No credit for #233, #195 or #201.",
+              "originEvent": {
+                "id": "ec02955c-a542-4945-b7d7-6e8c06f9cca7",
+                "timestamp": "2026-10-26T22:48:40.454Z",
+                "bytes": 2054,
+                "sha256": "cb05ca8da99df4dbd34e001a53af3e72e995e5cd5675fc576b9acb56931be8f4"
+              },
+              "receipt": {
+                "file": "campaign225-merge-boundary-intake.json",
+                "bytes": 800,
+                "sha256": "0467e6f471fea2060f5257d664f68a28105f45e759844beeb97c2049d1033689"
+              }
+            },
+            "owning": {
+              "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+              "source": "toolu_01Tq17HtJhxEyhq2QsBL17Ap",
+              "verbatim": "Status change: watcher-runtime-failure-diagnostics (#225) in-progress -> completed.\n- PR https://github.com/lossyrob/telex/pull/229 merged at 22:47:41Z as merge commit 00c0edfab22e58583d8ef6f2bd47425872cc4bfa (head 12b164a51765420a60b0eeadfd7be8f5635edebe). The head contains the steward's single macOS test ignore, which defers the SQLite registry-open failure to #233.\n- Campaign gate record: https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380. Issue #225 closed at 22:47:42Z.\n- The owner reports exact-merge main CI 40415150085 and Docs 40415150116 still running, with its field report to follow. I'll send any CI failure.\n- Owner 23511e04 stays for follow-through only.\n- #233 is now dependency-ready, but I'll launch its owner only after the #233 node is published.\n- The Sentinel's single rebased #195 diagnostic may now run; its conditional #195 -> #233 edge still waits on that evidence.",
+              "originEvent": {
+                "id": "0a012bc2-7881-4284-b70d-b1c12e87523e",
+                "timestamp": "2026-10-26T22:49:48.551Z",
+                "bytes": 2902,
+                "sha256": "f917e456b5dd3101582c8739e361e3195411a3b1a3908c64867e51aa68cedaae"
+              },
+              "receipt": {
+                "file": "watcher225-accepted-completion-intake.json",
+                "bytes": 1373,
+                "sha256": "337e7df5da71e202fa61c9275bb03a992c2b1fd769d8b92774b8ef22637f3139"
+              }
+            },
+            "gate": {
+              "id": 6429148380,
+              "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:47:38Z",
+              "updatedAt": "2026-10-26T22:47:38Z",
+              "raw": {
+                "file": "gate232v2-second-product-merge-gate-raw.json",
+                "bytes": 3618,
+                "sha256": "bd26d7c3131726bb645083d422cbc8c2c3bffe6c108288359cdf8b0366e3ce6f"
+              },
+              "body": {
+                "file": "gate232v2-second-product-merge-gate-body.txt",
+                "bytes": 1731,
+                "sha256": "c3623db105a93c2c76ca6c9db02e65bbcd6f5ea75e4a9bfa0691642a473453c5"
+              },
+              "completeBodyVerbatim": "Campaign gate: MERGE at exact head 12b164a51765420a60b0eeadfd7be8f5635edebe.\n\nFloor:\n- Parsed closing references: [225] only. Review threads: 0. MERGEABLE/CLEAN.\n- Hosted CI run 40412375343 (pull_request, head 12b164a5, attempt 1): 22/22 jobs succeeded. The macOS diagnostics job 121886040344 ignores only the SQLite case approved in the #225 boundary decision (6428753387), with the reason \"blocked by #233\".\n- Independent review: the existing reviewer's PASS from 718b705f explicitly carries to this exact head (6428684988). The 718b705f..12b164a5 delta is only the 4-line macOS cfg_attr(ignore), which Campaign verified.\n- Design: steward exact-head DESIGN PASS (6428803538).\n- Readiness/preflight: 6429132328.\n\nMain drift: PR base 7036e710; current main c4f6ac8c (#227). Drift 7036e710..c4f6ac8c touches .streamliner, CONTRIBUTING.md, docs/design/daemon.md and src/backend, src/daemon.rs, tests/daemon_core_postgres.rs, tests/fixtures/pg_latency_proxy.rs. Campaign grants the disjoint-drift exception because the drift is file- and API-disjoint:\n- None of #229's 9 paths (telex-watcher/*, docs/design/watcher.md, docs/watcher-runtime.md, the exit-codes guide page, ci.yml) is touched.\n- #229 adds no new telex library API use.\n- #227 only added a Backend trait method with a default implementation and changed no pub signatures used by telex-watcher (SqliteBackend, Backend, postgres::make_tls).\nThe PR does not get credit for latest-main execution; exact-merge main CI is the execution check.\n\nScope: this merge gives no credit for macOS SQLITE_BUSY (#233 owns the fix, removing the ignore and hosted macOS proof), for #195 or for #201. Normal consequence. The owner owns exact-merge main CI/Docs and the field report on #225."
+            }
+          },
+          "terminal": {
+            "actual": {
+              "owner": {
+                "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+                "source": "call_6RDdkxkGPY0KG4PxxeIpZaf4",
+                "verbatim": "Reconcile #225's merged/post-merge evidence from the verified field report: https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955. PR #229 merged as 00c0edfab22e58583d8ef6f2bd47425872cc4bfa, #225 is closed, exact-merge CI 40415150085 and Docs 40415150116 succeeded, isolated validation passed, and design impact is updated-docs; Campaign acceptance is requested, while #233 still owns the macOS SQLite repair and ignore removal (no completion credit for #233, #195 or #201).",
+                "receipt": {
+                  "file": "watcher225-owner-terminal-followthrough-intake.json",
+                  "bytes": 944,
+                  "sha256": "b5ee4d38d65e4a2b1b3b9aebb80f5d820a0ebeb4190928608b477bb5112ddc07"
+                },
+                "originEvent": {
+                  "id": "4bec4ee8-7340-44d2-8b97-e61b5d3a8064",
+                  "timestamp": "2026-10-26T23:06:10.007Z",
+                  "bytes": 2076,
+                  "sha256": "a4815e5dad910e747f5abf015be2325663e6d52e07c990d2670b7aca7b307817"
+                }
+              },
+              "campaign": {
+                "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+                "source": "toolu_01VgaKbu27AMgwTi2sWvmZtC",
+                "verbatim": "#225 follow-through accepted. Field report 6429402955, CI 40415150085 22/22 and Docs 40415150116 2/2 all passed at exact merge 00c0edfa. The node is complete. #233 keeps the macOS obligation; no credit for #233, #195 or #201.",
+                "receipt": {
+                  "file": "campaign225-followthrough-accepted-intake.json",
+                  "bytes": 681,
+                  "sha256": "6ce669a95d9068af4d138866a9ed32821dfa28459a0188e5d8468372942ad213"
+                },
+                "originEvent": {
+                  "id": "e80a68d5-90ec-4576-9361-ece30354046c",
+                  "timestamp": "2026-10-26T23:06:10.010Z",
+                  "bytes": 1816,
+                  "sha256": "8f3c85e87c78be7cf26b242c61ac9c14ce751218f0d114b956124c4565f48828"
+                }
+              },
+              "ownerConfirmation": {
+                "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+                "source": "call_b0vjtNWNvfPo4PCdGFwKVG0i",
+                "verbatim": "Campaign has now explicitly accepted #225's post-merge field report https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955 after independently verifying exact-merge CI 22/22 and Docs 2/2, and declared the node complete with no remaining owner duty; update the prior acceptance-pending state accordingly.",
+                "receipt": {
+                  "file": "watcher225-owner-acceptance-confirmed-intake.json",
+                  "bytes": 772,
+                  "sha256": "8ab70d0845b97d341418721262b63cdbbdc5634737a899bf2d16803c8e13d324"
+                },
+                "originEvent": {
+                  "id": "f24b055e-51dd-40ed-ad94-9270101951a5",
+                  "timestamp": "2026-10-26T23:06:10.022Z",
+                  "bytes": 1732,
+                  "sha256": "f7af3288d380bf072a338900ce4634d3da26dd44858f091f5c579dcce5d89edf"
+                }
+              }
+            },
+            "publicCapture": {
+              "file": "complete225-public-followthrough-capture.json",
+              "bytes": 2461,
+              "sha256": "e8278c902a782307fd8ecb3011fa8145093b2328807bae13e398e8b4907ce123"
+            },
+            "runs": [
+              {
+                "name": "CI",
+                "id": 40415150085,
+                "url": "https://github.com/lossyrob/telex/actions/runs/40415150085",
+                "head": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+                "event": "push",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "raw": {
+                  "file": "complete225-ci-run-raw.json",
+                  "bytes": 13043,
+                  "sha256": "967d2a37c25c6a569e7d14240116d6e2c19447cc7fc8d6b10af427b9d07f39c6"
+                }
+              },
+              {
+                "name": "Docs",
+                "id": 40415150116,
+                "url": "https://github.com/lossyrob/telex/actions/runs/40415150116",
+                "head": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+                "event": "push",
+                "attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+                "raw": {
+                  "file": "complete225-docs-run-raw.json",
+                  "bytes": 13046,
+                  "sha256": "e138e97f0b23bec94e14dbf68f92cd82b025f56bd2f609acd8d03a9ceb2d711a"
+                }
+              }
+            ],
+            "field": {
+              "id": 6429402955,
+              "url": "https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T23:04:08Z",
+              "updatedAt": "2026-10-26T23:04:08Z",
+              "raw": {
+                "file": "complete225-owner-field-raw.json",
+                "bytes": 5607,
+                "sha256": "17c57df318349946ab076fa051b36c44a79c999c01059abced7c20d3c6d85e50"
+              },
+              "body": {
+                "file": "complete225-owner-field-body.txt",
+                "bytes": 3673,
+                "sha256": "b32f6b4bb1b13d8ec8b56320a6acae28b63b8a5f281dbf45d42dfc76b398eb64"
+              },
+              "completeBodyVerbatim": "## Field report: #225\r\n\r\n[PR #229](https://github.com/lossyrob/telex/pull/229) merged as `00c0edfab22e58583d8ef6f2bd47425872cc4bfa` at 2026-10-26T22:47:41Z; #225 is closed. Main CI, Docs, and isolated local validation passed at that exact merge, including the intervening main changes covered by the [Campaign gate](https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380).\r\n\r\n### What held\r\n\r\nGeneric `runtime-failed` errors now produce a stage-labeled cause chain on stderr, capped at 4096 UTF-8 bytes including the newline and any truncation marker. The stdout envelope schema, error code, and exit 1 remain intact. Ownership/input error codes retain precedence and add no runtime-failure diagnostic; typed transport precedence also remains covered.\r\n\r\nSecret-named environment values are redacted at any nonempty length; other environment values are selected from 8 UTF-8 bytes. Static stage labels and OS error numbers survive short ordinary values such as `1`, `C`, and `true`. SQLite messages, embedded credentials/DSNs, and task payloads do not pass through as arbitrary diagnostic text. Returned shutdown/task failures use the same bounded path.\r\n\r\n### Exact-merge evidence\r\n\r\n| Evidence | Result |\r\n|---|---|\r\n| [Main CI 40415150085](https://github.com/lossyrob/telex/actions/runs/40415150085) | Completed successfully; all 22 jobs passed at `00c0edfa`. |\r\n| [Docs 40415150116](https://github.com/lossyrob/telex/actions/runs/40415150116) | Guide build and GitHub Pages deployment both succeeded at `00c0edfa`. |\r\n| [macOS diagnostics job 121895475772](https://github.com/lossyrob/telex/actions/runs/40415150085/job/121895475772) | 11 unit tests and 2 executable tests passed; the single approved SQLite executable test was ignored with the #233 reason. |\r\n| Local Windows diagnostics | 11 unit tests and all 3 executable tests passed, with zero ignored. The SQLite fixture first proved raw code 11 with private text, then verified the executable retained code 11 without that text. |\r\n| Local ordinary runtime lifecycle | `executable_runtime_supports_complete_ordinary_lifecycle_and_safe_defaults` passed. |\r\n\r\nLocal validation used absolute binaries built from the exact merge, unique absolute `TELEX_HOME`, `TELEX_DB`, and `TELEX_INSTALL_ROOT`, and temporary user/`LOCALAPPDATA` roots. The isolated runtime was shut down and fixture directories removed. The operator's installed runtime, real user-directory permissions, and main checkout were untouched; the owner worktree is clean.\r\n\r\n### What successors should know\r\n\r\nThe [approved boundary](https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387) leaves only `sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text` ignored on macOS, with its body and exact-code/redaction assertions unchanged. [#233](https://github.com/lossyrob/telex/issues/233) owns the macOS registry startup repair, removing that ignore, and passing the unchanged executable test on hosted macOS. This is not a diagnosis of #195's early exit. #195's rebased ordinary diagnostic and #201's work remain independent; this report gives none of those items completion credit and makes no macOS containment claim.\r\n\r\nDesign impact: updated-docs. The Watcher design, runtime guide, and exit-code reference describe the diagnostic, redaction threshold, preserved stages, and stderr inspection. No startup store or logging framework was added.\r\n\r\nConsequence: normal - error observability and failure propagation change, while the successful lifecycle and machine-readable envelope contract are preserved.\r\n\r\nPost-merge follow-through is complete; Campaign acceptance of this report is pending.\r\n"
+            },
+            "chronology": "The earlier owning completion reports running CI/Docs and pending field; the field last line later reports acceptance pending at publication. Preserve both unchanged as historical snapshots. Actual later direct Campaign acceptance fulfills that follow-through; the owner then confirms acceptance and no remaining owner duty.",
+            "attribution": "Full public field and exact-merge push/attempt1 completed-success run metadata only. CI22/22, Docs2/2, macOS11unit/2executable/1ignored, Windows11unit/3executable/0ignored, CORRUPT11 fixture proof, ordinary lifecycle/cleanup/isolation and design/source methods remain owner/Campaign attribution; no job, log, source, runtime, installation or registry replay.",
+            "boundary": "Source custody only; the field acceptance-pending text is historical and later Campaign acceptance remains separate actual authority. No product/artifact approval, macOS233 fix/ignore removal,195/201 outcome, environmental/profile/upgrade clearance or debt/hold credit."
+          },
+          "completionMethod": "Complete public claim/test-boundary/gate, PR/issue/closing-reference and exact-merge push/attempt1/completed-success run metadata, plus actual later owner/Campaign terminal messages only. CI22/22, four-line ignore/review carry, exact-head design and disjoint-drift merits remain Campaign/Watcher attribution. Actual later Campaign terminal acceptance is recorded, not independently replayed or expanded beyond bounded225; no product/source/job/log/runtime/installation replay."
+        },
+        "prelaunchFields": {
+          "node": {
+            "summary": "For runtime-failed startup/run errors, write a bounded 4 KiB redacted stage-labeled cause chain to stderr, with truncation marked. Preserve the stdout envelope, runtime-failed code/exit 1 and all other specific codes. Update docs/design/watcher.md and the exit-code reference; test forced startup failure/stage labeling, redaction, byte cap and unchanged envelope on every platform where the binary builds. Do not diagnose/fix the #195 macOS cause, add a logging framework or persisted startup records.",
+            "status": "planned"
+          },
+          "row": {
+            "owner": "Unassigned/unlaunched; Watcher coordinator reports instructions ready and launches one owner only after verified canonical publication.",
+            "status": "planned"
+          }
+        },
+        "prelaunchHistoryBoundary": "All original planned/unassigned, launch-doorbell and no-owner fields remain the original published prelaunch snapshot. This later same-owner qualification records launch, public claim and initial implementation history without rewriting that snapshot or creating a new work hold.",
+        "initialSnapshotNoOutcomeOrHoldRelease": "No independent exact-head source/design/hosted/Campaign gate, implementation acceptance, merged PR, runtime/containment outcome, #195 rerun/rebase/push/merge, PRODUCT225 hold release, #201 validation, five-minute release, installed upgrade, cleanup, debt credit or new worker follows. Original diagnostic contract and external-consumer hold remain exact.",
+        "laterBlockedThenReopenedPhase": {
+          "blocked": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01XJnKUAoyYGrNoQAHwE3Vdq",
+            "verbatim": "Status change: watcher-runtime-failure-diagnostics (#225) in-progress -> blocked. Evidence: https://github.com/lossyrob/telex/pull/229#issuecomment-6428718574 (22:21:35Z).\n- PR #229 is a draft at head 718b705f3058052e5066e6b2c982d198e6803760.\n- Independent review and design checks pass at that head, but macOS CI fails: run 40411290147, job 121882332938.\n- The failing test is sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text. On macOS the Watcher executable stops with \"registry open -> SQLite code 5 database is locked\" before the injected fixture error is reached. The earlier write-time fixture hit the same error: run 40410492025, job 121879665853, comment 6428609612.\n- The owner (23511e04) stopped fixture iterations and will not skip, relax checks or fix startup.\n- The blocker is a macOS registry-open prerequisite or a test-boundary decision. I've routed it to the steward. No #195 cause attribution.",
+            "receipt": {
+              "file": "watcher225-macos-prerequisite-blocked-intake.json",
+              "bytes": 1402,
+              "sha256": "a23c86bf153de618ae23661ba94f398a9f76f6ed56432b7af6dee42646a54384"
+            },
+            "originEvent": {
+              "id": "3504137b-c968-4ac5-ad4e-a79674a05f74",
+              "timestamp": "2026-10-26T22:22:16.087Z",
+              "bytes": 2959,
+              "sha256": "6f2dd1c3b3118cefa848ec0cd40bbd165e0b1751bd8419dde78e91368ad0fa90"
+            }
+          },
+          "owningReopened": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Ks72xgpLrctV5EUeHSXkdw",
+            "verbatim": "Status change: watcher-runtime-failure-diagnostics (#225) blocked -> in-progress. Steward boundary decision: https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387 (22:23:28Z). I relayed the exact test-only cfg_attr change to owner 23511e04. On your #233 node (from the steward's change): staffing is mine. I'll launch its owner after #225 completes and the node is published. I relayed the #195 note (https://github.com/lossyrob/telex/issues/195#issuecomment-6428756204) to the Sentinel and asked it to send the rebased-run evidence to both of us. ",
+            "receipt": {
+              "file": "watcher225-reopened-232-held-intake.json",
+              "bytes": 1159,
+              "sha256": "7cf88222ae5c84652123cc687cf4b75558be889647db254f23267c8cfed4960c"
+            },
+            "originEvent": {
+              "id": "b6a3ed0a-08af-429e-856f-4c9ed41189f8",
+              "timestamp": "2026-10-26T22:24:20.995Z",
+              "bytes": 2473,
+              "sha256": "9d3d7e511e7c26e807dcad69ee3ce94abfc47ec66b420a622a30c3b4166f1e73"
+            },
+            "extraction": "Exact prefix before the separate #232 held-runner section; full incoming source remains separately bound and is not rewritten."
+          },
+          "completePublicReceipts": [
+            {
+              "role": "macosWriteFixture",
+              "id": 6428609612,
+              "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6428609612",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:15:28Z",
+              "updatedAt": "2026-10-26T22:15:28Z",
+              "raw": {
+                "file": "owner225-macos-write-fixture-raw.json",
+                "bytes": 3237,
+                "sha256": "b07cfff4c120e19ca4a36f7a7875f2411b9e32c56c0bc2aa7c4bcdff0f42514b"
+              },
+              "body": {
+                "file": "owner225-macos-write-fixture-body.txt",
+                "bytes": 1323,
+                "sha256": "1b0c43b182e49dfaedf3254ed5d5159efe4d28d3e31e72c7c3df38b5e418fd8b"
+              },
+              "completeBodyVerbatim": "Integrated-head CI observation, not a #195 cause finding:\r\n\r\n- Head: d331499f72bd859e20ee1d4878d54d39882b12fb\r\n- Run: https://github.com/lossyrob/telex/actions/runs/40410492025\r\n- Job: https://github.com/lossyrob/telex/actions/runs/40410492025/job/121879665853\r\n- Test: sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text\r\n- Failure: the executable reports SQLite code 5 before reaching the fixture's code-1811 trigger.\r\n\r\nExact relevant excerpt:\r\n\r\n```text\r\nthread 'sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text' (12400) panicked at telex-watcher/tests/runtime_diagnostics.rs:144:5:\r\nruntime-failed\r\n  caused by: runtime open\r\n  caused by: registry open\r\n  caused by: SQLite: Error code 5: The database file is locked\r\n  caused by: Error code 5: The database file is locked\r\n```\r\n\r\nAll 11 binary/unit tests and the other two executable diagnostics tests passed in this job. The strengthened exact-code assertion correctly exposed that the secret-bearing trigger was not reached on macOS; this is not a reason to weaken the assertion, skip the macOS executable test, or fix product startup behavior within #225.\r\n\r\nThis is further evidence for the separately owned #195 diagnostic lead, not attribution of its early exit. No unchanged-head rerun has been requested.\r\n"
+            },
+            {
+              "role": "macosReadFixture",
+              "id": 6428718574,
+              "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6428718574",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:21:35Z",
+              "updatedAt": "2026-10-26T22:21:35Z",
+              "raw": {
+                "file": "owner225-macos-read-fixture-raw.json",
+                "bytes": 4406,
+                "sha256": "5584f54591562aa341b39fb43c92a7ff0c56d71b862523377bf63a12ae4f5f6d"
+              },
+              "body": {
+                "file": "owner225-macos-read-fixture-body.txt",
+                "bytes": 2478,
+                "sha256": "e1cc8f79afb744d53321a1824345ffa36fe1370724fd97edee1521daa4a3d2ae"
+              },
+              "completeBodyVerbatim": "PR #229 is blocked on the macOS executable SQLite diagnostic path at head 718b705f3058052e5066e6b2c982d198e6803760.\r\n\r\n- Run: https://github.com/lossyrob/telex/actions/runs/40411290147\r\n- Job: https://github.com/lossyrob/telex/actions/runs/40411290147/job/121882332938\r\n- Test: sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text\r\n- The raw schema-read assertions completed: the fixture produces SQLITE_CORRUPT code 11 and contains private text.\r\n- The branch executable instead returned SQLite code 5 before the expected code-11 assertion. The test failed rather than accepting a substitute error.\r\n\r\nExact excerpt:\r\n\r\n```text\r\nthread 'sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text' (13262) panicked at telex-watcher/tests/runtime_diagnostics.rs:164:5:\r\nruntime-failed\r\n  caused by: runtime open\r\n  caused by: registry open\r\n  caused by: SQLite: Error code 5: The database file is locked\r\n  caused by: Error code 5: The database file is locked\r\n```\r\n\r\nThe 11 binary/unit tests, executable I/O diagnostic and ownership/input precedence tests passed. The earlier write-time trigger fixture also returned code 5 in the executable (run 40410492025, job 121879665853; preserved in comment 6428609612). Changing the injection to a verified read-time error did not unblock the required executable assertion.\r\n\r\nNo further fixture workaround, platform skip, broadened accepted code, unchanged-head rerun, or product startup fix is being attempted here. This is additional evidence for the separately owned macOS startup lead, not a claim about #195's early-exit cause. The PR remains draft and not ready; the coordinator has been asked to route the prerequisite within the agreed boundary.\r\n\r\nIndependent review passed at this same head: https://github.com/lossyrob/telex/pull/229#issuecomment-6428684988. Both non-blocking notes have been read and dispositioned:\r\n\r\n- Pre-existing heartbeat/cleanup error precedence is unchanged. Preserving multiple simultaneous failures is outside #225's requirement; no change is requested or included here.\r\n- Separate Rust panic-hook output is not part of this formatter's diagnostic. The review demonstrated no production input path to the synthetic panic; adding a global panic/logging framework is not justified within this item.\r\n\r\nThese are recorded scope dispositions, not outstanding requested changes. Neither review pass nor design pass substitutes for the failed hosted CI gate.\r\n"
+            },
+            {
+              "role": "stewardTestBoundary",
+              "id": 6428753387,
+              "url": "https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387",
+              "author": "lossyrob",
+              "createdAt": "2026-10-26T22:23:28Z",
+              "updatedAt": "2026-10-26T22:23:28Z",
+              "raw": {
+                "file": "watcher233-public-boundary-raw.json",
+                "bytes": 4628,
+                "sha256": "497db12b90c795bde8d8d9ab2ec392fc8b71210c1c2c5f9e6988fd0d2620d798"
+              },
+              "body": {
+                "file": "watcher233-public-boundary-body.txt",
+                "bytes": 2726,
+                "sha256": "976a48cbf1bb8f721862ba816b5a269eb1879cdb97a01616de0cce4649e5b847"
+              },
+              "completeBodyVerbatim": "Steward decision: test boundary for #225 (PR #229), and a new upstream item #233 for the macOS registry-open lock. Option (c) from the coordinator.\n\n**Why this is a real boundary.** On hosted macOS, the Watcher executable fails at `registry open` with SQLite code 5 before it can reach any injected SQLite cause. Two independent fixtures both failed this way: the write-time trigger and the verified read-time SQLITE_CORRUPT (https://github.com/lossyrob/telex/pull/229#issuecomment-6428718574). Fixing startup is outside #225 by its node definition (\"Do not diagnose/fix the #195 macOS cause\"), and widening #225 to do it would mix a product repair into a diagnostics item. So #225's requirement to test \"on every platform where the binary builds\" is narrowed for exactly one case: the end-to-end SQLite-cause executable test on macOS. That case moves to #233.\n\n**Required change to PR #229 (test only):**\n\n1. On `sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text` only, add `#[cfg_attr(target_os = \"macos\", ignore = \"blocked by #233: macOS registry open returns SQLITE_BUSY\")]`. The test is reported as ignored, with its reason, on macOS.\n2. Do not change the test body, the exact `Error code 11:` assertion, or the redaction assertions.\n3. Do not skip, relax or replace any other test on any platform.\n4. The macOS I/O, ownership/input-precedence and unit diagnostics tests keep running there.\n5. State the boundary and #233 in the PR description.\n\nEverything else in PR #229 is unchanged; the design passes at d331499f and 718b705f carry forward.\n\n**Readiness:**\n\n- **#225 / PR #229.** The design returns to PASS at the head that adds only that attribute, after I confirm the delta. That head still needs green hosted CI, including macOS, plus Campaign's gate. The independent review at 718b705f covers the test body, but whether the attribute-only delta needs another review is the reviewer's and Campaign's call. Merging closes #225.\n- **#233** (new node `watcher-macos-sqlite-registry-open`) depends on #225. Its closing PR fixes the macOS cause, removes the attribute, and passes hosted macOS at its exact head. Staffing and priority are the coordinator's.\n- **#195.** Its plan does not change: after #229 merges, it runs one rebased diagnostic. If that run shows `runtime open -> registry open -> SQLite code 5`, #195 becomes blocked on #233. The reconciler adds that edge on that evidence without coming back to me. If the run shows a different cause, #195 proceeds on its own evidence and no edge is added. Either way, PR #221's post-merge run is attribution evidence only; it is not a fix and not a reason for #195 to absorb #233.\n\nNo change to #172's HOLD or to Windows/Linux behavior.\r\n"
+            }
+          ],
+          "blockedAt": "Reported draft718b705f3058052e5066e6b2c982d198e6803760, macOS40411290147/job121882332938, SQLite cause test. Executable registry-openSQLite5 preceded verified read-timeCORRUPT11 assertion; earlier write-time trigger40410492025/job121879665853 also stopped before injected cause. Independent/design pass at718 are reported, not substitutes for failed hosted CI.",
+          "decision": "Actual steward6428753387 narrows exactly one every-platform case: only the end-to-end SQLite-cause executable test is ignored on macOS, with the exact cfg_attr reason citing233. Its body, exact Error code11 and redaction assertions stay unchanged; every other test still runs on all platforms. It is a test-boundary decision, not a registry-open fix or weakened accepted error.",
+          "currentPhase": "Owning Watcher reports blocked -> in-progress after relaying that exact attribute-only decision to existing owner23511e04. No reconciler source inspection proves implementation or an attribute-only diff, and no new exact-head design/independent/CI/Campaign gate is granted. Any actual later head remains a separate snapshot.",
+          "deferred233": "Separate planned233 fixes the macOS cause and removes this one ignore under exact-head hosted gates, preserving ownership/single-owner lock/store identity and172HOLD. This owner qualification adds no233node/checkpoint/owner or dependency edge. Watcher alone owns staffing after225completion AND verified233publication.",
+          "conditional195": "PRODUCT225 hold is not released by metadata or this boundary. Actual post229merge single rebased195diagnostic must show runtime-open->registry-open->SQLite5 before the pre-authorized233dependency can be added; otherwise no edge. No195native cause, os33/212 recurrence, common cause, containment, runtime/repair or installed-upgrade outcome is established.",
+          "noGateExecution": "The source also mentions a prepared-held232runner; that separate excerpt is omitted here, without denying it. No runner/subject/installation/root test, observer/rerun/rearm/wait or scope expansion is performed by this packet."
+        },
+        "allEarlierPhaseStatementsAreHistorical": true,
+        "laterAcceptedProductCompletion": {
+          "campaign": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01MRuxaXXyYpkLBr1vF7nLqm",
+            "verbatim": "#229 merged at 00c0edfa (gate 6429148380; ledger cedd23d) and closes #225. The reviewer's PASS was carried to the exact head over the 4-line macOS ignore deferred to #233; design 6428803538; CI 22/22. The drift exception for 7036e710..c4f6ac8c is file- and API-disjoint. Owner 23511e04 owns the follow-through. No credit for #233, #195 or #201.",
+            "originEvent": {
+              "id": "ec02955c-a542-4945-b7d7-6e8c06f9cca7",
+              "timestamp": "2026-10-26T22:48:40.454Z",
+              "bytes": 2054,
+              "sha256": "cb05ca8da99df4dbd34e001a53af3e72e995e5cd5675fc576b9acb56931be8f4"
+            },
+            "receipt": {
+              "file": "campaign225-merge-boundary-intake.json",
+              "bytes": 800,
+              "sha256": "0467e6f471fea2060f5257d664f68a28105f45e759844beeb97c2049d1033689"
+            }
+          },
+          "owning": {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Tq17HtJhxEyhq2QsBL17Ap",
+            "verbatim": "Status change: watcher-runtime-failure-diagnostics (#225) in-progress -> completed.\n- PR https://github.com/lossyrob/telex/pull/229 merged at 22:47:41Z as merge commit 00c0edfab22e58583d8ef6f2bd47425872cc4bfa (head 12b164a51765420a60b0eeadfd7be8f5635edebe). The head contains the steward's single macOS test ignore, which defers the SQLite registry-open failure to #233.\n- Campaign gate record: https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380. Issue #225 closed at 22:47:42Z.\n- The owner reports exact-merge main CI 40415150085 and Docs 40415150116 still running, with its field report to follow. I'll send any CI failure.\n- Owner 23511e04 stays for follow-through only.\n- #233 is now dependency-ready, but I'll launch its owner only after the #233 node is published.\n- The Sentinel's single rebased #195 diagnostic may now run; its conditional #195 -> #233 edge still waits on that evidence.",
+            "originEvent": {
+              "id": "0a012bc2-7881-4284-b70d-b1c12e87523e",
+              "timestamp": "2026-10-26T22:49:48.551Z",
+              "bytes": 2902,
+              "sha256": "f917e456b5dd3101582c8739e361e3195411a3b1a3908c64867e51aa68cedaae"
+            },
+            "receipt": {
+              "file": "watcher225-accepted-completion-intake.json",
+              "bytes": 1373,
+              "sha256": "337e7df5da71e202fa61c9275bb03a992c2b1fd769d8b92774b8ef22637f3139"
+            }
+          },
+          "gate": {
+            "id": 6429148380,
+            "url": "https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T22:47:38Z",
+            "updatedAt": "2026-10-26T22:47:38Z",
+            "raw": {
+              "file": "gate232v2-second-product-merge-gate-raw.json",
+              "bytes": 3618,
+              "sha256": "bd26d7c3131726bb645083d422cbc8c2c3bffe6c108288359cdf8b0366e3ce6f"
+            },
+            "body": {
+              "file": "gate232v2-second-product-merge-gate-body.txt",
+              "bytes": 1731,
+              "sha256": "c3623db105a93c2c76ca6c9db02e65bbcd6f5ea75e4a9bfa0691642a473453c5"
+            },
+            "completeBodyVerbatim": "Campaign gate: MERGE at exact head 12b164a51765420a60b0eeadfd7be8f5635edebe.\n\nFloor:\n- Parsed closing references: [225] only. Review threads: 0. MERGEABLE/CLEAN.\n- Hosted CI run 40412375343 (pull_request, head 12b164a5, attempt 1): 22/22 jobs succeeded. The macOS diagnostics job 121886040344 ignores only the SQLite case approved in the #225 boundary decision (6428753387), with the reason \"blocked by #233\".\n- Independent review: the existing reviewer's PASS from 718b705f explicitly carries to this exact head (6428684988). The 718b705f..12b164a5 delta is only the 4-line macOS cfg_attr(ignore), which Campaign verified.\n- Design: steward exact-head DESIGN PASS (6428803538).\n- Readiness/preflight: 6429132328.\n\nMain drift: PR base 7036e710; current main c4f6ac8c (#227). Drift 7036e710..c4f6ac8c touches .streamliner, CONTRIBUTING.md, docs/design/daemon.md and src/backend, src/daemon.rs, tests/daemon_core_postgres.rs, tests/fixtures/pg_latency_proxy.rs. Campaign grants the disjoint-drift exception because the drift is file- and API-disjoint:\n- None of #229's 9 paths (telex-watcher/*, docs/design/watcher.md, docs/watcher-runtime.md, the exit-codes guide page, ci.yml) is touched.\n- #229 adds no new telex library API use.\n- #227 only added a Backend trait method with a default implementation and changed no pub signatures used by telex-watcher (SqliteBackend, Backend, postgres::make_tls).\nThe PR does not get credit for latest-main execution; exact-merge main CI is the execution check.\n\nScope: this merge gives no credit for macOS SQLITE_BUSY (#233 owns the fix, removing the ignore and hosted macOS proof), for #195 or for #201. Normal consequence. The owner owns exact-merge main CI/Docs and the field report on #225."
+          },
+          "mergedPr": {
+            "number": 229,
+            "url": "https://github.com/lossyrob/telex/pull/229",
+            "head": "12b164a51765420a60b0eeadfd7be8f5635edebe",
+            "commit": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+            "mergedAt": "2026-10-26T22:47:41Z",
+            "parsedClosingReferences": [
+              225
+            ]
+          },
+          "issue": {
+            "number": 225,
+            "url": "https://github.com/lossyrob/telex/issues/225",
+            "state": "closed",
+            "stateReason": "completed",
+            "closedAt": "2026-10-26T22:47:42Z"
+          },
+          "boundaryReceipt": {
+            "file": "gate232v2-second-product-merge-boundary.json",
+            "bytes": 2721,
+            "sha256": "2ae43545156427a8590ef9a86a0c5eaeb1400411c5796dd7aaa34421e36219d3"
+          },
+          "chronology": "Preserve complete prelaunch/controller/public-claim/first-PR/initial fixture failure, later two injected-cause failures, block, exact steward boundary and reopening snapshots unchanged. Actual Campaign merge and owning completion are later distinct authority, not a second owner or retrospective earlier readiness.",
+          "disposition": "At this owning completion source, same node/row completed/watch for bounded runtime-failure diagnostics delivery. Existing owner 23511e04 is historical and retained assigned exact-merge CI/Docs/field follow-through then; the separate later terminal acceptance below fulfills it, with no new launch.",
+          "testBoundary": "Campaign/Watcher report the exact 12b164a5 head contains only the steward-approved single macOS SQLite-cause ignore over the reviewed 718b705f head. The cause/exact-code/redaction body and every other test retain their accepted boundary; no source diff is independently inspected here. #233 must fix registry-open, remove that ignore and pass exact-head hosted macOS without weakening ownership/lock/store identity or #172 HOLD.",
+          "pendingFollowThroughAtSource": {
+            "mainCi": "40415150085",
+            "docs": "40415150116",
+            "status": "Both running and field report pending in the owning completion source.",
+            "boundary": "Reported pending at source, not a live run poll, job/log check, passed receipt or terminal acceptance. Later results require a separate qualification."
+          },
+          "conditional195": "Owning Watcher reports the single rebased #195 diagnostic after PR #229 merges may now run under its existing steward authorization. This packet does not execute or reauthorize it. Add the pre-authorized #233 dependency only if actual rebased-run evidence shows runtime-open -> registry-open -> SQLite5; no such evidence/edge or native cause is supplied here.",
+          "deferredStaffing": "Owning Watcher reports #233 dependency-ready after #225 completion, but launches its owner only after verified #233 node publication. This packet creates no #233 node/checkpoint/owner and grants no staffing authority.",
+          "noExpandedOutcome": "No macOS #233 fix/removal/proof, #195 cause/edge, #201 validation, installed/upgrade/environmental outcome, root/wait experiment, five-minute/examples gate, #172 containment clearance, debt credit or successor authority."
+        },
+        "laterAcceptedTerminalFollowThrough": {
+          "actual": {
+            "owner": {
+              "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+              "source": "call_6RDdkxkGPY0KG4PxxeIpZaf4",
+              "verbatim": "Reconcile #225's merged/post-merge evidence from the verified field report: https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955. PR #229 merged as 00c0edfab22e58583d8ef6f2bd47425872cc4bfa, #225 is closed, exact-merge CI 40415150085 and Docs 40415150116 succeeded, isolated validation passed, and design impact is updated-docs; Campaign acceptance is requested, while #233 still owns the macOS SQLite repair and ignore removal (no completion credit for #233, #195 or #201).",
+              "receipt": {
+                "file": "watcher225-owner-terminal-followthrough-intake.json",
+                "bytes": 944,
+                "sha256": "b5ee4d38d65e4a2b1b3b9aebb80f5d820a0ebeb4190928608b477bb5112ddc07"
+              },
+              "originEvent": {
+                "id": "4bec4ee8-7340-44d2-8b97-e61b5d3a8064",
+                "timestamp": "2026-10-26T23:06:10.007Z",
+                "bytes": 2076,
+                "sha256": "a4815e5dad910e747f5abf015be2325663e6d52e07c990d2670b7aca7b307817"
+              }
+            },
+            "campaign": {
+              "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+              "source": "toolu_01VgaKbu27AMgwTi2sWvmZtC",
+              "verbatim": "#225 follow-through accepted. Field report 6429402955, CI 40415150085 22/22 and Docs 40415150116 2/2 all passed at exact merge 00c0edfa. The node is complete. #233 keeps the macOS obligation; no credit for #233, #195 or #201.",
+              "receipt": {
+                "file": "campaign225-followthrough-accepted-intake.json",
+                "bytes": 681,
+                "sha256": "6ce669a95d9068af4d138866a9ed32821dfa28459a0188e5d8468372942ad213"
+              },
+              "originEvent": {
+                "id": "e80a68d5-90ec-4576-9361-ece30354046c",
+                "timestamp": "2026-10-26T23:06:10.010Z",
+                "bytes": 1816,
+                "sha256": "8f3c85e87c78be7cf26b242c61ac9c14ce751218f0d114b956124c4565f48828"
+              }
+            },
+            "ownerConfirmation": {
+              "sessionId": "23511e04-e331-4bf3-b44d-c5b97f011a52",
+              "source": "call_b0vjtNWNvfPo4PCdGFwKVG0i",
+              "verbatim": "Campaign has now explicitly accepted #225's post-merge field report https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955 after independently verifying exact-merge CI 22/22 and Docs 2/2, and declared the node complete with no remaining owner duty; update the prior acceptance-pending state accordingly.",
+              "receipt": {
+                "file": "watcher225-owner-acceptance-confirmed-intake.json",
+                "bytes": 772,
+                "sha256": "8ab70d0845b97d341418721262b63cdbbdc5634737a899bf2d16803c8e13d324"
+              },
+              "originEvent": {
+                "id": "f24b055e-51dd-40ed-ad94-9270101951a5",
+                "timestamp": "2026-10-26T23:06:10.022Z",
+                "bytes": 1732,
+                "sha256": "f7af3288d380bf072a338900ce4634d3da26dd44858f091f5c579dcce5d89edf"
+              }
+            }
+          },
+          "publicCapture": {
+            "file": "complete225-public-followthrough-capture.json",
+            "bytes": 2461,
+            "sha256": "e8278c902a782307fd8ecb3011fa8145093b2328807bae13e398e8b4907ce123"
+          },
+          "runs": [
+            {
+              "name": "CI",
+              "id": 40415150085,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40415150085",
+              "head": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+              "event": "push",
+              "attempt": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete225-ci-run-raw.json",
+                "bytes": 13043,
+                "sha256": "967d2a37c25c6a569e7d14240116d6e2c19447cc7fc8d6b10af427b9d07f39c6"
+              }
+            },
+            {
+              "name": "Docs",
+              "id": 40415150116,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40415150116",
+              "head": "00c0edfab22e58583d8ef6f2bd47425872cc4bfa",
+              "event": "push",
+              "attempt": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete225-docs-run-raw.json",
+                "bytes": 13046,
+                "sha256": "e138e97f0b23bec94e14dbf68f92cd82b025f56bd2f609acd8d03a9ceb2d711a"
+              }
+            }
+          ],
+          "field": {
+            "id": 6429402955,
+            "url": "https://github.com/lossyrob/telex/issues/225#issuecomment-6429402955",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:04:08Z",
+            "updatedAt": "2026-10-26T23:04:08Z",
+            "raw": {
+              "file": "complete225-owner-field-raw.json",
+              "bytes": 5607,
+              "sha256": "17c57df318349946ab076fa051b36c44a79c999c01059abced7c20d3c6d85e50"
+            },
+            "body": {
+              "file": "complete225-owner-field-body.txt",
+              "bytes": 3673,
+              "sha256": "b32f6b4bb1b13d8ec8b56320a6acae28b63b8a5f281dbf45d42dfc76b398eb64"
+            },
+            "completeBodyVerbatim": "## Field report: #225\r\n\r\n[PR #229](https://github.com/lossyrob/telex/pull/229) merged as `00c0edfab22e58583d8ef6f2bd47425872cc4bfa` at 2026-10-26T22:47:41Z; #225 is closed. Main CI, Docs, and isolated local validation passed at that exact merge, including the intervening main changes covered by the [Campaign gate](https://github.com/lossyrob/telex/pull/229#issuecomment-6429148380).\r\n\r\n### What held\r\n\r\nGeneric `runtime-failed` errors now produce a stage-labeled cause chain on stderr, capped at 4096 UTF-8 bytes including the newline and any truncation marker. The stdout envelope schema, error code, and exit 1 remain intact. Ownership/input error codes retain precedence and add no runtime-failure diagnostic; typed transport precedence also remains covered.\r\n\r\nSecret-named environment values are redacted at any nonempty length; other environment values are selected from 8 UTF-8 bytes. Static stage labels and OS error numbers survive short ordinary values such as `1`, `C`, and `true`. SQLite messages, embedded credentials/DSNs, and task payloads do not pass through as arbitrary diagnostic text. Returned shutdown/task failures use the same bounded path.\r\n\r\n### Exact-merge evidence\r\n\r\n| Evidence | Result |\r\n|---|---|\r\n| [Main CI 40415150085](https://github.com/lossyrob/telex/actions/runs/40415150085) | Completed successfully; all 22 jobs passed at `00c0edfa`. |\r\n| [Docs 40415150116](https://github.com/lossyrob/telex/actions/runs/40415150116) | Guide build and GitHub Pages deployment both succeeded at `00c0edfa`. |\r\n| [macOS diagnostics job 121895475772](https://github.com/lossyrob/telex/actions/runs/40415150085/job/121895475772) | 11 unit tests and 2 executable tests passed; the single approved SQLite executable test was ignored with the #233 reason. |\r\n| Local Windows diagnostics | 11 unit tests and all 3 executable tests passed, with zero ignored. The SQLite fixture first proved raw code 11 with private text, then verified the executable retained code 11 without that text. |\r\n| Local ordinary runtime lifecycle | `executable_runtime_supports_complete_ordinary_lifecycle_and_safe_defaults` passed. |\r\n\r\nLocal validation used absolute binaries built from the exact merge, unique absolute `TELEX_HOME`, `TELEX_DB`, and `TELEX_INSTALL_ROOT`, and temporary user/`LOCALAPPDATA` roots. The isolated runtime was shut down and fixture directories removed. The operator's installed runtime, real user-directory permissions, and main checkout were untouched; the owner worktree is clean.\r\n\r\n### What successors should know\r\n\r\nThe [approved boundary](https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387) leaves only `sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text` ignored on macOS, with its body and exact-code/redaction assertions unchanged. [#233](https://github.com/lossyrob/telex/issues/233) owns the macOS registry startup repair, removing that ignore, and passing the unchanged executable test on hosted macOS. This is not a diagnosis of #195's early exit. #195's rebased ordinary diagnostic and #201's work remain independent; this report gives none of those items completion credit and makes no macOS containment claim.\r\n\r\nDesign impact: updated-docs. The Watcher design, runtime guide, and exit-code reference describe the diagnostic, redaction threshold, preserved stages, and stderr inspection. No startup store or logging framework was added.\r\n\r\nConsequence: normal - error observability and failure propagation change, while the successful lifecycle and machine-readable envelope contract are preserved.\r\n\r\nPost-merge follow-through is complete; Campaign acceptance of this report is pending.\r\n"
+          },
+          "chronology": "The earlier owning completion reports running CI/Docs and pending field; the field last line later reports acceptance pending at publication. Preserve both unchanged as historical snapshots. Actual later direct Campaign acceptance fulfills that follow-through; the owner then confirms acceptance and no remaining owner duty.",
+          "attribution": "Full public field and exact-merge push/attempt1 completed-success run metadata only. CI22/22, Docs2/2, macOS11unit/2executable/1ignored, Windows11unit/3executable/0ignored, CORRUPT11 fixture proof, ordinary lifecycle/cleanup/isolation and design/source methods remain owner/Campaign attribution; no job, log, source, runtime, installation or registry replay.",
+          "boundary": "Source custody only; the field acceptance-pending text is historical and later Campaign acceptance remains separate actual authority. No product/artifact approval, macOS233 fix/ignore removal,195/201 outcome, environmental/profile/upgrade clearance or debt/hold credit."
+        },
+        "currentDisposition": "Bounded #225 completion and exact-merge CI/Docs/field are accepted. Preserve the same historical owner with no remaining assigned follow-through duty; #233, #195 and #201 remain separate and uncredited.",
+        "briefSourceDisplayProjection": {
+          "kind": "one-trailing-ASCII-space-omitted-only-from-brief-source-display",
+          "source": "toolu_01Ks72xgpLrctV5EUeHSXkdw",
+          "receipt": {
+            "file": "watcher225-reopened-232-held-intake.json",
+            "bytes": 1159,
+            "sha256": "7cf88222ae5c84652123cc687cf4b75558be889647db254f23267c8cfed4960c"
+          },
+          "sourceExcerptAndAuthoredBodyUnchangedInLedger": true,
+          "lineInBodyBeforeDisplayNotice": 72,
+          "removedSuffix": " ",
+          "originalAppend": {
+            "file": "complete225-brief-append.txt",
+            "bytes": 29269,
+            "sha256": "7281c7e474d32c2dd92436075576d8787494fb513e5df81332799297f537ace6"
+          },
+          "displayedBody": {
+            "bytes": 29268,
+            "sha256": "2e999004c20ddb05f850cada7f9263c21002992d7fddeb209cc7e72a9bc56b1f"
+          },
+          "inverse": "Append one U+0020 to line72 of the body after the display notice to recover the complete original29269-byte append exactly. The full original excerpt and bound actual incoming body are retained unchanged; only the brief presentation differs.",
+          "failureReceipt": {
+            "file": "complete225-freeze-failure.json",
+            "bytes": 3543,
+            "sha256": "7d8e0a2b7f84b3ee6987b12edcb56fbc3002acd6daa2bf7b5f52d1b02591eb59"
+          }
+        }
+      }
     }
   ]
 }
