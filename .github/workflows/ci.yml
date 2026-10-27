@@ -395,6 +395,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      - name: Verify source identity and isolate Watcher state
+        env:
+          EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SOURCE_HEAD"
+          echo "Direct source head: $actual; provider event SHA: $GITHUB_SHA"
+          root="$RUNNER_TEMP/watcher-registry-${{ github.run_id }}-${{ github.run_attempt }}"
+          {
+            echo "TELEX_HOME=$root/home"
+            echo "TELEX_DB=$root/telex.sqlite"
+            echo "TELEX_INSTALL_ROOT=$root/install"
+            echo "LOCALAPPDATA=$root/local"
+          } >> "$GITHUB_ENV"
+
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -404,6 +419,16 @@ jobs:
         run: >-
           cargo test -p telex-watcher --no-default-features --features sqlite
           --bin telex-watcher --test runtime_diagnostics
+
+      - name: Test registry ownership, persistence and macOS lock interaction
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --lib registry_v2::tests:: -- --nocapture
+
+      - name: Test macOS ownership error classification
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --lib ownership::tests:: -- --nocapture
 
   credential-macos:
     name: Credential invocation lifecycle (macOS)

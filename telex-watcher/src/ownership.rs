@@ -10,7 +10,6 @@ pub(crate) struct Ownership {
 
 impl Ownership {
     pub fn acquire(path: &Path) -> anyhow::Result<Self> {
-        use anyhow::Context;
         let path = if path.is_absolute() {
             path.to_path_buf()
         } else {
@@ -25,15 +24,50 @@ impl Ownership {
             .create(true)
             .truncate(false)
             .open(&path)?;
-        lock(&file).context("registry-already-owned")?;
+        lock(&file).map_err(lock_error)?;
         let path = std::fs::canonicalize(path)?;
         Ok(Self { _file: file, path })
     }
 }
 
-#[cfg(unix)]
+fn lock_error(error: std::io::Error) -> anyhow::Error {
+    #[cfg(target_os = "macos")]
+    if !matches!(error.raw_os_error(), Some(libc::EAGAIN | libc::EACCES)) {
+        return error.into();
+    }
+    anyhow::Error::new(error).context("registry-already-owned")
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn lock(file: &File) -> std::io::Result<()> {
     fs2::FileExt::try_lock_exclusive(file)
+}
+
+#[cfg(target_os = "macos")]
+fn lock(file: &File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // Darwin's whole-file flock conflicts with SQLite's POSIX locks. An OFD
+    // byte outside SQLite's range retains last-close lifetime and exclusion
+    // across separate opens, even in this process, without extending the file.
+    let lock = libc::flock {
+        l_start: i64::MAX - 1,
+        l_len: 1,
+        l_pid: 0,
+        l_type: libc::F_WRLCK,
+        l_whence: libc::SEEK_SET as libc::c_short,
+    };
+    let result = unsafe {
+        libc::fcntl(
+            file.as_raw_fd(),
+            libc::F_OFD_SETLK,
+            &lock as *const libc::flock,
+        )
+    };
+    if result == -1 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 /// Metadata-only endpoint identity. This neither opens SQLite nor takes an
@@ -124,5 +158,32 @@ fn lock(file: &File) -> std::io::Result<()> {
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn only_lock_conflicts_are_classified_as_already_owned() {
+        for code in [
+            libc::EAGAIN,
+            libc::EACCES,
+            libc::EINVAL,
+            libc::ENOTSUP,
+            libc::EIO,
+        ] {
+            let error = super::lock_error(std::io::Error::from_raw_os_error(code));
+            assert_eq!(
+                error
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .raw_os_error(),
+                Some(code)
+            );
+            assert_eq!(
+                error.to_string() == "registry-already-owned",
+                matches!(code, libc::EAGAIN | libc::EACCES)
+            );
+        }
     }
 }
