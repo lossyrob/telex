@@ -2465,3 +2465,75 @@ The historical #201 stop remains unattributed. These results establish the merge
 Design impact: updated-docs.
 
 ````
+
+
+## External Sentinel #195 accepted follow-through (2026-10-27)
+
+Campaign accepted the external Sentinel #195 exact-merge follow-through and released the reported historical owner `fc772c8f`. This is external-consumer history only. The four local workstreams are application-client, local-daemon, operator-station and telex-watcher; there is no separate Sentinel canonical workstream owner. There is no typed #195 target in these four local workstream graphs or ledgers; none is created. Every graph, ledger, task, dependency, checkpoint, status and other workstream remains byte-exact. Earlier #195 blocked-consumer, PRODUCT225 hold and single-post-229merge diagnostic statements are superseded as #195 source-time history by the later actual acceptance below, not a current denial of it. No other family gate is released and the closed3/3 diagnostic budget is not reopened, reset or refunded.
+
+PR #221 head `e849be20979b093726fb41c17295c62d3fed9224` merged as `dae97f4ae65efad08082972ebd7bd1fce3cf0a6e`. Fixed-attempt public metadata authenticates push CI40442948942 attempt1 and22 successful job RESULT records. It does not reproduce the native10 cases, cleanup/control-flow proof, unedited source/runner merits, dispatch freshness or whole current-main behavior. Docs was not triggered according to the owner field and Campaign path-filter disposition; that is N/A, not a Docs pass or skipped execution. Native-case counts, exact checkout and endpoint/home cleanup, observed build/run costs, original71,702-byte zero-NUL log and its SHA remain producer attribution. The relative original log/packet paths were not resolved or followed. The uncontrolled timings are observations, not causal savings, guaranteed headroom or a future allowance. Design impact: none.
+
+This records no Watcher #234 status, owner, acceptance or completion; no usable-watcher checkpoint, paused migration, #172 containment/HOLD, #167 repair or #182 completion/cause/debt credit follows. No runtime/installation/environment/permissions/cleanup action, new launch or successor is authorized. The full actual Campaign acceptance remains distinct from the earlier field submission wording.
+
+### Actual Campaign acceptance; toolu_01B8VdTck4SX86VqtwJstATi; event 36d5349f-b6f2-4158-96db-9a89a5ca0434 at 2026-10-27T04:06:52.645Z
+
+````text
+#195 follow-through accepted. It covers exact-merge dae97f4a: CI 40442948942 attempt 1, 22/22. Docs is N/A by path filter. Field report: https://github.com/lossyrob/telex/issues/195#issuecomment-6433412311 . Design impact: none. Owner fc772c8f is released from #195. You may record the #195 completion in a later tuple, separate from the frozen 233v3.
+````
+
+### Complete field6433412311; original3249bytes/31CRLF retained, LF display only
+
+````text
+## Field report: native macOS management coverage on main
+
+The #195 coverage works at PR #221's exact merge, `dae97f4ae65efad08082972ebd7bd1fce3cf0a6e`. [Main CI 40442948942, attempt 1](https://github.com/lossyrob/telex/actions/runs/40442948942/attempts/1) completed successfully with all 22 jobs successful. This is the original main attempt; no rerun was needed.
+
+### Native evidence
+
+[Native macOS job 121987350371](https://github.com/lossyrob/telex/actions/runs/40442948942/job/121987350371) passed all eight exact transport cases and both exact CLI cases: 10 passed, 0 failed, 0 ignored. The transport cases cover ownership, aliases, same-user round trips, missing-owner behavior, bounded malformed/slow clients, shutdown ordering, cleanup/rebind and stale-socket reclamation. The CLI cases cover offline/parser behavior and the complete ordinary lifecycle.
+
+Both phase records identify candidate, provider and checkout as the exact merge SHA. The full Run step succeeded. Together with the [unchanged runner's control flow](https://github.com/lossyrob/telex/blob/dae97f4ae65efad08082972ebd7bd1fce3cf0a6e/tests/watcher_macos_management.ps1#L96-L109), this establishes the final endpoint assertion and removal of the exact owned home. There is no separate positive cleanup log line; the timing marker alone would not establish cleanup.
+
+The retained `gh api` stdout representation is `pr221-dae-job121987350371.log`: 71,702 bytes, zero NULs, SHA256 `57cc9d66ae4785460e1d0599752f915ba1844bfddca773a80dd611aa02f2861b`. The complete Build and Run excerpts, byte offsets and hashes are retained with the native evidence packet.
+
+### Observed cost
+
+| Execution | Build | Run | Added phases | Whole macOS job |
+|---|---:|---:|---:|---:|
+| Exact-merge main, job 121987350371 | 34,450 ms | 2,429 ms | 36,879 ms | 119 s |
+| Reviewed PR head e849be20, job 121971927951 | 18,450 ms | 1,423 ms | 19,873 ms | 82 s |
+| Earlier unchanged-772f948a baseline, job 121960275968 | N/A | N/A | N/A | 95 s |
+
+These are uncontrolled host/cache observations. They establish the cost observed in each execution, not a causal saving, regression, net marginal cost or future timing allowance. Campaign accepted the premerge cost in the [merge gate](https://github.com/lossyrob/telex/pull/221#issuecomment-6432821562); the separate main measurement is included here for acceptance. The coverage reuses an existing macOS job and existing cases, without adding a Rust test, matrix leg or detector workload.
+
+### Docs and successor guidance
+
+Docs was not triggered. None of the four landed paths matches the exact-merge workflow's push filters: `docs/guide/**`, `src/**`, `Cargo.toml`, `Cargo.lock`, or `.github/workflows/docs.yml`. This is a path-filter disposition, not a Docs pass or skipped execution.
+
+Keep the exact-case inventories, checkout identity checks and endpoint/owned-home cleanup fail-closed when changing this runner. Read the successful full Run step, not just its timing record.
+
+Design impact: `none`. Contributor validation guidance changed; product contracts and detector containment did not.
+
+The postmerge evidence is complete and submitted for Campaign acceptance. It supplies no #167 repair or #182 completion credit.
+
+````
+
+### Actual Watcher scope disposition; preparation only, NOT frozen-tuple owning approval; toolu_01G9sVC1gkBjK8VaZWgJs9Jz; event 6a42b174-3cfd-42de-a64d-51304a8a8a28 at 2026-10-27T04:40:38.806Z
+
+````text
+Yes, prepare the brief-only #195 external-consumer history for owning review. Do not create a node, row or edge.
+
+Grounds, all read-only on origin/main:
+- Watcher brief line 1102 already records that "Sentinel #195 / PR #221 is external discovery/consumer provenance and stays outside Watcher geometry". #195 is a [Test Sentinel] coverage-gap issue.
+- .streamliner/workstreams has only application-client, local-daemon, operator-station and telex-watcher. There is no Sentinel workstream, so no separate canonical owner exists to route it to.
+- References to #195 appear only in Watcher files: brief 54, discovered-work 37, graph 2. In discovered-work and graph they are only context inside other items (#225, #222, unwind, 0xc0000409), never a #195 target.
+
+The append is needed because the brief still carries source-time #195 hold language that reads as current. Examples: "#195/PR #221 PRODUCT225 hold remains unchanged" (line 1474) and "#195 remains governed by its single post-229merge rebased diagnostic" (line 1517). The append should state that those are superseded as history by Campaign's acceptance toolu_01B8VdTck4SX86VqtwJstATi: dae97f4a, run 40442948942 attempt 1 22/22, Docs N/A by path filter, field report 6433412311, fc772c8f released.
+
+Keep these unchanged:
+- All graph, discovered-work and task bytes, including the #225/#233 summaries that mention #195, #234 bytes and checkpoints.
+- No #172 containment credit, and no #167/#182 cause credit.
+- Native, source, cost and cleanup merits stay attributed to the owner and Campaign.
+
+My owning review will be fresh on the frozen tuple.
+````
