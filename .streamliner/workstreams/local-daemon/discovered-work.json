@@ -9326,9 +9326,9 @@
       "recommendedDisposition": "Separate tracked Local diagnosis-first task for existing #224.",
       "selectedDisposition": "Accept the same new family into one planned/unlaunched Local node/task; preserve candidate history, null discovery provenance and all evidence limits.",
       "target": "postgres-fallback-recovery-exhaustion / existing issue #224",
-      "owner": "Local Daemon; existing implementation owner 769a992c-7319-4d2e-b93a-4977094d7715 (reported same-owner path (a), not a new launch).",
+      "owner": "Local Daemon; historical implementation owner 769a992c-7319-4d2e-b93a-4977094d7715 (bounded #224 delivery and exact-merge follow-through accepted; no remaining assigned #224 duty or new launch).",
       "terminalPath": "Path (a): a closing product/guidance PR with independent exact-head source review, design and hosted gates, followed by Campaign acceptance. Path (b): specific diagnosis that a transient/environmental cause has cleared, then prior design-steward approval for exactly one supported same-profile wait outlasting the observed failure window and Campaign disposition. Neither path is satisfied now. After acceptance Campaign re-arms root once and reports station_health; that later action is not authorized or performed by this recording.",
-      "status": "in-progress",
+      "status": "completed",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign toolu_01JR27dM8djhYUzuMCGXmgYN then toolu_012dMoYnEa5LdQd2wUwFehr1, supplied in exact Local controller custody and actual Local call_Ltnq26mZRnQscWnsSbCG8ugr. Routing/shape acceptance only, not outcome acceptance.",
       "routingQualification": {
@@ -9551,6 +9551,113 @@
           }
         },
         "prelaunchHistoryBoundary": "All unchanged old candidate, routing, planned/unlaunched and no-owner fields describe the original prelaunch snapshot. This additive later assignment/phase/correction qualifies that snapshot without deleting or rewriting it, and creates no new work hold."
+      },
+      "completionQualification": {
+        "kind": "same224-family-later-accepted-bounded-completion-and-exact-merge-followthrough",
+        "accepted": {
+          "campaign": {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01PEuM6iYbZCRfNhYH4mThYs",
+            "verbatim": "#224 follow-through accepted. Field report 6429439948, CI 40414741263 a1 21/21 and Docs 40414741325 2/2 all passed at exact merge c4f6ac8c. The node is complete. The #201 owner has installed v0.3.0-gate201-c4f6ac8c. Root-201 went attended_push again after copilot resume (lease_epoch 4); the pushed test 4192 is still pending. No #201 or #231 credit.",
+            "originEvent": {
+              "id": "98a55938-4ba7-47ec-b475-f95b0fca660f",
+              "timestamp": "2026-10-26T23:08:05.501Z",
+              "bytes": 2066,
+              "sha256": "1469b484cbabefad5b63d861bafb08871df54f0f3f0936c9bddbdaced842236a"
+            },
+            "receipt": {
+              "file": "campaign224-followthrough-accepted-intake.json",
+              "bytes": 806,
+              "sha256": "02f546195434ea04bb8740fc17ead957c7640d38143183557371c19b7bd1023f"
+            }
+          },
+          "field": {
+            "id": 6429439948,
+            "url": "https://github.com/lossyrob/telex/issues/224#issuecomment-6429439948",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:06:32Z",
+            "updatedAt": "2026-10-26T23:06:32Z",
+            "raw": {
+              "file": "complete224-owner-field-raw.json",
+              "bytes": 6990,
+              "sha256": "e7fac69bfced4851e313b0cf200c037cb89c0bbf068381e58d98f0e847d3580c"
+            },
+            "body": {
+              "file": "complete224-owner-field-body.txt",
+              "bytes": 5050,
+              "sha256": "88bab512c62513ed645d84f281e881b1c02c4e21bc6b777d9315bb0ae7727dd2"
+            },
+            "completeBodyVerbatim": "## Post-merge field report: exact merge c4f6ac8c\r\n\r\nThe required actual-merge main CI and Docs follow-through is green. This completes the owner's execution checks and field report; bounded delivery acceptance remains with Campaign.\r\n\r\n[PR #227](https://github.com/lossyrob/telex/pull/227) merged at `2026-10-26T22:44:30Z` as `c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a`, tree `560262dc15dc42487b53a1c7066f58ff1ec5898d`, ordered parents `839f26dd16a37678f3e5f4ffc1c20685e4c54d22` + reviewed head `9baca453ccb4ec372dd067e0d4b9af189434d39a`. Issue #224 closed completed at `22:44:31Z`.\r\n\r\n### Actual-merge gates\r\n\r\n| Gate | Exact-merge result |\r\n| --- | --- |\r\n| [CI 40414741263, attempt 1](https://github.com/lossyrob/telex/actions/runs/40414741263) | `push`, `main`, head `c4f6ac8c...`; 21/21 jobs succeeded, no rerun. |\r\n| [Windows Build/test 121894103259](https://github.com/lossyrob/telex/actions/runs/40414741263/job/121894103259) | Execution context records event, provider and checkout SHA all equal to the full merge SHA. `daemon_process_sqlite` passed 50/50. |\r\n| [Live Postgres parity 121894103497](https://github.com/lossyrob/telex/actions/runs/40414741263/job/121894103497) | Checkout log records the exact merge. Contention/materialization/primary-read/connect and credential-cancellation contracts passed; parity 12 passed, daemon 18 passed, process recovery 2 passed plus one intentionally ignored subprocess entrypoint invoked by its parent proof. |\r\n| [Docs 40414741325, attempt 1](https://github.com/lossyrob/telex/actions/runs/40414741325) | `push`, `main`, exact merge; 2/2 succeeded: Build user guide 121894103228 and Deploy to GitHub Pages 121894909816. Build checkout is the exact merge; deployment consumed artifact 12694641983 and reported success for that merge. |\r\n\r\nThe existing sole observer reported completion and cleared its scheduler. The owner independently read provider run/job metadata, retained full Windows/Postgres/Docs logs and verified the selected checkout, regression and deployment markers above. This is not an independent every-job checkout attestation or a full-log causal audit.\r\n\r\n### Delivered behavior and retained limits\r\n\r\nCandidate materialization and reads use a separate shared autocommit connection without holding the command/status client mutex. Cancellation-surviving phase diagnostics reach exhaustion detail and status. The 3000ms recovery grace, finite idle-deadline precedence, typed exit 7 and truthful unattended health remain unchanged.\r\n\r\nThe controlled local three-waiter/status case reached idle timeout at 6011ms for all three waiters; the 5700ms credential-delay control still exhausted at 3011ms, reporting credential/acquisition phases. These are isolated synthetic controls, not production replay or a historical-cause finding. The original root/member failures remain unattributed.\r\n\r\nEvery backend instance pays the eager extra connection/setup cost. Optional durable-clock and ownership-proof operations still use the ordinary client; SQL can queue on the shared candidate connection. A caller timeout does not cancel submitted SQL or close the retained driver, so submitted work may continue and delay later operations.\r\n\r\n### Review, drift and failure history\r\n\r\nThe [source PASS](https://github.com/lossyrob/telex/pull/227#issuecomment-6428173451), [INITIAL design clearance](https://github.com/lossyrob/telex/pull/227#issuecomment-6428994425) and [Campaign merge gate](https://github.com/lossyrob/telex/pull/227#issuecomment-6429096910) bind the reviewed candidate. Premerge CI tested synthetic `1de3f3c6...` with first parent `cb747a8f...`, not actual merge `c4f6ac8c...`. Campaign explicitly accepted disjoint #228 product drift; the new exact-merge runs above satisfy the resulting execution obligation. No previous PR result or later-main SHA substitutes for them. Docs was N/A for PR scope; main Docs is now separately verified.\r\n\r\nPremerge attempt 1's seven Windows failures remain recorded in the [original #182 occurrence](https://github.com/lossyrob/telex/issues/182#issuecomment-6428543801) and [Sentinel classification](https://github.com/lossyrob/telex/issues/182#issuecomment-6428588529). Its single authorized rerun was one fresh Windows job plus 20 reused successes. Neither that rerun nor these main successes establish the failure cause, a flake/environment diagnosis or debt clearance.\r\n\r\nOwned disposable Docker resources and temporary runtime fixtures were cleaned up, and Docker returned to its prior stopped state. No production waits, production-row writes, real installation upgrade, auth/PIM/ACL/timeout change or detector staging was performed by this owner.\r\n\r\nAck retry ambiguity remains outside this repair under #231; #230 App wording is separate. This report does not establish environmental clearance, a #155 regression, installed-build adoption, same-profile wait survival, or #201 delivery/validation. The upgrade, root re-arm and station-health report remain the separately authorized responsibilities of the #201 owner and Campaign.\r\n"
+          },
+          "publicCapture": {
+            "file": "complete224-public-followthrough-capture.json",
+            "bytes": 2655,
+            "sha256": "791e7cc4e512a20cea7fcac4074991ff83f080d59f7ec155b0c6df2c524734b1"
+          },
+          "runs": [
+            {
+              "name": "CI",
+              "id": 40414741263,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40414741263",
+              "head": "c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a",
+              "event": "push",
+              "attempt": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete224-ci-run-raw.json",
+                "bytes": 13055,
+                "sha256": "4e18149555a23e3064631589ea9d8dd1de73e92bad4eb85f891a0db30b02f945"
+              }
+            },
+            {
+              "name": "Docs",
+              "id": 40414741325,
+              "url": "https://github.com/lossyrob/telex/actions/runs/40414741325",
+              "head": "c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a",
+              "event": "push",
+              "attempt": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "raw": {
+                "file": "complete224-docs-run-raw.json",
+                "bytes": 13058,
+                "sha256": "ecf0a1bda6b72bde131f9a3590605ad6ecfb4d0ad7d6da131c5a2c4eac018d80"
+              }
+            }
+          ],
+          "method": "Full public field and exact-merge push/attempt1 completed-success run metadata only. CI21/21, Docs2/2, selected job checkout/test/deployment markers, isolated three-waiter6011ms/credential5700ms-3011ms controls, cleanup and eager extra connection/uncancelled SQL limits remain owner/Campaign attribution; no job, log, source, runtime, installation, database, Docker or registry replay.",
+          "boundary": "Source custody only. Field acceptance-pending statement is historical and direct later Campaign acceptance is separate authority. Premerge failure, one fresh Windows plus20reused successes and disjoint-drift decisions remain history, not cause/flake/environment/debt clearance. Separately reported201upgrade/resume/attended_push/lease4/pushed4192pending is Campaign attribution, not224runtimeoutcome,201/231acceptance or new permission."
+        },
+        "pr": {
+          "number": 227,
+          "url": "https://github.com/lossyrob/telex/pull/227",
+          "head": "9baca453ccb4ec372dd067e0d4b9af189434d39a",
+          "merge": "c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a",
+          "mergedAt": "2026-10-26T22:44:30Z",
+          "parsedClosingReferences": [
+            224
+          ]
+        },
+        "issue": {
+          "number": 224,
+          "url": "https://github.com/lossyrob/telex/issues/224",
+          "state": "closed",
+          "stateReason": "completed",
+          "closedAt": "2026-10-26T22:44:31Z"
+        },
+        "preservedActualOwnerQualification": {
+          "bytes": 13464,
+          "sha256": "cc203300f4e029ca55e1f77eed568afba3b43d9fe63aafe2b3fc117b4663abe0",
+          "boundary": "Existing complete controller, sole private-path projection, original identity correction, phase A, prelaunch fields and every source/limit remain unchanged. This completion is a separate appended qualification, never a repeated owner publication or second owner."
+        },
+        "chronology": "Preserve the original candidate, routing, planned/no-owner, launch, binding-correction, in-progress and isolated-alternative statements as source-time history. The complete owner field retains the original premerge failures, one fresh Windows run plus 20 reused successes, review/design/disjoint-drift limits and exact-merge execution obligation. Its acceptance-pending statement is historical; later direct Campaign acceptance fulfills the bounded #224 follow-through only.",
+        "deliveredBehaviorAttribution": "The owner and Campaign report a separate shared autocommit candidate materialization/read connection without the ordinary command/status client mutex, plus cancellation-surviving phase diagnostics. Preserve the 3,000 ms grace, finite idle-deadline precedence, typed exit 7 and truthful unattended health. The isolated three-waiter 6,011 ms and credential 5,700 ms -> 3,011 ms controls are not production replay or a historical-cause finding.",
+        "retainedLimits": "Every backend instance pays the eager extra connection/setup cost. Ordinary-client durable-clock/ownership work remains, and SQL can queue on the shared candidate connection. Caller timeout neither cancels submitted SQL nor closes the retained driver, so work may continue and delay later operations.",
+        "noRuntimeOrCauseReplay": "The reported 21/21 CI and 2/2 Docs results, platform counts, checkout/test/deployment markers, independent source/design merits, isolation/cleanup/Docker return and controlled timings remain owner/Campaign attribution. No product, source, job, log, diagnosis, manifest, nineteen-file, experiment, runtime, installation or database replay occurred. Original root/member failures remain unattributed; fresh Windows/reused successes or exact-merge green do not establish cause, flakiness, environment or debt clearance.",
+        "separate201SourceTime": "The same complete Campaign body separately reports #201 installed at v0.3.0-gate201-c4f6ac8c, with the root in attended_push after resume, lease 4, and pushed message 4192 pending. Preserve that as source-time Campaign attribution, not a current-state denial, #224 runtime outcome, #201/#231 acceptance or new permission. Later #201 behavior, PR #235 head/C1/CI and other records remain separate.",
+        "currentDisposition": "The same existing #224 row/node is completed/watch, with the same historical owner 769a992c-7319-4d2e-b93a-4977094d7715 and no remaining assigned #224 follow-through duty or new launch.",
+        "noExpandedAuthority": "No #201 or #231 credit or #230 absorption; no environmental, installation, upgrade or effective-capacity clearance; no root re-arm, wait, retry, observer or runtime permission; no production-cause finding, new family/row/node/owner/edge/checkpoint, debt/HOLD release or successor approval."
       }
     },
     {

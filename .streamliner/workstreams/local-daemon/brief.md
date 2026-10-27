@@ -1945,3 +1945,62 @@ Update `docs/guide/src/guides/copilot-push.md` and the matching text in `copilot
 - Not covered: whether every App build discovers per-session extensions at startup. Evidence is from one Windows App build. The guidance should make liveness verification the gate, not the App version.
 - Separate data point: the first `ack` of 4191 failed with "reconnect grace expired before ack retry sleep". An immediate retry returned `delivery_outcome: already-consumed` / `state: acknowledged` in 1202ms. That belongs to the #224/#190 recovery-grace work, not to this issue.
 ```
+
+
+## #224 later accepted bounded delivery and exact-merge follow-through (2026-10-26)
+
+Direct Campaign `toolu_01PEuM6iYbZCRfNhYH4mThYs` accepts the complete field [6429439948](https://github.com/lossyrob/telex/issues/224#issuecomment-6429439948), CI run 40414741263, attempt 1, and Docs run 40414741325 at the exact merge `c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a`, and declares the node complete. Record completed/watch on the same #224 row/node with historical owner `769a992c-7319-4d2e-b93a-4977094d7715`, no remaining assigned #224 follow-through duty and no new launch. The existing actualOwnerQualification, full controller/path projection, additive alias correction, phase A, original planned task/brief and every previous field remain exact. Add completionQualification separately; do not redo the old owner publication or discard intervening history.
+
+PR #227, head `9baca453ccb4ec372dd067e0d4b9af189434d39a`, merged at 22:44:30Z as `c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a`, with tree 560262dc15dc42487b53a1c7066f58ff1ec5898d and ordered parents 839f26dd16a37678f3e5f4ffc1c20685e4c54d22 plus the reviewed head. Issue #224 closed at 22:44:31Z. Independently match only the bounded public merge/closing metadata, complete field and exact-merge push/attempt-1/completed-success CI/Docs metadata. The reported 21/21 CI and 2/2 Docs results, checkout/test/deployment markers, source/design/disjoint-drift merits and isolated controls/cleanup remain owner/Campaign methods, not this reconciler replay.
+
+The owner and Campaign report a separate shared autocommit candidate materialization/read connection without the ordinary command/status client mutex, plus cancellation-surviving phase diagnostics. Preserve the 3,000 ms grace, finite idle-deadline precedence, typed exit 7 and truthful unattended health. The isolated three-waiter 6,011 ms and credential 5,700 ms -> 3,011 ms controls are not production replay or a historical-cause finding. Every backend instance pays the eager extra connection/setup cost. Ordinary-client durable-clock/ownership work remains, and SQL can queue on the shared candidate connection. Caller timeout neither cancels submitted SQL nor closes the retained driver, so work may continue and delay later operations.
+
+The complete field preserves the original seven Windows failures, one fresh Windows run plus 20 reused successes, disjoint #228 drift and exact-merge execution chronology. None of those green results establishes the original root/member cause, flakiness/environment disposition or debt clearance. Its acceptance-pending sentence is source-time history fulfilled by the separately later direct Campaign body, not a current denial or silently rewritten source. Actual Docker cleanup remains owner-attested, not reconciler environmental clearance.
+
+The same complete Campaign body separately reports #201 installed at v0.3.0-gate201-c4f6ac8c, with the root in attended_push after resume, lease 4, and pushed message 4192 pending. Preserve that as source-time Campaign attribution, not a current-state denial, #224 runtime outcome, #201/#231 acceptance or new permission. Later #201 behavior, PR #235 head/C1/CI and other records remain separate. No #201 or #231 credit or #230 absorption; no environmental, installation, upgrade or effective-capacity clearance; no root re-arm, wait, retry, observer or runtime permission; no production-cause finding, new family/row/node/owner/edge/checkpoint, debt/HOLD release or successor approval.
+
+### Complete actual Campaign acceptance; its separate #201 pending statement is source-time only
+
+```text
+#224 follow-through accepted. Field report 6429439948, CI 40414741263 a1 21/21 and Docs 40414741325 2/2 all passed at exact merge c4f6ac8c. The node is complete. The #201 owner has installed v0.3.0-gate201-c4f6ac8c. Root-201 went attended_push again after copilot resume (lease_epoch 4); the pushed test 4192 is still pending. No #201 or #231 credit.
+```
+
+### Complete public field: 5,050 raw bytes / SHA-256 88bab512c62513ed645d84f281e881b1c02c4e21bc6b777d9315bb0ae7727dd2; original body retained, CRLF-to-LF display only
+
+```text
+## Post-merge field report: exact merge c4f6ac8c
+
+The required actual-merge main CI and Docs follow-through is green. This completes the owner's execution checks and field report; bounded delivery acceptance remains with Campaign.
+
+[PR #227](https://github.com/lossyrob/telex/pull/227) merged at `2026-10-26T22:44:30Z` as `c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a`, tree `560262dc15dc42487b53a1c7066f58ff1ec5898d`, ordered parents `839f26dd16a37678f3e5f4ffc1c20685e4c54d22` + reviewed head `9baca453ccb4ec372dd067e0d4b9af189434d39a`. Issue #224 closed completed at `22:44:31Z`.
+
+### Actual-merge gates
+
+| Gate | Exact-merge result |
+| --- | --- |
+| [CI 40414741263, attempt 1](https://github.com/lossyrob/telex/actions/runs/40414741263) | `push`, `main`, head `c4f6ac8c...`; 21/21 jobs succeeded, no rerun. |
+| [Windows Build/test 121894103259](https://github.com/lossyrob/telex/actions/runs/40414741263/job/121894103259) | Execution context records event, provider and checkout SHA all equal to the full merge SHA. `daemon_process_sqlite` passed 50/50. |
+| [Live Postgres parity 121894103497](https://github.com/lossyrob/telex/actions/runs/40414741263/job/121894103497) | Checkout log records the exact merge. Contention/materialization/primary-read/connect and credential-cancellation contracts passed; parity 12 passed, daemon 18 passed, process recovery 2 passed plus one intentionally ignored subprocess entrypoint invoked by its parent proof. |
+| [Docs 40414741325, attempt 1](https://github.com/lossyrob/telex/actions/runs/40414741325) | `push`, `main`, exact merge; 2/2 succeeded: Build user guide 121894103228 and Deploy to GitHub Pages 121894909816. Build checkout is the exact merge; deployment consumed artifact 12694641983 and reported success for that merge. |
+
+The existing sole observer reported completion and cleared its scheduler. The owner independently read provider run/job metadata, retained full Windows/Postgres/Docs logs and verified the selected checkout, regression and deployment markers above. This is not an independent every-job checkout attestation or a full-log causal audit.
+
+### Delivered behavior and retained limits
+
+Candidate materialization and reads use a separate shared autocommit connection without holding the command/status client mutex. Cancellation-surviving phase diagnostics reach exhaustion detail and status. The 3000ms recovery grace, finite idle-deadline precedence, typed exit 7 and truthful unattended health remain unchanged.
+
+The controlled local three-waiter/status case reached idle timeout at 6011ms for all three waiters; the 5700ms credential-delay control still exhausted at 3011ms, reporting credential/acquisition phases. These are isolated synthetic controls, not production replay or a historical-cause finding. The original root/member failures remain unattributed.
+
+Every backend instance pays the eager extra connection/setup cost. Optional durable-clock and ownership-proof operations still use the ordinary client; SQL can queue on the shared candidate connection. A caller timeout does not cancel submitted SQL or close the retained driver, so submitted work may continue and delay later operations.
+
+### Review, drift and failure history
+
+The [source PASS](https://github.com/lossyrob/telex/pull/227#issuecomment-6428173451), [INITIAL design clearance](https://github.com/lossyrob/telex/pull/227#issuecomment-6428994425) and [Campaign merge gate](https://github.com/lossyrob/telex/pull/227#issuecomment-6429096910) bind the reviewed candidate. Premerge CI tested synthetic `1de3f3c6...` with first parent `cb747a8f...`, not actual merge `c4f6ac8c...`. Campaign explicitly accepted disjoint #228 product drift; the new exact-merge runs above satisfy the resulting execution obligation. No previous PR result or later-main SHA substitutes for them. Docs was N/A for PR scope; main Docs is now separately verified.
+
+Premerge attempt 1's seven Windows failures remain recorded in the [original #182 occurrence](https://github.com/lossyrob/telex/issues/182#issuecomment-6428543801) and [Sentinel classification](https://github.com/lossyrob/telex/issues/182#issuecomment-6428588529). Its single authorized rerun was one fresh Windows job plus 20 reused successes. Neither that rerun nor these main successes establish the failure cause, a flake/environment diagnosis or debt clearance.
+
+Owned disposable Docker resources and temporary runtime fixtures were cleaned up, and Docker returned to its prior stopped state. No production waits, production-row writes, real installation upgrade, auth/PIM/ACL/timeout change or detector staging was performed by this owner.
+
+Ack retry ambiguity remains outside this repair under #231; #230 App wording is separate. This report does not establish environmental clearance, a #155 regression, installed-build adoption, same-profile wait survival, or #201 delivery/validation. The upgrade, root re-arm and station-health report remain the separately authorized responsibilities of the #201 owner and Campaign.
+
+```
