@@ -343,6 +343,33 @@ cancellation and compensation evidence and keeps affected senders non-ready.
 Startup, registry changes, periodic reconciliation, and membership loss drive
 repair without force takeover. Graceful shutdown detaches known senders.
 
+### Daemon and backend outages
+
+A Telex daemon exit, daemon replacement or backend connection termination does
+not stop Watcher. The same runtime retains registry ownership, serves management
+requests and advances its heartbeat. After observing the failure, `health`
+reports the affected profile non-ready with client error or lifecycle evidence
+and `productionReady` is false. Watches using that sender launch no new attempts
+or sends while it is non-ready.
+
+Membership reconciliation runs on the normal cycle (currently every 30 seconds),
+on registration changes and after typed membership loss. It retries the
+supported Application Client, which reconnects to the backend and reattaches to
+the daemon, starting the authorized installed daemon if needed. When that
+sender becomes ready, eligible watches resume automatically. No Watcher restart,
+resume command or replacement registration is required for a transient outage.
+
+An already-running detector may finish during the outage. Event-producing state
+still commits only after durable Telex acceptance. A send with an unknown
+outcome retains its frozen operation identity for receipt reconciliation;
+recovery does not duplicate delivery or commit unaccepted state. Independent
+receipt, store, containment and exhausted-budget blockers remain in effect.
+
+Registry, ownership, management-transport, heartbeat and attempt-task failures
+can end the runtime; daemon and backend availability errors cannot. An
+unplanned `runtime-failed` exit retains the
+[stderr stage and cause chain](#runtime-failure-diagnostics).
+
 Watcher never receives, acknowledges, or dispositions inbound messages. An
 actionable backlog on a sender address degrades runtime health and sets
 `productionReady` to false.
@@ -399,6 +426,22 @@ conflict, late outcomes, grants, removal, and containment uncertainty.
 `sqlite_watcher_runtime_matrix` and `postgres_watcher_runtime_matrix` exercise
 the same transactions through the public client against isolated real stores.
 `TELEX_PG_REQUIRE=1` makes missing PostgreSQL configuration a failure.
+
+`runtime_resilience_tests` runs the real runtime actor with isolated daemon
+processes. Its `*_sender_outage` cases finish an in-flight detector after the
+sender becomes non-ready; the `*_backend_resilience` cases finish before that
+observation to exercise a send interrupted by the outage. A barrier-controlled
+detector produces accepted events before and after each fault.
+
+The tests withhold only the disposable installation's selector to hold a daemon
+outage, and use a private loopback TCP boundary to terminate and withhold only
+the PostgreSQL connections belonging to that test. They assert non-ready/error
+then ready health, unchanged runtime identity, advancing heartbeat, paused
+launches across multiple cadences, unchanged unaccepted state, automatic
+recovery and one durable message per accepted operation. A ten-second non-ready
+window exceeds the ordinary three-attempt send backoff window and must not spend
+any send-retry attempts. The PostgreSQL cases run in both Windows and Linux live
+CI jobs; missing required backend configuration fails closed.
 
 The same SQLite and credentialed-Postgres runtime matrices also invoke the
 actual CLI against the live owner's local endpoint. They cover immutable

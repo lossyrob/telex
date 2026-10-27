@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Node
         # Pinned: the bridge contract step below relies on Node's own positional-glob expansion,
@@ -668,6 +670,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -713,7 +717,7 @@ jobs:
         run: |
           export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
           cargo build -p telex-watcher --all-features --bins
-          cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
+          cargo test -p telex-watcher --all-features --lib postgres_watcher_ -- --test-threads=1
 
       - name: Run InstalledCurrent process proofs on live Postgres
         env:
@@ -742,6 +746,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -791,7 +797,7 @@ jobs:
           TELEX_PG_PASSWORD: postgres
         run: |
           cargo build -p telex-watcher --all-features --bins
-          cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
+          cargo test -p telex-watcher --all-features --lib postgres_watcher_ -- --test-threads=1
 
       - name: Stop PostgreSQL
         if: always()
