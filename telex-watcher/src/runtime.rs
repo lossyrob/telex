@@ -49,6 +49,8 @@ pub struct Runtime {
     containment_directory: PathBuf,
     reconciled_registry_revision: Option<u64>,
     stopping: bool,
+    #[cfg(all(test, any(windows, target_os = "linux")))]
+    pub(crate) send_barrier: Option<crate::runtime_resilience_tests::SendBarrier>,
 }
 
 struct CompletedAttempt {
@@ -101,6 +103,8 @@ impl Runtime {
                 containment_directory,
                 reconciled_registry_revision: None,
                 stopping: false,
+                #[cfg(all(test, any(windows, target_os = "linux")))]
+                send_barrier: None,
             },
             management,
         ))
@@ -500,6 +504,18 @@ impl Runtime {
         if !lock(&self.registry)?.reserve_recovery(id, send, manual, now_ms())? {
             return Ok(());
         }
+        #[cfg(all(test, any(windows, target_os = "linux")))]
+        if send
+            && self
+                .send_barrier
+                .as_ref()
+                .is_some_and(|barrier| barrier.event_sequence == operation.event_sequence)
+        {
+            // Hold the real send after readiness admission while the fixture induces its fault.
+            let barrier = self.send_barrier.take().expect("send barrier present");
+            barrier.reached.send(()).expect("send barrier observer");
+            barrier.resume.await.expect("send barrier release");
+        }
         let evidence = if send {
             let result = bounded(client.send(operation.envelope.clone())).await;
             if let Err(error) = &result {
@@ -507,6 +523,11 @@ impl Runtime {
                     error,
                     ApplicationClientError::MembershipLost { .. }
                         | ApplicationClientError::Collision(_)
+                        | ApplicationClientError::DaemonBootstrap(_)
+                        | ApplicationClientError::Unavailable(_)
+                        | ApplicationClientError::UnsupportedCapability(_)
+                        | ApplicationClientError::TransportUncertain(_)
+                        | ApplicationClientError::Indeterminate { .. }
                 ) {
                     self.clients.invalidate(profile, error.clone());
                 }

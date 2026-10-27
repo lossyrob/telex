@@ -25,5 +25,8 @@ pub use runtime::{Runtime, RuntimeConfig};
 mod runtime_tests;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
+mod runtime_resilience_tests;
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
 #[path = "../../tests/support/telex_isolation.rs"]
 mod isolation;

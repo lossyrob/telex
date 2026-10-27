@@ -798,6 +798,34 @@ default Telex coordination daemon is never used for destructive proof.
 
 ## Failure and recovery
 
+Daemon restart or replacement and backend connection loss are recoverable sender
+outages, not runtime exit conditions. The Watcher keeps its runtime identity,
+registry ownership, management endpoint and heartbeat while the sender is
+unavailable. Health marks the affected sender non-ready and retains the client
+error or lifecycle failure evidence. No new detector attempt or send starts for
+that sender while it is non-ready; other ready senders remain independently
+eligible.
+
+Send-side bootstrap, transport or capability failures invalidate cached sender
+readiness immediately and request membership reconciliation. They do not consume
+further send attempts while waiting for readiness to be proved again. Receipt
+queries remain independent and never infer non-acceptance from a sender failure.
+
+An in-flight detector can finish during an outage, but its event-producing state
+cannot commit without durable acceptance. An uncertain send retains the exact
+pending operation and follows receipt-first reconciliation; recovery never
+allocates a replacement identity or blindly resends. When the daemon or backend
+returns, normal bounded membership reconciliation reattaches the sender and
+eligible watches resume without a Watcher restart or operator repair command.
+Existing receipt, logical-store, containment and exhausted-budget fences still
+apply.
+
+Only registry, ownership, management-transport, heartbeat or attempt-task
+failures may end the runtime. An unplanned host failure reports the failing
+stage and redacted stderr cause chain described in
+[Runtime failure diagnostics](../watcher-runtime.md#runtime-failure-diagnostics).
+Explicit graceful shutdown remains a normal exit.
+
 | Condition | State/send effect | Lifecycle/eligibility/health | Recovery |
 |---|---|---|---|
 | `idle` | commit valid `nextState`; no send | active/eligible/ready | none |

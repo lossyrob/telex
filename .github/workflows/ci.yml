@@ -713,7 +713,7 @@ jobs:
         run: |
           export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
           cargo build -p telex-watcher --all-features --bins
-          cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
+          cargo test -p telex-watcher --all-features --lib postgres_watcher_ -- --test-threads=1
 
       - name: Run InstalledCurrent process proofs on live Postgres
         env:
@@ -791,7 +791,7 @@ jobs:
           TELEX_PG_PASSWORD: postgres
         run: |
           cargo build -p telex-watcher --all-features --bins
-          cargo test -p telex-watcher --all-features --lib postgres_watcher_runtime_matrix -- --test-threads=1
+          cargo test -p telex-watcher --all-features --lib postgres_watcher_ -- --test-threads=1
 
       - name: Stop PostgreSQL
         if: always()
