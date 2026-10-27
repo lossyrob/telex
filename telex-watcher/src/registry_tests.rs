@@ -240,19 +240,149 @@ fn physical_registry_lock_rejects_same_path_and_hard_link_without_mutation() {
     registry
         .register(fixture.registration("watch"), 1000)
         .unwrap();
+    let connection = rusqlite::Connection::open(fixture.path()).unwrap();
+    let count: u64 = connection
+        .query_row("SELECT count(*) FROM watcher_v2_watches", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 1);
+    drop(connection);
+    drop(std::fs::File::open(fixture.path()).unwrap());
+    crate::ownership::physical_identity(&fixture.path()).unwrap();
     let before = std::fs::read(fixture.path()).unwrap();
-    assert!(Registry::open(&fixture.path(), 1, 1)
-        .err()
-        .unwrap()
-        .to_string()
-        .contains("registry-already-owned"));
-    let alias = fixture.root.join("alias.sqlite");
-    std::fs::hard_link(fixture.path(), &alias).unwrap();
-    assert!(Registry::open(&alias, 1, 1).is_err());
+    let hard_link = fixture.root.join("hard-link.sqlite");
+    std::fs::hard_link(fixture.path(), &hard_link).unwrap();
+    let mut paths = vec![
+        fixture.path(),
+        fixture.root.join(".").join("registry.sqlite"),
+        hard_link,
+    ];
+    #[cfg(unix)]
+    {
+        let symlink = fixture.root.join("symlink.sqlite");
+        std::os::unix::fs::symlink(fixture.path(), &symlink).unwrap();
+        paths.push(symlink);
+    }
+    for path in paths.drain(..) {
+        assert!(
+            Registry::open(&path, 1, 1)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("registry-already-owned"),
+            "{}",
+            path.display()
+        );
+    }
     assert_eq!(before, std::fs::read(fixture.path()).unwrap());
     drop(registry);
     let reopened = fixture.open();
     assert_eq!(reopened.list().unwrap().len(), 1);
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn macos_ownership_conflicts_with_legacy_flock_in_both_directions() {
+    let fixture = Fixture::new();
+    let owner = Ownership::acquire(&fixture.path()).unwrap();
+    let legacy = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.path())
+        .unwrap();
+    let error = fs2::FileExt::try_lock_exclusive(&legacy).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    drop(owner);
+    fs2::FileExt::try_lock_exclusive(&legacy).unwrap();
+    let error = Ownership::acquire(&fixture.path()).err().unwrap();
+    assert_eq!(error.to_string(), "registry-already-owned");
+    drop(legacy);
+    Ownership::acquire(&fixture.path()).unwrap();
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn registry_ownership_child() {
+    use std::io::Read;
+
+    let Some(root) = std::env::var_os("TELEX_TEST_REGISTRY_OWNER_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let _registry = Registry::open(&root.join("registry.sqlite"), 10_000, 10_000_000).unwrap();
+    std::fs::write(root.join("owner-ready"), b"owned").unwrap();
+    let mut release = [0];
+    std::io::stdin().read_exact(&mut release).unwrap();
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn macos_physical_registry_owner_excludes_other_processes_and_releases_on_kill() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct OwnerProcess(std::process::Child);
+    impl Drop for OwnerProcess {
+        fn drop(&mut self) {
+            let cleanup = self.0.try_wait().and_then(|status| {
+                if status.is_none() {
+                    self.0.kill()?;
+                    self.0.wait()?;
+                }
+                Ok(())
+            });
+            if !std::thread::panicking() {
+                cleanup.expect("reap isolated registry owner");
+            }
+        }
+    }
+
+    let fixture = Fixture::new();
+    fixture
+        .open()
+        .register(fixture.registration("persisted"), 1000)
+        .unwrap();
+    let binary = std::env::current_exe().unwrap();
+    assert!(binary.is_absolute());
+    let mut owner = OwnerProcess(
+        Command::new(binary)
+            .args(["--exact", "registry_v2::tests::registry_ownership_child"])
+            .env("TELEX_TEST_REGISTRY_OWNER_ROOT", &fixture.root)
+            .env("TELEX_HOME", fixture.root.join("home"))
+            .env("TELEX_DB", fixture.root.join("telex.sqlite"))
+            .env("TELEX_INSTALL_ROOT", fixture.root.join("install"))
+            .env("LOCALAPPDATA", fixture.root.join("local"))
+            .current_dir(&fixture.root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !fixture.root.join("owner-ready").exists() {
+        assert!(
+            owner.0.try_wait().unwrap().is_none(),
+            "owner exited before ready"
+        );
+        assert!(Instant::now() < deadline, "owner did not become ready");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let hard_link = fixture.root.join("hard-link.sqlite");
+    std::fs::hard_link(fixture.path(), &hard_link).unwrap();
+    let symlink = fixture.root.join("symlink.sqlite");
+    std::os::unix::fs::symlink(fixture.path(), &symlink).unwrap();
+    let before = std::fs::read(fixture.path()).unwrap();
+    for path in [fixture.path(), symlink, hard_link] {
+        let error = Registry::open(&path, 1, 1).err().unwrap();
+        assert_eq!(error.to_string(), "registry-already-owned");
+    }
+    assert_eq!(before, std::fs::read(fixture.path()).unwrap());
+    owner.0.kill().unwrap();
+    let status = owner.0.wait().unwrap();
+    assert!(!status.success());
+    let reopened = fixture.open();
+    assert!(reopened.get("persisted").unwrap().is_some());
 }
 
 #[test]

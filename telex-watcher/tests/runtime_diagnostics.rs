@@ -111,10 +111,6 @@ fn startup_io_failure_reports_stage_and_cause_without_changing_envelope() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "blocked by #233: macOS registry open returns SQLITE_BUSY"
-)]
 fn sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text() {
     let fixture = Fixture::new();
     let registry = fixture.root.join("registry.sqlite");
@@ -183,7 +179,7 @@ fn registry_ownership_and_input_codes_do_not_gain_runtime_failure_diagnostics() 
     .unwrap();
     #[cfg(unix)]
     let ownership = {
-        // Match the Unix owner's flock without requiring SQLite startup.
+        // The legacy flock excludes both Unix flock and macOS OFD owners.
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)

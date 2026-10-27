@@ -77,6 +77,23 @@ links contend for the same lock. A second owner receives
 `registry-already-owned`; it cannot mutate registrations or membership. Kernel
 lock release does not depend on a reusable PID file.
 
+On macOS 14 and later, ownership uses a nonblocking open-file-description (OFD)
+write lock on one byte at offset `i64::MAX - 1` of that same registry file.
+Darwin shares the advisory-lock namespace used by `flock` and SQLite's POSIX
+record locks: a whole-file ownership `flock` would block SQLite through its
+separate descriptor. The OFD byte is outside SQLite's lock range and does not
+extend the file. Separate opens, aliases and hard links still contend; closing
+unrelated metadata or SQLite descriptors does not release ownership. The last
+close of the owning description, including process death, releases the lock.
+Legacy whole-file `flock` owners and OFD owners exclude each other.
+
+Only macOS lock conflicts (`EAGAIN`/`EACCES`) report `registry-already-owned`.
+Other native lock errors, including `EINVAL`/`ENOTSUP` on an OS or filesystem
+that rejects OFD locking, fail startup with the OS error preserved and no
+fallback. macOS 13 and earlier are not claimed for this mechanism. Linux and
+other Unix targets keep `flock`; Windows keeps its existing `LockFileEx` byte
+lock. Registry startup support does not enable macOS detector execution.
+
 The returned `LocalManagement` handle sends bounded in-process requests to that
 owner. The host exposes those same typed operations over a versioned same-user
 local endpoint, created after ownership acquisition. Unix uses an owner-only
