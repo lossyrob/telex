@@ -405,6 +405,12 @@ jobs:
           cargo test -p telex-watcher --no-default-features --features sqlite
           --bin telex-watcher --test runtime_diagnostics
 
+      - name: Prove macOS flock and SQLite lock interaction
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --lib registry_v2::tests::macos_whole_file_flock_blocks_sqlite_until_owner_descriptor_closes
+          -- --exact --nocapture
+
   credential-macos:
     name: Credential invocation lifecycle (macOS)
     runs-on: macos-latest

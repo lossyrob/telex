@@ -182,6 +182,58 @@ fn rejected(permanent: bool) -> SendEvidence {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
+fn macos_whole_file_flock_blocks_sqlite_until_owner_descriptor_closes() {
+    use std::os::fd::AsRawFd;
+
+    let fixture = Fixture::new();
+    let owner = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(fixture.path())
+        .unwrap();
+    fs2::FileExt::try_lock_exclusive(&owner).unwrap();
+    let connection = rusqlite::Connection::open(fixture.path()).unwrap();
+    connection.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let mut query = libc::flock {
+        l_start: 0x4000_0000,
+        l_len: 512,
+        l_pid: 0,
+        l_type: libc::F_RDLCK,
+        l_whence: libc::SEEK_SET as libc::c_short,
+    };
+    assert_eq!(
+        unsafe { libc::fcntl(owner.as_raw_fd(), libc::F_GETLK, &mut query) },
+        0
+    );
+    assert_eq!(query.l_type, libc::F_WRLCK);
+    assert_eq!((query.l_start, query.l_len, query.l_pid), (0, 0, -1));
+    let error = connection
+        .query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+            row.get::<_, u64>(0)
+        })
+        .unwrap_err();
+    assert_eq!(
+        error.sqlite_error().unwrap().extended_code,
+        rusqlite::ffi::SQLITE_BUSY
+    );
+    eprintln!(
+        "whole-file flock overlaps SQLite bytes: start={}, len={}, pid={}; SQLite code={}",
+        query.l_start,
+        query.l_len,
+        query.l_pid,
+        error.sqlite_error().unwrap().extended_code
+    );
+    drop(owner);
+    let tables: u64 = connection
+        .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(tables, 0);
+    eprintln!("closing only the flock descriptor restores the same SQLite connection");
+}
+
+#[test]
 fn physical_registry_lock_rejects_same_path_and_hard_link_without_mutation() {
     let fixture = Fixture::new();
     let mut registry = fixture.open();
