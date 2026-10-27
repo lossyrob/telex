@@ -496,21 +496,35 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
     wait_for_fixture_process_completion(&second).await;
 }
 
-/// Issue #167 phase evidence for the delayed inherited writer on Windows.
+/// Issue #167 phase and drain evidence for the delayed inherited writer on Windows.
 ///
-/// The writer stamps its own process creation time, script start and write
-/// completion into atomic marker files. The test reads them only after the
-/// operation has completed or has been dropped (cancellation requested), so
-/// no file or process query precedes cancellation. Cross-process phases use the UTC
-/// FILETIME wall clock and are not a monotonic ordering: writer stamps come
+/// The writer stamps its process creation time, script start, the instant
+/// immediately before its stdout write and write completion into atomic
+/// marker files, each created once by rename and never removed before the
+/// read. The test reads them only after the operation has completed or has
+/// been dropped (cancellation requested), so no file or process query
+/// precedes cancellation. A marker that read as NotFound later had not been
+/// published by the outcome, given no removal; that does not show the writer
+/// never reached that point, because marker I/O can fail while the command
+/// continues. A present marker is placed relative to the outcome only by
+/// the UTC FILETIME wall clock, which is not monotonic. Writer stamps come
 /// from .NET `DateTime.UtcNow`, whose resolution is not verified here, and
-/// marker I/O inside the writer is an observer effect. Only the total is
-/// also measured monotonically.
+/// marker I/O inside the writer, including the pre-write marker just before
+/// the write, is an observer effect.
+///
+/// For a timed-out operation the native owner's drain progress is read after
+/// the drop and before the reaping obligation query. It is a post-cancel
+/// snapshot of independent loads, not a coherent deadline-state
+/// reconstruction: the owner may complete further polls after the outcome,
+/// overwriting the last pre-outcome one. Its stamps are the owner's own
+/// monotonic `Instant`s reported relative to the outcome, so such later
+/// events stay visible as later rather than read as deadline state.
 #[cfg(windows)]
 mod delayed_writer_phases {
     use std::fmt::Write as _;
     use std::path::PathBuf;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use telex::profiles::CredentialCommandDrain;
 
     /// 100ns intervals between 1601-01-01 and 1970-01-01.
     const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
@@ -529,6 +543,50 @@ mod delayed_writer_phases {
 
     fn ms(duration: Duration) -> String {
         format!("{:.1}", duration.as_secs_f64() * 1000.0)
+    }
+
+    /// Signed milliseconds from `at` to the outcome. Only a strictly earlier
+    /// stamp is reported as before it; an equal or later stamp is reported as
+    /// non-positive (`-`), never as a deadline-time event.
+    fn before_outcome(outcome: Instant, at: Option<Instant>) -> String {
+        match at {
+            None => "never".into(),
+            Some(at) if at < outcome => ms(outcome - at),
+            Some(at) => format!("-{}", ms(at - outcome)),
+        }
+    }
+
+    /// One marker as seen at the read after the outcome.
+    enum Marker {
+        Absent,
+        Unreadable,
+        Present(Vec<Option<u64>>),
+    }
+
+    impl Marker {
+        fn stamp(&self, index: usize) -> Option<u64> {
+            match self {
+                Marker::Present(fields) => fields.get(index).copied().flatten(),
+                _ => None,
+            }
+        }
+
+        /// A successful NotFound at the later read means the marker had not
+        /// been published by the outcome, given no removal; it does not show
+        /// the writer never reached that point, since marker I/O can fail
+        /// while the command continues. Presence is placed relative to the
+        /// outcome by wall clock only.
+        fn at_outcome(&self, index: usize, outcome: u64) -> &'static str {
+            match self {
+                Marker::Absent => "not_published_at_read",
+                Marker::Unreadable => "unreadable",
+                Marker::Present(_) => match self.stamp(index) {
+                    Some(stamp) if stamp <= outcome => "present_wallclock_before_outcome",
+                    Some(_) => "present_wallclock_after_outcome",
+                    None => "present_unparsed",
+                },
+            }
+        }
     }
 
     pub struct Markers {
@@ -551,29 +609,35 @@ mod delayed_writer_phases {
             Self { root }
         }
 
-        /// Wrap the delayed writer with atomic started/written markers. The
-        /// stdout contract is unchanged; marker failures only reach stderr.
-        pub fn script(&self, body: &str) -> String {
+        /// Wrap the delayed writer with atomic started, pre_write and written
+        /// markers. The stdout contract is unchanged; marker failures only
+        /// reach stderr.
+        pub fn script(&self, before_write: &str, write: &str) -> String {
             let root = self.root.display();
             format!(
                 "$m='{root}'; $s=[DateTime]::UtcNow.ToFileTimeUtc(); \
                  $c=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc(); \
                  [IO.File]::WriteAllText(\"$m\\started.tmp\", \"$c $s\"); \
                  [IO.File]::Move(\"$m\\started.tmp\", \"$m\\started\"); \
-                 {body}; \
+                 {before_write}; \
+                 [IO.File]::WriteAllText(\"$m\\pre_write.tmp\", [string][DateTime]::UtcNow.ToFileTimeUtc()); \
+                 [IO.File]::Move(\"$m\\pre_write.tmp\", \"$m\\pre_write\"); \
+                 {write}; \
                  [IO.File]::WriteAllText(\"$m\\written.tmp\", [string][DateTime]::UtcNow.ToFileTimeUtc()); \
                  [IO.File]::Move(\"$m\\written.tmp\", \"$m\\written\")"
             )
         }
 
-        /// Writer creation, script start and write completion stamps.
-        fn read(&self) -> (Option<u64>, Option<u64>, Option<u64>) {
-            let started = std::fs::read_to_string(self.root.join("started")).unwrap_or_default();
-            let mut fields = started.split_whitespace().map(|field| field.parse().ok());
-            let written = std::fs::read_to_string(self.root.join("written"))
-                .ok()
-                .and_then(|text| text.trim().parse().ok());
-            (fields.next().flatten(), fields.next().flatten(), written)
+        fn read(&self, name: &str) -> Marker {
+            match std::fs::read_to_string(self.root.join(name)) {
+                Ok(text) => Marker::Present(
+                    text.split_whitespace()
+                        .map(|field| field.parse().ok())
+                        .collect(),
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Marker::Absent,
+                Err(_) => Marker::Unreadable,
+            }
         }
     }
 
@@ -603,6 +667,16 @@ mod delayed_writer_phases {
         }
     }
 
+    /// Observations after a timed-out operation was dropped, in capture
+    /// order: cancel request, non-reaping drain read, reaping obligation
+    /// query. Durations are measured from the outcome.
+    pub struct Cancellation {
+        pub dropped: Duration,
+        pub drain: Vec<CredentialCommandDrain>,
+        pub drain_read: Duration,
+        pub obligations_read: Duration,
+    }
+
     impl Clock {
         pub fn start() -> Self {
             Self {
@@ -619,24 +693,27 @@ mod delayed_writer_phases {
             }
         }
 
-        /// `cancellation` carries the drop (cancel request) and post-cancel
-        /// obligation-query times, measured from the outcome, for a timed-out
-        /// operation. `capture_elapsed_ms` is observer cost from the outcome
-        /// through the marker read, not writer or operation duration.
+        /// `capture_elapsed_ms` is observer cost from the outcome through the
+        /// marker reads, not writer or operation duration.
         pub fn report(
             &self,
             markers: &Markers,
             finished: &Finished,
-            cancellation: Option<(Duration, Duration)>,
+            cancellation: Option<Cancellation>,
         ) -> String {
-            let (created, script, written) = markers.read();
+            let started = markers.read("started");
+            let pre_write = markers.read("pre_write");
+            let written = markers.read("written");
+            let (created, script) = (started.stamp(0), started.stamp(1));
+            let (pre, done) = (pre_write.stamp(0), written.stamp(0));
             let invoked = Some(self.invoked);
             let outcome = Some(finished.filetime);
             let mut line = format!(
                 "[issue-167 delayed-writer phases] outcome={} monotonic_total_ms={} \
                  filetime_total_ms={} invoked_to_writer_created_ms={} \
-                 writer_created_to_script_ms={} script_to_written_ms={} \
-                 written_to_outcome_ms={} writer_exit=unobserved",
+                 writer_created_to_script_ms={} script_to_pre_write_ms={} \
+                 pre_write_to_written_ms={} written_to_outcome_ms={} \
+                 pre_write_at_outcome={} written_at_outcome={} writer_exit=unobserved",
                 if cancellation.is_some() {
                     "elapsed"
                 } else {
@@ -646,24 +723,59 @@ mod delayed_writer_phases {
                 span(invoked, outcome),
                 span(invoked, created),
                 span(created, script),
-                span(script, written),
-                span(written, outcome),
+                span(script, pre),
+                span(pre, done),
+                span(done, outcome),
+                pre_write.at_outcome(0, finished.filetime),
+                written.at_outcome(0, finished.filetime),
             );
-            if let Some((dropped, snapshot)) = cancellation {
+            if let Some(cancellation) = cancellation {
                 write!(
                     line,
-                    " cancel_requested_ms={} post_cancel_obligations_ms={} obligations=post_cancel_reaping_racy markers=post_cancel_racy",
-                    ms(dropped),
-                    ms(snapshot),
+                    " cancel_requested_ms={} drain_read_ms={} post_cancel_obligations_ms={} \
+                     fixture_stdout_bytes_before_trim={} drain_entries={}",
+                    ms(cancellation.dropped),
+                    ms(cancellation.drain_read),
+                    ms(cancellation.obligations_read),
+                    super::DELAYED_WRITER_OUTPUT.len(),
+                    cancellation.drain.len(),
                 )
                 .unwrap();
+                for entry in &cancellation.drain {
+                    write!(
+                        line,
+                        " drain[{}]=owner_pid:{},polls_completed:{},\
+                         last_poll_started_before_outcome_ms:{},\
+                         last_poll_completed_before_outcome_ms:{},stdout_byte_count:{},\
+                         first_stdout_before_outcome_ms:{},\
+                         shell_exit_observed_by_owner_before_outcome_ms:{}",
+                        entry.invocation_id,
+                        entry.owner_pid,
+                        entry.polls,
+                        before_outcome(finished.at, entry.last_poll_started),
+                        before_outcome(finished.at, entry.last_poll_completed),
+                        entry.stdout_bytes,
+                        before_outcome(finished.at, entry.first_stdout),
+                        before_outcome(finished.at, entry.shell_exit_observed),
+                    )
+                    .unwrap();
+                }
+                line.push_str(
+                    " drain=post_cancel_snapshot_independent_loads_not_deadline_state \
+                     obligations=post_cancel_reaping_racy markers=post_cancel_racy",
+                );
             }
             write!(
                 line,
                 " capture_elapsed_ms={} limits=filetime_wall_clock_not_monotonic,\
                  writer_utcnow_resolution_unverified,writer_marker_io_observer_effect,\
-                 script_to_written_includes_configured_150ms_sleep,\
-                 capture_elapsed_is_observer_cost_after_outcome",
+                pre_write_marker_io_precedes_write,marker_io_failure_hides_progress,\
+                 script_to_pre_write_includes_configured_150ms_sleep,\
+                marker_not_found_means_unpublished_not_unreached,\
+                later_poll_overwrites_last_pre_outcome_poll,\
+                shell_exit_is_owner_observation_not_os_exit,\
+                byte_count_is_not_eof_or_child_exit,\
+                capture_elapsed_is_observer_cost_after_outcome",
                 ms(finished.since()),
             )
             .unwrap();
@@ -679,25 +791,47 @@ fn emit_uncaptured(line: &str) {
     let _ = writeln!(std::io::stderr(), "{line}");
 }
 
+/// Diagnostic-head sampling for issue #167: each Windows invocation (workspace
+/// Test and the dedicated credential lifecycle step) runs up to ten
+/// independent single-iteration checks, stopping at the first failure. Every
+/// iteration keeps the original 5s budget and assertions.
+#[cfg(windows)]
+const DELAYED_WRITER_ITERATIONS: usize = 10;
+/// Exact delayed-writer stdout (22 bytes before trim, 18 after).
+#[cfg(windows)]
+const DELAYED_WRITER_OUTPUT: &str = "  delayed-non-secret  ";
+#[cfg(unix)]
+const DELAYED_WRITER_ITERATIONS: usize = 1;
+
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
+    for iteration in 1..=DELAYED_WRITER_ITERATIONS {
+        delayed_writer_iteration(iteration).await;
+    }
+}
+
+async fn delayed_writer_iteration(iteration: usize) {
+    let sample = format!("iteration={iteration}/{DELAYED_WRITER_ITERATIONS}");
     #[cfg(windows)]
     let markers = delayed_writer_phases::Markers::new();
     #[cfg(windows)]
     let command = format!(
         "start /b {}",
         encoded_powershell(&markers.script(
-            "Start-Sleep -Milliseconds 150; [Console]::Out.Write('  delayed-non-secret  ')",
+            "Start-Sleep -Milliseconds 150",
+            &format!("[Console]::Out.Write('{DELAYED_WRITER_OUTPUT}')"),
         ))
     );
     #[cfg(unix)]
     let command = "sh -c 'sleep 0.15; printf \"  delayed-non-secret  \"' &".to_string();
     let profile = profile(&command);
     // Boxed so a timed-out operation is dropped first. Dropping only requests
-    // cancellation in memory. The later obligation query reaps: it may join a
-    // finished owner, publish and remove its entry, so an empty list does not
-    // mean nothing was outstanding at the timeout. Observer file I/O follows.
+    // cancellation in memory. Drain progress is then read without reaping;
+    // the owner's own stamps place each poll relative to the outcome. The
+    // later obligation query reaps: it may join a finished owner, publish and
+    // remove its entry, so an empty list does not mean nothing was
+    // outstanding at the timeout. Observer file I/O follows.
     let mut operation = Box::pin(pg_connect_config(&profile));
     #[cfg(windows)]
     let clock = delayed_writer_phases::Clock::start();
@@ -708,24 +842,44 @@ async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
         drop(operation);
         #[cfg(windows)]
         let dropped = finished.since();
+        #[cfg(windows)]
+        let drain = telex::profiles::credential_command_drain_observations();
+        #[cfg(windows)]
+        let drain_read = finished.since();
         let obligations = telex::profiles::credential_command_obligations();
         #[cfg(windows)]
-        let report = clock.report(&markers, &finished, Some((dropped, finished.since())));
+        let report = clock.report(
+            &markers,
+            &finished,
+            Some(delayed_writer_phases::Cancellation {
+                dropped,
+                drain,
+                drain_read,
+                obligations_read: finished.since(),
+            }),
+        );
         #[cfg(unix)]
         let report = String::new();
         panic!(
-            "delayed inherited writer was not collected within the 5s budget; \
+            "delayed inherited writer was not collected within the 5s budget ({sample}); \
              post_cancel_obligations={obligations:?} {report}"
         );
     };
     #[cfg(windows)]
-    emit_uncaptured(&clock.report(&markers, &finished, None));
+    emit_uncaptured(&format!(
+        "{sample} {}",
+        clock.report(&markers, &finished, None)
+    ));
     let (config, _) = result.unwrap();
     assert_eq!(
         config.get_password(),
-        Some(b"delayed-non-secret".as_slice())
+        Some(b"delayed-non-secret".as_slice()),
+        "{sample}"
     );
-    assert!(telex::profiles::credential_command_obligations().is_empty());
+    assert!(
+        telex::profiles::credential_command_obligations().is_empty(),
+        "{sample}"
+    );
 }
 
 #[tokio::test]

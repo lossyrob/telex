@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -76,8 +76,69 @@ struct Invocation {
     joined: AtomicBool,
     held_scope: Mutex<Option<Process>>,
     failure: Mutex<Option<Failure>>,
+    drain: DrainProgress,
     #[cfg(test)]
     publication_gate: Mutex<Option<Arc<PublicationGate>>>,
+}
+
+/// Lock-free, secret-free record of the native owner's output collection.
+/// Stamps are nanoseconds after `stamp_base()` plus one; zero means never.
+/// A poll starts immediately before `read_available` (stdout then stderr)
+/// and completes only when that call returns successfully; an error return
+/// leaves the previous completion stamp. Shell exit is the owner's first
+/// observation of the primary process status, not the OS exit time. Only
+/// counts and times are kept, never command text or output bytes.
+#[derive(Default)]
+struct DrainProgress {
+    polls: AtomicU64,
+    last_poll_started: AtomicU64,
+    last_poll_completed: AtomicU64,
+    stdout_bytes: AtomicU64,
+    first_stdout: AtomicU64,
+    shell_exit_observed: AtomicU64,
+}
+
+fn stamp_base() -> Instant {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    *BASE.get_or_init(Instant::now)
+}
+
+fn stamp_now() -> u64 {
+    u64::try_from(stamp_base().elapsed().as_nanos())
+        .unwrap_or(u64::MAX - 1)
+        .saturating_add(1)
+}
+
+fn stamp_instant(stamp: u64) -> Option<Instant> {
+    stamp
+        .checked_sub(1)
+        .map(|nanos| stamp_base() + Duration::from_nanos(nanos))
+}
+
+impl DrainProgress {
+    fn poll_started(&self) {
+        self.last_poll_started.store(stamp_now(), Ordering::Release);
+    }
+
+    fn poll_completed(&self, stdout_len: usize) {
+        let now = stamp_now();
+        let bytes = stdout_len as u64;
+        if bytes != 0 && self.stdout_bytes.load(Ordering::Acquire) == 0 {
+            self.first_stdout.store(now, Ordering::Release);
+        }
+        self.stdout_bytes.store(bytes, Ordering::Release);
+        self.polls.fetch_add(1, Ordering::AcqRel);
+        self.last_poll_completed.store(now, Ordering::Release);
+    }
+
+    fn shell_exited(&self) {
+        let _ = self.shell_exit_observed.compare_exchange(
+            0,
+            stamp_now(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +327,7 @@ impl Registry {
             joined: AtomicBool::new(false),
             held_scope: Mutex::new(None),
             failure: Mutex::new(None),
+            drain: DrainProgress::default(),
             #[cfg(test)]
             publication_gate: Mutex::new(None),
         });
@@ -405,6 +467,35 @@ impl Registry {
             })
             .collect()
     }
+
+    /// Reads drain progress without joining, reaping or publishing anything.
+    fn drain_observations(&self) -> Vec<DrainObservation> {
+        self.state
+            .lock()
+            .unwrap()
+            .invocations
+            .iter()
+            .map(|entry| {
+                let drain = &entry.drain;
+                DrainObservation {
+                    invocation_id: entry.id,
+                    owner_pid: std::process::id(),
+                    polls: drain.polls.load(Ordering::Acquire),
+                    last_poll_started: stamp_instant(
+                        drain.last_poll_started.load(Ordering::Acquire),
+                    ),
+                    last_poll_completed: stamp_instant(
+                        drain.last_poll_completed.load(Ordering::Acquire),
+                    ),
+                    stdout_bytes: drain.stdout_bytes.load(Ordering::Acquire),
+                    first_stdout: stamp_instant(drain.first_stdout.load(Ordering::Acquire)),
+                    shell_exit_observed: stamp_instant(
+                        drain.shell_exit_observed.load(Ordering::Acquire),
+                    ),
+                }
+            })
+            .collect()
+    }
 }
 
 fn run_owned(invocation: &Invocation) -> WorkerResult {
@@ -419,8 +510,14 @@ fn run_owned(invocation: &Invocation) -> WorkerResult {
             if invocation.cancelled.load(Ordering::Acquire) {
                 return Err(Failure::at("cancelled"));
             }
+            invocation.drain.poll_started();
             scope.read_available(&mut stdout)?;
-            match scope.exit_status()? {
+            invocation.drain.poll_completed(stdout.len());
+            let status = scope.exit_status()?;
+            if status.is_some() {
+                invocation.drain.shell_exited();
+            }
+            match status {
                 Some(code) if code != 0 => {
                     return Err(Failure {
                         stage: "exited unsuccessfully",
@@ -486,6 +583,22 @@ pub struct Obligation {
     pub failure_stage: Option<&'static str>,
 }
 
+/// Post-cancel diagnostic snapshot of one registered invocation's drain
+/// progress. Fields are independent loads that may straddle owner
+/// iterations; they are not a coherent deadline state. Stamps are the
+/// owner's own `Instant`s; `stdout_bytes` is a count, never content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DrainObservation {
+    pub invocation_id: u64,
+    pub owner_pid: u32,
+    pub polls: u64,
+    pub last_poll_started: Option<Instant>,
+    pub last_poll_completed: Option<Instant>,
+    pub stdout_bytes: u64,
+    pub first_stdout: Option<Instant>,
+    pub shell_exit_observed: Option<Instant>,
+}
+
 fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(Registry::new)
@@ -513,6 +626,10 @@ pub(super) fn drain_before_exit() {
 pub(super) fn pending() -> Vec<Obligation> {
     registry().collect_finished();
     registry().obligations()
+}
+
+pub(super) fn drain_observations() -> Vec<DrainObservation> {
+    registry().drain_observations()
 }
 
 #[cfg(test)]
