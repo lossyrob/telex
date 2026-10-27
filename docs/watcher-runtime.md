@@ -353,7 +353,10 @@ and `productionReady` is false. Watches using that sender launch no new attempts
 or sends while it is non-ready.
 
 Membership reconciliation runs on the normal cycle (currently every 30 seconds),
-on registration changes and after typed membership loss. It retries the
+on registration changes and after typed membership loss. Send-side bootstrap,
+transport and capability failures also invalidate cached readiness immediately
+and request reconciliation, preventing retries from spending the send budget
+against a sender that is no longer ready. It retries the
 supported Application Client, which reconnects to the backend and reattaches to
 the daemon, starting the authorized installed daemon if needed. When that
 sender becomes ready, eligible watches resume automatically. No Watcher restart,

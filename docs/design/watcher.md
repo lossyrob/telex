@@ -806,6 +806,11 @@ error or lifecycle failure evidence. No new detector attempt or send starts for
 that sender while it is non-ready; other ready senders remain independently
 eligible.
 
+Send-side bootstrap, transport or capability failures invalidate cached sender
+readiness immediately and request membership reconciliation. They do not consume
+further send attempts while waiting for readiness to be proved again. Receipt
+queries remain independent and never infer non-acceptance from a sender failure.
+
 An in-flight detector can finish during an outage, but its event-producing state
 cannot commit without durable acceptance. An uncertain send retains the exact
 pending operation and follows receipt-first reconciliation; recovery never

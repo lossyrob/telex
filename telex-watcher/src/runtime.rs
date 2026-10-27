@@ -507,6 +507,11 @@ impl Runtime {
                     error,
                     ApplicationClientError::MembershipLost { .. }
                         | ApplicationClientError::Collision(_)
+                        | ApplicationClientError::DaemonBootstrap(_)
+                        | ApplicationClientError::Unavailable(_)
+                        | ApplicationClientError::UnsupportedCapability(_)
+                        | ApplicationClientError::TransportUncertain(_)
+                        | ApplicationClientError::Indeterminate { .. }
                 ) {
                     self.clients.invalidate(profile, error.clone());
                 }

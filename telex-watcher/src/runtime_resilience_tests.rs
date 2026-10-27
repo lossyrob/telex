@@ -231,6 +231,12 @@ async fn assert_outage(
     let budget = pending(management)
         .await
         .map(|operation| operation.send_budget);
+    if let Some(budget) = &budget {
+        assert!(
+            budget.used <= 1,
+            "sender failure did not fence subsequent sends: {budget:?}"
+        );
+    }
     // Three send attempts would exhaust after 1 + 2 + 4 seconds; wait beyond that.
     sleep(Duration::from_secs(10)).await;
     let after = health(management).await;
@@ -240,7 +246,9 @@ async fn assert_outage(
     assert!(after.heartbeat_at > before.heartbeat_at, "{after:?}");
     assert!(!after.senders[0].ready);
     assert_eq!(attempts(management).await.len(), attempt_count);
-    assert_eq!(watch(management).await.state, json!(1));
+    let value = watch(management).await;
+    assert_eq!(value.state, json!(1));
+    assert_eq!(value.lifecycle, Lifecycle::Active, "{value:?}");
     if let Some(before) = budget {
         let after = pending(management)
             .await
