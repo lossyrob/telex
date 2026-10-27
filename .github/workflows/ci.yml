@@ -354,6 +354,22 @@ jobs:
           --lib daemon::p3_tests::a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member
           -- --exact --nocapture
 
+      - name: Build Watcher management checks (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          TELEX_CI_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: .\tests\watcher_macos_management.ps1 -Phase Build -ExpectedSourceHead $env:TELEX_CI_EVENT_HEAD_SHA
+
+      - name: Exercise native Watcher management (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          TELEX_CI_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: .\tests\watcher_macos_management.ps1 -Phase Run -ExpectedSourceHead $env:TELEX_CI_EVENT_HEAD_SHA
+
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

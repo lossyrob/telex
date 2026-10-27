@@ -1,5 +1,6 @@
 use clap::Parser;
 use serde_json::{json, Value};
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command as ProcessCommand, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -111,7 +112,39 @@ impl Fixture {
             if response["ok"] == true {
                 return host;
             }
-            assert!(host.0.try_wait().unwrap().is_none(), "runtime exited early");
+            let status = host.0.try_wait().unwrap();
+            assert!(
+                status.is_none(),
+                "runtime exited early: status={status:?}; stdout={}; stderr={}",
+                {
+                    let mut bytes = Vec::new();
+                    let read = host
+                        .0
+                        .stdout
+                        .as_mut()
+                        .unwrap()
+                        .take(4096)
+                        .read_to_end(&mut bytes);
+                    format!(
+                        "{} (read={read:?}, limit=4096 bytes)",
+                        String::from_utf8_lossy(&bytes)
+                    )
+                },
+                {
+                    let mut bytes = Vec::new();
+                    let read = host
+                        .0
+                        .stderr
+                        .as_mut()
+                        .unwrap()
+                        .take(4096)
+                        .read_to_end(&mut bytes);
+                    format!(
+                        "{} (read={read:?}, limit=4096 bytes)",
+                        String::from_utf8_lossy(&bytes)
+                    )
+                }
+            );
             assert!(started.elapsed() < Duration::from_secs(15), "{response}");
             std::thread::sleep(Duration::from_millis(20));
         }
