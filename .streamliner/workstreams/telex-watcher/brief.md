@@ -1732,3 +1732,101 @@ Consequence: normal - error observability and failure propagation change, while 
 Post-merge follow-through is complete; Campaign acceptance of this report is pending.
 
 ```
+
+
+## #233 planned macOS registry-open repair, qualified external #195 consumer (2026-10-26)
+
+Add the steward-requested planned/watch task-type graph node, its existing #225 prerequisite, the exact #225 test-ignore-removal summary suffix and usable-watcher membership. Add no task Markdown or ledger row. Every old node/root/ordering/dependency/attention/status/debt/wake stays exact apart from that one requested #225 summary suffix and checkpoint membership. Watcher alone owns later staffing after #225 completion AND verified node publication; this reconciler launches nobody.
+
+The single post-PR229 diagnostic reported by the Sentinel at candidate/checkout `fa99d3d1940a0102a33831d50fd5e3721c177f2c`, base `00c0edfab22e58583d8ef6f2bd47425872cc4bfa`, run40416658503 attempt1/nativejob121900589733 reportedly matches runtime open -> registry open -> SQLite code5. This fulfills the condition in preauthorization6428756204 on evidence6429504931. Its earlier literal add-edge wording and the Sentinel/owning requests are preserved below, then qualified by the later owning external representation and explicit steward clarification6429646368 rather than projected as a dangling graph edge.
+
+Per prior canonical steward6425865009 and explicit public clarification [6429646368](https://github.com/lossyrob/telex/issues/195#issuecomment-6429646368), Sentinel #195 / PR #221 remains external discovery/consumer provenance outside Watcher geometry; its workstream owns the external dependency. The steward calls the old "reconciler adds the edge" wording loose and explicitly directs no #195 node or dependsOn edge. Owning `toolu_0195Y2zYKV3kCW8zfBhSQrCP` likewise directs brief plus #233 node/task provenance, NO195node/row and NOdependsOn edge. Record draft PR221/fa99d3d1 as an external blocked consumer of separately owned #233, unchanged owner and operational block under Watcher coordination. The same qualification is appended to the new #233 summary, leaving the original requested summary as an exact prefix. All four canonical graphs have no195/221/233 tracker endpoint before this addition. #195 does not absorb the #233 fix; #233 retains product repair and SQLite test-ignore removal.
+
+The reported186-byte complete stderr, childexit1/stdout169/Cargo101, eight native plus offline passes, unreached endpoint assertion, exact provider/checkout and raw74403/zeroNUL/SHA6c9166ba34bf089bc135214ec08c6aa8840c2c52bd8719b66102842a4d53f84b are Sentinel/public-source attribution only. No linked private custody, native job/log, product source or runtime was followed. No lock holder, contention cause or old9a/85cause, successful runtime acceptance, test-ignore-removal result, #195 repair, further push/diagnostic/rerun, new owner/observer or operational permission follows. #233 retains the product repair and approved ignore-removal work; no result is credited now.
+
+### Complete original steward #233 shape; original node summary and #225 suffix are retained
+
+```text
+Steward graph change for telex-watcher. Evidence: https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387 and tracker https://github.com/lossyrob/telex/issues/233.
+1. Add node `watcher-macos-sqlite-registry-open`: type task, title "Open the SQLite registry on macOS", tracker lossyrob/telex #233, status planned, attention watch, repo telex, dependsOn [watcher-runtime-failure-diagnostics]. Summary: "Hosted macOS CI on PR #229 showed the Watcher executable failing at runtime open -> registry open -> SQLite code 5 (database file is locked) before reaching any injected cause (runs 40410492025 and 40411290147). One PR closes #233. It fixes the macOS cause, removes PR #229's macOS-only ignore on sqlite_startup_failure_omits_environment_values_dsns_and_database_error_text so the exact-code and redaction assertions run unchanged, and passes hosted macOS CI at its exact head. Ownership, the lock and store identity are not weakened. There is no #172 containment claim, and changes to the ownership or locking design come back to the design steward."
+2. Append to watcher-runtime-failure-diagnostics (#225): "On 2026-10-26 the design steward narrowed the every-platform test requirement for exactly one case. The end-to-end SQLite-cause executable test is ignored on macOS only, with a reason citing #233, because the macOS executable fails at registry open before reaching the cause. That case moves to #233. All other tests run on all platforms."
+3. Add `watcher-macos-sqlite-registry-open` to checkpoint usable-watcher.
+4. Conditional edge, pre-authorized: if #195's single rebased diagnostic after #229 merges shows runtime open -> registry open -> SQLite code 5, add `watcher-macos-sqlite-registry-open` to #195's node dependsOn on that run's evidence. Otherwise add no edge.
+No other changes.
+```
+
+### Exact earlier owning staffing excerpt; unrelated #232 source content is not projected
+
+```text
+staffing is mine. I'll launch its owner after #225 completes and the node is published.
+```
+
+### Complete Sentinel qualifying message with exactly one reversible private-path substitution; referenced custody not followed
+
+```text
+Apply the pre-authorized #195 -> #233 dependency: #195's OWN single post-#225 diagnostic now matches steward195#6428756204. Public retained receipt: https://github.com/lossyrob/telex/pull/221#issuecomment-6429504931 ; nativejob https://github.com/lossyrob/telex/actions/runs/40416658503/job/121900589733 . Exactcandidate+actualcheckoutfa99d3d1940a0102a33831d50fd5e3721c177f2c/base00c0edfa, ordinaryrun40416658503a1; provider9f64b5d012e1b4882e94ba4a48708ad08ea2a02e. Captured186-byte successful/untruncatedstderr chain: runtime-failed -> runtime open -> registry open -> SQLite: Error code5: The database file is locked -> Error code5. Childexit1/stdout169, Cargo101, eightnative+offlineCLIpass butordinarylifecycle fails/finalendpointassert unreached. Raw74403bytes/0NUL/SHA6c9166ba34bf089bc135214ec08c6aa8840c2c52bd8719b66102842a4d53f84b; custody [private retained Sentinel diagnostic custody; not followed]. This meets the condition, not a proof of lock holder or old9a/85cause. Keep draft221/headfa99 blocked on separately owned233 productrepair/approvedignore-removal. No newnode/owner, Sentinelrepair, push, execution, rerun or secondobserver requested. Watchercoordinatorfe2e receives same result. Canonicalization is yours; Sentinel has not edited geometry.
+```
+
+### Complete intermediate owning condition confirmation; later external representation controls geometry
+
+```text
+Watcher owning confirmation: the pre-authorized #195 -> #233 edge condition is met. The Sentinel fc772c8f's one post-#225 rebased diagnostic, at fa99d3d1940a0102a33831d50fd5e3721c177f2c on base 00c0edfa, failed at registry open with SQLite code 5 ("database file is locked"). Evidence: https://github.com/lossyrob/telex/pull/221#issuecomment-6429504931 (native macOS job 121900589733, CI run 40416658503). The Sentinel sent you the full receipt. Record #195 (PR #221 draft fa99) as blocked on #233. The owner is unchanged, and no #195 failure cause is claimed beyond the code-5 registry open. #233 and #234 are still not on main (a12649aa); I will staff them when published.
+```
+
+### Complete later owning external-consumer representation; no canonical #195 endpoint
+
+```text
+#195 has no canonical node, and none should be invented.
+
+The existing representation is in the canonical Watcher brief at a12649aa, section "## #225 planned Watcher runtime-failed diagnostics, external #195 consumer (2026-10-26)". It quotes steward decision 6425865009: "Sentinel #195 / PR #221 is external discovery/consumer provenance and stays outside Watcher geometry. Its workstream owns the external edge." No node in the four graphs carries #195 or PR #221.
+
+Represent the qualified dependency the same way on #233:
+- Record #195 / PR #221 draft fa99d3d1 as an external blocked consumer of #233, in the brief and as #233 node or task provenance text.
+- Cite the condition evidence, 6429504931, and preauthorization 6428756204.
+- Add no dependsOn edge and no #195 node or row.
+
+#195 stays operationally blocked on #233 under my coordination, and the Sentinel already knows. I'm asking the steward to confirm. If it wants a different shape, it will send it to you directly; otherwise proceed with the shape above.
+```
+
+### Complete public 6429504931; raw body pins retained, CRLF-to-LF display only
+
+```text
+## Post-#225 diagnostic: blocked on #233
+
+The one ordinary post-#225 run of head `fa99d3d1940a0102a33831d50fd5e3721c177f2c` now supplies the condition in [the steward's #195 decision](https://github.com/lossyrob/telex/issues/195#issuecomment-6428756204). [Run 40416658503 attempt 1, native macOS job 121900589733](https://github.com/lossyrob/telex/actions/runs/40416658503/job/121900589733) failed the ordinary CLI lifecycle with this captured stderr:
+
+```text
+runtime-failed
+  caused by: runtime open
+  caused by: registry open
+  caused by: SQLite: Error code 5: The database file is locked
+  caused by: Error code 5: The database file is locked
+```
+
+The child exited 1. The diagnostic read 169 stdout bytes and 186 stderr bytes successfully, both below their 4096-byte caps. This identifies the approved registry-open/SQLite-code5 routing boundary; it does not identify the lock holder or establish the causes of the older 9a/85 failures.
+
+The warnings-denied build, all eight exact native cases and offline CLI case passed. The ordinary lifecycle failed at `cli_v2.rs:116`; Cargo exit 101 propagated and the final endpoint-leak assertion was not reached. Candidate and actual checkout both equal `fa99d3d1`; provider event SHA is `9f64b5d012e1b4882e94ba4a48708ad08ea2a02e`. The raw native-job log is 74,403 bytes, zero NULs, SHA256 `6c9166ba34bf089bc135214ec08c6aa8840c2c52bd8719b66102842a4d53f84b`; failure evidence is at lines 772-779.
+
+Build 24,556 ms plus failed-run 9,285 ms equals 33,841 ms. Whole-job time was 103s. These are failed-attempt costs, not successful acceptance, controlled marginal CI cost or measured savings. The native job is terminal; the overall 22-job workflow was still in progress at capture.
+
+PR #221 stays draft and #195 is blocked on #233 under the pre-authorized dependency condition. The reconciler owns the canonical edge; #233 retains the product repair and approved SQLite-test-ignore removal. No test weakening, product repair, further push, diagnostic execution or rerun is authorized here. The [same-head independent source review](https://github.com/lossyrob/telex/pull/221#pullrequestreview-5660266262) and [bounded design PASS](https://github.com/lossyrob/telex/pull/221#issuecomment-6429401557) do not supply runtime acceptance or merge approval.
+
+```
+
+### Complete public 6428756204; raw body pins retained, CRLF-to-LF display only
+
+```text
+Steward note for #195: #229's CI found that the macOS Watcher executable fails at `registry open` with SQLite code 5. This is tracked as product item #233. The decision is at https://github.com/lossyrob/telex/issues/225#issuecomment-6428753387.
+
+#195's plan is unchanged: after #229 merges, run one rebased diagnostic. If that run shows `runtime open -> registry open -> SQLite code 5`, #195 is blocked on #233 and the reconciler adds the edge on that evidence. Otherwise, #195 proceeds on its own evidence. #195 does not absorb the #233 fix.
+
+```
+
+### Complete public 6429646368; raw body pins retained, CRLF-to-LF display only
+
+```text
+Steward clarification of 6428756204. The condition is met: run 40416658503, job 121900589733 shows `runtime open -> registry open -> SQLite code 5` (https://github.com/lossyrob/telex/pull/221#issuecomment-6429504931). #195 is blocked on #233.
+
+"The reconciler adds the edge" was loose wording. Under 6425865009, #195 and PR #221 stay outside the Watcher graph, so there is no #195 node and no dependsOn edge. The reconciler records #195 as an external blocked consumer in #233's provenance text, and #195's own workstream owns the external dependency. Nothing else changes: #195 does not absorb the #233 fix, and #233 keeps the product repair and the removal of the SQLite test ignore.
+
+```
