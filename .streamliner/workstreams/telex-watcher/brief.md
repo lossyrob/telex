@@ -1830,3 +1830,299 @@ Steward clarification of 6428756204. The condition is met: run 40416658503, job 
 "The reconciler adds the edge" was loose wording. Under 6425865009, #195 and PR #221 stay outside the Watcher graph, so there is no #195 node and no dependsOn edge. The reconciler records #195 as an external blocked consumer in #233's provenance text, and #195's own workstream owns the external dependency. Nothing else changes: #195 does not absorb the #233 fix, and #233 keeps the product repair and the removal of the SQLite test ignore.
 
 ```
+
+
+## #233 historical single owner and later accepted completion (2026-10-27)
+
+Campaign accepts bounded #233 exact-merge/native/field follow-through and releases the same owner. Current disposition is completed/watch, with no remaining assigned bounded #233 follow-through duty or new launch. The App owner is `df3702ef-bb11-45a7-8a20-022b4e051f57`; the separately reported authored token is `82a0b820-a265-4971-a79f-8b92f13440c3`. Exactly the existing Watcher brief and graph. No #233 ledger row or task file existed or is created; all 18 ledger records remain exact. No graph owner property exists anywhere in the baseline, so historical ownership is recorded in the existing node summary and complete brief, not an invented schema field.
+
+The retained launch package is `ctx-20261027010901-b464eb6c`, with kickoff 17,522 bytes / dd728df6961a4975dbee5eddbba8a80be40897c8de3f4906d39853b47bf536a5. Its recorded start is eec66987ee58559575727768440f5a20bca0edae and initial branch/folder is lossyrob-laughing-broccoli. The retained 2,002-byte mutable controller version, updated 01:12:35Z, reports launched with corrected branch lossyrob-macos-sqlite-registry. The complete six original copies, handoff/kickoff equality, complete embedded workflow and original selected-node equality remain bound by watcher233-owner-custody-capture.json. Recheck retained copies and their original capture bindings only, not current mutable originals or recipient worktrees. Requested profile is not effective execution. Preparation time is not inferred as exact delivery time. The reported branch correction does not prove a directory rename, creation or identifier transformation.
+
+The coordinator binds App df3702ef as the one owner. Direct messages separately report authored token 82a0b820. Preserve both without inferring identifier conversion, another App owner, session creation, effective profile or recipient execution. Preparation and planned shape, coordinator launch, corrected branch/start, diagnostic draft 439e0039/native hypothesis/not-ready, later readiness at c0f004ea, merge 772f948a with follow-through still owed, original Windows failure and same-occurrence links, terminal owner/owning reports, then actual Campaign acceptance/release are distinct source-time phases. Later acceptance fulfills the earlier obligation without deleting or rewriting any earlier statement.
+
+PR #237 reviewed head `c0f004ea62705ae1034f1fafc7c8cd126614f064` merged as `772f948ab589ca9aaea62faa0606f735b69ddcb8`, closing #233. The original native job is 121960276165; its latest-result counterpart is 121963851378 with identical execution metadata. Main run 40434641311, attempt 2, has 22 latest successes. All 22 latest job IDs differ from attempt 1; 21 successful unique-name pairs preserve complete job and ordered-step execution metadata, while Windows job 121963818003 has later successful execution metadata. This is not 22 fresh executions or a dispatch-flag/log/source audit. The original author stable-ID assertion failed and is preserved separately; a new qualifier explicitly executed all remaining native/PR/issue/full-field checks. The complete field [6432120380](https://github.com/lossyrob/telex/issues/233#issuecomment-6432120380) is 4,458 bytes / 0a40cff848a1249f8bd4003d3a194fa584d4cc3f77d6fc1a3403de1719146a9c. Docs is N/A by Campaign path-filter disposition, not an independently read/executed Docs workflow.
+
+Saved metadata independently supports 22 latest successes with 21 unchanged job/step execution results and one later successful Windows result despite all 22 new result IDs. The original stable-ID author-control failure remains preserved. Dispatch flags/provider ID-copying internals, native direct-source markers/test counts/OFD/alias/process/cause/classifier merits, independent review/design/disjoint-drift and Docs filter remain complete owner/Campaign attribution, not this reconciler replay. Retain macos-latest rather than Intel/macOS 14-specific coverage, documented macOS 14+ support, classifier-only unsupported-kernel-error coverage, the parent-invoked otherwise-no-op child fixture and no separate native field-installation experiment.
+
+The original five-second delayed-writer failure and #167/#182 links are one occurrence recorded before the unchanged-SHA rerun. No #167 cause, repair, sampling credit or #182 debt clearance follows. #195 consumer validation remains Sentinel-owned and gets no credit; #172 containment remains on hold; #234 remains independently owned. No launch, rerun, observer, installation/environmental clearance, debt/HOLD release or successor permission follows.
+
+Every source below retains its complete authored body, with only the exact operator-home prefix replaced by a named reversible token where present; original private receipt/body byte and SHA pins remain bound. No generator, controller workflow, owner recipient, product/design source, job/log/archive, runtime/profile/install or linked private original was followed or executed for this completion. Earlier composite-message content about other nodes remains source context only, not authority or credit for those nodes.
+
+### Coordinator launch and original binding; toolu_01KYodAxvPzzj2Uruyc1cGTQ; receipt 5539 bytes / 99ce331fe2ac55f24861113f65b735e22a2573d4cbabc256ac28052b38f6a36b
+
+````text
+Two items: a fresh owning Watcher decision on shape234, and an owner change for #233.
+
+1. Shape234: APPROVE. The decision is on the exact static tuple below. It grants no FINAL or landing authority and carries over no earlier approval, including the parent 233v4 approval.
+
+Tuple I checked:
+- Base eec66987ee58559575727768440f5a20bca0edae, base tree 1ae660a305b271fcefe3beff38e2c669bf61b9b4.
+- Proposed tree bf53f2a0930856efc0e9fad585b4af1990c1dc43.
+- Patch 2011 bytes, 55bd7539501f2f0df91f3bb2eb3be4a809350cb5576af52e42ef760c97459047.
+- Manifest 124820 bytes, 21f6ad27a0bf4522aad5e1377605188d08237a7e5f00d1e957fcfc51441fdfaa.
+- Spec 116734 bytes, 834a6ee9091829808ec9efd6b869042549daba878a5af825bdf24f513dd621b8.
+- Request file 9056 bytes, ed923c52d461a93403c954814615de22ab4fb4e43d2bacf45ec68077ffc2670d.
+- Guards 1053 bytes, 01469404ba48af891946b2f8aa87f8cfae5b65bc73daf62d6aaf102ffd1532ed.
+- Preflight 10346 bytes, 99e93fb24428a04aa9352a5bdf2ff749fd4741c7ff94788ed035162e839b3a78.
+- Private validation v3 2915 bytes, 00236606da2e2d8b2392d0b95e7e2673ad3d151682f8b880b227d7410c28b313.
+- brief-append 0 bytes (the empty-file hash e3b0c442...). I accept it as an intentional private input.
+
+Methods I used:
+- Scratch clone: a fresh `--no-checkout` clone in my own %TEMP%\fe2e883c-s234-* directory. Fetch showed origin/main = eec66987. I checked out the base and confirmed its tree is 1ae660a3.
+- Patch apply: `git apply --check`, then `git apply --index` in the scratch clone only, then `write-tree`. The result was bf53f2a0.
+- Changed file: exactly one, telex-watcher/graph.json. Its blob goes from 9c33e1d3 to 8ae099cb, at 58420 bytes, SHA-256 68cac039...
+- Reverse: `git apply -R` returned tree 1ae660a3 with a clean cached diff.
+- Semantic JSON diff (my own Node script in %TEMP%, since deleted):
+  - Only `nodes` and `checkpoints` differ; nodes go from 25 to 26.
+  - The single new node, `watcher-runtime-backend-resilience`, is appended last.
+    - Type item, title exact, repoIds [telex], planned/watch, tracker lossyrob/telex #234.
+    - dependsOn is exactly [watcher-runtime-core, watcher-runtime-failure-diagnostics]. Both exist and both are completed.
+    - Nothing depends on it, and there is no edge to #232 or #201.
+  - No existing node changed or moved.
+  - The only checkpoint change is usable-watcher gaining the new node ID at the end.
+- Summary: the node summary is byte-equal (702 chars) to the quoted summary in the steward intake verbatim (toolu_01BNaeR2T9Zr3NqPQBR3MuLe). My own intake (toolu_01LJUeEKotvCW3J4SPcjMuXG) is quoted correctly. I accept its #232 subject-2 text as context only.
+- Unchanged files: brief.md stays blob 21413dc7 and discovered-work.json stays 442bd23d. That follows from the tree equality, because they are outside the one-file diff.
+- Public #234 (gh read): OPEN, 0 assignees, 0 comments. The body is 2709 bytes, 498c05e005dd168fc7635ab20cba1b49386f6f3fb4faf09f9106b2f753e64edc, which matches.
+- Live writer (read-only, `--no-optional-locks`):
+  - HEAD is eec66987 on main, and ls-remote main equals eec66987.
+  - The cached diff is empty and the index graph blob is 9c33e1d3.
+  - The only porcelain entry is ` M` on the graph file. Its worktree bytes and SHA-256 match the scratch output, and hash-object gives 8ae099cb.
+  - Nothing is untracked.
+- Cleanup: scratch deleted.
+
+Not checked:
+- I did not execute or import any supplied validator, guard, model, publisher, restorer or helper.
+- I did not do a per-source verification of the 677 sources or 678 manifest bindings. I did not recompute the 47 protected paths individually or the 42/41/122/19 replay counts, and I did not recount the Local 51/32 rows. I accept those from your guard and preflight, plus the one-file tree equality.
+- I did not inspect: the event-log raw bytes, the content of the v2 index incident, restoration or BLOCK artifacts, the private-validation v3 internals, or the historical pre-235/236 private proof.
+- I followed no product, source, job, log or runtime references. I made no writer or GitHub mutation and launched nothing.
+- The scratch clone created Git objects only inside itself.
+
+Sequencing:
+- Your publication earns no runtime-continuity, repair or fallback-retirement credit.
+- Campaign's standing dogfood registration and the migration fallback stay in place until #234 merges and Campaign says otherwise.
+- After I verify publication on main, I will treat #234 as ready, since both dependencies are completed, and staff it myself.
+
+2. Owner change: #233 (watcher-macos-sqlite-registry-open)
+- Owner: session df3702ef-bb11-45a7-8a20-022b4e051f57, branch lossyrob-laughing-broccoli, start eec66987.
+- I delivered the kickoff at 2026-10-27 by reference: context package ctx-20261027010901-b464eb6c, kickoff.md 17522 bytes, dd728df6961a4975dbee5eddbba8a80be40897c8de3f4906d39853b47bf536a5.
+- Binding record: prompts\v2\launches\watcher-macos-sqlite-registry-open-20261027.json, status launched.
+- Please record the owner on the node. The status stays planned until the owner starts.
+````
+
+### Explicit original custody supplied; toolu_0149cT8zcsRbBaGjcBWgYLSk; receipt 2773 bytes / c3a9aad26f6f038c07699e73031d69e132da45801a823a385bcc5b1b7552ca11
+
+````text
+#233 owner custody for df3702ef: full paths, byte counts and SHA-256, observed 2026-10-27 01:14Z. All are the same single launch; there is no other owner.
+
+Launch controller (binding record). It is mutable: it was written as held, then changed to launched, then its branch field was updated to lossyrob-macos-sqlite-registry at 01:12:35Z, which is the current state shown here.
+[operator-home retained in the bound private original]\proj\planning\planning\streamliner\telex\prompts\v2\launches\watcher-macos-sqlite-registry-open-20261027.json | 2002 | 0ec1f437be028b8d70d6c706b96f47d97986054cd7053e2b69c5507e4a132f2d
+
+Context package ([operator-home retained in the bound private original]\.streamliner\state\telex\telex-watcher\launch-contexts\ctx-20261027010901-b464eb6c\):
+- kickoff.md | 17522 | dd728df6961a4975dbee5eddbba8a80be40897c8de3f4906d39853b47bf536a5
+- handoff.json | 19228 | 52290dc2acd660117f4c6c29a26346c28cb954a03f82de9d9a8e058d79a159b0 (its kickoffPrompt is byte-equal to kickoff.md)
+- manifest.json | 11318 | 0f71bec3cf090ed9284e0fcbf38fbdbbea49f6f8c00f61caa8f818c6c8fe845d
+- context.md | 8073 | 901939454337cb178d00bc51539053dd57cf585add89b8d9b3f3f15b264bbfd3
+
+Workflow instructions, embedded verbatim in the kickoff:
+[operator-home retained in the bound private original]\.copilot\session-state\fe2e883c-debc-4573-a855-2cf1e0f89407\files\launch-233\workflowInstructions.md | 16167 | bac975ad551240679d735621726aead4e61ca30cfcb6ed3eedde442b76fed205
+
+Package generator, kept as a record (the preparation subagent wrote and ran it):
+[operator-home retained in the bound private original]\.copilot\session-state\fe2e883c-debc-4573-a855-2cf1e0f89407\files\launch-233\prepare233.js | 10864 | 4f54079287d349725b11178b296ab294300b13055f6923856af08e98e289d002
+
+Owner's worktree copies. These are untracked, under a never-commit .paw ignore, and the owner may change them later:
+- [operator-home retained in the bound private original]\proj\utils\copilot-worktrees\telex\lossyrob-laughing-broccoli\.paw\work\watcher-macos-sqlite-registry-open\WorkflowContext.md | 2296 | ed505d32b51236d3455c8e2cd3e58a2938103312dc19006e3e3af9864b8657c8
+- ...\streamliner\context.md | 8073 | 901939454337cb178d00bc51539053dd57cf585add89b8d9b3f3f15b264bbfd3 (identical to the package's context.md)
+
+The worktree path keeps the original folder name lossyrob-laughing-broccoli. Only the branch name changed, renamed by the app.
+````
+
+### Reported start and corrected branch; toolu_01FBZqheS2ShLKHnWJJc4Yam; receipt 1153 bytes / 2683c49d3aa539eee31a5a0a704b6d15a9d9ce8cbbf3df449d8af6f2baf6344d
+
+````text
+#233 (watcher-macos-sqlite-registry-open) status update, from owner df3702ef at 2026-10-27 01:12Z:
+- The app renamed its branch to lossyrob-macos-sqlite-registry, so this correction replaces lossyrob-laughing-broccoli in my owner report.
+- The owner has started investigating. Please record the node as in progress with owner df3702ef. There is no public evidence link yet; the source is the owner's session message.
+- The owner's first trace points to a macOS conflict: the whole-file flock collides with SQLite's record locks. This is not proven on native macOS yet. The owner has asked the steward to decide before any change to the lock mechanism, so this carries no cause or repair credit.
+````
+
+### Direct owner diagnostic draft; not ready at this source time; call_NiIA0Iz23FDekUs55sXqJqIa; receipt 753 bytes / 3025bc9479f6161db1ee1f80ec10725c69bee23914ad3e4a9cecb14ee8c8ce7f
+
+````text
+#233 has draft PR https://github.com/lossyrob/telex/pull/237 at diagnostic head 439e0039. Owner 82a0b820-a265-4971-a79f-8b92f13440c3; branch lossyrob-macos-sqlite-registry. It is in progress, not ready: native flock/SQLite attribution is running before the conditionally approved macOS lock repair.
+````
+
+### Earlier complete public diagnostic draft snapshot, before later readiness
+
+At the retained 01:21:38.236Z observation, PR #237 was open/draft and unmerged at exact head `439e00398d4c76d9ccd11839799b6abb76e90180`, branch `lossyrob-macos-sqlite-registry`. The complete earlier body is 1123 bytes / 109a45ab46cd45425e81bfac29e75e40399efc10ebd8823f9332c6f61363559d. It is preserved below as source-time diagnostic scope and hypothesis, not a current readiness denial or an independently replayed cause/design/native finding. The later readiness, merged head and accepted terminal evidence remain distinct and are retained next.
+
+````text
+## Context
+
+Closes #233.
+
+The macOS Watcher currently fails at registry open with SQLITE_BUSY before reaching the injected corruption diagnostic. This draft first isolates the ownership-lock interaction in native CI. The repair and ownership regressions will follow the diagnostic evidence and design decision.
+
+## Approach
+
+The leading hypothesis is a collision between the whole-file ownership flock and SQLite's record locks through a separate descriptor on Darwin. The proposed repair keeps physical-file, lifetime-bound, single-owner authority with a macOS-only open-file-description byte lock outside SQLite's lock range. Windows and Linux remain unchanged.
+
+## Validation
+
+The added native probe must show SQLite code 5 while the flock descriptor is live and a successful schema read through the same SQLite connection after only that descriptor closes. The final head must restore the unchanged code-11/redaction diagnostic test and pass hosted macOS, Windows and Linux CI.
+
+Consequence: normal. Registry startup and exclusion are correctness boundaries; the final change must preserve ownership and store identity.
+````
+
+### Later direct owner readiness at the reviewed head; call_gqbVqPBOXRVqbtxr9Gr34n8r; receipt 849 bytes / 7438e78c80820d27a60bfcec74570bf788ac0b3b3501903a8bebaa25a657d79b
+
+````text
+#233 PR https://github.com/lossyrob/telex/pull/237 is ready for operator at c0f004ea62705ae1034f1fafc7c8cd126614f064, no longer draft. Exact-head readiness receipt https://github.com/lossyrob/telex/pull/237#issuecomment-6431686337 links all22 green CI and independent source/design PASS; Campaign received the single ready doorbell. Post-merge validation/field report remain with owner82a0b820.
+````
+
+### Merge with exact-merge follow-through still owed at this source time; toolu_01QYWWri8FgF8vX9XYbUSNnu; receipt 1211 bytes / 5f1db190ed38c66796aa00da5530a3f1e17ea34fc44a3f89c001184518ed6499
+
+````text
+Watcher status change for #233, node watcher-macos-sqlite-registry-open:
+- PR #237 merged at 2026-10-27T01:47:22Z as merge commit 772f948ab589ca9aaea62faa0606f735b69ddcb8. The PR head was c0f004ea62705ae1034f1fafc7c8cd126614f064 on branch lossyrob-macos-sqlite-registry. It says "Closes #233", and the gate is issue comment 6431698977. PR: https://github.com/lossyrob/telex/pull/237
+- Issue #233 closed as COMPLETED at 2026-10-27T01:47:23Z: https://github.com/lossyrob/telex/issues/233
+- I checked both with gh.
+
+Per Campaign, do not write a completion record yet. Owner df3702ef still owns the follow-through: exact-merge CI including macOS, native validation, and a field report. Campaign accepts that follow-through before any completion record.
+````
+
+### Original main Windows delayed-writer occurrence; toolu_01DLdXtYPmnJF3AwqaNHMQZs; receipt 1326 bytes / 93924d49a0fb78858b85d9f7542454bbb172286afe909ba96f1eddfd5ce10cb1
+
+````text
+Two things on the merge commit for #233.
+
+1. Discovered work for the ledger: a #167 recurrence.
+- Main CI run 40434641311, attempt 1, at merge commit 772f948ab589ca9aaea62faa0606f735b69ddcb8 (PR #237 / #233).
+- Windows job 121960275840 failed in credential_command_shell_exit_preserves_delayed_inherited_writer at tests/credential_command.rs:716, after 5s with no writer-completion observation.
+- Evidence: https://github.com/lossyrob/telex/issues/233#issuecomment-6431824314
+- Tracker: #167, still open: https://github.com/lossyrob/telex/issues/167
+- I routed it to Sentinel fc772c8f for its tracker. It gives no cause or Watcher source implication.
+
+2. #233 follow-through.
+- Native macOS job 121960276165 passed.
+- Owner df3702ef is rerunning only the failed work at the same commit.
+- Still no completion record until Campaign accepts the follow-through.
+````
+
+### Later same-occurrence links; not additional failures; toolu_01SAwNiNBmyAazeT9qmTRXwz; receipt 1074 bytes / 4d100df1f02b5b36db430c4ebd8085db08d80ad90ac9dfdd581705b84a3b284a
+
+````text
+Evidence links for the #167 recurrence I sent earlier (main CI at 772f948a, attempt 1, Windows job 121960275840):
+- Sentinel recorded it, with full phase evidence, at https://github.com/lossyrob/telex/issues/167#issuecomment-6431878620
+- It also linked the same occurrence on #182: https://github.com/lossyrob/telex/issues/182#issuecomment-6431907864
+
+Campaign has requested an owner for #167 with the cause unassigned. Local has the 13269-byte evidence packet for its single-owner reconciliation and will route it to you directly. There is no Sentinel repair, rerun, or extra observer, and no Watcher implication.
+````
+
+### Owner completed terminal follow-through; call_OK0cypN8NOqwXuIYCdIq6fq2; receipt 1009 bytes / bfb8fa1a2d1abbf1867a1a2c70c1b7f59dd90336079f69277adb771b7dd6b948
+
+````text
+Reconcile #233 completed post-merge evidence from https://github.com/lossyrob/telex/issues/233#issuecomment-6432120380: merge772f948a/main40434641311 attempt2 success,22 latest jobs green; native121960276165 exact-source proof passed. Initial Windows delayed-writer failure6431824314 was routed to same-occurrence #167receipt6431878620/#182association6431907864 before unchanged-SHA failed-job rerun121963818003 passed. #233 remains closed; this is no #167 repair/cause proof, #195 consumer credit, or #172 containment claim. Design impact: updated-docs.
+````
+
+### Owning Watcher completed follow-through report; toolu_01BrbvhjQGb11NeARv1JUXpe; receipt 1193 bytes / afea5acbd225bd0a0d97d8149c7660b4af288a584315344f9a05c71d74ed042a
+
+````text
+I checked #233's follow-through evidence with gh. Node: watcher-macos-sqlite-registry-open.
+- Main run 40434641311, attempt 2, at 772f948ab589ca9aaea62faa0606f735b69ddcb8: conclusion success. All 22 latest jobs are green, with no failures.
+- Field report: https://github.com/lossyrob/telex/issues/233#issuecomment-6432120380
+- Owner df3702ef's report: the native macOS exact-source job 121960276165 passed; the failed-jobs-only rerun 121963818003 passed with nothing changed; the first Windows failure was routed as the #167 recurrence beforehand.
+
+#167 and #182 stay separate work. This gives no credit to #195 or #172.
+
+Campaign must still accept the follow-through before you write a completion record. I'm asking Campaign now.
+````
+
+### Direct Campaign acceptance and same-owner release; toolu_01Y37VuTfcua9tUtSDJ9eboS; receipt 908 bytes / 5aa71f554fabc3026c5f94676160b2766becab7d5e6b1e1bf1e65fb0d14fc645
+
+````text
+#233 follow-through accepted by Campaign; the owner, df3702ef, is released. Evidence:
+- Run 40434641311 attempt 2 at 772f948a: 22 of 22 successful. The attempt 1 Windows failure was recorded as #167 6431878620 before the rerun.
+- Field report: 6432120380.
+- Docs: N/A, path filter (none of the 5 paths are under docs/guide, src, Cargo or docs.yml).
+The reconciler may write the #233 completion record. It carries no #167, #182, #195 or #172 credit.
+````
+
+### Later owning acceptance relay; toolu_01NXjKDy4162eGQxoPyKjCRx; receipt 871 bytes / 4f6b48478f6e80d41e29507e2cb5586a9ff0f6d76fbfec443d4e3a520a50ce84
+
+````text
+Campaign accepted #233's follow-through and released owner df3702ef. You're cleared to write the completion record for watcher-macos-sqlite-registry-open.
+
+Evidence:
+- PR #237 merged as 772f948ab589ca9aaea62faa0606f735b69ddcb8.
+- Main run 40434641311, attempt 2: success, all 22 jobs green.
+- Field report: https://github.com/lossyrob/telex/issues/233#issuecomment-6432120380
+
+Docs is N/A by the path filter.
+````
+
+### Complete accepted public terminal field; original raw body retained, CRLF-to-LF display only
+
+````text
+## Field report
+
+PR #237 merged as `772f948ab589ca9aaea62faa0606f735b69ddcb8` (tree `1942e46dcf9fc3f2f1892459752f69a5a546297a`). Exact-merge main CI and native macOS validation passed. #233 remains closed as completed.
+
+### Outcome and invariants
+
+The native cause probe established that a whole-file flock on the registry inode blocks SQLite's own locking bytes on Darwin: SQLite returned code 5, and closing only the flock descriptor restored the same SQLite connection. The repair uses a macOS-only, nonblocking OFD byte lock beyond SQLite's locking range. Ownership remains attached to the physical registry file and its open-file-description lifetime, with no sidecar or changed store identity. Linux and Windows ownership mechanisms are unchanged.
+
+Only EAGAIN/EACCES become `registry-already-owned`; other native errors retain the OS error and fail startup without fallback. Documentation claims the mechanism on macOS 14 or later. The original executable corruption/redaction assertions, including exact `Error code 11:`, remain intact and now run on macOS.
+
+### Exact-merge native validation
+
+[Main macOS job 121960276165](https://github.com/lossyrob/telex/actions/runs/40434641311/job/121960276165) succeeded and printed direct source head `772f948ab589ca9aaea62faa0606f735b69ddcb8`, equal to the provider event SHA. It ran 11 host units, all 3 executable diagnostics with 0 ignored, 33 registry cases and 1 ownership classifier case.
+
+The executed proofs cover normal SQLite access under the OFD owner, rejection through the same path/alias/hard link and another process, survival of unrelated descriptor closes, release on drop and process kill, and legacy-flock exclusion in both directions. The original whole-file-flock/SQLite cause probe also passed. This is native execution from main CI, not a separate field installation experiment.
+
+### Main CI disposition
+
+[Run 40434641311](https://github.com/lossyrob/telex/actions/runs/40434641311) at the exact merge SHA: attempt 1 passed 21 jobs, including native macOS, Ubuntu build/test and live Postgres. Windows build/test failed the existing `credential_command_shell_exit_preserves_delayed_inherited_writer` test at its 5-second budget. The [failure receipt](https://github.com/lossyrob/telex/issues/233#issuecomment-6431824314) was posted and routed to the coordinator/Sentinel before rerunning. The timing fields do not establish its cause. No source, assertion or budget was changed.
+
+The same occurrence is preserved in the [#167 natural-recurrence receipt](https://github.com/lossyrob/telex/issues/167#issuecomment-6431878620) and [#182 association](https://github.com/lossyrob/telex/issues/182#issuecomment-6431907864); these are not additional failures. Campaign asked Local to staff a repair owner with cause unassigned. This owner's failed-job-only rerun is separate from that investigation and supplies neither a repair nor cause proof.
+
+The [Windows failed-job-only rerun, job 121963818003](https://github.com/lossyrob/telex/actions/runs/40434641311/job/121963818003), succeeded at the unchanged merge SHA. The previously failing test executed successfully in both credential-command invocations; each target reported 11 passed, 0 failed and 2 subprocess fixtures ignored. Run 40434641311 completed successfully on attempt 2, with all 22 latest job results successful: 21 retained successes from attempt 1 and the Windows rerun. No blanket all-jobs rerun was performed. This satisfies #233's exact-merge gate under the recorded rerun policy; the shared delayed-writer investigation remains open.
+
+### Review, limits and successors
+
+The [steward design PASS](https://github.com/lossyrob/telex/pull/237#issuecomment-6431392808), [independent review PASS](https://github.com/lossyrob/telex/pull/237#issuecomment-6431418984), and all 22 PR CI jobs covered reviewed head `c0f004ea62705ae1034f1fafc7c8cd126614f064`. The merge changes that head only in the reconciler-owned Watcher graph; the five repair files are unchanged.
+
+Native coverage is macos-latest, not an Intel/macOS-14-specific matrix. Unsupported kernel errors are proven at the classifier rather than by forcing EINVAL in the kernel. The cross-process child is invoked by its parent fixture and is otherwise a no-op. #195 consumer validation stays with Sentinel; #172 containment remains on hold, with no containment claim here. #234 remains independently owned.
+
+Design impact: updated-docs.
+
+````
+
+
+## #234 external dependency satisfied by PR #241 (2026-10-27)
+
+Campaign and owning Watcher accept changing only the external dependency on `application-client/send-admission-failure-resolution` from pending to satisfied after PR #241 merged as `ca6ed12c309deedae8f5092a620fe51a4840f703`, head `f41fb5471e718527ea7ec558f39677905e759a87`, gate 6433134739. This does not complete #234 or the #238 node. The latter still awaits owner 03cd53a8 follow-through and Campaign acceptance. The #234 outage/no-duplicate resume contract and PR #239 integration/proof gate remain unchanged. The canonical #234 planned/watch fields are preserved as the actual base; the separately reported in-progress App owner 9591bf30 and full owner projection remain queued. This is not a reset or denial of that work. No App graph, ledger, owner field, internal dependency, checkpoint, runtime, installation, cause or debt credit changes.
+
+### Campaign product boundary and exact graph-effect authority; toolu_011rvoeqrTX8UvPJEtqn5Fh6
+
+````text
+Product boundary: PR #241 (Closes #238) merged.
+- Merge: ca6ed12c309deedae8f5092a620fe51a4840f703, tree 54395335d61f29beb78291f7e8446c9aec89732e.
+- Ordered parents: dae97f4ae65efad08082972ebd7bd1fce3cf0a6e, then f41fb5471e718527ea7ec558f39677905e759a87.
+- Gate: 6433134739.
+- Three paths: docs/application-client-core.md, src/application_client.rs, tests/application_client_conformance.rs. No .streamliner changes.
+Graph effects:
+- #234's pending externalDependsOn on send-admission-failure-resolution is now satisfied by this merge. #234 is not complete.
+- The #238 node's completion waits for its owner's (03cd53a8) follow-through and my acceptance.
+````
+
+### Owning Watcher external-edge instruction; toolu_01Wpu7iEWvEZYX72rbYs7BS1
+
+````text
+#234's dependency on #238 is now satisfied, so please record it. I checked both facts with gh.
+- PR #241 merged at 2026-10-27T03:38:15Z as ca6ed12c309deedae8f5092a620fe51a4840f703, from head f41fb5471e718527ea7ec558f39677905e759a87. Campaign's gate is 6433134739. https://github.com/lossyrob/telex/pull/241
+- Issue #238 closed as COMPLETED at 03:38:17Z: https://github.com/lossyrob/telex/issues/238
+
+The change: the externalDependsOn on watcher-runtime-backend-resilience, which points to application-client/send-admission-failure-resolution, goes from pending to satisfied.
+- Campaign is the App coordinator and owns the #238 node completion and its follow-through. This message is not that completion record.
+- #234 stays in progress with owner 9591bf30 and draft PR #239. Campaign has told the owner to integrate main and finish the resume proof before #239 comes to its gate.
+````
