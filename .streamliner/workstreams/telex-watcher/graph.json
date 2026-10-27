@@ -559,6 +559,27 @@
       "dependsOn": [
         "watcher-runtime-failure-diagnostics"
       ]
+    },
+    {
+      "id": "watcher-runtime-backend-resilience",
+      "type": "item",
+      "title": "Watcher runtime survives Telex daemon restart and backend connection loss",
+      "summary": "A Watcher runtime keeps running across a Telex daemon restart or replacement and a backend connection loss. Affected senders go not ready, attempts pause without duplicate sends, and the runtime reattaches on its normal cycle. Scope: state the contract in the design and runtime docs; add Windows and Linux tests against an isolated daemon and backend; fix any Watcher path that exits or does not recover, filing Application Client or daemon defects upstream. Opened after the #201 runtime (binary 343b9d95, pre-#225) stopped unattended on 2026-10-26 with only a postgres connection-ended log line; that stop's cause is not attributed. No #201 installation, restart or upgrade authority; no macOS work.",
+      "repoIds": [
+        "telex"
+      ],
+      "status": "planned",
+      "attention": "watch",
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 234
+      },
+      "dependsOn": [
+        "watcher-runtime-core",
+        "watcher-runtime-failure-diagnostics"
+      ]
     }
   ],
   "checkpoints": [
@@ -594,7 +615,8 @@
         "minimal-example-pack",
         "examples-accelerate-gate",
         "watcher-macos-containment-runtime",
-        "watcher-macos-sqlite-registry-open"
+        "watcher-macos-sqlite-registry-open",
+        "watcher-runtime-backend-resilience"
       ]
     },
     {
