@@ -791,28 +791,13 @@ fn emit_uncaptured(line: &str) {
     let _ = writeln!(std::io::stderr(), "{line}");
 }
 
-/// Diagnostic-head sampling for issue #167: each Windows invocation (workspace
-/// Test and the dedicated credential lifecycle step) runs up to ten
-/// independent single-iteration checks, stopping at the first failure. Every
-/// iteration keeps the original 5s budget and assertions.
-#[cfg(windows)]
-const DELAYED_WRITER_ITERATIONS: usize = 10;
 /// Exact delayed-writer stdout (22 bytes before trim, 18 after).
 #[cfg(windows)]
 const DELAYED_WRITER_OUTPUT: &str = "  delayed-non-secret  ";
-#[cfg(unix)]
-const DELAYED_WRITER_ITERATIONS: usize = 1;
 
 #[tokio::test]
 async fn credential_command_shell_exit_preserves_delayed_inherited_writer() {
     let _guard = TEST_LOCK.lock().await;
-    for iteration in 1..=DELAYED_WRITER_ITERATIONS {
-        delayed_writer_iteration(iteration).await;
-    }
-}
-
-async fn delayed_writer_iteration(iteration: usize) {
-    let sample = format!("iteration={iteration}/{DELAYED_WRITER_ITERATIONS}");
     #[cfg(windows)]
     let markers = delayed_writer_phases::Markers::new();
     #[cfg(windows)]
@@ -861,25 +846,18 @@ async fn delayed_writer_iteration(iteration: usize) {
         #[cfg(unix)]
         let report = String::new();
         panic!(
-            "delayed inherited writer was not collected within the 5s budget ({sample}); \
+            "delayed inherited writer was not collected within the 5s budget; \
              post_cancel_obligations={obligations:?} {report}"
         );
     };
     #[cfg(windows)]
-    emit_uncaptured(&format!(
-        "{sample} {}",
-        clock.report(&markers, &finished, None)
-    ));
+    emit_uncaptured(&clock.report(&markers, &finished, None));
     let (config, _) = result.unwrap();
     assert_eq!(
         config.get_password(),
-        Some(b"delayed-non-secret".as_slice()),
-        "{sample}"
+        Some(b"delayed-non-secret".as_slice())
     );
-    assert!(
-        telex::profiles::credential_command_obligations().is_empty(),
-        "{sample}"
-    );
+    assert!(telex::profiles::credential_command_obligations().is_empty());
 }
 
 #[tokio::test]
