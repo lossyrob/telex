@@ -476,6 +476,17 @@ downstream of this suite.
   receipt evidence absent for the exact tuple and confirms that no cleanup
   crossed the handle's retention generation. A crossed or missing generation
   returns `RetentionBoundaryCrossed`, which never authorizes retry.
+- Before reserving a new `send` or `reply` operation, the client completes
+  connection, bootstrap admission, and the Application Client capability check.
+  The request then uses that same admitted connection. An admission failure
+  preserves `DaemonBootstrap`, connection `Unavailable`, or
+  `UnsupportedCapability` and creates no operation record. Reconciliation of
+  the original staged handle returns authoritative `NotRecorded` while its
+  retention generation is unchanged and no concurrent attempt recorded that
+  operation. No fallible deletion or completion is needed to establish absence.
+  Existing operation outcomes are replayed or reconciled before admission;
+  admission failure never deletes or rewrites their evidence, and legacy
+  `Pending` records are not reclassified as `NotRecorded`.
 - Recorded reconciliation projects persistence into typed `Accepted`,
   `Rejected`, `Partial`, `Indeterminate`, `Duplicate`, or `Pending` outcomes.
   Consumers do not parse backend state strings or result/recovery JSON.
@@ -542,3 +553,11 @@ backend evidence. Postgres exposes the configured connection user as
   `accepted` before the application authors a replacement. If no record or
   mapping exists and the persisted retention generation still matches, it
   returns typed authoritative `NotRecorded` evidence.
+- After a pre-write daemon admission failure, restore sender readiness, reconcile
+  the persisted handle, and retry the exact same operation and payload only on
+  authoritative `NotRecorded` (or an existing definite transient rejection).
+  Preserve the typed admission failure instead of treating daemon downtime as a
+  transient send rejection that spends a send-retry budget. The error says this
+  call did not write the request; it does not prove that a concurrent attempt
+  recorded nothing. Once the request write begins, transport uncertainty remains
+  `Indeterminate`, and reconciliation is required before any retry.
