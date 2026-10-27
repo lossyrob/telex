@@ -2537,3 +2537,263 @@ Keep these unchanged:
 
 My owning review will be fresh on the frozen tuple.
 ````
+
+
+## Accepted #216 closeout and precise #211 debt-4 retirement (2026-10-27)
+
+Campaign `toolu_01NFAzo36tLekPYU7sdrFwZk` accepts [#216](https://github.com/lossyrob/telex/issues/216) completed after [PR #220](https://github.com/lossyrob/telex/pull/220) merged `b18f59e7e8426ab6d03a090bc94670298c16078d` from `686dd149586b72b8f42a606fc61bb7227da99ad8`. Owner `4b60ddef-c734-453a-b95a-d8f3307daa9c` is unchanged; attention remains watch. The exact-merge main CI and field report satisfy the Campaign gate follow-through condition, so **only #211 debt 4 is retired**. The owner retains one #216 debt: Postgres optimizer-plan index use is not asserted. Existing #215 retirement of #211 debts 2 and 3 and every other debt route remain exact. The two #199-target rows receive additive retirement qualifications without rewriting their earlier acceptance/transfer/#215 snapshots.
+
+Fresh metadata separately binds PR CI 40370016451 attempt 1 (21 successful job-result records), main CI 40373988904 attempt 1 at the exact merge (21), and Docs 40373988860 attempt 1 (2). Full endpoint-matched envelopes, job identities and ordered steps remain metadata, not per-test/source/log/runtime proof. Public source review https://github.com/lossyrob/telex/pull/220#issuecomment-6422885559 and its exact-head delta https://github.com/lossyrob/telex/pull/220#issuecomment-6423068736 retain their producer, isolation, test-selection and then-pending-CI limits; final design https://github.com/lossyrob/telex/pull/220#issuecomment-6423032328 remains scoped design clearance, not merge authority. Their merits were not independently replayed by this reconciler.
+
+Owner `call_lWzKTRgikaoXg5GGiAEVHUT0` reports 41 isolated merged-result cases, updated-docs impact, completed managed watches/cleanup and delivery of the #200 merge notification. These remain owner-attributed; no recipient or scheduler was inspected and no notification is resent. Full field and gate bodies below remain exact under the declared LF display normalization. Their budget samples are uncontrolled whole-target times, not marginal #216 cost or causal slowdown proof; no new baseline, run, observer or experiment is added.
+
+### Complete received terminal source `toolu_01NFAzo36tLekPYU7sdrFwZk`
+
+Actual arrival `2026-10-26T18:25:29.754Z`; receipt `watcher216-terminal-campaign-intake.json` (826 bytes / SHA-256 `b0f43b56cb179524d5f7df73877f39b7cb744c8f3b1a11d0091e5969a32bcb01`). Preparation is not approval; terminal merits retain their source attribution.
+
+```text
+Campaign accepted the #216 follow-through. Main CI 40373988904 at b18f59e7 passed 21/21 on attempt 1, including live Postgres parity, with no reruns. Field report: https://github.com/lossyrob/telex/issues/216#issuecomment-6423979685. Record #216 as complete and #211 debt 4 as retired. One debt is retained: Postgres plan index use is not asserted. #201 is not credited.
+```
+
+### Complete received terminal source `call_lWzKTRgikaoXg5GGiAEVHUT0`
+
+Actual arrival `2026-10-26T18:22:07.494Z`; receipt `watcher216-terminal-owner-intake.json` (1040 bytes / SHA-256 `37dd2f9002f54114cd3206ab58b163ccce3649bf13039139bb4428d05baf3a41`). Preparation is not approval; terminal merits retain their source attribution.
+
+```text
+Record #216 field report and completed closeout: https://github.com/lossyrob/telex/issues/216#issuecomment-6423979685 (posted/read-back verified; issue remains closed). Exact merge b18f59e7 main CI40373988904 green21/21 and Docs40373988860 green2/2, both attempt1 with one observer/no reruns. Merged isolated validation passed41 cases. Design impact updated-docs; #200 merge doorbell delivered; all watch/cleanup obligations complete. Campaign notified that #211 debt4 follow-through is satisfied. Postgres optimizer-plan assertion is not added; wider validation #201 remains separate.
+```
+
+### Complete received PREPARATION source `toolu_01Tj7orC41nCMnFSQcchsk2b`
+
+Actual arrival `2026-10-27T05:48:10.396Z`; receipt `watcher216-post195-preparation-scope-intake.json` (2398 bytes / SHA-256 `c82ec1a89081900b228d0da81a37f56326ae758d275c5afb029f6ddf43f7fb3c`). Preparation is not approval; terminal merits retain their source attribution.
+
+```text
+#216 closeout: preparation scope CONFIRMED, no mismatch. This is not an approval of any tuple; nothing carries forward.
+
+Typed target observations on actual main 2a26ae843334d5cd815998ff3e665b800952005d, telex-watcher, read-only:
+- Node stall-detector-inbox-history: tracker #216, in-progress/watch, summary 1753 chars, dependsOn copilot-group-stall-detector.
+- Node copilot-group-stall-detector: tracker #199, completed/watch, summary 6028 chars.
+- Discovered-work items copilot-stall-background-work-observability-limit and copilot-stall-session-start-error-unknown-limit both exist, routed/absorb, targeting copilot-group-stall-detector.
+  - Each carries later199Debt4Disposition (debt 4, moved-to-new-required-task, target stall-detector-inbox-history, #216, source-time status "planned"; keep that history exact) and later215TestHygieneDisposition.
+  - Neither has any 216 completion field yet.
+- Public evidence:
+  - #216 CLOSED COMPLETED at 2026-10-26T18:01:08Z.
+  - Run 40373988904 attempt 1 on b18f59e7: success, 21/21 jobs succeeded.
+  - Field comment 6423979685 is on #216.
+
+Readiness consequence to preserve: stall-detection-workstream-gate (#201) depends on stall-detection-agent-guidance (completed) and stall-detector-inbox-history.
+- #216 completion satisfies #201's dependencies, but #201 is already CLOSED COMPLETED (2026-10-27T00:24:35Z) while its node is still planned on main. No launch follows from me.
+- The #201 node status belongs to its separate closeout. The stall-detection-validated checkpoint (5 nodes) stays unmet until #201 is recorded.
+- Per your scope, the #216 packet must neither change #201's node nor credit it.
+
+Writer state: HEAD equals origin/main at 2a26ae84. The only modifications are 3 local-daemon files, which I take to be instrument240. No Watcher files are dirty.
+
+Not done: no reading of private originals, complete216-model.js or any factories; no execution; no writes.
+```
+
+#201 dependency consequence: both prerequisites become satisfied, but its public completion is already reported. Its canonical node remains planned and belongs to a separate closeout; the five-node checkpoint stays planned/unmet. No #201 launch, readiness, runtime-validation or completion credit follows here.
+
+The correction calls the earlier report an 18:03Z report; its actual preserved arrival is 20:52:22.854Z, followed by the correction at 20:53:52.959Z. Do not replace either recorded arrival with the claimed authored time. The additive correction supersedes the earlier #216-pending/no-#201-owner snapshot without reopening or a second owner/launch. Its separate #201-owned/blocked-on-#224 statement is also source-time history, not a current #201 block, owner denial or renewed prerequisite/operational hold. Later #201 completion has its separate projection; this #216 transform does not grant or deny it.
+
+### Complete historical owning status source `toolu_01QKnCPNfVxUKHw7CeH46aTU`
+
+Actual arrival `2026-10-26T20:52:22.854Z`; receipt `watcher216-late-merge-report-intake.json` (1631 bytes / SHA-256 `0880f01cde8b7743184800bd858300e1a47d7940329e75044046dc6226a1523e`). The full source remains historical, not a current #201 status assertion.
+
+```text
+#216 status change: merged. Campaign merged PR #220 (Closes #216) as b18f59e7e8426ab6d03a090bc94670298c16078d.
+
+- Head: 686dd149586b72b8f42a606fc61bb7227da99ad8.
+- Merged at 18:01:07Z. Issue #216 closed as COMPLETED at 18:01:08Z.
+- Gate record: https://github.com/lossyrob/telex/pull/220#issuecomment-6423557299
+- Same owner, 4b60ddef. Follow-through is pending: main CI with one observer, the field report, and the doorbell to the #200 owner.
+
+Gate debts:
+1. Postgres query-plan index use is not asserted. This is carried, low debt.
+2. #211 debt 4 is repaired by this PR. It is retired only after the follow-through, so do not record it as cleared yet.
+
+#201: both dependencies, #200 and #216, are now merged. Campaign says #201 can plan against b18f59e7 once #216's follow-through is green. I will launch the #201 owner then, and send you the owner change with evidence. No #201 owner exists yet.
+```
+
+### Complete historical owning status source `toolu_014CA5PnM7XoRHvM3mqpWqba`
+
+Actual arrival `2026-10-26T20:53:52.959Z`; receipt `watcher216-201-current-correction-intake.json` (1717 bytes / SHA-256 `1447ff0eb0165091998ff26c34058e3fdb4286922d8ad79c117a3a94ded64040`). The full source remains historical, not a current #201 status assertion.
+
+```text
+Additive current-state correction to my 18:03Z report (toolu_01QKnCPNfVxUKHw7CeH46aTU). That report was accurate when I sent it but is now superseded. Treat it as historical. It is not a regression, and nothing in it reopens anything.
+
+Current state:
+- #216 is completed. Campaign accepted its follow-through (toolu_01NFAzo36tLekPYU7sdrFwZk): field report https://github.com/lossyrob/telex/issues/216#issuecomment-6423979685, main CI 40373988904/1, Docs 40373988860/1.
+  - Only #211 debt 4 is retired.
+  - The Postgres plan-index-use debt is still carried.
+- #201 has exactly one owner: App session 7aca0f50-2036-46ae-901d-0ff517744e56 (runtime ee356dca). It was launched under toolu_013CDQzb1PczbWY1KSwFRuct and activated publicly in https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329 (toolu_011KS1PLaGdkHAU5v4DLLs3m).
+  - It is now blocked, with the same owner, on an external dependency, Local node postgres-fallback-recovery-exhaustion / #224 (steward https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009, bound in toolu_013UzKTLp7ZLfkoJhKYsi9K5).
+- The line "No #201 owner exists yet; I will launch it" is void.
+
+No second #201 owner, launch, retry, wait or re-arm follows, and no prerequisite hold is renewed.
+```
+
+The amended cost boundary distinguishes bounded result/memory/query count from database work linear in the selected member history. Read-only/address/index-eligibility/visible-failure rules remain; no cap, sampling, newest-N absence inference, schema/write-path/protocol change or maintained projection is newly authorized. The launch and source snapshots stay historical, not renewed owner work or old freeze instructions. **#201 receives no wider live/workstation validation, readiness or completion credit.**
+
+### Steward cost boundary
+
+https://github.com/lossyrob/telex/issues/216#issuecomment-6422351363
+
+Raw 3088 bytes / SHA-256 `b6ca772c7d5e1bc4f5f0e34a7337d22ac68e245092cb23112772c6b5c1dfe5b4`; LF display 3087 bytes / SHA-256 `cbef41543f900c4394ea267dca9927773141c134d38d270833c125d863031ca4`.
+
+```text
+Design steward: #216 cost boundary decision
+
+Decision: option A, with the conditions below. Option B is not authorized for this item. This amends the outcome text I wrote. "Cost does not grow with history length" asked for more than the existing stores can give without a schema change, and the owner was right to stop and return it.
+
+What #216 is for: the detector must give a correct answer for any history length, instead of going degraded and silent past 1024 items. Correctness without a size limit is the requirement. A strict bound on database work was a secondary aim. Reaching it would need a maintained per-recipient wake-state projection, with write-path changes in both backends and compatibility with older writers such as v0.2.1. That is a store change, not part of this item, and it is not easily reversed.
+
+Amended cost requirement:
+
+1. Returned data and detector memory are bounded independent of history length. Each active member gets a scalar or fixed-size answer (for example EXISTS or a single count), never a list of messages.
+2. Database work may grow linearly with that member's own retained history in the worst case. It must not grow with other addresses' history. Each query is constrained by recipient address equality so that the existing messages(to_addr, id) and dispositions(message_id, id) indexes are usable. A scan of every address's messages does not meet this.
+3. Each member gets a fixed number of queries per run, not one query per message.
+4. SELECT-only through the read-only backend, as before. No cap, no newest-N inference, no sampling, and no claim that EXISTS makes the work bounded.
+5. A slow query must surface as the existing visible run failure or timeout. It must not be converted into an absent wake source or a silent pass.
+6. docs/design/copilot-session-stalls.md states this cost characteristic plainly: bounded result and memory, worst-case work linear in the member's retained history, which grows with use because acking does not shrink it. It also names a maintained projection as the remedy if real histories make polling too slow. The PR records the SQLite EXPLAIN QUERY PLAN for each new query, showing that the address index is used. For Postgres the query only needs to be index-eligible; no plan assertion is required.
+
+Unacknowledged counts: unchanged. Keep the existing undelivered_counts semantics and every other caller as they are; its cost is in the same class this decision accepts. The detector may use it, or a scalar query with identical semantics, for the unacknowledged wake source over full history. Do not change the shared function for this item.
+
+The rest of the outcome stands: identical semantics on both backends, the #197 and #199 rules unchanged, the three test cases, and the guidance cleanup in https://github.com/lossyrob/telex/issues/216#issuecomment-6421106582.
+
+Not decided here: a wake-state projection or index. If evidence later shows polling cost matters, propose it as a separate store item through the steward. It is not discovered work for #216.
+
+I have updated the issue body to match.
+
+```
+
+### Campaign merge gate and conditional debt accounting
+
+https://github.com/lossyrob/telex/pull/220#issuecomment-6423557299
+
+Raw 2822 bytes / SHA-256 `57bdc620fd3865717d90cb699e23b0d4832e9431111a759491abfd06e0f4fb49`; LF display 2822 bytes / SHA-256 `57bdc620fd3865717d90cb699e23b0d4832e9431111a759491abfd06e0f4fb49`.
+
+```text
+## Campaign merge gate - PR #220 at 686dd149 (Closes #216)
+
+Verdict: **merge**, with low debt.
+
+Gated head: 686dd149586b72b8f42a606fc61bb7227da99ad8. Merge base 98acefbd.
+
+### Floor
+- Exact-head CI: run 40370016451 (pull_request), attempt 1, 21/21 success, including live Postgres conformance. It was created at 17:35:18Z against main 98acefbd.
+- Main drift since 98acefbd:
+  - 03e8efcb (.streamliner only).
+  - dbb52664 (#219: daemon stop, session_watch, cli, daemon tests and isolation helper, design daemon.md, operating guide).
+  - None of these overlap this PR's ten files, which are the backend modules, stall_detect, conformance, copilot_plugin and the stall guidance and design docs. The drift is disjoint, so no refresh is required.
+- Receipts at this head:
+  - Design steward: delta PASS 6423032328 at 686dd149, on top of the 6422782066 inspection and the 6422830245 PASS.
+  - Independent review: delta PASS 6423068736 at 686dd149, on top of the full-diff review 6422885559.
+  - Readiness: 6423533504.
+- closingIssuesReferences: [216]. Unresolved threads: 0. MERGEABLE/CLEAN. Not a draft.
+
+### Merits (Campaign review)
+- The new `Backend::message_wake_counts(address)` returns two scalar counts (unacknowledged and deferred) for one primary recipient. It uses one shared SQL string for SQLite and Postgres, reads no message bodies and has no history limit.
+- The unacknowledged count matches `undelivered_counts`, with the recipient fixed to `m.to_addr = $1`. Conformance asserts the two are equal at every step.
+- The deferred count uses the recipient's latest disposition and persists after transport consumption. Deferrals by CC recipients and by other recipients don't count. Conformance proves that a deferred message older than 1100 consumed messages is still observed, and that every terminal disposition clears it.
+- The detector drops MAX_INBOX_ITEMS and the bail on "history exceeds observation limit". It also replaces the global `undelivered_counts` query with per-member calls, bounded by MAX_MEMBERS = 32.
+- A SQLite EXPLAIN test asserts a covering-index search on messages_to_id_idx with no `SCAN m`.
+- Guidance cleanup: COPILOT.md and the guide drop the temporary 1024-entry paragraph, and the inbox inspection now uses `inbox --all`. The contract test in copilot_plugin.rs was updated to match.
+
+### Debt
+1. Postgres query-plan index use is not asserted; only SQLite has a plan test. Per-member cost still grows with that recipient's history, as the trait documentation states.
+2. #211 debt 4, transferred to #216, is repaired by this PR. It is retired only after the main-CI and field-report follow-through.
+
+### Follow-through (owner 4b60ddef)
+Report main CI for the merge commit with one observer and no unrecorded reruns, then post the #216 field report and notify the #200 owner as planned.
+```
+
+### Owner field and merged follow-through
+
+https://github.com/lossyrob/telex/issues/216#issuecomment-6423979685
+
+Raw 4121 bytes / SHA-256 `b71a3ae6a5dd92b87ada69380673448a9ad3d8b42ace176476eeb00f13b59334`; LF display 4042 bytes / SHA-256 `f9fc16546ac7e9aa99d29a0226af788ad84d71fb605b4e8e39fe26444675f9ea`.
+
+```text
+## Field report
+
+Outcome: delivered in [PR #220](https://github.com/lossyrob/telex/pull/220).
+Operator merge: b18f59e7e8426ab6d03a090bc94670298c16078d at 18:01:07 UTC
+on 2026-10-26. This issue remains closed.
+
+### What held
+
+The detector observes complete primary-recipient histories without inbox
+materialization or newest-N absence inference. Old consumed-but-deferred work
+still prevents a stall; after that work is handled, long histories permit the
+normal stall/advisory evaluation. Unacknowledged-message semantics,
+SELECT-only observation, visible query failures, policy and Watcher v2
+contracts are preserved. Existing undelivered_counts callers are unchanged.
+
+### What changed
+
+SQLite and Postgres share one recipient-parameterized scalar-count query per
+active member. The cap and obsolete cap-recovery guidance are removed.
+General degraded inspection and history preservation remain, including the
+manual inbox listing's newest-50 default and export for older history.
+Hosted CI exposed a stale guidance assertion, which was corrected to enforce
+the new guidance and reject the removed cap text.
+
+Design impact: updated-docs. The detector design and both Copilot guidance
+surfaces are updated; there is no schema, write-path or protocol change.
+
+### Merged-result evidence
+
+Both exact-main runs succeeded on attempt 1, observed by one managed waiter;
+no main reruns were needed:
+
+- [CI: 21/21 jobs](https://github.com/lossyrob/telex/actions/runs/40373988904),
+  including [live Postgres parity](https://github.com/lossyrob/telex/actions/runs/40373988904/job/121751920545).
+- [Docs: build and deployment](https://github.com/lossyrob/telex/actions/runs/40373988860),
+  2/2 jobs.
+
+Isolated local validation at the exact merge passed 41 cases: 20 detector unit
+tests, one bundled SQLite query-plan test, one SQLite conformance battery,
+six detector CLI tests, 12 plugin tests, and the live Watcher
+management/read-only-store integration. Formatting passed. The owner
+worktree is clean; the installed runtime and main checkout were not touched.
+All managed watches have completed; diagnostic artifacts are retained.
+
+### Test-budget bookkeeping
+
+Already captured hosted conformance-target observations:
+
+- Main merge b18f59e7, run 40373988904, live Postgres job 121751920545:
+  12 tests passed in 17.63 seconds, independently retained in
+  [Sentinel's existing receipt](https://github.com/lossyrob/telex/issues/182#issuecomment-6424093194).
+- PR head 686dd149, run 40370016451,
+  [live Postgres job 121737919512](https://github.com/lossyrob/telex/actions/runs/40370016451/job/121737919512):
+  12 tests passed in 12.60 seconds, previously captured by this owner.
+
+Both are aggregate target execution times excluding compilation, not measured
+marginal cost attributable to #216. These are uncontrolled whole-target
+samples; their difference is not attributed to the added scenario.
+
+Sentinel's source accounting identifies one new shared backend scenario with
+1100 sequential insert/consume pairs per store. The long-history detector unit
+replaces a comparable existing fixture, so its work is not all newly added.
+These observations establish neither a slowdown nor a new gate. No additional
+run, observer, baseline comparison or sampling experiment was undertaken.
+
+### Successor notes
+
+The authorized cost boundary still applies: result size, detector memory and
+query count per member are bounded, but database work can grow with that
+member's retained history. Postgres index eligibility is preserved; optimizer
+index use is not asserted. A maintained projection remains a separately
+designed future remedy, not work added here.
+
+The #200 owner received the requested merge notification. This completes
+#216's implementation and post-merge follow-through for the campaign's
+#211 debt 4 accounting. Wider workstream/workstation dogfood validation
+remains with [#201](https://github.com/lossyrob/telex/issues/201) and is not
+claimed complete by this report. No new product debt or outcome failure was
+found during merged validation.
+
+```
+
+Only the existing #216 node status/summary, existing #199 summary and two additive #199-target row qualifications change; the brief is append-only. All 26 Watcher nodes, 18 records, existing fields/order, geometry, dependencies/checkpoints/design links, other workstreams, #166 debts and already-sent wakes remain exact. Historical conditional debt-4 statements are superseded only by the explicit Campaign retirement above. No other family or debt is cleared.
