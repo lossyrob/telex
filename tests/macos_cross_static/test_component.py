@@ -2296,5 +2296,116 @@ class TransportBoundaryTests(unittest.TestCase):
         self.assertEqual(run.BOUNDS["tools"]["ipsw"]["artifact_id"],12694487625)
 
 
+class DelayedTraceGrammarTests(unittest.TestCase):
+    child = 12
+    identity = "123456781234123412341234567890ab"
+    pathname = "/usr/lib/libParallelCompression.dylib"
+    other_identity = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+    def image(self, pathname, pid=12, identity=None):
+        return f"dyld[{pid}]: <{identity or self.other_identity}> {pathname}"
+
+    def selected(self):
+        return self.image(self.pathname, identity="12345678-1234-1234-1234-1234567890ab")
+
+    def delayed(self, name, pid=12):
+        return f"dyld[{pid}]: move loaded to delayed: {name}"
+
+    def parse(self, *lines):
+        return native.decode_trace("\n".join(lines), self.pathname, self.identity, self.child)
+
+    def test_observed_delayed_shape_adds_no_evidence_and_preserves_return_shape(self):
+        earlier = [self.image("/System/Library/PrivateFrameworks/AOSKit.framework/Versions/A/AOSKit"),
+                   self.image("/usr/lib/libpcap.A.dylib")]
+        expected = self.parse(*earlier, self.selected())
+        actual = self.parse(*earlier, self.selected(), self.delayed("AOSKit"),
+                            self.delayed("libpcap.A.dylib"), "Patching cryptex")
+        self.assertEqual(actual, expected)
+        self.assertEqual(set(actual), {"exact_child", "unrelated_children"})
+        self.assertEqual(len(actual["exact_child"]), 1)
+        self.assertEqual(actual["exact_child"][0]["line"], self.selected())
+        self.assertEqual(actual["unrelated_children"], [])
+
+    def test_selected_delayed_name_is_rejected_with_earlier_selected_row(self):
+        with self.assertRaisesRegex(cache.EvidenceError, "may not relate"):
+            self.parse(self.selected(), self.delayed("libParallelCompression.dylib"))
+        with self.assertRaises(cache.EvidenceError):
+            self.parse(self.image("/other/libParallelCompression.dylib"), self.selected(),
+                       self.delayed("libParallelCompression.dylib"))
+
+    def test_missing_earlier_row_and_case_mismatch_are_rejected(self):
+        for name in ("AOSKit", "aoskit", "AOSKit-extra"):
+            with self.subTest(name=name), self.assertRaisesRegex(cache.EvidenceError, "lacks an earlier"):
+                earlier = [] if name == "AOSKit" else [self.image("/other/AOSKit")]
+                self.parse(*earlier, self.selected(), self.delayed(name))
+
+    def test_empty_whitespace_slash_and_trailing_text_names_fail(self):
+        for name in ("", " ", "AOS Kit", "AOSKit\t", "AOSKit ", "AOSKit extra",
+                     "AOSKit\ttext", "/AOSKit", "path/AOSKit", "AOSKit/", "AOSKit\u00a0"):
+            with self.subTest(name=name), self.assertRaises(cache.EvidenceError):
+                self.parse(self.image("/other/AOSKit"), self.selected(), self.delayed(name))
+
+    def test_delay_before_matching_row_or_before_other_child_match_fails(self):
+        for lines in (
+            [self.selected(), self.delayed("AOSKit"), self.image("/other/AOSKit")],
+            [self.image("/other/AOSKit", pid=99), self.selected(), self.delayed("AOSKit")],
+            [self.delayed("AOSKit", pid=99), self.selected(), self.delayed("AOSKit")],
+        ):
+            with self.subTest(lines=lines), self.assertRaisesRegex(cache.EvidenceError, "lacks an earlier"):
+                self.parse(*lines)
+        self.assertEqual(len(self.parse(self.image("/other/AOSKit"), self.delayed("AOSKit"),
+                                       self.selected())["exact_child"]), 1)
+
+    def test_all_other_exact_child_non_uuid_shapes_still_fail(self):
+        for content in ("move loaded to delayed:AOSKit", "Move loaded to delayed: AOSKit",
+                        "move loaded to delayed:  AOSKit", "loaded to delayed: AOSKit",
+                        "move loaded to active: AOSKit", "unload: AOSKit",
+                        "move loaded to delayed:", "<truncated> /other/AOSKit", "AOSKit"):
+            with self.subTest(content=content), self.assertRaises(cache.EvidenceError):
+                self.parse(self.image("/other/AOSKit"), self.selected(), f"dyld[12]: {content}")
+
+    def test_delayed_rows_cannot_supply_missing_or_remove_duplicate_selected_evidence(self):
+        earlier = self.image("/other/AOSKit")
+        delayed = self.delayed("AOSKit")
+        for lines in ([earlier, delayed], [earlier, delayed, self.delayed("AOSKit")],
+                      [earlier, self.selected(), delayed, self.selected()]):
+            with self.subTest(lines=lines), self.assertRaisesRegex(cache.EvidenceError, "missing/duplicated"):
+                self.parse(*lines)
+
+    def test_related_path_and_selected_hint_protections_are_preserved(self):
+        for name in ("libP", "libParallelCompression", "libParallelCompression.dylib-extra",
+                     "LIBPARALLELCOMPRESSION.DYLIB"):
+            with self.subTest(name=name), self.assertRaises(cache.EvidenceError):
+                self.parse(self.image("/other/" + name), self.selected(), self.delayed(name))
+        for name in ("prefix-libParallelCompression-helper", self.identity,
+                     "12345678-1234-1234-1234-1234567890ab"):
+            with self.subTest(name=name):
+                earlier = self.image("/other/" + name)
+                self.assertEqual(len(self.parse(earlier, self.selected())["exact_child"]), 1)
+                with self.assertRaisesRegex(cache.EvidenceError, "may not relate"):
+                    self.parse(earlier, self.selected(), self.delayed(name))
+
+    def test_multiple_prior_basename_matches_and_repeated_delays_remain_non_evidence(self):
+        earlier = [self.image("/one/AOSKit"), self.image("/two/AOSKit")]
+        self.assertEqual(self.parse(*earlier, self.delayed("AOSKit"), self.delayed("AOSKit"), self.selected()),
+                         self.parse(*earlier, self.selected()))
+        with self.assertRaises(cache.EvidenceError):
+            self.parse(self.image("/one/AOSKit"),
+                       self.image("/two/AOSKit", identity="12345678-1234-1234-1234-1234567890ab"),
+                       self.selected(), self.delayed("AOSKit"))
+
+    def test_non_child_and_non_dyld_handling_is_unchanged(self):
+        nonchild = self.delayed("libParallelCompression.dylib", pid=99)
+        result = self.parse(self.delayed("unknown", pid=99), nonchild,
+                            "move loaded to delayed: unknown", self.selected())
+        self.assertEqual(result["exact_child"], self.parse(self.selected())["exact_child"])
+        self.assertEqual(result["unrelated_children"], [
+            {"pid": 99, "line": nonchild, "unclassified": True, "supplies_exact_child_evidence": False}])
+        for line in ("move loaded to delayed: libParallelCompression.dylib",
+                     "dyld[12] move loaded to delayed: AOSKit"):
+            with self.subTest(line=line), self.assertRaises(cache.EvidenceError):
+                self.parse(self.image("/other/AOSKit"), self.selected(), line)
+
+
 if __name__ == "__main__":
     unittest.main()

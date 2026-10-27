@@ -245,7 +245,7 @@ def decode_trace(stderr, expected_path, expected_uuid, child_pid):
         return (expected_stem.casefold() in folded or expected_uuid in folded or
                 str(uuid.UUID(expected_uuid)) in folded)
 
-    records, unrelated = [], []
+    records, unrelated, earlier_images = [], [], {}
     for line in stderr.splitlines():
         prefix = re.fullmatch(r"dyld\[(\d+)\]:\s*(.*)", line)
         if prefix is None:
@@ -263,8 +263,20 @@ def decode_trace(stderr, expected_path, expected_uuid, child_pid):
                                   "supplies_exact_child_evidence": False})
             continue
         # Classify every exact-child dyld record before filtering for the selected image.
+        if match is None:
+            delayed = re.fullmatch(r"move loaded to delayed: ([^\s/]+)", prefix[2])
+            if delayed is not None:
+                name = delayed[1]
+                earlier = earlier_images.get(name, [])
+                require(earlier, "delayed image lacks an earlier exact-child UUID/path row")
+                require(all(identity != expected_uuid and pathname != expected_path
+                            for identity, pathname in earlier) and
+                        not related_path(name) and not selected_hint(line),
+                        "delayed image may not relate to the selected library")
+                continue
         require(match is not None, "incomplete or ambiguous exact-child loader record")
         identity, pathname = uuid.UUID(match[1]).hex, match[2]
+        earlier_images.setdefault(pathname.rsplit("/", 1)[-1], []).append((identity, pathname))
         if identity != expected_uuid and not related_path(pathname):
             continue
         require(pathname == expected_path, "incomplete or mismatching selected-library pathname")

@@ -124,7 +124,8 @@ BUILD attempts are consumed.
 
 ## Preserved native and input contract
 
-`native.py`, `cache.py` and the three inherited dependencies remain unchanged.
+`cache.py` and the three inherited dependencies remain unchanged. The only
+`native.py` correction is the narrow trace grammar described below.
 Native resolution/before-transfer binding precedes acquisition and all input
 transfers. Candidate verification/version checks remain before the original
 Apple input chain. Seven roots, query-wrapper exclusions, family selection,
@@ -141,3 +142,37 @@ containment, original failure cause, release-feature/whole-binary equivalence,
 reproducibility, physical/admission/product readiness and HOLD clearance are
 not established. Guarded local tests use tiny synthetic archives, API objects,
 timestamps and denied effects, not the retained candidate executable.
+
+## Exact-child delayed-image non-evidence record
+
+[6430907843](https://github.com/lossyrob/telex/issues/172#issuecomment-6430907843)
+classifies the consumed a06 component attempt as a controller trace-grammar
+gap. It permits only the literal exact-child form
+`move loaded to delayed: <name>` when the name is nonempty, has no whitespace
+or `/`, and has no trailing text. The name must exactly match the last path
+component of at least one **earlier UUID/path row of the same exact child**.
+No matching earlier row may be the selected library; the delayed record must
+also fail both the existing `related_path` and `selected_hint` relevance tests.
+Any violation rejects the record.
+
+These delayed records supply **no identity evidence** and never enter the
+returned selected-library records. Exactly one selected exact-child UUID/path
+row is still mandatory; delayed records cannot supply a missing row or excuse
+a duplicate. All other non-UUID/path exact-child forms remain rejected.
+Non-child and non-dyld handling, return shape, UUID/path validation, SDK/otool,
+post-decoder confirmation and semantic acceptance order are unchanged.
+
+Optional offline replay of the two retained stderr streams exercises only this
+pure parser under effect guards. It is source-review evidence, not acceptance
+of the old decoded output, a native recheck or a new candidate invocation.
+Both old decoder children returned zero with complete pipes, but the consumed
+attempt reached no post-decoder confirmation, semantics or native acceptance.
+The grammar correction makes no claim about dyld's internal delayed-loading
+behavior or decoder correctness.
+
+All five BUILDs and a06 component attempt 40425113395/1 remain consumed, with
+zero retries and HOLD unchanged. Before any future attempt: fresh independent
+WHOLE component-source review, a NEW steward finite disposition binding it,
+then a NEW genuine owner freeze. No approval transfers from source review
+6430317350 or ACTUAL verdict 6430817786; this local correction grants no use,
+push, freeze or attempt authority.
