@@ -206,6 +206,24 @@
       "dependsOn": [
         "operational-hardening"
       ]
+    },
+    {
+      "id": "send-admission-failure-resolution",
+      "type": "task",
+      "title": "Resolve sends rejected by bootstrap admission before peer decision",
+      "summary": "Give send or reply failures before any request bytes are written a determinable, retry-authorizing typed outcome for the exact operation. Bootstrap, connect or capability admission must not leave the operation Recorded/Pending indefinitely. Reconciliation must yield authoritative NotRecorded for the same handle with unchanged retention generation, or a definite transient pre-acceptance rejection; the synchronous error has the same typed meaning. Resolve only the pending operation this call began, never accepted, rejected, indeterminate or concurrent-contender state; WriteBoundaryUnknown stays indeterminate. Prove an isolated unavailable-daemon recovery that retries the same operation and delivers exactly one message, and document the recovery rule. This is separate from operational-hardening. Campaign coordinates; #234 retains its full outage and no-duplicate resume proof.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 238
+      },
+      "dependsOn": []
     }
   ],
   "checkpoints": [
