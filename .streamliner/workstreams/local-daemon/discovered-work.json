@@ -4240,6 +4240,150 @@
           "planningIdentityReceipt": "rerun-policyv4-planning-capture.json"
         },
         "historyBoundary": "All old evidence, observations, owner/launch/authority and qualifications are retained exactly. Saved prior current fields remain history, superseded only as stated. This is policy/assignment recording, not an observation, rerun execution, recommendation or acceptance."
+      },
+      "instrumentationDeliveryAndRetainedParkedQualification": {
+        "kind": "accepted-instrumentation-delivery-retained-parked-owner-not-repair-completion",
+        "acceptedMerge": "8e09538f44e8f7042a3a07c150dcf47c00f9e1d9",
+        "field": {
+          "id": 6434299094,
+          "url": "https://github.com/lossyrob/telex/issues/167#issuecomment-6434299094",
+          "bytes": 1361,
+          "sha256": "fd5a04ae549dc80c925121b69c8e69c594f834987479a90c5e16beb296c8b1c1",
+          "createdAt": "2026-10-27T05:09:54Z",
+          "updatedAt": "2026-10-27T05:09:54Z",
+          "originalCrlfPairs": 0
+        },
+        "directCampaign": {
+          "file": "campaign240-accepted-terminal-followthrough-intake.json",
+          "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "source": "toolu_0132XpkJ1vgWcPhs9BfwRyyZ",
+          "originEvent": {
+            "id": "d6d210dc-3c4e-4a5d-b247-8197a6c6a3e7",
+            "timestamp": "2026-10-27T05:12:22.508Z",
+            "bytes": 2668,
+            "sha256": "7e1d9b73bd99cb1c5c6af1fe9c934831991ff0544f0ab8276e29d9fbe36318aa"
+          },
+          "receipt": {
+            "file": "campaign240-accepted-terminal-followthrough-intake.json",
+            "bytes": 1107,
+            "sha256": "2de03e1f74e574766c7e8f91edb85f31bc8d46938aafb453e694a595f617128a"
+          },
+          "displayedBody": "Campaign originating decision (verbatim as sent to Local aeae4fa9 at ~05:11Z): \"ACCEPTED: #240 exact-merge follow-through (CI 40451635695 a1 22/22, Docs 40451635758 a1 success at 8e09538f; field 6434299094). Instrumentation only; #167 OPEN, no repair/cause/closure credit. 9a stays assigned and parked on natural recurrence watch. No further action requested.\" Campaign independently verified via gh: both runs push/attempt 1/success/headSha 8e09538f44e8f7042a3a07c150dcf47c00f9e1d9, CI jobs 22 success, #167 OPEN. Recorded in the instruction register. For your later separate additive qualification only; no #234 tuple mutation, no #167 completion.",
+          "projectedHomePrefixes": 0
+        },
+        "provenance": [
+          {
+            "file": "local167-pr240-aae-final-gate-submitted-intake.json",
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_AhhGZoEJWsH2DGEZmQgUtJkA",
+            "originEvent": {
+              "id": "af00f147-aa78-4740-8f10-84bbd6927cfd",
+              "timestamp": "2026-10-27T04:33:00.482Z",
+              "bytes": 4186,
+              "sha256": "6f46164dfca750ca3c8b4540c5c6e2dbf4c12596140a907e3e6d6984d62c987f"
+            },
+            "receipt": {
+              "file": "local167-pr240-aae-final-gate-submitted-intake.json",
+              "bytes": 2019,
+              "sha256": "796c417d50c5663d2853cd672a1442a1abacc6705593ebff0456bfac083d9401"
+            },
+            "projectedHomePrefixes": 0
+          },
+          {
+            "file": "local167-pr240-residual-gap-accepted-intake.json",
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_HnsyezJZX4EKDzDfRoYFlhGf",
+            "originEvent": {
+              "id": "50ead6ab-17b4-4c9a-beec-8e9c66f0b7cf",
+              "timestamp": "2026-10-27T04:35:20.481Z",
+              "bytes": 4436,
+              "sha256": "431a60b9f692bfa5e06e7d3f28c6d06d7f84350bf6b0cd325aa6b4528edbf791"
+            },
+            "receipt": {
+              "file": "local167-pr240-residual-gap-accepted-intake.json",
+              "bytes": 2144,
+              "sha256": "22460e69bcb8c558af800e01e7ebe01f6e0a2858b5a08c60067c7da21ab19207"
+            },
+            "projectedHomePrefixes": 0
+          },
+          {
+            "file": "local167-pr240-actual-merge-and-corrected-gate-intake.json",
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_t7hHnKm9LhnSA1LHP2vpOSno",
+            "originEvent": {
+              "id": "5934ea4c-ecc6-4180-a3da-2172aebb3b3e",
+              "timestamp": "2026-10-27T04:49:04.751Z",
+              "bytes": 4116,
+              "sha256": "3b974273f4978432cecfdfa16504d19c583502d63d99584c8d89b2f9b00e184a"
+            },
+            "receipt": {
+              "file": "local167-pr240-actual-merge-and-corrected-gate-intake.json",
+              "bytes": 1984,
+              "sha256": "a925fc322ad2ae3691f4b1d2c081d6913fa8d26c10b85ec26e627828bb7c20b9"
+            },
+            "projectedHomePrefixes": 0
+          },
+          {
+            "file": "local167-pr240-verified-terminal-followthrough-intake.json",
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_xomZVtT0hj4KKmuOcyInscgt",
+            "originEvent": {
+              "id": "fe0705b5-ed4e-489d-8224-e32b4d8c59c0",
+              "timestamp": "2026-10-27T05:11:01.075Z",
+              "bytes": 5302,
+              "sha256": "7ce489e18513ee3dd05dbaf1a9a61ef15b514794273194a2a4e8c047e6b75877"
+            },
+            "receipt": {
+              "file": "local167-pr240-verified-terminal-followthrough-intake.json",
+              "bytes": 2577,
+              "sha256": "640f53dc61bc231ad3c6a841f09c4f37d2a59989d9aac83d9742f329ccef5219"
+            },
+            "projectedHomePrefixes": 0
+          },
+          {
+            "file": "local167-pr240-reported-campaign-acceptance-intake.json",
+            "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+            "source": "call_UGmkEZ0BA0v5eIrbMa1hHUm7",
+            "originEvent": {
+              "id": "4c2a9668-ab09-46e0-ab3d-05bb839c50bf",
+              "timestamp": "2026-10-27T05:11:32.902Z",
+              "bytes": 2654,
+              "sha256": "f1bac1b6e776ede6f36404184ca5bedb29d46ea9935cfab4d9eaffb648ef2d69"
+            },
+            "receipt": {
+              "file": "local167-pr240-reported-campaign-acceptance-intake.json",
+              "bytes": 1253,
+              "sha256": "d60ae1c637ebd3148f74b1c4bdafd6105967d4fa00e8ed503f83a1586f6437e2"
+            },
+            "projectedHomePrefixes": 0
+          }
+        ],
+        "preparation": {
+          "file": "local167-pr240-preparation-scope-intake.json",
+          "sessionId": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "source": "call_z4mjfck0QvieA0quuPc4B1Bh",
+          "originEvent": {
+            "id": "c152efa5-ff13-4d6f-8345-e096b8a889db",
+            "timestamp": "2026-10-27T05:32:00.660Z",
+            "bytes": 6323,
+            "sha256": "8e680a66718fc2950053f3051c903b68131742f8be7dc9184c11952b01f5a863"
+          },
+          "receipt": {
+            "file": "local167-pr240-preparation-scope-intake.json",
+            "bytes": 3087,
+            "sha256": "c9c574ce400b2626d92b65c5273064436fbef802b38446a1ef6511208b41cfc7"
+          },
+          "projectedHomePrefixes": 0,
+          "authority": "PREPARATION only, not a future frozen-tuple owning approval"
+        },
+        "ownerDisposition": {
+          "sameHistoricalOwner": "9a868a31-2c8d-429a-aee3-7e195076a4dd",
+          "assignmentKind": "Campaign/Local operational report, GitHub assignees remain empty",
+          "state": "PARKED on natural recurrence; no recipient activity/session inspection, release or new launch"
+        },
+        "unchangedDiagnosticLedger": "Closed budget: 3/3 runs and 40/60 iterations, not reopened/reset/refunded; no additional diagnostic work is authorized.",
+        "evidenceBoundary": "One exact composed-tree attempt 1 green baseline; producer raw Windows/PG/checkout/log assertions and predicate correction remain attributed. No absence, headroom, cause, repair or closure inference.",
+        "historicalBoundary": "All old row fields remain field-equivalent. Earlier no-merge/owed statements remain source-time history for this accepted instrumentation only, not closing-repair clearance or release of other family/B/C gates. Original failure, unknown cause and separate future closing repair gates remain."
       }
     },
     {
