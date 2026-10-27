@@ -7,14 +7,22 @@ use crate::{Runtime, RuntimeConfig};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
+use telex::application_client::{ApplicationClientError, OperationReconciliation};
 use telex::backend::Backend;
 use telex::profiles::ConfigFile;
+use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout, Instant};
 
 const PROFILE: &str = "resilience-test";
 const WATCH: &str = "resilience";
 const TARGET: &str = "agent:resilience-recipient";
 const DEADLINE: Duration = Duration::from_secs(100);
+
+pub(crate) struct SendBarrier {
+    pub event_sequence: u64,
+    pub reached: oneshot::Sender<()>,
+    pub resume: oneshot::Receiver<()>,
+}
 
 struct OwnerTask(tokio::task::JoinHandle<anyhow::Result<()>>);
 
@@ -205,7 +213,8 @@ async fn assert_outage(
     owner: &tokio::task::JoinHandle<anyhow::Result<()>>,
     runtime_id: &str,
     store: &dyn Backend,
-) {
+    require_interrupted_send: bool,
+) -> Option<Box<Operation>> {
     let before = wait_for_sender(management, false).await;
     assert_eq!(before.runtime_id, runtime_id);
     let deadline = Instant::now() + DEADLINE;
@@ -228,9 +237,17 @@ async fn assert_outage(
     );
     assert_eq!(watch(management).await.state, json!(1));
     assert_deliveries(management, store, 1).await;
-    let budget = pending(management)
-        .await
-        .map(|operation| operation.send_budget);
+    let operation = pending(management).await;
+    if require_interrupted_send {
+        let operation = operation
+            .as_ref()
+            .expect("daemon outage must interrupt a staged send");
+        assert_eq!(operation.send_budget.used, 1, "{operation:?}");
+        assert_eq!(operation.send_budget.remaining, 2, "{operation:?}");
+    }
+    let budget = operation
+        .as_ref()
+        .map(|operation| operation.send_budget.clone());
     if let Some(budget) = &budget {
         assert!(
             budget.used <= 1,
@@ -252,14 +269,61 @@ async fn assert_outage(
     if let Some(before) = budget {
         let after = pending(management)
             .await
-            .expect("pending identity retained")
-            .send_budget;
+            .expect("pending identity retained");
         assert_eq!(
-            after.remaining, before.remaining,
+            after.operation_id,
+            operation.as_ref().unwrap().operation_id,
+            "outage replaced the pending operation"
+        );
+        assert_eq!(
+            after.send_budget.remaining, before.remaining,
             "unready sender spent retry budget"
         );
-        assert_eq!(after.used, before.used, "unready sender attempted a send");
+        assert_eq!(
+            after.send_budget.used, before.used,
+            "unready sender attempted a send"
+        );
     }
+    if require_interrupted_send {
+        let operation = operation.as_ref().unwrap();
+        let Response::ReceiptEvidence(evidence) = management
+            .execute(Command::ReceiptEvidence {
+                operation_id: operation.operation_id.clone(),
+                limit: 1000,
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("expected receipt evidence")
+        };
+        let sends: Vec<_> = evidence
+            .iter()
+            .filter(|value| matches!(value.evidence, SendEvidence::Send(_)))
+            .collect();
+        assert_eq!(sends.len(), 1, "{evidence:?}");
+        assert!(
+            matches!(
+                &sends[0].evidence,
+                SendEvidence::Send(Err(ApplicationClientError::DaemonBootstrap(_)))
+            ),
+            "interrupted send must record typed bootstrap admission failure: {evidence:?}"
+        );
+        assert!(
+            evidence.iter().any(|value| {
+                matches!(
+                    &value.evidence,
+                    SendEvidence::Reconciliation(Ok(OperationReconciliation::NotRecorded(absent)))
+                        if absent.operation_id == operation.recovery.operation_id
+                            && absent.payload_identity == operation.recovery.payload_identity
+                            && absent.logical_store_id == operation.recovery.logical_store_id
+                            && absent.responsibility == operation.recovery.responsibility
+                            && Some(absent.retention_generation) == operation.recovery.retention_generation
+                )
+            }),
+            "original recovery handle must authorize retry with typed absence: {evidence:?}"
+        );
+    }
+    operation
 }
 
 async fn exercise(
@@ -275,11 +339,22 @@ async fn exercise(
         std::os::unix::net::SocketAddr::from_pathname(&path)
             .unwrap_or_else(|error| panic!("isolated daemon endpoint {}: {error}", path.display()));
     }
-    let (runtime, management) = Runtime::open(RuntimeConfig::installed(
+    let require_interrupted_send = release_before_observation && backend_fault.is_none();
+    let (mut runtime, management) = Runtime::open(RuntimeConfig::installed(
         iso.root.join("registry.sqlite"),
         iso.trusted_root(),
     ))
     .unwrap();
+    let mut send_barrier = require_interrupted_send.then(|| {
+        let (reached, observed) = oneshot::channel();
+        let (resume, released) = oneshot::channel();
+        runtime.send_barrier = Some(SendBarrier {
+            event_sequence: 2,
+            reached,
+            resume: released,
+        });
+        (observed, resume)
+    });
     let runtime_id = runtime.runtime_id().to_owned();
     let mut owner = OwnerTask(tokio::spawn(runtime.run()));
     let detector = isolation::branch_binary().with_file_name(format!(
@@ -318,6 +393,13 @@ async fn exercise(
         original: iso.layout().current_path,
         withheld: iso.root.join("withheld-current"),
     };
+    if let Some((reached, _)) = &mut send_barrier {
+        std::fs::write(iso.root.join("permit-1"), b"ready").unwrap();
+        timeout(DEADLINE, reached)
+            .await
+            .expect("runtime did not admit the interrupted send")
+            .expect("runtime ended before the interrupted send");
+    }
     if let Some(fault) = backend_fault {
         fault.set_available(false).await;
     } else {
@@ -325,12 +407,22 @@ async fn exercise(
         std::fs::rename(&selector.original, &selector.withheld).unwrap();
         iso.stop_daemon_with_executable(&binary);
     }
-    if !release_before_observation {
-        wait_for_sender(&management, false).await;
+    if let Some((_, resume)) = send_barrier {
+        resume.send(()).expect("runtime waiting at send barrier");
+    } else {
+        if !release_before_observation {
+            wait_for_sender(&management, false).await;
+        }
+        std::fs::write(iso.root.join("permit-1"), b"ready").unwrap();
     }
-    std::fs::write(iso.root.join("permit-1"), b"ready").unwrap();
-    assert_outage(&management, &owner.0, &runtime_id, store).await;
-    let pending = watch(&management).await.pending_operation_id;
+    let pending = assert_outage(
+        &management,
+        &owner.0,
+        &runtime_id,
+        store,
+        require_interrupted_send,
+    )
+    .await;
     if let Some(fault) = backend_fault {
         fault.set_available(true).await;
     } else {
@@ -349,7 +441,7 @@ async fn exercise(
     }
     wait_for_state(&management, 2).await;
     assert_deliveries(&management, store, 2).await;
-    if let Some(operation_id) = pending {
+    if let Some(operation) = pending {
         let Response::Events(events) = management
             .execute(Command::Events {
                 id: WATCH.into(),
@@ -360,12 +452,19 @@ async fn exercise(
         else {
             panic!("expected event evidence")
         };
-        assert!(
-            events.iter().any(|event| {
-                event.operation_id == operation_id && event.status == OperationStatus::Accepted
-            }),
-            "recovery must preserve the staged identity"
+        let accepted: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.operation_id == operation.operation_id
+                    && event.status == OperationStatus::Accepted
+            })
+            .collect();
+        assert_eq!(
+            accepted.len(),
+            1,
+            "recovery must accept the staged identity exactly once"
         );
+        assert_eq!(accepted[0].recovery, operation.recovery);
     }
     wait_for_detector(iso, &management).await;
     std::fs::write(iso.root.join("permit-2"), b"ready").unwrap();

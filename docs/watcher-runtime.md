@@ -436,6 +436,13 @@ sender becomes non-ready; the `*_backend_resilience` cases finish before that
 observation to exercise a send interrupted by the outage. A barrier-controlled
 detector produces accepted events before and after each fault.
 
+The interrupted-daemon case also holds the real send after readiness admission
+until the daemon fault is installed. It requires a staged operation with exactly
+one spent send, a typed bootstrap admission failure and same-handle `NotRecorded`
+evidence. Recovery must accept that exact operation and deliver it once. This
+send barrier is compiled only into platform unit tests; production scheduling
+and membership timing are unchanged.
+
 The tests withhold only the disposable installation's selector to hold a daemon
 outage, and use a private loopback TCP boundary to terminate and withhold only
 the PostgreSQL connections belonging to that test. They assert non-ready/error
