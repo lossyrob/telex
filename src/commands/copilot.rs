@@ -28,7 +28,7 @@ pub mod session_state;
 pub mod stall_detect;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
-const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "Bridge files and push registration do not prove the bridge loaded. Keep an already-loaded, live bridge in push mode. If this host exposes a supported live bridge loader, re-provision with `telex --address <station> copilot resume` and use that loader (`extensions_reload` where available), then verify bridge liveness. On Copilot CLI only, enabling Copilot Extensions under `/experimental` may expose that tool. If the bridge is not live and this host has no supported live loader (including App sessions), use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill` for completion artifacts, ack/deduplication, re-arming and stopping. Preparation is not wakeup proof; report setup/backend failures. Do not use --force unless intentionally downgrading. Or detach with `telex --address <station> copilot detach`.";
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "Bridge files and push registration do not prove the bridge loaded. Keep an already-loaded, live bridge in push mode. If this host exposes a supported live bridge loader, re-provision with `telex --address <station> copilot resume` and use that loader (`extensions_reload` where available). On Copilot CLI only, enabling Copilot Extensions under `/experimental` may expose that tool. In App without an advertised live loader, startup extension discovery can load the provisioned bridge: if a restart is acceptable, provision with `telex --address <station> copilot attach --copilot-bridge`, restart the App session, then run `telex --address <station> copilot resume`. After either loading path, verify bridge liveness with `telex --address <station> --json status`: require `station_health: attended_push` and `push_registered: true`; where available, call `telex_bridge_info` for supporting bridge evidence. A restart is not proof by itself. Startup loading was reported on one Windows App build, not every App build or a plain conversation clear. Liveness is not end-to-end delivery proof. If a live bridge is unavailable and a restart is unacceptable or liveness does not verify, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill` for completion artifacts, ack/deduplication, re-arming and stopping. Preparation is not wakeup proof; report setup/backend failures. Do not use --force unless intentionally downgrading. Or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
@@ -195,7 +195,7 @@ fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
 }
 
 /// Write the embedded bridge extension into the session's extension discovery dir. The agent
-/// still runs `extensions_reload` to load it (telex cannot trigger a reload).
+/// uses supported live reload or startup discovery to load it; telex only provisions files.
 fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
     std::fs::create_dir_all(&dir)?;
@@ -621,7 +621,7 @@ fn capture_producer_identity(session: &str) -> Result<(ProducerIdentity, String)
 /// A placeholder identity for the `pending` record written before `Register`.
 ///
 /// On a first attach the bridge extension has been written but not yet loaded (the agent still has
-/// to run `extensions_reload`), so there is no live producer to describe. That is exactly why the
+/// to use live reload or startup discovery), so there is no live producer to describe. That is why the
 /// record starts `Pending`: it is never reconciled, and the identity fields only become mandatory
 /// when it is finalized to `Live`.
 fn placeholder_producer_identity() -> ProducerIdentity {
@@ -2172,7 +2172,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                 Ok(true) => {
                     // Finalize the intent to `live` only after *proving* the producer answers the
                     // same probe the daemon will. A bridge that has not been loaded yet (the normal
-                    // first-attach path, where the agent still has to run `extensions_reload`)
+                    // first-attach path, before live reload or startup discovery)
                     // simply leaves the intent `Pending`: it is never reconciled in that state, and
                     // the next drain hook or `copilot resume` finalizes it once the bridge is live.
                     match daemon_member_status(&store_key, &session, &address).await {
@@ -4433,15 +4433,48 @@ mod tests {
                 "**Supported live bridge loader available:** use the bridge path below",
                 "On Copilot CLI",
                 "That CLI setting is not an App prerequisite",
-                "**No supported live bridge loader:**",
-                "first-time setup in Copilot App",
+                "**App startup discovery without a live loader:**",
+                "copilot attach --copilot-bridge",
+                "restart the App session",
+                "copilot resume",
+                "verify liveness",
+                "**Restart is unacceptable or liveness does not verify:**",
                 "copilot fallback prepare",
             ],
         );
         assert!(
             routing.contains("Bridge files and push registration do not prove the bridge loaded")
         );
-        assert!(routing.contains("Restarting or clearing a session is not a substitute"));
+        assert!(routing.contains("A restart is not proof by itself"));
+        assert!(routing
+            .contains("plain conversation clear is not an established first-time App loader"));
+        let bridge = doc
+            .split_once("2. **Load or verify the bridge.**")
+            .expect("bridge loading instructions")
+            .1
+            .split_once("3. **Receive messages as turns.**")
+            .expect("loading precedes delivery")
+            .0
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_in_order(
+            &bridge,
+            &[
+                "first-time App setup without an advertised `extensions_reload`",
+                "after provisioning above",
+                "restart the App session",
+                "copilot resume",
+                "--json status",
+                "station_health: attended_push",
+                "push_registered: true",
+                "Where available, call `telex_bridge_info`",
+                "do not require that tool when it is absent",
+                "not end-to-end delivery proof",
+                "one Windows App build, not every App build",
+                "Liveness verification, not an App version, is the gate",
+            ],
+        );
         let transition = doc
             .split_once("### Switch modes and stop")
             .unwrap()
@@ -4455,13 +4488,19 @@ mod tests {
         assert_in_order(
             &transition,
             &[
-                "first confirm a supported loader",
+                "first choose a loading path",
+                "startup discovery",
+                "acceptable App session restart",
                 "station stop",
                 "copilot attach --copilot-bridge",
+                "restart the App session",
+                "copilot resume",
                 "verify bridge liveness",
+                "--json status",
+                "If liveness does not verify, return to the prepared pull fallback",
             ],
         );
-        assert!(transition.contains("Do not leave working pull for a loader the host lacks"));
+        assert!(transition.contains("unavailable live loader or an unacceptable restart"));
     }
 
     #[test]
@@ -5412,7 +5451,20 @@ mod tests {
                             "copilot resume",
                             "extensions_reload` where available",
                             "On Copilot CLI only",
-                            "If the bridge is not live and this host has no supported live loader (including App sessions)",
+                            "In App without an advertised live loader",
+                            "startup extension discovery",
+                            "if a restart is acceptable",
+                            "copilot attach --copilot-bridge",
+                            "restart the App session",
+                            "copilot resume",
+                            "--json status",
+                            "station_health: attended_push",
+                            "push_registered: true",
+                            "where available, call `telex_bridge_info`",
+                            "A restart is not proof by itself",
+                            "one Windows App build, not every App build or a plain conversation clear",
+                            "Liveness is not end-to-end delivery proof",
+                            "a restart is unacceptable or liveness does not verify",
                             "supported pull fallback",
                             "copilot fallback prepare",
                             "exactly one returned command",

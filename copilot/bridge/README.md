@@ -12,12 +12,22 @@ Describes the **load-on-bind push delivery** path in
 a message through an already-loaded, live bridge in Copilot CLI or Copilot App as a real turn, with no agent-managed
 `telex wait` waiter and no `--ui-server` flag.
 
-First-time loading depends on the host exposing a supported live bridge loader.
-For an App session without one, follow `telex copilot skill` and
-`copilot fallback prepare` for the Telex-owned single-shot pull path. Keep push
-when the bridge is already live; host identity alone does not select pull.
-Provisioning files is not loading proof, and fallback preparation is not wakeup
-proof.
+First-time loading uses a supported live bridge loader or startup extension
+discovery. For App setup without an advertised live loader, provision with
+`telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
+then run `telex --address <addr> copilot resume`. Verify
+`telex --address <addr> --json status` reports `station_health: attended_push` and
+`push_registered: true`; where available, call `telex_bridge_info` for supporting
+bridge evidence. Keep push when the bridge is already live.
+
+Provisioning files is not loading proof, and a restart is not proof by itself.
+[Issue #230](https://github.com/lossyrob/telex/issues/230) reports startup loading
+and pushed delivery on one Windows App build, not every App build or a plain
+conversation clear. Liveness and end-to-end delivery are separate checks.
+When a live bridge is unavailable and a restart is unacceptable or liveness does
+not verify, follow `telex copilot skill` and `copilot fallback prepare` for the
+Telex-owned single-shot pull path. Fallback preparation is not wakeup proof;
+report setup/backend failures.
 
 ## Files
 
@@ -54,7 +64,7 @@ reloads.
 
 These CLI proof recipes require the `extensions_reload` tool. On Copilot CLI,
 enable Copilot Extensions under `/experimental` if needed to expose it. They are
-not first-time App setup instructions when that host has no supported loader.
+not the App startup-discovery procedure described above.
 
 Self-push (inject into your own session):
 

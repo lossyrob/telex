@@ -470,7 +470,7 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
         .collect::<Vec<_>>()
         .join(" ");
     for required in [
-        "first-time App setup without a supported live bridge loader",
+        "a restart is unacceptable or liveness does not verify",
         "Preparation does **not** change delivery mode",
         "Repeating `prepare` before `exit.code` exists returns the same run",
         "exactly one `telex wait`",
@@ -580,21 +580,77 @@ fn copilot_delivery_overviews_keep_host_capabilities_and_evidence_distinct() {
             "live bridge",
             "copilot fallback prepare",
             evidence_limit,
+            "startup extension discovery",
+            "copilot attach --copilot-bridge",
+            "copilot resume",
+            "--json status",
+            "station_health: attended_push",
+            "push_registered: true",
+            "telex_bridge_info",
+            "one Windows App build",
+            "plain conversation clear",
         ] {
             assert!(
                 normalized.contains(required),
                 "{name} must preserve capability/evidence guidance {required:?}"
             );
         }
+        let lowercase = normalized.to_ascii_lowercase();
+        for required in [
+            "restart the app session",
+            "where available, call `telex_bridge_info`",
+            "a restart is not proof by itself",
+            "a restart is unacceptable or liveness does not verify",
+            "end-to-end delivery",
+        ] {
+            assert!(
+                lowercase.contains(required),
+                "{name} must preserve startup/liveness guidance {required:?}"
+            );
+        }
         for obsolete in [
             "CLI tool available to every agent",
             "If `extensions_reload` is unavailable, enable",
+            "First-time loading depends on the host exposing a supported live bridge loader",
+            "Restarting or clearing a session is not a substitute",
+            "Restarting or clearing a session does not establish first-time loading",
+            "clearing a session cannot substitute for an unavailable loader",
+            "first-time App setup without a supported live bridge loader, use",
         ] {
             assert!(
                 !normalized.contains(obsolete),
                 "{name} must not require an unavailable App loader: {obsolete:?}"
             );
         }
+    }
+}
+
+#[test]
+fn pending_push_recovery_text_offers_startup_discovery_before_fallback() {
+    for (name, source) in [
+        ("send", include_str!("../src/commands/send.rs")),
+        ("wait", include_str!("../src/commands/wait.rs")),
+    ] {
+        let recovery = source
+            .split_once("A push attach for this station is still finalizing;")
+            .expect("pending push recovery text")
+            .1
+            .split_once('\"')
+            .expect("end of recovery string")
+            .0;
+        for required in [
+            "telex copilot skill",
+            "live reload or startup-discovery recovery",
+            "and verify liveness",
+            "copilot fallback prepare",
+            "if restarting is unacceptable or liveness does not verify",
+        ] {
+            assert!(
+                recovery.contains(required),
+                "{name} pending push recovery must preserve {required:?}"
+            );
+        }
+        assert!(!recovery.contains("when no loader is available"));
     }
 }
 

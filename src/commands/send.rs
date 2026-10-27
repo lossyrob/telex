@@ -57,8 +57,9 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 if needs_attach_reason == Some(NeedsAttachReason::PushIntentPending) {
                     return Err(anyhow!(
                         "{code}: {message}. A push attach for this station is still finalizing; \
-                         use `telex copilot skill` to choose supported loader recovery or \
-                         `telex --address <station> copilot fallback prepare` when no loader is available"
+                         use `telex copilot skill` to choose live reload or startup-discovery recovery \
+                         and verify liveness; use `telex --address <station> copilot fallback prepare` \
+                         if restarting is unacceptable or liveness does not verify"
                     ));
                 }
                 if retried_after_attach {
