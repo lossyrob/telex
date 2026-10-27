@@ -99,10 +99,12 @@ async fn wait_for_state(management: &LocalManagement, cursor: u64) {
             assert!(value.pending_operation_id.is_none());
             return;
         }
-        assert!(
-            Instant::now() < deadline,
-            "state did not advance: {value:?}"
-        );
+        if Instant::now() >= deadline {
+            panic!(
+                "state did not advance: {value:?}; runtime: {:?}",
+                health(management).await
+            );
+        }
         sleep(Duration::from_millis(50)).await;
     }
 }
@@ -291,6 +293,7 @@ async fn exercise(
         matches!(response, Response::Mutation(ref value) if value.refusal.is_none()),
         "{response:?}"
     );
+    wait_for_sender(&management, true).await;
     wait_for_state(&management, 1).await;
     wait_for_detector(iso, &management).await;
     let first = wait_for_sender(&management, true).await;
