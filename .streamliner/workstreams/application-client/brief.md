@@ -1313,3 +1313,204 @@ on main.
   out of contract work unless they expose a missing semantic. Any requirement
   that cannot be accepted must name its blocked consumer and owner rather than
   being softened into ambiguous shared wording.
+
+
+## #238 historical owner and accepted completion (2026-10-27)
+
+Campaign accepts the bounded #238 follow-through and releases the same historical Copilot App owner `03cd53a8-a769-480c-8114-886256d512b6`. This reconciles the actual in-progress instruction through draft, ready, merged, terminal submission and later accepted completion once. The canonical node remained planned until this projection; its complete prior summary stays an exact suffix. No #238 ledger row or task existed, and none is invented. No graph owner property is added. No controller, kickoff, private context/profile package or delivery/branch-creation mechanics was supplied or reconstructed.
+
+PR #241 head `f41fb5471e718527ea7ec558f39677905e759a87` merged as `ca6ed12c309deedae8f5092a620fe51a4840f703`. Accepted fixed-attempt metadata is CI40445276093 attempt1 with22 successful job results and Docs40445276122 attempt1 withTWO successful job results, Build user guide and Deploy to GitHub Pages. These are public result metadata, not independent source/test/Docs/runtime reproduction or provider-dispatch/freshness proof. The owner reports all30 supported-client scenarios passed in21.54seconds at the merge; that executable/local proof remains owner/Campaign attribution. Design impact is updated-docs, not a normative contract/schema/public-type change.
+
+The original author metadata capture wrongly assumed Docs had one job and stopped before the remaining checks. That unchanged control and its saved full responses/failure are retained. A separate strict qualifier ran every assertion, including BOTH named Docs successes and final parent safety; no product failure, proposal failure, guard relaxation or original PASS is invented.
+
+The full typed admission-before-begin, same-operation handle/payload, unchanged retention-generation, pending-only authority and WriteBoundaryUnknown/Indeterminate contract remains. A synchronous error about this attempt is not absence evidence about a concurrent attempt; existing Pending is not retroactively unwritten and exact-operation retry still requires reconciliation/readiness. No new public schema or type is introduced by this metadata. This tuple records no #234 status or credit; #234 is a Watcher matter recorded separately. Its entire canonical brief/graph, full outage/no-duplicate resume contract and independently satisfied external edge stay byte-exact. No #195/#167/#182/#172, other App node/checkpoint, workstream closure, repair/debt/HOLD, runtime/installation/environment/cleanup or successor credit follows.
+
+Normal Campaign owns this artifact decision. Its explicit node-only 88943d7d appointment is limited to this completion review, not general App stewardship, workstream closure or authority over #234. The original complete238 appointment ended on abort; Campaign expressly renewed the same scope for complete238v2 below, ending at v2 publication/abort. No old appointment or decision carries. Both owning actors, technical and separate FINAL must be fresh. Parent233v3 authority does not carry. The earlier finite233 hold expired and is not renewed here.
+
+### Complete original public238 contract; source body retained
+
+````text
+## Defect
+
+ApplicationClient::send can leave an operation Recorded/Pending indefinitely when daemon bootstrap admission fails before any peer decision. Reattaching the sender does not resolve that exact operation, so a receipt-gated consumer cannot resume safely.
+
+This was found by the isolated Watcher regression for #234. Evidence: https://github.com/lossyrob/telex/issues/234#issuecomment-6431592482.
+
+## Source trace
+
+At the reproducing base e521652cab804e4335af1af691b52fc3dd41770f:
+
+- src/application_client.rs:1445-1465 prepares and begins the durable send operation before contacting the daemon.
+- src/application_client.rs:1577-1595 returns RequestFailure::BeforePeerDecision directly when bootstrap admission fails, leaving the durable operation pending.
+- Later exact-operation reconciliation reports Recorded/Pending rather than determinable non-acceptance or acceptance.
+
+## Isolated reproduction
+
+The regression starts the real Watcher actor and an isolated installed daemon with unique absolute TELEX_HOME, TELEX_DB, TELEX_INSTALL_ROOT and temporary LOCALAPPDATA. It uses only branch binaries and a disposable SQLite store.
+
+1. Accept a first detector event and commit cursor 1.
+2. Hold the next detector at a file barrier.
+3. Withhold only the disposable installation's current selector and drain its isolated daemon.
+4. Release the detector. Watcher stages sequence 2 and calls ApplicationClient::send; the bootstrap admission fails before the request reaches the daemon.
+5. Observe sender non-ready, continued runtime heartbeat, no new attempts and unchanged cursor 1.
+6. Restore the disposable selector. The sender reattaches, but receipt reconciliation repeatedly returns Recorded/Pending for the exact sequence-2 operation.
+
+Eight Recorded/Pending queries exhausted the consumer's finite query budget. No second message was sent. The operation remained pending and cursor 1 did not advance.
+
+The regression is in the #234 owner's branch, lossyrob-watcher-backend-resilience, as runtime_resilience_tests::sqlite_watcher_backend_resilience. Commands:
+
+```text
+cargo build --locked -p telex -p telex-watcher --all-features --bins
+cargo test --locked -p telex-watcher --all-features --lib sqlite_watcher_backend_resilience -- --nocapture
+```
+
+## Acceptance
+
+A send whose bootstrap admission fails before a peer decision must end with a determinable operation outcome after reattach, never Recorded/Pending forever.
+
+The design steward's acceptance decision is https://github.com/lossyrob/telex/issues/234#issuecomment-6431621187. The Application Client workstream chooses the mechanism:
+
+1. When send or reply fails before any request bytes are written, the exact operation gets retry-authorizing typed evidence. Either reconcile_operation returns authoritative NotRecorded for the same handle, with the retention generation unchanged, or it returns a recorded definite pre-acceptance rejection with RejectionRetryability::Transient. The synchronous error carries the same typed meaning.
+2. No such operation remains Pending indefinitely. If the client cannot durably record that the request was never written, it must not report it either, and it must have another path that later yields the evidence in point 1.
+3. Use compare-and-set resolution only for the pending operation this call began. Never overwrite accepted, rejected or indeterminate state, or an in-flight concurrent contender's state. WriteBoundaryUnknown remains indeterminate.
+4. Add a supported-client test against an isolated daemon: the daemon is unavailable at send time, reconciliation gives point-1 evidence, and after the daemon returns the exact same operation is retried and produces exactly one message.
+5. State this rule in the recovery section of docs/application-client-core.md.
+
+## Ownership and dependency
+
+This is an upstream Application Client outcome in the application-client workstream, coordinated by Campaign. It gets its own closing PR. The Watcher #234 no-duplicate/resume criterion depends on this outcome; its outage-survival, diagnostics and documentation scope remains unchanged. The design steward records the exact dependency edge.
+
+````
+
+### Actual owner recorded in progress; toolu_0127jxt8AVzhQ7wRPDnzyjRB; event ca2476d2-4857-4e4f-affc-e64b01f36362 at 2026-10-27T03:04:22.958Z
+
+````text
+Record owner 03cd53a8-a769-480c-8114-886256d512b6 on application-client/send-admission-failure-resolution (#238) as in progress.
+````
+
+### Owner draft PR; review, design and CI still pending; call_OixWQYJsOixyeeqwILxgAO8F; event 752c885f-7521-4198-b396-6b626b981833 at 2026-10-27T03:17:02.243Z
+
+````text
+#238 closing PR opened as draft: https://github.com/lossyrob/telex/pull/241 at f41fb5471e718527ea7ec558f39677905e759a87. Implementation and local supported-client proof are complete; exact-head independent review, design inspection and required CI remain.
+````
+
+### Retained complete public draft PR body, source-time03:29:43Z
+
+````text
+Closes #238
+
+A daemon connection or bootstrap failure previously left a newly reserved send/reply operation Pending even though no application request was written. Receipt-gated consumers could not establish non-acceptance and safely resume.
+
+## Change
+
+Complete connection, bootstrap admission and the Application Client capability check before reserving a new operation. Send and reply then write on that same admitted connection. Failed admission creates no operation evidence, so the original prepared handle reconciles to authoritative NotRecorded with its retention generation unchanged. This avoids a fallible rollback or deletion after admission fails.
+
+Existing outcomes still replay before admission. A concurrent begin follows the existing replay path. DaemonBootstrap, connection Unavailable and UnsupportedCapability keep their existing typed meaning; they are not converted into transient send rejections. Once the write boundary is crossed, uncertainty remains Indeterminate.
+
+Existing Pending rows are not retroactively declared unwritten. They retain the existing reconciliation-then-request behavior; accepted mappings are promoted and existing rejected/indeterminate evidence is preserved.
+
+## Validation
+
+The shared SQLite/PostgreSQL conformance battery now covers connection and bootstrap outages for send and reply, exact-handle absence before and after a fresh runtime, unchanged retention generation, exact-operation retry with one accepted message, offline result replay, payload mismatch, existing pending/rejected/indeterminate outcomes and concurrent identical attempts.
+
+Windows SQLite: all 30 conformance scenarios and 35 Application Client unit tests passed. The full conformance battery passed again after rebasing onto current main. Dual-backend conformance compilation, formatting and diff checks passed. Credentialed PostgreSQL runtime coverage remains required CI evidence.
+
+Recovery guidance is updated in docs/application-client-core.md. No schema or public type changes.
+
+Consequence: normal. This changes when durable operation evidence begins and restores receipt-gated recovery while preserving the existing admission and uncertain-write contracts.
+````
+
+### Owner reports exact-head ready state; call_UU55tPZ68TtqeMoTLS7fRiDv; event da2606cd-3e53-49c9-8a60-1faf5a2ed2e8 at 2026-10-27T03:38:02.284Z
+
+````text
+#238 PR https://github.com/lossyrob/telex/pull/241 is ready (not draft) at f41fb5471e718527ea7ec558f39677905e759a87; independent/design PASS and all 22 CI jobs green. Readiness evidence: https://github.com/lossyrob/telex/pull/241#issuecomment-6433121244; Campaign has the single gate.
+````
+
+### Complete public readiness6433121244
+
+````text
+Ready for operator at f41fb5471e718527ea7ec558f39677905e759a87.
+
+All 22 CI jobs passed at this head, including credentialed Linux and Windows PostgreSQL coverage: https://github.com/lossyrob/telex/actions/runs/40443228279.
+
+Independent review PASS: https://github.com/lossyrob/telex/pull/241#issuecomment-6432921849.
+Design inspection PASS: https://github.com/lossyrob/telex/pull/241#issuecomment-6432873264.
+The non-blocking review suggestion has a recorded disposition: https://github.com/lossyrob/telex/pull/241#issuecomment-6432934009.
+
+The PR is mergeable, has no unresolved review threads, and GitHub's parsed closing references contain only #238. Existing Pending rows retain their prior reconciliation/replay semantics; this repair does not infer that they were unwritten.
+
+The dependent Watcher Windows SQLite interrupted-send proof also passed with this exact candidate plus the Watcher's readiness fence, preserving the operation and verifying three unique messages: https://github.com/lossyrob/telex/pull/239#issuecomment-6433031199.
+
+````
+
+### Campaign product merge; owner follow-through and acceptance still owed; toolu_011rvoeqrTX8UvPJEtqn5Fh6; event e12974ec-c52a-4b22-8b1b-0b222e5a65bb at 2026-10-27T03:39:23.424Z
+
+````text
+Product boundary: PR #241 (Closes #238) merged.
+- Merge: ca6ed12c309deedae8f5092a620fe51a4840f703, tree 54395335d61f29beb78291f7e8446c9aec89732e.
+- Ordered parents: dae97f4ae65efad08082972ebd7bd1fce3cf0a6e, then f41fb5471e718527ea7ec558f39677905e759a87.
+- Gate: 6433134739.
+- Three paths: docs/application-client-core.md, src/application_client.rs, tests/application_client_conformance.rs. No .streamliner changes.
+Graph effects:
+- #234's pending externalDependsOn on send-admission-failure-resolution is now satisfied by this merge. #234 is not complete.
+- The #238 node's completion waits for its owner's (03cd53a8) follow-through and my acceptance.
+````
+
+### Owner submits terminal follow-through for acceptance; call_fynEWQsAc27Kev3GV1fqSsdP; event cf561b93-3119-410c-b478-597645671189 at 2026-10-27T03:59:51.449Z
+
+````text
+#238 merged as ca6ed12c; exact-merge main CI and Docs both passed attempt 1, and post-merge supported-client validation passed. Field report: https://github.com/lossyrob/telex/issues/238#issuecomment-6433396391; design impact updated-docs. Follow-through is submitted to Campaign for acceptance.
+````
+
+### Campaign accepts exact-merge follow-through and releases the same owner; toolu_01Jc3p7eRXURCsHhbGYKftvR; event aef2eb41-5ff0-4e14-a93b-b3279e2f2fff at 2026-10-27T04:00:48.609Z
+
+````text
+#238 follow-through accepted. It covers exact-merge ca6ed12c: CI 40445276093 attempt 1 (22/22) and Docs 40445276122 attempt 1, both successful, plus field report https://github.com/lossyrob/telex/issues/238#issuecomment-6433396391 (design impact: updated-docs). The owner, 03cd53a8, is released. You may record completion for the App send-admission-failure-resolution node in a later tuple; don't add it to the frozen 233v3 tuple. #234 is still incomplete.
+````
+
+### Complete accepted terminal field6433396391; original2446bytes/25CRLF retained, LF display only
+
+````text
+## Field report: outcome verified in main
+
+PR #241 merged as ca6ed12c309deedae8f5092a620fe51a4840f703. This issue remains closed: post-merge validation found no failure of its outcome.
+
+| Evidence at the exact merge commit | Result |
+| --- | --- |
+| [Main CI](https://github.com/lossyrob/telex/actions/runs/40445276093), push event, attempt 1 | All 22 jobs passed, including credentialed Linux and Windows PostgreSQL coverage. |
+| [Docs](https://github.com/lossyrob/telex/actions/runs/40445276122), push event, attempt 1 | Passed. |
+| Owner's post-merge Windows SQLite supported-client battery | All 30 scenarios passed in 21.54 seconds. |
+
+Neither main workflow needed a rerun. The owner fast-forwarded only this isolated worktree to the exact merge commit and ran:
+
+```text
+cargo test --locked --no-default-features --features sqlite --test application_client_conformance sqlite_application_client_conformance --quiet
+```
+
+What held: send and reply preserve their synchronous typed admission failures and leave a new operation authoritatively NotRecorded with the original handle and unchanged retention generation. The proof covers connection and bootstrap outages, a fresh runtime, exact-operation retry with one accepted message, offline result replay, payload mismatch, existing outcome preservation and concurrent attempts. Unknown writes remain Indeterminate.
+
+What changed: connection, bootstrap and the capability check now finish before a new operation is reserved; the request uses that same admitted connection. Failed admission requires no fallible completion or deletion. There is no schema or public type change.
+
+Successors should keep the staged handle and exact payload, restore sender readiness, and reconcile before retrying. An error from this call is not absence evidence about a concurrent attempt. Legacy Pending rows retain their existing reconciliation/replay behavior and are not retroactively declared unwritten. The downstream Watcher recovery proof remains with #234 and its owner.
+
+Design impact: updated-docs. The recovery material in docs/application-client-core.md now states the accepted admission-before-begin rule; no normative contract change was needed.
+
+No new work remains from this repair. The non-blocking capability-fixture suggestion was declined with a recorded rationale and accepted in the [merge gate](https://github.com/lossyrob/telex/pull/241#issuecomment-6433134739).
+
+````
+
+### Original completion-only steward appointment, retained history only; toolu_014cXhHiT21Lq49UAtCyhHsQ
+
+````text
+Affirmed. I'm extending 88943d7d's #238-only acting Application Client design-steward appointment to cover the steward review of the #238 accepted-completion metadata tuple. Scope: the existing App brief and graph entries for send-admission-failure-resolution, recording my accepted completion and the owner's release (03cd53a8). This grants no general App steward role, no workstream closure, no other App node, and no authority over #234. The appointment ends when that tuple publishes or is aborted. I'll review as owning actor; f7c stays separate as technical/FINAL.
+````
+
+### Fresh successor after product PR #239
+
+The original complete238 tuple on e32051b6 was invalidated when PR #239 advanced main to `aae96d3afc5a3a10fbc6dd65a6480121e09d0227`. Campaign rejected only the stale base; the steward also required the time-independent #234 scope sentence and readable appointment wording now applied above. Technical work stopped without a verdict. Every original source, decision, guard and failed-author-control qualification stays byte-exact in private custody. The exact terminal inverse restored only the two verified author-owned App outputs with unchanged real-index SHA, then an ordinary no-tags fetch/fast-forward admitted the seven product paths with the whole .streamliner subtree unchanged. Those restores and fetch/fast-forward are real writes. No original238 FINAL request/snapshot/stage/commit/push/publication exists, and no old approval carries. This successor adds no234 field or status.
+
+The separate new Campaign product-main hold ends at v2 publication/abort or04:55Z, whichever occurs first; it is not an approval, reviewer deadline, validation waiver or protection after expiry. Strict unchanged-main/source/tuple guards remain mandatory. The accepted238 owner history and exact typed contract are unchanged. The earlier finite233 hold remains expired.
+
+````text
+Renewed. 88943d7d's narrow appointment carries forward unchanged to the fresh complete238v2 successor on aae96d3a: steward review of the #238 accepted-completion metadata only. Scope is the App brief and graph for send-admission-failure-resolution, recording my accepted completion and the owner's release (03cd53a8). It grants no general App role, no other node, no workstream closure, and no authority over #234. It ends when v2 publishes or is aborted; a further successor needs another renewal. I remain the owning actor; f7c stays separate as technical/FINAL. My product-main hold (until v2 publishes or aborts, 04:55Z at the latest) applies to this successor.
+````
