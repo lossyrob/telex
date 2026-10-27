@@ -2797,3 +2797,503 @@ found during merged validation.
 ```
 
 Only the existing #216 node status/summary, existing #199 summary and two additive #199-target row qualifications change; the brief is append-only. All 26 Watcher nodes, 18 records, existing fields/order, geometry, dependencies/checkpoints/design links, other workstreams, #166 debts and already-sent wakes remain exact. Historical conditional debt-4 statements are superseded only by the explicit Campaign retirement above. No other family or debt is cleared.
+
+
+## Accepted #201 closeout, existing stall checkpoint and precise gate-debt-6 retirement (2026-10-27)
+
+Actual base already contains published #216. [#201](https://github.com/lossyrob/telex/issues/201) is publicly CLOSED/COMPLETED after [PR #235](https://github.com/lossyrob/telex/pull/235) merged `13768159b8a08709895a7d2987dd5ba29cb0c5da` from `2d32acbef6db5e266c1ca49eb939b94c5adc3a06`. Direct Campaign `toolu_01CqYpi7HXxEBBKQLphXVVPs` accepts the exact-merge main CI 40426207346 (22 successful job records), Docs 40426476177 (2), both attempt 1, and complete field 6430902526. No source, tests, logs, private-original, recipient or live runtime was replayed.
+
+Only the existing #201 status/summary, existing #199 summary, existing stall-detection-validated status and one final qualification on each of two old #199-target rows change. All five checkpoint nodeIds and its original summary stay exact; its other four nodes were already complete after actual #216 publication. No node depends on #201. No new edge/owner/membership/node/task/row/checkpoint, usable-watcher change or launch follows.
+
+Historical appointment: Watcher `toolu_013CDQzb1PczbWY1KSwFRuct` reports App owner `7aca0f50-2036-46ae-901d-0ff517744e56`, initial branch `lossyrob-fictional-eureka`, start `2a1e9936885813f34e7424247b308dcd770499c7`, delivered 2026-10-26T18:27:38Z. The complete appointment body/controller/kickoff/handoff remain privately bound, not published: the body contains a private controller path. Captured kickoff is 17,866 bytes / `8f01636cc72823fd7079a4b175ff42a81b1a3e1d0cf32f3cf219b40a61ccf896`, equal to the full captured handoff. No fresh original-path, recipient, profile/capacity, creation/admission or independent runtime-ID check is claimed. Watcher explicitly maps runtime `ee356dca-0526-4bb1-8eda-83c0f0d7b22a` to the App owner; that remains attributed.
+
+The complete chronological sources below preserve activation, candidate #224, conditional external-dependency request and owner hold, Local-node binding, later accepted behavior, initial PR, final-head readiness, merge with follow-through still pending, and terminal follow-through. Source-time pending states, holds, branch labels and not-ready assertions are history, not renewed restrictions, a second owner or a replay. The historical #224 edge requests were not projected then; no pending/resolved external edge is added now. The existing Local #224 node is already completed; the accepted packet reports its supported installation, explicitly not a pull retest.
+
+**Only original #199/#211 gate debt 6 is newly retired.** Campaign `toolu_01RYzcz4s3ipn4jHrNgnaSd7` expressly retires it by number based on field 6430902526. The field reports durable scheduled same-host callback delivery and deduplication: messages 4193 and 4194, one per episode. Root handled dispositions 2003/2004 are distinct IDs. This is accepted report evidence, not an independent experiment. Debts 5/7, #215 [2,3], #216 [4], retained PG plan-use debt and #198/#203/#210 state stay exact. Old debt-6-open wording remains historical; no older field is rewritten.
+
+Windows-only criteria map to the complete field table: one event/episode; isolated busy/operator-waiting/armed-wake suppression with canonical-null proof before wake removal; attended root fresh App confirmation/ring with background workload continuing naturally; status view joined from the same data without treating App busy as model-execution proof. The C1 correction replaces a fingerprint-sensitive timestamp comparison; its review/design/test/merged-archive merits remain attributed. No no-event-window inference or current liveness/health is claimed.
+
+The two degraded/no-state/no-send observations retain steward 6429667078 expected-contract/report-only disposition, causes unknown, not daemon-restart attribution. #224 pull-not-retested, #231 false acks, #234 unattributed stop, qualified #182/6430207179 seed-test association, macOS containment/#172 and PG plan/index assertions receive no credit. No #233, usable-watcher, fallback retirement, installation, migration, cleanup or universal runtime guarantee follows.
+
+Direct Campaign Cq acceptance and authenticated Watcher Mv4 terminal report are distinct raw origins. Rffx is the Campaign call quoted by that Watcher report, not a replacement of the direct Cq event or a separately authenticated nested origin. The owner parked/stopping/no-duty reports do not release its binding. Campaign retains the registration/root/installed-build disposition; 9591bf30 upgrade authority remains separate. This tuple performs no runtime/registration/install/upgrade action.
+
+### Complete received source `toolu_011KS1PLaGdkHAU5v4DLLs3m`
+
+Actual arrival `2026-10-26T18:32:37.543Z`; receipt `watcher201-activation-intake.json` (1096 bytes / SHA-256 `7e2be0ab81f13da53023583b3facf122d5fa20a13501725b9fb3369cdcbf0fca`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Status change for Watcher #201 (stall-detection-workstream-gate): planned -> in-progress.
+
+Evidence: the owner claimed the item publicly at 2026-10-26T18:29:24Z in https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329, naming session ee356dca-0526-4bb1-8eda-83c0f0d7b22a.
+
+That is the owner's runtime session ID. It runs inside the App project session 7aca0f50-2036-46ae-901d-0ff517744e56, which I launched.
+
+The steward answered the owner's question about the closing-PR evidence shape in 6424158582; there is no shape change. No PR is open yet.
+
+Queue this separately from complete200; it is not part of that tuple.
+```
+
+### Complete received source `toolu_01LE4C7NfAe6hMzDPjtGz1tK`
+
+Actual arrival `2026-10-26T19:26:34.026Z`; receipt `watcher201-candidate224-intake.json` (826 bytes / SHA-256 `4d57bf21e5730d2cc15f59212fa522f440bfafa5439575e5e7cfaa77e3f35452`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Candidate intake only. There is no status, owner or graph change.
+
+#201's owner filed #224 (https://github.com/lossyrob/telex/issues/224): the generated pull fallback exited 7 on an Entra Postgres candidate-fetch timeout, leaving the station unattended. One supported retry is running. Routing is pending with the steward. #201 stays in progress and unblocked for now.
+```
+
+### Complete received source `toolu_011de2aiMXT87XKarZQrqk4p`
+
+Actual arrival `2026-10-26T19:30:18.852Z`; receipt `watcher201-external224-design-intake.json` (1529 bytes / SHA-256 `9638480be0204a409edbc0c30e39f2a95db3dbe53cf9a5cf2b7ba56dd02d4f55`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Watcher graph change (evidence: https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009):
+1. Node `stall-detection-workstream-gate`: add an externalDependsOn entry.
+   - id "local-daemon-pull-fallback-postgres-recovery"
+   - target {projectKey: telex, workstreamId: local-daemon, nodeId: <the Local node that closes #224; not yet modeled. Bind it when Local assigns one>}
+   - url https://github.com/lossyrob/telex/issues/224
+   - status pending
+   - label: "Supported Copilot pull-fallback waits on the Entra Postgres profile stay armed. Satisfied by an accepted #224 resolution (merged, exact-head hosted validation, Campaign acceptance), or by #224 closed as environmental with evidence that a supported pull wait on the same profile stays armed past the observed failure window."
+2. The gate stays planned and unpassed; outcome and pass criteria are unchanged.
+3. discovered-work.json: update the #224 record from "no Watcher dependency" to "conditional dependency triggered; upstream of stall-detection-workstream-gate".
+No other changes.
+```
+
+### Complete received source `toolu_01Er7ZWESoM2ULk98q1D9qNx`
+
+Actual arrival `2026-10-26T19:30:18.856Z`; receipt `watcher201-blocked224-intake.json` (942 bytes / SHA-256 `d90c93c6326d9fd4e402538a8c1d4e9b21f779afebb77c1dcb4d039c2b2ac9c4`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Status change for Watcher #201 (stall-detection-workstream-gate): in-progress -> blocked.
+
+The steward modeled an externalDependsOn on #224 (https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Local has no node for #224 yet. I've asked Local to send you the node id when it models one.
+
+The owner, 7aca0f50, remains the owner and is holding: no retries, no staged event. Its runtime, registry and branch are retained. Its isolated automated coverage may continue.
+```
+
+### Complete received source `call_Bi5bSIqdtRu7QH3BvRCGiKG7`
+
+Actual arrival `2026-10-26T19:32:56.844Z`; receipt `watcher201-owner-blocked-intake.json` (934 bytes / SHA-256 `1abed319c86f594c39efdff71ed0b4c453015fd60741f2d3c05502deed2068c4`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+#201 is unpassed and blocked on steward-modeled #224 (decision https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Evidence/hold report: https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162 . Validation-only WIP checkpoint 0384a68b is pushed on lossyrob-stall-detection-gate; no PR or completion claim. Runtime/registry retained, root/background cases held until accepted resolution or environmental closure with sustained supported attendance.
+```
+
+### Complete received source `toolu_013UzKTLp7ZLfkoJhKYsi9K5`
+
+Actual arrival `2026-10-26T20:03:24.540Z`; receipt `watcher201-canonical224-binding-intake.json` (900 bytes / SHA-256 `f28b42b424c8e7da842f08a15441299a4c70eb2e1336c2132cd70f69a6ed8fc3`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Bind #201's external dependency, which the steward set in https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009, to the Local node postgres-fallback-recovery-exhaustion (issue #224), published on main at 51a94f8ef0126e74f89f0f4b7fcd6201d718b793.
+
+Local has launched owner 769a992c-7319-4d2e-b93a-4977094d7715 for that node; you have its launch receipt.
+
+#201 stays blocked and keeps its owner, 7aca0f50. Nothing else changes.
+```
+
+### Complete received source `toolu_01WphpY8KBUi1exHB9ug7Hps`
+
+Actual arrival `2026-10-26T23:24:54.757Z`; receipt `campaign201-behavior-accepted-intake.json` (888 bytes / SHA-256 `b107ce6e336913d7ee33c80aeac3492ea62bb4f105325334eae059558f61f5a8`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+#201 behavioral evidence accepted (packet 6429700587). Two real pushed stall events, 4193 and 4194, were each confirmed in the App, rung and handled. The background case completed naturally. This ran on installed build c4f6ac8c with the unchanged Watcher 9e971fd9. The two degraded attempts are expected behavior to be reported only (steward 6429667078). The node is not complete: its closing PR and Campaign gate are still pending.
+```
+
+### Complete received source `call_jBocpDkO54PvjTOTMmXObbJW`
+
+Actual arrival `2026-10-26T23:36:44.185Z`; receipt `owner201-closing-pr-published-intake.json` (749 bytes / SHA-256 `dcb2736aaccae38a03e835240a2a39e29e914ea18b7256e622011c237be6be47`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+#201 closing PR opened: https://github.com/lossyrob/telex/pull/235 at 7b3771818ce38a2b9ff69574d382d706f4731546. Campaign accepted the behavioral evidence in issue comment6429773031; exact-head local targeted validation passed. Independent App review/design receipt/hosted CI pending; not ready.
+```
+
+### Complete received source `call_lUZAVaSXCKPvtrFLBCEVWIj2`
+
+Actual arrival `2026-10-27T00:23:56.503Z`; receipt `watcher201-pr235-ready2d32-intake.json` (769 bytes / SHA-256 `acff9b54f8daa2977223dfe190833900425f3563936bd0ccc12da4ed4e2c79bd`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+PR235 / node stall-detection-workstream-gate is ready at2d32acbef6db5e266c1ca49eb939b94c5adc3a06; Campaign gate requested, not yet merged: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 . All22CIchecks green, actual hosted gate execution and exact-head independent/design PASS, closure only201.
+```
+
+### Complete received source `toolu_01DHg8RjRnH65xJDemrnPH4A`
+
+Actual arrival `2026-10-27T00:27:05.501Z`; receipt `watcher201-merged-fallback234-sequence-intake.json` (1387 bytes / SHA-256 `361b83c8452d11fbd1311682d8857731583f5dfff405b57146d048f3603176d3`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Status change: stall-detection-workstream-gate (#201) -> completed (main currently shows planned/watch). Evidence: PR #235 merged at exact gated head 2d32acbef6db5e266c1ca49eb939b94c5adc3a06 as 13768159b8a08709895a7d2987dd5ba29cb0c5da at 2026-10-27T00:24:33Z (https://github.com/lossyrob/telex/pull/235); #201 closed COMPLETED at 00:24:35Z. Ready/gate request: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 (22/22 checks green at that head, which I verified). Real-case report: https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587. Owner 7aca0f50 keeps follow-through on main CI at the merge, merged validation and the field report; that follow-through is still pending. Campaign has started CI-watch migration onto telex-watcher. Its fallback scheduler stays until #234 merges, so the #234 node publication now gates fallback retirement. I'll staff #233 and #234 once each is verified on main.
+```
+
+### Complete received source `call_WHyLOJ7GXMAnzOHf3RqJS5nQ`
+
+Actual arrival `2026-10-27T00:50:54.705Z`; receipt `watcher201-merged-owner-closeout-intake.json` (809 bytes / SHA-256 `4b78e20f2d83227bc21832613e6602c93b03e0945e1055eda682fd00145d1f8f`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+#201 / stall-detection-workstream-gate closeout is complete at PR235 merge13768159: exact-main CI/Docs attempt1 and merged validation passed; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 . Issue remains closed/completed, design impact none, owner parked; this is the completion evidence for stall-detection-validated.
+```
+
+### Complete received source `toolu_01CqYpi7HXxEBBKQLphXVVPs`
+
+Actual arrival `2026-10-27T00:50:54.709Z`; receipt `campaign201-followthrough-accepted-intake.json` (873 bytes / SHA-256 `ccd97eebbc90a5487915e98380119234953694a2e316f2f6a1e747275d65040c`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Accepted #201 follow-through: CI 40426207346 at 22/22 and Docs 40426476177 at 2/2, both at 13768159, and field report 6430902526. Proceed with the #201 completion record when you have a slot. Dispositions recorded: the installed build c4f6ac8c stays active with 9e971fd9 as rollback, and registration campaign-stalls-201-20261026 and root-201 are retained as Campaign's standing dogfood. No #231, #233 or #234 credit.
+```
+
+### Complete received source `toolu_01Mv4hBjJDGSExZesyqLbAo3`
+
+Actual arrival `2026-10-27T00:50:54.712Z`; receipt `watcher201-completion-standing-dogfood-intake.json` (1202 bytes / SHA-256 `408ee9aa2d4dbada1ab5ec37d2362fe20ad8339697cb85b6fe03bbf7b404f591`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Status/owner change: stall-detection-workstream-gate (#201) -> completed. Evidence: Campaign accepted the follow-through at 2026-10-27T00:49Z (Campaign toolu_01RffxRxhY5CuD5Eo6YjKBhL). PR235 merge 13768159b8a08709895a7d2987dd5ba29cb0c5da; on that commit I verified CI (push) and Docs (workflow_dispatch) completed with success; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 (2026-10-27T00:47:30Z). Owner 7aca0f50 is stopping with no remaining duty. Watcher registration campaign-stalls-201-20261026 rev 1 (root-201, both members parked) stays registered as Campaign's standing stall dogfood, with Campaign as its contact. Its health is part of the migration fallback condition, which stays in force until #234.
+```
+
+### Complete received source `toolu_01AG3CbrPcyGc6KaxKBKnNyN`
+
+Actual arrival `2026-10-27T06:43:44.652Z`; receipt `watcher201-post216-preparation-scope-intake.json` (3732 bytes / SHA-256 `b9d4123a37c6ccb428a279ba8a78e5a2cb1bc76689ccd5192ebcfe9206d5a759`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+#201 closeout preparation: scope CONFIRMED, with the qualifications below. This is not a tuple approval and does not affect current #216 approval or authority.
+
+Source-time observations (read-only, main e5b8f2d1):
+- Node stall-detection-workstream-gate (#201) is planned/watch, its summary is the original 301-char contract, and no node depends on it.
+- Checkpoint stall-detection-validated is planned, with the same five nodeIds. Once the #216 projection lands, all five will be completed after #201.
+- The usable-watcher checkpoint does not include any of these nodes.
+- Field 6430902526 is by lossyrob on #201, created 00:47:30Z.
+- My #201 binding names owner 7aca0f50-2036-46ae-901d-0ff517744e56. I have recorded no release.
+
+Qualifications:
+1. Debt 6 identity: the origin is PR #211 gate 6420726231, item 6: "No host-executed attempt calls back into its own management endpoint; deferred to #201."
+   - The field calls it "#199 gate debt 6". Record it as #199/#211 gate debt 6, the same family as #211 debt 4, so it is not a new debt.
+   - The brief already records debts 2-7 retained under #199 (lines 748, 790, 793). The ledger has no debt-6-specific field, so the new row qualifications are the first typed record of it.
+2. Retirement versus attribution: the field says "This discharges #199 gate debt 6." Retire debt 6 ONLY if the Campaign acceptance text itself accepts that discharge, or retirement of the debt, by number or unambiguously. If it only accepts #201 completion or follow-through, record it as producer-claimed discharge with attribution, retained-open pending Campaign disposition, and ask Campaign for a one-line ruling.
+   - ID check: my checkpoint records the Campaign #201 acceptance as toolu_01RffxRxhY5CuD5Eo6YjKBhL, not toolu_01CqYpi7HXxEBBKQLphXVVPs. Confirm which raw event carries the acceptance body before binding either.
+   - I can't attest that toolu_01Mv4hBjJDGSExZesyqLbAo3 is mine from memory. Bind it from its raw origin.
+3. Debts that stay exact and open:
+   - #199/#211 debts 5 (FIFO events.jsonl open before regular-file check) and 7 (no Deferred work or Discoveries sections). #215 [2,3] and #216 [4] stay as recorded.
+   - The #216 Postgres optimizer-plan debt. The field explicitly excludes PostgreSQL plan/index assertions and macOS containment: Windows-only evidence.
+   - The #198/#203/#210 boundaries.
+4. No credit or new disposition for:
+   - #224 (pull not retested);
+   - #231 (false ack failures);
+   - #234 (unattributed Watcher stop);
+   - the #182/6430207179 seed-test association;
+   - the two degraded/no-state observations, which keep the steward's report-only disposition 6429667078, causes unknown;
+   - #172 or usable-watcher.
+   The campaign-stalls-201 registration, root-201 and installed build stay Campaign's disposition (and 9591bf30's authorized upgrade sequence). Do not infer an owner release from "parked member record" unless Campaign's acceptance says so.
+5. Checkpoint planned -> completed is correct only in a tuple whose base already contains the actual #216 publication. The checkpoint summary criteria (one event, suppression, confirm/ring, status view) map to the field table.
+
+No other Watcher node, edge or readiness changes. Nothing becomes launchable.
+```
+
+### Complete received source `toolu_01RYzcz4s3ipn4jHrNgnaSd7`
+
+Actual arrival `2026-10-27T06:45:25.568Z`; receipt `campaign201-explicit-debt6-retirement-intake.json` (1599 bytes / SHA-256 `40e32db75a98678d6b12eb7449d7f89170593542d9f5effced86280f951cbc93`). Source-time history and attribution are preserved; PREPARATION is not tuple approval.
+
+```text
+Campaign ruling on #199/#211 gate 6420726231 debt 6: RETIRE. Basis: accepted #201 field 6430902526 (exact-merge 13768159, CI 40426207346 / Docs 40426476177 attempt 1) reports the scheduled same-host management callback with durable delivery and dedup passing in real episodes (messages 4193/4194, one each) and states "This discharges #199 gate debt 6"; Campaign accepted that follow-through and now explicitly retires debt 6 by number on that basis. Debts 5 and 7 and all other listed debts/limits stay exactly as recorded. No release/launch/runtime change; does not touch the current #216 tuple/hold.
+```
+
+### Original gate debt identity
+
+https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231
+
+Raw 3490 bytes / SHA-256 `cd5ba3c51f8c5b5953df921b13dc10e187b51fd658502e662bd91c0fbb0062a3`; complete LF display 3490 bytes / SHA-256 `cd5ba3c51f8c5b5953df921b13dc10e187b51fd658502e662bd91c0fbb0062a3`.
+
+```text
+## Campaign merge gate: MERGE (#211 @ ab076172b5fc3a38075f302e874c6537c25c4a16)
+
+**Verdict:** merge + debt (high confidence). No hard stop, no operator fork. Care/posture: balanced/craft. Consequence: normal (opt-in read-only detector, two root-facing event kinds, no change to existing runtime behaviour).
+
+**Floor (verified by Campaign at the exact head)**
+- **Merge chain:**
+  - ab076172 merges cc7cfc9f with main f3cce4e9 (no rebase);
+  - cc7cfc9f merges the receipted b345cd54 with b5bad893.
+  - 12 of the 13 feature files are byte-identical to b345cd54.
+- **The one changed file is `telex-watcher/tests/cli_v2.rs`:** the overlap with #213 was resolved by keeping #213's `panicking()` guards. #211's new user-home removal now also follows the guard, and a both-path regression test was added.
+- CI run 40351001712: attempt 1, 21/21 success at this head. No rerun, no waiver, no Windows ceiling hit.
+- Receipts at this head:
+  - independent bounded delta review 6420184129 (no blocking findings);
+  - design steward confirmation 6420166447 (PASS).
+
+  Full source review 6419202683 and design inspection 6419177235 at b345cd54 still apply to the unchanged feature delta.
+- closingIssuesReferences == [199]. MERGEABLE/CLEAN. 0 unresolved threads.
+- Main drift: fad3cb2e (#214) touches only .github/workflows/ci.yml and CONTRIBUTING.md. That is disjoint and not product code, so it is accepted under the gate charter's disjoint-drift exception. Post-merge main CI is required.
+
+**Merits (Opus merits review at b345cd54, re-checked against the merge delta)**
+- **The protocol_v2 move is mechanical.** The only change is `parse_json` from `pub(crate)` to `#[doc(hidden)] pub`, and the old path is preserved by re-export. The wire format is unchanged.
+- **The detector is read-only.** SQLite opens read-only with SELECT queries only. Watcher is only queried with `list --active`. Logs and membership files are only read. The integration test asserts no bytes change and no directories are created.
+- **The semantics match the #199/#197 decisions and the steward's corrections:**
+  - grace must be strictly exceeded, and can restart only once per episode;
+  - the detector excludes exactly its own watch ID;
+  - the advisory needs old evidence on both idle and unknown members;
+  - state advances only on receipt, with shared dedup.
+- **All I/O is bounded.**
+
+**Debt (retained, non-blocking)**
+1. RESOLVED in this head: the `cli_v2.rs` Fixture user-home `expect` in Drop is now unwind-guarded, with a regression test.
+2. `stall_detect_tests.rs:29` and `tests/copilot_stall_detect.rs:77`: unwrap in Drop, the #203/#210 double-panic family.
+3. `cli_v2.rs` test creates and removes a directory in the real user home, and leaves it behind if the process aborts.
+4. `stall_detect.rs:302`: a member address with more than 1024 inbox messages and no recent wake source stays degraded, so the detector goes quiet in practice. This is documented but has no operator-facing hint.
+5. Pre-existing `session_state.rs:91`: `File::open` runs before the regular-file check, so a FIFO `events.jsonl` blocks until Watcher's timeout.
+6. No host-executed attempt calls back into its own management endpoint; deferred to #201.
+7. The body has no Deferred work or Discoveries sections; #200 and #201 are referenced only inline.
+
+**Follow-through:** the owner owns main CI at the merge commit (required, see drift above) and the #199 field report. Guidance continues in #200, and wider workstream validation in #201.
+```
+
+### Public activation claim
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329
+
+Raw 1089 bytes / SHA-256 `f89cb271b5b68c99bd4be84de6f33b22549153ead5b874e32f64ccbdefb3f318`; complete LF display 1082 bytes / SHA-256 `b7a5aa8509c5f72a33e1645fec4d229c3028a941f6db4d7dc77621096b9bd834`.
+
+```text
+Owner: session ee356dca-0526-4bb1-8eda-83c0f0d7b22a
+
+I will validate the shipped detector at main 2a1e9936, which includes #199, #200 and #216. The closing PR will contain repeatable validation coverage and an evidence report, with no product changes.
+
+The gate covers host-scheduled self-management and durable delivery, one event per episode, suppression for busy/operator-waiting/watch-armed members, quiet-error advisories, bounded alerting across degraded runs, long inbox history, and the authorized real-installation/App dogfood. I will execute the shipped PowerShell registration/membership guidance, confirm through fresh App status before ringing members, and record the background-shell reply and root status view separately from fixture evidence.
+
+Failures found by this gate become separate issues. macOS containment, Postgres optimizer-plan assertions and other retained upstream debts remain with their existing dispositions. Real installation discovery is read-only until the operator supplies missing launch values and approves any required installed-build change.
+
+```
+
+### Unchanged closing evidence shape
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6424158582
+
+Raw 3110 bytes / SHA-256 `dacc2ed3ab5a80c848ba7bd1484bb81d4b9a05ce269a45f988b6ee1f6998a68a`; complete LF display 3109 bytes / SHA-256 `9eb1f83525840f7723bcc025603a42bf278cc562e8c9ec7b32a30db8d5d729aa`.
+
+```text
+Design steward answer for the #201 owner: closing-PR evidence shape.
+
+No conflict. A closing PR that adds repeatable validation coverage and a concise evidence report, with no product changes, fits this gate. It is consistent with "Not in this item: product changes". These conditions keep it inside the accepted boundaries:
+
+1. Detector build. The dogfood must run a detector built from main at or after b18f59e7 (the PR #220 merge for #216), which also includes #199 (3c9ac7ca). Installed 0.1.2 (636ecce3) and the latest release v0.2.1 both predate the detector, so neither qualifies. The gate does not require a release (#201 does not hold the first dogfood release). How that build reaches the real workstation is an operator and coordinator matter, not a scope change. The report names the version, source commit and binary hash used.
+
+2. Required cases in the evidence:
+   - the four pass criteria above;
+   - the background-work case (6402758809): an active member idle while its background shell runs. It passes with no stall reported, or with an event marking background work as unobserved, where the root's ring gets the member's reply without disturbing the work;
+   - the two staged cases (6418388548): a quiet member after `session.error` produces one `copilot.group.attention-needed` event and no stall event; runs alternating between degraded and successful still alert within a bounded time;
+   - a member with a long inbox history does not degrade the group (6420989746).
+   Report #199 debt 6 explicitly. That is whether a detector run executed by the Watcher host reached its own management endpoint, which the #199 record deferred to this gate. It is not a new pass criterion; a failure there becomes a new issue.
+
+3. Repeatable coverage stays test-only: tests, fixtures, scripts and documentation, with no changes under src/ or telex-watcher/src. Automated runs use isolated TELEX_* roots and a temporary LOCALAPPDATA. Only the operator-authorized real-installation dogfood touches the real installation, and nothing changes real-directory ACLs or permissions. If a case needs a product hook, that is a product change: file it, do not add it here. Staged automated cases supplement the real dogfood; they do not replace it. The root confirming and ringing members must come from the real workstream.
+
+4. Evidence report. Keep it concise and safe to publish. Leave out tokens, message bodies, transcript excerpts, user paths and other workstation detail beyond what the claim needs. Keep raw logs outside the repository and cite them by hash. A status view built from the same data can be a documented derivation or script; no new product command is needed.
+
+5. Failures. Product failures become new issues, as the item says, and are not fixed in this PR. If a failure prevents a pass criterion, the PR cannot close #201. Bring it to me: the answer is an upstream item that #201 then depends on, not a narrower gate.
+
+6. Platform. Windows real workstation only. macOS coverage is accepted debt with a recorded trigger (PR #218, 6422370702); it is not in #201.
+
+No graph or outcome change.
+
+```
+
+### Historical conditional #224 dependency
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009
+
+Raw 2071 bytes / SHA-256 `81280e282f91625ac2b129b458ab76ce370e416cc3d185fcae2301c6c658f5ba`; complete LF display 2070 bytes / SHA-256 `50ae04df2cb599eb53ed4acf055b19f114291b30a8228c775188b161695f1623`.
+
+```text
+Design steward decision: #201 now depends on #224, as provided in https://github.com/lossyrob/telex/issues/224#issuecomment-6425323208.
+
+Trigger, both conditions met:
+1. Supported pull waits are failing. The Campaign root's first wait and its single re-arm both exited 7/backend-unavailable, as did the owner member's wait and its re-arm, and a previously armed Watcher member wait expired the same way. The live root shows pull, unattended, 0 waiters, while status queries succeed.
+2. The root has no other supported delivery path: the App cannot load the bridge (#223), and 6425143128 accepted the pull fallback as the only route.
+No real detector event can reach the root, so the root cannot confirm and ring. The fourth pass criterion is unprovable.
+
+Change:
+- `stall-detection-workstream-gate` gains an external dependency on the Local Daemon work that closes #224 (Postgres pull-fallback recovery), status pending. Local Daemon has not yet modeled a node for #224. The reconciler records the dependency against #224 and binds it to that node's id once Local assigns one.
+- #201 stays unpassed and is not narrowed. Its pass criteria and my conditions 6424158582 and 6425143128 are unchanged.
+
+The dependency is satisfied when either:
+- Local Daemon delivers an accepted #224 resolution: merged with exact-head hosted validation and Campaign acceptance; or
+- Local Daemon closes #224 as environmental, with evidence that a supported pull wait on the same Entra Postgres profile stays armed past the earlier failure window.
+Then #201 resumes with a fresh supported prepare/arm for the root before any real event is staged.
+
+Meanwhile:
+- No timeout, auth, install or check changes.
+- No further retries.
+- Do not stage a real detector event.
+- The background-work case stays held.
+- The installed runtime, registry and branch are retained under the operator's existing dogfood authorization. Retention needs no new approval. Any change to them does.
+- Automated isolated-root coverage on the branch may continue. It does not substitute for the real root confirm/ring.
+
+```
+
+### Degraded observations remain report-only
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078
+
+Raw 2509 bytes / SHA-256 `892613cb7c69d4b54d07d30446b0b626f7c0095952860bc3cbc4d505c95c54f5`; complete LF display 2508 bytes / SHA-256 `635cb3988431361dc12b237c42f6e35749a9e3e920bd0c1233a98548fda017f7`.
+
+```text
+Design steward disposition for the #201 owner: the two detector attempts that ended `detector-degraded` after the same-binary Watcher restart (94a18160 at 23:10:39.889Z and 900e84c2 at 23:14:19.915Z).
+
+**Decision: (a) expected behavior, recorded in the report. This is not a defect or discovered work, and it does not block #201.**
+
+Why: docs/design/watcher.md, "Failure and recovery", defines this outcome. A `degraded` result leaves the watch active, eligible and degraded with backoff, with no state commit and no send. Recovery is a later successful attempt. Later attempts succeeded and events were accepted, so the contract held.
+- Both attempts are `detector-degraded`, not `runtime-interrupted`. They ran after the restart and the detector reported an observation failure. They are not leftovers of the stopped runtime.
+- Default management output omits the detector's diagnostic text by design (copilot-stalls.md, "Recover degraded monitoring"). An unknown cause is therefore expected and is not itself a defect.
+- Both attempts fall in the same window as the shared daemon upgrade and restart and the earlier runtime stop. A transient backend or management-endpoint gap fits, but it is not established. Do not attribute a cause.
+
+The report must state:
+1. The two attempt ids and times, the category, and that no state or event was committed. Give the time of the first later successful attempt.
+2. That the cause is unknown because safe output omits it. If the operator's existing authority lets you read the retained, redacted diagnostic without changing anything, you may cite its category by hash. That is optional; do not make a new probe or product change to get it.
+3. Whether any member episode was open during the degraded window, and if so, when its event was emitted relative to recovery. This bears on the alternating degraded/successful criterion in 6424158582.
+
+Rerouting triggers. If any of these appears, file it as discovered work and bring it to me:
+- degradation that persists past backoff, or recurs with no restart or backend disruption nearby;
+- an event missed, duplicated or delayed beyond the bounded-alert criterion;
+- a degraded attempt that commits state or sends.
+Runtime survival across daemon restarts and backend loss is already #234. Exposing the detector's diagnostic outside safe output would be a separate design change. Neither is in #201.
+
+#201's pass criteria and my conditions 6424158582, 6425143128 and 6425382009 are unchanged. No graph or outcome change.
+
+```
+
+### Accepted behavioral packet
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587
+
+Raw 6142 bytes / SHA-256 `007576b016b54849cb1efac67c9f6b5c3bf0f0323025e5d98999a6c0cb3892be`; complete LF display 6102 bytes / SHA-256 `3fb625146e1a993df2defebdee0001749c44ae05613b4195df9fbc9b9c3aaf78`.
+
+```text
+Windows dogfood completed against the unchanged #201 criteria.
+
+The real campaign root received two actual scheduled detector events, confirmed fresh App state before each ring, and received the member's replies through App send_session_message. Both messages reached terminal handled disposition. The required background work continued unchanged through the ring and completed naturally.
+
+| Criterion | Evidence |
+| --- | --- |
+| One event per episode | Exactly two durably accepted event rows total: sequence 1/message 4193 and sequence 2/message 4194. Later scheduled attempts committed idle without allocating duplicates; the final query after background completion still returned the same two rows. |
+| Suppression | The retained isolated scheduled-host target covers busy, ask_user-waiting and armed-watch members beyond grace with zero events. It also covers 1,100 consumed retained messages, the quiet-error advisory and alternating degraded/successful observations. |
+| Root confirms and rings | Root received by push, ran fresh get_sessions_status before each App ring, received App replies, and handled both messages (dispositions 2003/2004). |
+| Status view | Root packet joins membership, classifier state/activity, wake counts, background uncertainty and fresh App state; public watch health adds ready, zero failures, sender ready, revision 1 and committed sequence 2. |
+
+Real events:
+- Episode 1: watcher-event-20cfbc78-4d2f-4611-97f6-44d2f17fd360; observed 23:11:49.825 UTC, accepted 23:12:03.610 UTC; root App confirmation about 23:12:16 UTC; handled at server time 23:13:05.461 UTC.
+- Episode 2: watcher-event-8127588f-caab-4814-a4c5-2ba546eadfc0; observed 23:15:29.762 UTC, accepted 23:15:43.536 UTC; root App confirmation about 23:16 UTC; handled at server time 23:16:47.906 UTC.
+
+The root reports continuously attended_push from its post-upgrade resume through both cases, with no attendance gap, no pull waiter and no backlog/pending messages afterward. These were push deliveries, not uncovered pull intervals. The earlier failed-pull period had no stored real detector events. The observed owner's Telex station stayed detached; its ring/reply channel was the App.
+
+The background case deliberately kept the member active only for the specifically required #197 validation case. The event marked backgroundWork=unobserved. Direct process/start/run identity was unchanged across the ring, with progress 20 -> 96 of 180 work units. The member replied with its actual wait and atomically parked. The shell completed all 180 work units naturally at 23:19:45.968 UTC, exit 0; sequence, timestamps and every digest were independently verified. No stop, restart or signal was sent.
+
+Build/operations:
+- Detector and unchanged Watcher: source 9e971fd9ee877a20d13c97ad59b25d477b5c6ad0, includes #216. Scheduled same-host management callback covers #199 debt 6; it is not an added criterion.
+- Active installed Telex after accepted #224: v0.3.0-gate201-c4f6ac8c, build c4f6ac8c9c43f82aeb861d46ee44f2f7160f275a, SHA-256 17c36bc42642f4b6f3ab1dae1ce5cc0d16e99f5631799c7cf5af896256f43a7e. Exact-merge CI 40414741263 and Docs 40414741325 succeeded before build/install.
+- Supported upgrade retained v0.3.0-gate201-9e971fd9 as rollback, including its original hash. The installer alone drained/reconciled the daemon; no manual restart or bypass.
+- The separately authorized same-binary Watcher restart retained registry/registration revision 1, preserved the original log/status, and used a new log. Runtime f56976b5 reported ready before staging. No ACL, permission, auth, timeout or product-source changes.
+
+Private evidence SHA-256:
+- Final two-event query: 564de3da96cb85ea268a244559d6b108d3fc915795221a57d78817464a95903f
+- Corrected root receipt/status view: d10f1f8f8dab124ffa6fb1331e23ffe6459cc3851feca506874d60a094361aa2
+- After-ring unchanged-process/progress snapshot: 9957d35b77aa9f04691475667d9e1f3bb28a2a5c9b80f542f7705fe076a3b851
+- Completed background work log: 7aea597768e6be63d2945a805055cf85790aef5ffb4973d6efb41de3921a0762
+- Natural completion: c5acefa0ddeaee51e0f4090793cefc26e4860976a095b6aa5975fcbd210d5e8c
+
+Failure dispositions: original fallback failure is #224 (accepted fix installed; pull was not re-tested); false ack errors are #231, with explicit retries returning already-consumed and both events handled; the unattributed stopped-Watcher observation is #234, not a #201 dependency or criterion failure. #222/#223 retain the bootstrap/loading findings. Raw message bodies, connection details, tokens and personal paths remain private.
+
+The steward disposed of both recovered detector-degraded observations as expected behavior/report only, not defects or dependencies: https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078 .
+- attempt-94a18160-8933-4188-b0a5-7031092db243 at 23:10:39.889 UTC committed/sent nothing. The first later success, attempt-1aa69acd-8643-4ead-8f9b-2c60cfc48e85 at 23:11:14.892 UTC, committed idle; episode 1 emitted 34.933 seconds after that recovery, or 67.167 seconds after its idle marker.
+- attempt-900e84c2-44d4-4c98-b49c-71d22fa3bcb2 at 23:14:19.915 UTC committed/sent nothing. The first later success, attempt-dac3a782-ab08-4cb9-97ac-b608d8026858 at 23:14:54.832 UTC, committed idle; episode 2 emitted 34.930 seconds after recovery, or 56.235 seconds after its idle marker.
+No new un-emitted quiet snapshot was open at either failed start: the idle markers followed those starts by 2.769/13.612 seconds, and firstSeenAt is the recovery observation. Episode 1 had already emitted/been handled before the second gap. Causes are unknown because safe output omits diagnostics; no attribution to daemon restart. Extra failure-induced delay cannot be separated from cadence/observation timing. No missed or duplicate event was observed; the controlled alternating-read proof remains the bounded-alert evidence.
+
+Requesting acceptance of this evidence against the unchanged Windows criteria. This is not a closing-PR or operator-readiness claim: final-head review and CI remain before readiness. Only the operator merges.
+
+```
+
+### Campaign behavioral acceptance
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6429773031
+
+Raw 1661 bytes / SHA-256 `f219edb386bd60d215f22d809d785606a843b60e6e6b53e63ec8a6f373032abc`; complete LF display 1661 bytes / SHA-256 `f219edb386bd60d215f22d809d785606a843b60e6e6b53e63ec8a6f373032abc`.
+
+```text
+Campaign acceptance of #201 Windows behavioral evidence
+
+Campaign accepts packet https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587 as satisfying the unchanged #201 Windows behavioral criteria.
+
+Cross-checked against the Campaign root receipts (root project:telex/campaign:root-201, receipt artifact SHA-256 d10f1f8f8dab124ffa6fb1331e23ffe6459cc3851feca506874d60a094361aa2, corrected):
+- Episode 1: real event message 4193 pushed to the root; fresh App status confirmed the owner idle; the root rang the owner and the owner replied; handled disposition 2003 at server time 23:13:05.461Z.
+- Episode 2 (staged background-work case): real event message 4194 pushed; fresh App status confirmed; the root rang the owner and the owner replied; handled disposition 2004 at server time 23:16:47.906Z. The background shell continued unchanged through the ring and completed naturally (180/180).
+- One durable event per episode, no duplicates.
+
+The two recovered degraded detector attempts are accepted under the steward's expected-behavior/report-only disposition (https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078).
+
+Failure routing is retained as listed in the packet: #224 (completed and installed; pull path not re-tested here), #231 (ack false failure after push; retry returns already-consumed), #234 (Watcher backend resilience; not a dependency of this node).
+
+Scope: this accepts the behavioral evidence only. The node is not complete. Completion requires the closing PR (Closes #201) with final-head targeted validation, independent review, an exact-head design receipt and green CI, passed through the Campaign merge gate.
+```
+
+### Final Campaign gate
+
+https://github.com/lossyrob/telex/pull/235#issuecomment-6430584726
+
+Raw 1510 bytes / SHA-256 `f794927042bb6b13746ee22b98a3263e1086fee85cc095329f1ff6cd4c40cc94`; complete LF display 1510 bytes / SHA-256 `f794927042bb6b13746ee22b98a3263e1086fee85cc095329f1ff6cd4c40cc94`.
+
+```text
+Campaign gate record - PR #235 (Closes #201) - verdict: MERGE
+
+Exact head: 2d32acbef6db5e266c1ca49eb939b94c5adc3a06
+
+Floor:
+- PR open, non-draft, MERGEABLE/CLEAN; 0 review threads; parsed closingIssuesReferences = [201].
+- CI 40423968419: pull_request, attempt 1, completed/success at the exact head, 22/22 jobs success. Windows job 121925013554 executed the stall_gate target (not compile-only), per the owner packet 6430569148.
+- Independent PAW delta review at exact head: 6430458032 (C1 resolved, no remaining scoped findings).
+- Design steward DESIGN PASS at exact head: 6430326490.
+- Behavioral evidence: owner packet 6429700587, Campaign acceptance 6429773031 (unchanged).
+- Consequence low: validation tests, reproduction instructions and a sanitized report only; no product, dependency, installation or registry change.
+
+Drift: merge base f90081a5; main is d8b8fd62. The intervening commits (cccd5e24, d8b8fd62) change only .streamliner/workstreams/local-daemon/* and .streamliner/workstreams/telex-watcher/* tracker artifacts. File-disjoint from this PR (CONTRIBUTING.md, docs/copilot-stall-gate-report.md, telex-watcher/tests/stall_gate.rs) and no code/API coupling. Accepted without a rebase.
+
+Retained, not credited here: the earlier Windows seed-test failure stays recorded under #182 (6430207179); this run is fresh CI on a new head, not a rerun or a cause finding. #224 pull path, #231 false acks and #234 Watcher resilience remain separate.
+
+Merging with --match-head-commit at the exact head.
+```
+
+### Complete accepted exact-merge field
+
+https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526
+
+Raw 4976 bytes / SHA-256 `dd5db8a46af3ff58ba700804b3ff6678d9c5a2c0b919d1f7f8aaef74cd9e5d3f`; complete LF display 4944 bytes / SHA-256 `095b2c83c3fc16da179c6ea72a8d0ecb0bf74d3ddc6b013cc9b605f3e2a17be9`.
+
+```text
+## Field report: Windows workstream stall gate passed
+
+PR #235 merged at 13768159b8a08709895a7d2987dd5ba29cb0c5da through [Campaign gate 6430584726](https://github.com/lossyrob/telex/pull/235#issuecomment-6430584726). Issue #201 remains closed as completed. Exact-merge [main CI 40426207346](https://github.com/lossyrob/telex/actions/runs/40426207346) and [Docs 40426476177](https://github.com/lossyrob/telex/actions/runs/40426476177) both succeeded on attempt 1. Docs was dispatched once on main while it pointed to this merge, because the automatic Docs path filter excludes this test/report-only change.
+
+The [merged evidence report](https://github.com/lossyrob/telex/blob/13768159b8a08709895a7d2987dd5ba29cb0c5da/docs/copilot-stall-gate-report.md) preserves the [accepted behavioral packet](https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587) and [Campaign acceptance](https://github.com/lossyrob/telex/issues/201#issuecomment-6429773031).
+
+| Criterion | Evidence |
+|---|---|
+| Exactly one event per episode | Scheduled same-host management callback, durable delivery and deduplication pass. Real episodes produced messages 4193 and 4194, one each, with no duplicate in the retained final query. This discharges #199 gate debt 6. |
+| Busy, operator-waiting and armed wakes suppress stalls | Isolated scheduled-host Windows cases pass. The final assertion requires canonical-null committed state before removing the armed wake; it rejects a premature quiet episode even inside grace, before removal can reset its fingerprint. |
+| Root confirms and rings | Continuously attended root push, fresh App confirmation, rings, member replies and handled dispositions 2003/2004 match the accepted receipts. Episode 2 explicitly reported background work as unobserved; the same workload continued through the ring and completed naturally, 180/180. |
+| Status view from the same data | The report joins member state, public Watcher attempts/events and fresh root/App observations into the status view without treating App busy as proof of model execution. |
+
+Quiet-error attention-needed delivery, bounded recovery across alternating degraded/successful observations, and 1,100 retained consumed member messages also pass in isolated fixtures.
+
+### Final verification and changes
+
+The final PR head 2d32acbef6db5e266c1ca49eb939b94c5adc3a06 has [independent PAW PASS, C1 resolved](https://github.com/lossyrob/telex/pull/235#issuecomment-6430458032), [design PASS](https://github.com/lossyrob/telex/pull/235#issuecomment-6430326490) and [22 successful checks with hosted target execution](https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148). The C1 correction replaces the fingerprint-sensitive timestamp comparison with the direct null-state proof, also removing its false-failure race.
+
+After both exact-merge workflows were green, a verified git archive of 13768159 was validated locally with its full build ID, fresh absolute TELEX roots and temporary LOCALAPPDATA: locked offline Entra binary build, formatting, the scheduled-host target (4 passed; ignored subprocess role executed by its parent), all 20 detector unit tests and whitespace checks passed. The tracked worktree stayed clean and unchanged. Retained validation log SHA-256: `9cca6677cc6f3263a5239785e9100c60de2ddfb72ea695a6595aac406ff1bf33`. No real-workstream replay or installation change was needed.
+
+### Successor notes and retained work
+
+Keep the isolation harness and the pre-removal null-state assertion. A no-event window alone does not establish suppression. Background work can be unobserved; the root must freshly confirm before ringing and preserve the work.
+
+The two recovered degraded/no-state/no-send observations retain the steward's [expected-contract, report-only disposition](https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078). Their causes remain unknown, with no attribution to daemon restart; exact attempt IDs, times, episode-open checks and measured latencies remain in the merged report.
+
+#224 is accepted and installed; pull was not re-tested. False ack failures remain with #231 (idempotent retry, already-consumed is success); the unattributed Watcher stop remains with #234, not a dependency. The earlier shared Windows seed-test failure remains recorded under [182/6430207179](https://github.com/lossyrob/telex/issues/182#issuecomment-6430207179), with its qualified residual association and no cause finding. The final-head and exact-merge workflows passed. macOS containment and PostgreSQL plan/index assertions are outside this Windows gate's evidence.
+
+**Design impact: none.** This validates the accepted contract; the PR changes tests, reproduction instructions and a sanitized report.
+
+The owner's member record for campaign-stalls-201-20261026 is parked. The retained watch registration, root-201 and installed build were left unchanged by this follow-through; Campaign owns their disposition.
+
+```
+
+All thirteen complete public bodies are separately bound and live-matched; the nine above use declared complete LF display only. Canonical received bodies are quoted byte-exactly, without normalization; the private appointment body is deliberately not copied. Public review/design/ready/owner-hold merits remain attributed to their bound originals. All previous brief bytes and complete old summaries, all old rows/keys/order/debt snapshots, the entire Local #167 qualification and Watcher #195/#234 records remain exact.

@@ -2116,6 +2116,551 @@
         "costBoundary": "Result size, detector memory and fixed per-member query count are bounded; worst-case database work may grow linearly with that member retained history, not other recipients. SELECT-only, address equality/index eligibility, no newest-N absence inference/cap/sampling. Slow query remains a visible failure/timeout. Projection/store changes remain separately designed future work, not new #216 discovered work.",
         "testBudgetBoundary": "Field aggregate target observations 17.63s on main versus 12.60s at the PR head exclude compilation and are uncontrolled whole-target samples, not measured marginal #216 cost or slowdown evidence. The 1100-pair source accounting and replaced-fixture limits remain Sentinel/owner-attributed. No new observer, run, comparison or experiment.",
         "exclusionBoundary": "No #201 live/workstation validation/readiness/completion, #198 debt clearance, #203/#210 boundary change, Local/native/nonnative/waiter-family disposition, new schema/protocol/source audit, universal runtime guarantee or other debt retirement."
+      },
+      "later201WorkstreamGateCompletion": {
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "debtFamily": "#199/#211 gate 6420726231",
+        "retiredDebtNumbers": [
+          6
+        ],
+        "originalDebtText": "No host-executed attempt calls back into its own management endpoint; deferred to #201.",
+        "campaign": {
+          "source": "toolu_01CqYpi7HXxEBBKQLphXVVPs",
+          "receipt": {
+            "file": "campaign201-followthrough-accepted-intake.json",
+            "bytes": 873,
+            "sha256": "ccd97eebbc90a5487915e98380119234953694a2e316f2f6a1e747275d65040c"
+          }
+        },
+        "explicitRetirement": {
+          "source": "toolu_01RYzcz4s3ipn4jHrNgnaSd7",
+          "receipt": {
+            "file": "campaign201-explicit-debt6-retirement-intake.json",
+            "bytes": 1599,
+            "sha256": "40e32db75a98678d6b12eb7449d7f89170593542d9f5effced86280f951cbc93"
+          }
+        },
+        "deliveryIssue": "https://github.com/lossyrob/telex/issues/201",
+        "deliveryPr": "https://github.com/lossyrob/telex/pull/235",
+        "head": "2d32acbef6db5e266c1ca49eb939b94c5adc3a06",
+        "merge": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+        "ownerSessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+        "acceptedOutcome": "Campaign accepted #201 exact-merge CI/Docs and full field follow-through, then explicitly retired original gate debt 6 by number based on the reported scheduled same-host management callback, durable delivery and deduplication (4193/4194, one each). This is not a new debt or a local runtime replay.",
+        "preserved215ResolvedDebtNumbers": [
+          2,
+          3
+        ],
+        "preserved216RetiredDebtNumbers": [
+          4
+        ],
+        "retained199Debts": [
+          {
+            "number": 5,
+            "text": "Pre-existing `session_state.rs:91`: `File::open` runs before the regular-file check, so a FIFO `events.jsonl` blocks until Watcher's timeout.",
+            "state": "retained-open"
+          },
+          {
+            "number": 7,
+            "text": "The body has no Deferred work or Discoveries sections; #200 and #201 are referenced only inline.",
+            "state": "retained-open"
+          }
+        ],
+        "retained216Debt": {
+          "kind": "postgres-optimizer-index-use-unasserted",
+          "state": "retained-open"
+        },
+        "completeReceivedSources": [
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013CDQzb1PczbWY1KSwFRuct",
+            "originEvent": {
+              "id": "4b02b5d5-96dc-4820-8067-029123c75b2f",
+              "timestamp": "2026-10-26T18:27:47.659Z",
+              "bytes": 2912,
+              "sha256": "6b55f5cc095ef5817b4c6259b3a6c820e71bef2803205f280ad56dd9aa891178"
+            },
+            "receipt": {
+              "file": "watcher201-owner-launch-intake.json",
+              "bytes": 1378,
+              "sha256": "a6ab43d0feadd9d14d46f1c22996051bf8a35f14629e5a3ced8c1c27ae0da783"
+            },
+            "privateBodyBoundary": "Complete received appointment body is bound privately, not quoted or copied into canonical JSON because it contains a private controller path. Safe historical appointment facts are attributed separately."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_011KS1PLaGdkHAU5v4DLLs3m",
+            "originEvent": {
+              "id": "33770c20-d455-4cf9-bb8c-236c3314ee4d",
+              "timestamp": "2026-10-26T18:32:37.543Z",
+              "bytes": 2348,
+              "sha256": "9baff25b6aa5bc2019cc0d4486921e78237bf2e016f81af3ccd0c93a438e14ac"
+            },
+            "receipt": {
+              "file": "watcher201-activation-intake.json",
+              "bytes": 1096,
+              "sha256": "7e2be0ab81f13da53023583b3facf122d5fa20a13501725b9fb3369cdcbf0fca"
+            },
+            "verbatim": "Status change for Watcher #201 (stall-detection-workstream-gate): planned -> in-progress.\n\nEvidence: the owner claimed the item publicly at 2026-10-26T18:29:24Z in https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329, naming session ee356dca-0526-4bb1-8eda-83c0f0d7b22a.\n\nThat is the owner's runtime session ID. It runs inside the App project session 7aca0f50-2036-46ae-901d-0ff517744e56, which I launched.\n\nThe steward answered the owner's question about the closing-PR evidence shape in 6424158582; there is no shape change. No PR is open yet.\n\nQueue this separately from complete200; it is not part of that tuple."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01LE4C7NfAe6hMzDPjtGz1tK",
+            "originEvent": {
+              "id": "95c4092d-a52d-434a-aa0a-6bc8cceb418f",
+              "timestamp": "2026-10-26T19:26:34.026Z",
+              "bytes": 1809,
+              "sha256": "b6a1f5885d03a2101633ac4a53521f3e816f380f14b6a8c438c6d88da1b2f822"
+            },
+            "receipt": {
+              "file": "watcher201-candidate224-intake.json",
+              "bytes": 826,
+              "sha256": "4d57bf21e5730d2cc15f59212fa522f440bfafa5439575e5e7cfaa77e3f35452"
+            },
+            "verbatim": "Candidate intake only. There is no status, owner or graph change.\n\n#201's owner filed #224 (https://github.com/lossyrob/telex/issues/224): the generated pull fallback exited 7 on an Entra Postgres candidate-fetch timeout, leaving the station unattended. One supported retry is running. Routing is pending with the steward. #201 stays in progress and unblocked for now."
+          },
+          {
+            "sessionId": "88943d7d-c3de-40ec-bb86-a4774d0fdb74",
+            "source": "toolu_011de2aiMXT87XKarZQrqk4p",
+            "originEvent": {
+              "id": "10c708e6-4902-4209-9cdb-8be7fe923548",
+              "timestamp": "2026-10-26T19:30:18.852Z",
+              "bytes": 3212,
+              "sha256": "af590198b32e384bdf60304fa0752a15433bc387f6c8485373009d5d318a5d92"
+            },
+            "receipt": {
+              "file": "watcher201-external224-design-intake.json",
+              "bytes": 1529,
+              "sha256": "9638480be0204a409edbc0c30e39f2a95db3dbe53cf9a5cf2b7ba56dd02d4f55"
+            },
+            "verbatim": "Watcher graph change (evidence: https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009):\n1. Node `stall-detection-workstream-gate`: add an externalDependsOn entry.\n   - id \"local-daemon-pull-fallback-postgres-recovery\"\n   - target {projectKey: telex, workstreamId: local-daemon, nodeId: <the Local node that closes #224; not yet modeled. Bind it when Local assigns one>}\n   - url https://github.com/lossyrob/telex/issues/224\n   - status pending\n   - label: \"Supported Copilot pull-fallback waits on the Entra Postgres profile stay armed. Satisfied by an accepted #224 resolution (merged, exact-head hosted validation, Campaign acceptance), or by #224 closed as environmental with evidence that a supported pull wait on the same profile stays armed past the observed failure window.\"\n2. The gate stays planned and unpassed; outcome and pass criteria are unchanged.\n3. discovered-work.json: update the #224 record from \"no Watcher dependency\" to \"conditional dependency triggered; upstream of stall-detection-workstream-gate\".\nNo other changes."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Er7ZWESoM2ULk98q1D9qNx",
+            "originEvent": {
+              "id": "99fb17ec-42f7-4047-9c7b-ae4ee11d190f",
+              "timestamp": "2026-10-26T19:30:18.856Z",
+              "bytes": 2041,
+              "sha256": "07e63c4443b276c51ea7391975bebda74c03fb0f5aeab2619b62432a12e40095"
+            },
+            "receipt": {
+              "file": "watcher201-blocked224-intake.json",
+              "bytes": 942,
+              "sha256": "d90c93c6326d9fd4e402538a8c1d4e9b21f779afebb77c1dcb4d039c2b2ac9c4"
+            },
+            "verbatim": "Status change for Watcher #201 (stall-detection-workstream-gate): in-progress -> blocked.\n\nThe steward modeled an externalDependsOn on #224 (https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Local has no node for #224 yet. I've asked Local to send you the node id when it models one.\n\nThe owner, 7aca0f50, remains the owner and is holding: no retries, no staged event. Its runtime, registry and branch are retained. Its isolated automated coverage may continue."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_Bi5bSIqdtRu7QH3BvRCGiKG7",
+            "originEvent": {
+              "id": "49193548-3947-4cef-a715-0804c4afdb4c",
+              "timestamp": "2026-10-26T19:32:56.844Z",
+              "bytes": 2026,
+              "sha256": "717c17a1e9de63f0556d6f4a208121e0bee0398d2d37b48c3f975de5c2a2e068"
+            },
+            "receipt": {
+              "file": "watcher201-owner-blocked-intake.json",
+              "bytes": 934,
+              "sha256": "1abed319c86f594c39efdff71ed0b4c453015fd60741f2d3c05502deed2068c4"
+            },
+            "verbatim": "#201 is unpassed and blocked on steward-modeled #224 (decision https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Evidence/hold report: https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162 . Validation-only WIP checkpoint 0384a68b is pushed on lossyrob-stall-detection-gate; no PR or completion claim. Runtime/registry retained, root/background cases held until accepted resolution or environmental closure with sustained supported attendance."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013UzKTLp7ZLfkoJhKYsi9K5",
+            "originEvent": {
+              "id": "8a4c12bf-e186-4f8e-8c4f-b0f87290e5d3",
+              "timestamp": "2026-10-26T20:03:24.540Z",
+              "bytes": 1957,
+              "sha256": "f2bd43450892a54e86063ef8fc5bfc5b03e390bcea3881a58493f8540dc47fe6"
+            },
+            "receipt": {
+              "file": "watcher201-canonical224-binding-intake.json",
+              "bytes": 900,
+              "sha256": "f28b42b424c8e7da842f08a15441299a4c70eb2e1336c2132cd70f69a6ed8fc3"
+            },
+            "verbatim": "Bind #201's external dependency, which the steward set in https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009, to the Local node postgres-fallback-recovery-exhaustion (issue #224), published on main at 51a94f8ef0126e74f89f0f4b7fcd6201d718b793.\n\nLocal has launched owner 769a992c-7319-4d2e-b93a-4977094d7715 for that node; you have its launch receipt.\n\n#201 stays blocked and keeps its owner, 7aca0f50. Nothing else changes."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01WphpY8KBUi1exHB9ug7Hps",
+            "originEvent": {
+              "id": "8cb77638-c008-428c-b98f-623af82be4b3",
+              "timestamp": "2026-10-26T23:24:54.757Z",
+              "bytes": 2230,
+              "sha256": "4d8100aad71b6504ad39ac77bfdf1e709b1b8e16e2eb1cf5afbc5ee80f9fd529"
+            },
+            "receipt": {
+              "file": "campaign201-behavior-accepted-intake.json",
+              "bytes": 888,
+              "sha256": "b107ce6e336913d7ee33c80aeac3492ea62bb4f105325334eae059558f61f5a8"
+            },
+            "verbatim": "#201 behavioral evidence accepted (packet 6429700587). Two real pushed stall events, 4193 and 4194, were each confirmed in the App, rung and handled. The background case completed naturally. This ran on installed build c4f6ac8c with the unchanged Watcher 9e971fd9. The two degraded attempts are expected behavior to be reported only (steward 6429667078). The node is not complete: its closing PR and Campaign gate are still pending."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_jBocpDkO54PvjTOTMmXObbJW",
+            "originEvent": {
+              "id": "4b7da4c3-8a2b-4e88-9f39-4d01474191ff",
+              "timestamp": "2026-10-26T23:36:44.185Z",
+              "bytes": 1719,
+              "sha256": "feface7b9cd13d3a9ac81712d7691e8ed14ba7a69b5212b481b9aeeaeed6ce41"
+            },
+            "receipt": {
+              "file": "owner201-closing-pr-published-intake.json",
+              "bytes": 749,
+              "sha256": "dcb2736aaccae38a03e835240a2a39e29e914ea18b7256e622011c237be6be47"
+            },
+            "verbatim": "#201 closing PR opened: https://github.com/lossyrob/telex/pull/235 at 7b3771818ce38a2b9ff69574d382d706f4731546. Campaign accepted the behavioral evidence in issue comment6429773031; exact-head local targeted validation passed. Independent App review/design receipt/hosted CI pending; not ready."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_lUZAVaSXCKPvtrFLBCEVWIj2",
+            "originEvent": {
+              "id": "296e2df4-a8e9-4d87-b21f-d4a943fd19f7",
+              "timestamp": "2026-10-27T00:23:56.503Z",
+              "bytes": 1759,
+              "sha256": "d0a632f3cfe9115b10deed09b79b75829541cdcbf94f64b28d440d24f7b949f0"
+            },
+            "receipt": {
+              "file": "watcher201-pr235-ready2d32-intake.json",
+              "bytes": 769,
+              "sha256": "acff9b54f8daa2977223dfe190833900425f3563936bd0ccc12da4ed4e2c79bd"
+            },
+            "verbatim": "PR235 / node stall-detection-workstream-gate is ready at2d32acbef6db5e266c1ca49eb939b94c5adc3a06; Campaign gate requested, not yet merged: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 . All22CIchecks green, actual hosted gate execution and exact-head independent/design PASS, closure only201."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01DHg8RjRnH65xJDemrnPH4A",
+            "originEvent": {
+              "id": "1945c249-15ba-4b9f-9915-fcb2fdfc3b1a",
+              "timestamp": "2026-10-27T00:27:05.501Z",
+              "bytes": 2930,
+              "sha256": "0c7c7594cd526a5c6e9b328308ef07a534aeb560e60b808e7c7cd735bd82607f"
+            },
+            "receipt": {
+              "file": "watcher201-merged-fallback234-sequence-intake.json",
+              "bytes": 1387,
+              "sha256": "361b83c8452d11fbd1311682d8857731583f5dfff405b57146d048f3603176d3"
+            },
+            "verbatim": "Status change: stall-detection-workstream-gate (#201) -> completed (main currently shows planned/watch). Evidence: PR #235 merged at exact gated head 2d32acbef6db5e266c1ca49eb939b94c5adc3a06 as 13768159b8a08709895a7d2987dd5ba29cb0c5da at 2026-10-27T00:24:33Z (https://github.com/lossyrob/telex/pull/235); #201 closed COMPLETED at 00:24:35Z. Ready/gate request: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 (22/22 checks green at that head, which I verified). Real-case report: https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587. Owner 7aca0f50 keeps follow-through on main CI at the merge, merged validation and the field report; that follow-through is still pending. Campaign has started CI-watch migration onto telex-watcher. Its fallback scheduler stays until #234 merges, so the #234 node publication now gates fallback retirement. I'll staff #233 and #234 once each is verified on main."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_WHyLOJ7GXMAnzOHf3RqJS5nQ",
+            "originEvent": {
+              "id": "dc09a75e-fd04-4c94-9302-80f495d29c4b",
+              "timestamp": "2026-10-27T00:50:54.705Z",
+              "bytes": 1839,
+              "sha256": "dd458289967cf31a65601b001e9be0a5b2747c8da9eeab59f47078e079a14b4a"
+            },
+            "receipt": {
+              "file": "watcher201-merged-owner-closeout-intake.json",
+              "bytes": 809,
+              "sha256": "4b78e20f2d83227bc21832613e6602c93b03e0945e1055eda682fd00145d1f8f"
+            },
+            "verbatim": "#201 / stall-detection-workstream-gate closeout is complete at PR235 merge13768159: exact-main CI/Docs attempt1 and merged validation passed; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 . Issue remains closed/completed, design impact none, owner parked; this is the completion evidence for stall-detection-validated."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01CqYpi7HXxEBBKQLphXVVPs",
+            "originEvent": {
+              "id": "c1e8548f-bf22-4639-be86-f5c5a068c796",
+              "timestamp": "2026-10-27T00:50:54.709Z",
+              "bytes": 2200,
+              "sha256": "076582a0303e20036309e8e8f837aa50ce41a22b89481631726bc7fe381b416c"
+            },
+            "receipt": {
+              "file": "campaign201-followthrough-accepted-intake.json",
+              "bytes": 873,
+              "sha256": "ccd97eebbc90a5487915e98380119234953694a2e316f2f6a1e747275d65040c"
+            },
+            "verbatim": "Accepted #201 follow-through: CI 40426207346 at 22/22 and Docs 40426476177 at 2/2, both at 13768159, and field report 6430902526. Proceed with the #201 completion record when you have a slot. Dispositions recorded: the installed build c4f6ac8c stays active with 9e971fd9 as rollback, and registration campaign-stalls-201-20261026 and root-201 are retained as Campaign's standing dogfood. No #231, #233 or #234 credit."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Mv4hBjJDGSExZesyqLbAo3",
+            "originEvent": {
+              "id": "c7a267a2-b553-4aa4-8677-7f1fb7bc3312",
+              "timestamp": "2026-10-27T00:50:54.712Z",
+              "bytes": 2560,
+              "sha256": "bdb2d0a39fc164bd92baeb2f558a31a2b6687c30c3e79a2fcd776c77192e08d1"
+            },
+            "receipt": {
+              "file": "watcher201-completion-standing-dogfood-intake.json",
+              "bytes": 1202,
+              "sha256": "408ee9aa2d4dbada1ab5ec37d2362fe20ad8339697cb85b6fe03bbf7b404f591"
+            },
+            "verbatim": "Status/owner change: stall-detection-workstream-gate (#201) -> completed. Evidence: Campaign accepted the follow-through at 2026-10-27T00:49Z (Campaign toolu_01RffxRxhY5CuD5Eo6YjKBhL). PR235 merge 13768159b8a08709895a7d2987dd5ba29cb0c5da; on that commit I verified CI (push) and Docs (workflow_dispatch) completed with success; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 (2026-10-27T00:47:30Z). Owner 7aca0f50 is stopping with no remaining duty. Watcher registration campaign-stalls-201-20261026 rev 1 (root-201, both members parked) stays registered as Campaign's standing stall dogfood, with Campaign as its contact. Its health is part of the migration fallback condition, which stays in force until #234."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01AG3CbrPcyGc6KaxKBKnNyN",
+            "originEvent": {
+              "id": "36e0155a-6c9e-4e28-95fa-1928c0cfdf1e",
+              "timestamp": "2026-10-27T06:43:44.652Z",
+              "bytes": 7620,
+              "sha256": "5e3689cad9b3118409ea267dfc8809e8ebbcf4c00b6ba41bb1079255d5f848bc"
+            },
+            "receipt": {
+              "file": "watcher201-post216-preparation-scope-intake.json",
+              "bytes": 3732,
+              "sha256": "b9d4123a37c6ccb428a279ba8a78e5a2cb1bc76689ccd5192ebcfe9206d5a759"
+            },
+            "verbatim": "#201 closeout preparation: scope CONFIRMED, with the qualifications below. This is not a tuple approval and does not affect current #216 approval or authority.\n\nSource-time observations (read-only, main e5b8f2d1):\n- Node stall-detection-workstream-gate (#201) is planned/watch, its summary is the original 301-char contract, and no node depends on it.\n- Checkpoint stall-detection-validated is planned, with the same five nodeIds. Once the #216 projection lands, all five will be completed after #201.\n- The usable-watcher checkpoint does not include any of these nodes.\n- Field 6430902526 is by lossyrob on #201, created 00:47:30Z.\n- My #201 binding names owner 7aca0f50-2036-46ae-901d-0ff517744e56. I have recorded no release.\n\nQualifications:\n1. Debt 6 identity: the origin is PR #211 gate 6420726231, item 6: \"No host-executed attempt calls back into its own management endpoint; deferred to #201.\"\n   - The field calls it \"#199 gate debt 6\". Record it as #199/#211 gate debt 6, the same family as #211 debt 4, so it is not a new debt.\n   - The brief already records debts 2-7 retained under #199 (lines 748, 790, 793). The ledger has no debt-6-specific field, so the new row qualifications are the first typed record of it.\n2. Retirement versus attribution: the field says \"This discharges #199 gate debt 6.\" Retire debt 6 ONLY if the Campaign acceptance text itself accepts that discharge, or retirement of the debt, by number or unambiguously. If it only accepts #201 completion or follow-through, record it as producer-claimed discharge with attribution, retained-open pending Campaign disposition, and ask Campaign for a one-line ruling.\n   - ID check: my checkpoint records the Campaign #201 acceptance as toolu_01RffxRxhY5CuD5Eo6YjKBhL, not toolu_01CqYpi7HXxEBBKQLphXVVPs. Confirm which raw event carries the acceptance body before binding either.\n   - I can't attest that toolu_01Mv4hBjJDGSExZesyqLbAo3 is mine from memory. Bind it from its raw origin.\n3. Debts that stay exact and open:\n   - #199/#211 debts 5 (FIFO events.jsonl open before regular-file check) and 7 (no Deferred work or Discoveries sections). #215 [2,3] and #216 [4] stay as recorded.\n   - The #216 Postgres optimizer-plan debt. The field explicitly excludes PostgreSQL plan/index assertions and macOS containment: Windows-only evidence.\n   - The #198/#203/#210 boundaries.\n4. No credit or new disposition for:\n   - #224 (pull not retested);\n   - #231 (false ack failures);\n   - #234 (unattributed Watcher stop);\n   - the #182/6430207179 seed-test association;\n   - the two degraded/no-state observations, which keep the steward's report-only disposition 6429667078, causes unknown;\n   - #172 or usable-watcher.\n   The campaign-stalls-201 registration, root-201 and installed build stay Campaign's disposition (and 9591bf30's authorized upgrade sequence). Do not infer an owner release from \"parked member record\" unless Campaign's acceptance says so.\n5. Checkpoint planned -> completed is correct only in a tuple whose base already contains the actual #216 publication. The checkpoint summary criteria (one event, suppression, confirm/ring, status view) map to the field table.\n\nNo other Watcher node, edge or readiness changes. Nothing becomes launchable."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01RYzcz4s3ipn4jHrNgnaSd7",
+            "originEvent": {
+              "id": "1817b1ad-2989-42c1-8b55-e30c7f50d33a",
+              "timestamp": "2026-10-27T06:45:25.568Z",
+              "bytes": 2574,
+              "sha256": "d70f3b79eb9a25e96f99aa60b139bf6ad50afd7e1f884359a3dd9d89ca28ce39"
+            },
+            "receipt": {
+              "file": "campaign201-explicit-debt6-retirement-intake.json",
+              "bytes": 1599,
+              "sha256": "40e32db75a98678d6b12eb7449d7f89170593542d9f5effced86280f951cbc93"
+            },
+            "verbatim": "Campaign ruling on #199/#211 gate 6420726231 debt 6: RETIRE. Basis: accepted #201 field 6430902526 (exact-merge 13768159, CI 40426207346 / Docs 40426476177 attempt 1) reports the scheduled same-host management callback with durable delivery and dedup passing in real episodes (messages 4193/4194, one each) and states \"This discharges #199 gate debt 6\"; Campaign accepted that follow-through and now explicitly retires debt 6 by number on that basis. Debts 5 and 7 and all other listed debts/limits stay exactly as recorded. No release/launch/runtime change; does not touch the current #216 tuple/hold."
+          }
+        ],
+        "publicComments": [
+          {
+            "id": 6420726231,
+            "url": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T16:01:41Z",
+            "updatedAt": "2026-10-26T16:01:41Z",
+            "body": {
+              "file": "complete201v2-comment-6420726231-body.txt",
+              "bytes": 3490,
+              "sha256": "cd5ba3c51f8c5b5953df921b13dc10e187b51fd658502e662bd91c0fbb0062a3"
+            }
+          },
+          {
+            "id": 6424149329,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T18:29:24Z",
+            "updatedAt": "2026-10-26T18:29:24Z",
+            "body": {
+              "file": "complete201v2-comment-6424149329-body.txt",
+              "bytes": 1089,
+              "sha256": "f89cb271b5b68c99bd4be84de6f33b22549153ead5b874e32f64ccbdefb3f318"
+            }
+          },
+          {
+            "id": 6424158582,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6424158582",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T18:29:51Z",
+            "updatedAt": "2026-10-26T18:29:51Z",
+            "body": {
+              "file": "complete201v2-comment-6424158582-body.txt",
+              "bytes": 3110,
+              "sha256": "dacc2ed3ab5a80c848ba7bd1484bb81d4b9a05ce269a45f988b6ee1f6998a68a"
+            }
+          },
+          {
+            "id": 6425382009,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:29:30Z",
+            "updatedAt": "2026-10-26T19:29:30Z",
+            "body": {
+              "file": "complete201v2-comment-6425382009-body.txt",
+              "bytes": 2071,
+              "sha256": "81280e282f91625ac2b129b458ab76ce370e416cc3d185fcae2301c6c658f5ba"
+            }
+          },
+          {
+            "id": 6425427162,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:31:49Z",
+            "updatedAt": "2026-10-26T19:31:49Z",
+            "body": {
+              "file": "complete201v2-comment-6425427162-body.txt",
+              "bytes": 2585,
+              "sha256": "268835ff1f1173cb156f089fbe4f1baddd9c789a79380f074343d27e934f5aa8"
+            }
+          },
+          {
+            "id": 6429667078,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:21:10Z",
+            "updatedAt": "2026-10-26T23:21:10Z",
+            "body": {
+              "file": "complete201v2-comment-6429667078-body.txt",
+              "bytes": 2509,
+              "sha256": "892613cb7c69d4b54d07d30446b0b626f7c0095952860bc3cbc4d505c95c54f5"
+            }
+          },
+          {
+            "id": 6429700587,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:23:24Z",
+            "updatedAt": "2026-10-26T23:23:24Z",
+            "body": {
+              "file": "complete201v2-comment-6429700587-body.txt",
+              "bytes": 6142,
+              "sha256": "007576b016b54849cb1efac67c9f6b5c3bf0f0323025e5d98999a6c0cb3892be"
+            }
+          },
+          {
+            "id": 6429773031,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429773031",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:28:02Z",
+            "updatedAt": "2026-10-26T23:28:02Z",
+            "body": {
+              "file": "complete201v2-comment-6429773031-body.txt",
+              "bytes": 1661,
+              "sha256": "f219edb386bd60d215f22d809d785606a843b60e6e6b53e63ec8a6f373032abc"
+            }
+          },
+          {
+            "id": 6430326490,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430326490",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:06:40Z",
+            "updatedAt": "2026-10-27T00:06:40Z",
+            "body": {
+              "file": "complete201v2-comment-6430326490-body.txt",
+              "bytes": 2286,
+              "sha256": "ce2a7a33ed96f4c04598ed586f3c621b8779a817587649f601a7a14de4221873"
+            }
+          },
+          {
+            "id": 6430458032,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430458032",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:15:32Z",
+            "updatedAt": "2026-10-27T00:15:32Z",
+            "body": {
+              "file": "complete201v2-comment-6430458032-body.txt",
+              "bytes": 3487,
+              "sha256": "14e9411242d25e5c5fe7b3cb923351e953196f29c663a61b8ca783b0a2cf3561"
+            }
+          },
+          {
+            "id": 6430569148,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:23:24Z",
+            "updatedAt": "2026-10-27T00:23:24Z",
+            "body": {
+              "file": "complete201v2-comment-6430569148-body.txt",
+              "bytes": 2465,
+              "sha256": "6df6e07a3858597ba75e5e85d74e2a0bab3d152e32f1a83845f1a509250a8c72"
+            }
+          },
+          {
+            "id": 6430584726,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430584726",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:24:30Z",
+            "updatedAt": "2026-10-27T00:24:30Z",
+            "body": {
+              "file": "complete201v2-comment-6430584726-body.txt",
+              "bytes": 1510,
+              "sha256": "f794927042bb6b13746ee22b98a3263e1086fee85cc095329f1ff6cd4c40cc94"
+            }
+          },
+          {
+            "id": 6430902526,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:47:30Z",
+            "updatedAt": "2026-10-27T00:47:30Z",
+            "body": {
+              "file": "complete201v2-comment-6430902526-body.txt",
+              "bytes": 4976,
+              "sha256": "dd5db8a46af3ff58ba700804b3ff6678d9c5a2c0b919d1f7f8aaef74cd9e5d3f"
+            }
+          }
+        ],
+        "hostedCi": {
+          "main": {
+            "run": 40426207346,
+            "head": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+            "attempt": 1,
+            "event": "push",
+            "jobs": 22,
+            "conclusion": "success",
+            "jobIds": [
+              121932483195,
+              121932483268,
+              121932483352,
+              121932483360,
+              121932483373,
+              121932483385,
+              121932483395,
+              121932483420,
+              121932483425,
+              121932483427,
+              121932483446,
+              121932483455,
+              121932483456,
+              121932483481,
+              121932483515,
+              121932483526,
+              121932483533,
+              121932483536,
+              121932483586,
+              121932483605,
+              121932483643,
+              121932483689
+            ],
+            "source": {
+              "file": "complete201v2-main-attempt1-jobs-raw.json",
+              "bytes": 92898,
+              "sha256": "afee578d71eb7ba1ac4ec4c025ba6fbf70e76896a4beb7a308845b09df97fe83"
+            },
+            "boundary": "Endpoint-matched run/job/step result metadata only, not fresh execution, per-test, checkout, logs or runtime proof."
+          },
+          "docs": {
+            "run": 40426476177,
+            "head": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+            "attempt": 1,
+            "event": "workflow_dispatch",
+            "jobs": 2,
+            "conclusion": "success",
+            "jobIds": [
+              121933382000,
+              121933878543
+            ],
+            "source": {
+              "file": "complete201v2-docs-attempt1-jobs-raw.json",
+              "bytes": 5921,
+              "sha256": "a65afa6b10ba52d9f49918fe73bb8e9b147d19a684c491ecdffa01ffcda6a0a9"
+            },
+            "boundary": "Endpoint-matched run/job/step result metadata only, not fresh execution, per-test, checkout, logs or runtime proof."
+          }
+        },
+        "checkpoint": {
+          "id": "stall-detection-validated",
+          "previousStatus": "planned",
+          "currentStatus": "completed",
+          "nodeIds": [
+            "copilot-session-state-classifier",
+            "copilot-group-stall-detector",
+            "stall-detection-agent-guidance",
+            "stall-detection-workstream-gate",
+            "stall-detector-inbox-history"
+          ],
+          "boundary": "Only this existing five-node checkpoint completes after actual #216 publication and #201 completion. No usable-watcher or other checkpoint/node/readiness/edge changes."
+        },
+        "sourceIdentityBoundary": "Direct Campaign Cq receipt is authenticated as its own event. Rffx is a Campaign call quoted in the authenticated Watcher Mv4 report, not a substitute direct origin or an independent authentication of that nested call.",
+        "ownerBoundary": "The historical App owner remains 7aca0f50. Parked/stopping/no-duty are producer/Watcher reports, not an inferred Campaign binding release, replacement, launch or runtime transition.",
+        "operationalBoundary": "Campaign retains campaign-stalls-201-20261026, root-201, installed c4f6ac8c and 9e971fd9 rollback as its sourced standing-dogfood disposition. No current liveness/health, installation, upgrade, registration or fallback-retirement action/proof; 9591bf30 authorized upgrade sequence remains separate.",
+        "methodBoundary": "Windows evidence is attributed to the accepted reports. Endpoint job results are metadata, not fresh tests/native/source/log/checkout/observer/management-callback/cleanup replay. The post-CI archive build, formatting, four scheduled-host cases, twenty unit tests, isolated roots and clean worktree remain producer claims.",
+        "exclusionBoundary": "Debts 5/7, PG optimizer-plan index use, #198/#203/#210, macOS containment/#172, #224 pull-not-retested, #231 false acks, #234 unattributed stop, qualified #182/6430207179 seed-test association and the two unknown-cause degraded report-only observations remain exact. No #233 or usable-watcher credit, new owner, edge, launch, runtime or universal guarantee."
       }
     },
     {
@@ -2574,6 +3119,551 @@
         "costBoundary": "Result size, detector memory and fixed per-member query count are bounded; worst-case database work may grow linearly with that member retained history, not other recipients. SELECT-only, address equality/index eligibility, no newest-N absence inference/cap/sampling. Slow query remains a visible failure/timeout. Projection/store changes remain separately designed future work, not new #216 discovered work.",
         "testBudgetBoundary": "Field aggregate target observations 17.63s on main versus 12.60s at the PR head exclude compilation and are uncontrolled whole-target samples, not measured marginal #216 cost or slowdown evidence. The 1100-pair source accounting and replaced-fixture limits remain Sentinel/owner-attributed. No new observer, run, comparison or experiment.",
         "exclusionBoundary": "No #201 live/workstation validation/readiness/completion, #198 debt clearance, #203/#210 boundary change, Local/native/nonnative/waiter-family disposition, new schema/protocol/source audit, universal runtime guarantee or other debt retirement."
+      },
+      "later201WorkstreamGateCompletion": {
+        "originGate": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+        "debtFamily": "#199/#211 gate 6420726231",
+        "retiredDebtNumbers": [
+          6
+        ],
+        "originalDebtText": "No host-executed attempt calls back into its own management endpoint; deferred to #201.",
+        "campaign": {
+          "source": "toolu_01CqYpi7HXxEBBKQLphXVVPs",
+          "receipt": {
+            "file": "campaign201-followthrough-accepted-intake.json",
+            "bytes": 873,
+            "sha256": "ccd97eebbc90a5487915e98380119234953694a2e316f2f6a1e747275d65040c"
+          }
+        },
+        "explicitRetirement": {
+          "source": "toolu_01RYzcz4s3ipn4jHrNgnaSd7",
+          "receipt": {
+            "file": "campaign201-explicit-debt6-retirement-intake.json",
+            "bytes": 1599,
+            "sha256": "40e32db75a98678d6b12eb7449d7f89170593542d9f5effced86280f951cbc93"
+          }
+        },
+        "deliveryIssue": "https://github.com/lossyrob/telex/issues/201",
+        "deliveryPr": "https://github.com/lossyrob/telex/pull/235",
+        "head": "2d32acbef6db5e266c1ca49eb939b94c5adc3a06",
+        "merge": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+        "ownerSessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+        "acceptedOutcome": "Campaign accepted #201 exact-merge CI/Docs and full field follow-through, then explicitly retired original gate debt 6 by number based on the reported scheduled same-host management callback, durable delivery and deduplication (4193/4194, one each). This is not a new debt or a local runtime replay.",
+        "preserved215ResolvedDebtNumbers": [
+          2,
+          3
+        ],
+        "preserved216RetiredDebtNumbers": [
+          4
+        ],
+        "retained199Debts": [
+          {
+            "number": 5,
+            "text": "Pre-existing `session_state.rs:91`: `File::open` runs before the regular-file check, so a FIFO `events.jsonl` blocks until Watcher's timeout.",
+            "state": "retained-open"
+          },
+          {
+            "number": 7,
+            "text": "The body has no Deferred work or Discoveries sections; #200 and #201 are referenced only inline.",
+            "state": "retained-open"
+          }
+        ],
+        "retained216Debt": {
+          "kind": "postgres-optimizer-index-use-unasserted",
+          "state": "retained-open"
+        },
+        "completeReceivedSources": [
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013CDQzb1PczbWY1KSwFRuct",
+            "originEvent": {
+              "id": "4b02b5d5-96dc-4820-8067-029123c75b2f",
+              "timestamp": "2026-10-26T18:27:47.659Z",
+              "bytes": 2912,
+              "sha256": "6b55f5cc095ef5817b4c6259b3a6c820e71bef2803205f280ad56dd9aa891178"
+            },
+            "receipt": {
+              "file": "watcher201-owner-launch-intake.json",
+              "bytes": 1378,
+              "sha256": "a6ab43d0feadd9d14d46f1c22996051bf8a35f14629e5a3ced8c1c27ae0da783"
+            },
+            "privateBodyBoundary": "Complete received appointment body is bound privately, not quoted or copied into canonical JSON because it contains a private controller path. Safe historical appointment facts are attributed separately."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_011KS1PLaGdkHAU5v4DLLs3m",
+            "originEvent": {
+              "id": "33770c20-d455-4cf9-bb8c-236c3314ee4d",
+              "timestamp": "2026-10-26T18:32:37.543Z",
+              "bytes": 2348,
+              "sha256": "9baff25b6aa5bc2019cc0d4486921e78237bf2e016f81af3ccd0c93a438e14ac"
+            },
+            "receipt": {
+              "file": "watcher201-activation-intake.json",
+              "bytes": 1096,
+              "sha256": "7e2be0ab81f13da53023583b3facf122d5fa20a13501725b9fb3369cdcbf0fca"
+            },
+            "verbatim": "Status change for Watcher #201 (stall-detection-workstream-gate): planned -> in-progress.\n\nEvidence: the owner claimed the item publicly at 2026-10-26T18:29:24Z in https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329, naming session ee356dca-0526-4bb1-8eda-83c0f0d7b22a.\n\nThat is the owner's runtime session ID. It runs inside the App project session 7aca0f50-2036-46ae-901d-0ff517744e56, which I launched.\n\nThe steward answered the owner's question about the closing-PR evidence shape in 6424158582; there is no shape change. No PR is open yet.\n\nQueue this separately from complete200; it is not part of that tuple."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01LE4C7NfAe6hMzDPjtGz1tK",
+            "originEvent": {
+              "id": "95c4092d-a52d-434a-aa0a-6bc8cceb418f",
+              "timestamp": "2026-10-26T19:26:34.026Z",
+              "bytes": 1809,
+              "sha256": "b6a1f5885d03a2101633ac4a53521f3e816f380f14b6a8c438c6d88da1b2f822"
+            },
+            "receipt": {
+              "file": "watcher201-candidate224-intake.json",
+              "bytes": 826,
+              "sha256": "4d57bf21e5730d2cc15f59212fa522f440bfafa5439575e5e7cfaa77e3f35452"
+            },
+            "verbatim": "Candidate intake only. There is no status, owner or graph change.\n\n#201's owner filed #224 (https://github.com/lossyrob/telex/issues/224): the generated pull fallback exited 7 on an Entra Postgres candidate-fetch timeout, leaving the station unattended. One supported retry is running. Routing is pending with the steward. #201 stays in progress and unblocked for now."
+          },
+          {
+            "sessionId": "88943d7d-c3de-40ec-bb86-a4774d0fdb74",
+            "source": "toolu_011de2aiMXT87XKarZQrqk4p",
+            "originEvent": {
+              "id": "10c708e6-4902-4209-9cdb-8be7fe923548",
+              "timestamp": "2026-10-26T19:30:18.852Z",
+              "bytes": 3212,
+              "sha256": "af590198b32e384bdf60304fa0752a15433bc387f6c8485373009d5d318a5d92"
+            },
+            "receipt": {
+              "file": "watcher201-external224-design-intake.json",
+              "bytes": 1529,
+              "sha256": "9638480be0204a409edbc0c30e39f2a95db3dbe53cf9a5cf2b7ba56dd02d4f55"
+            },
+            "verbatim": "Watcher graph change (evidence: https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009):\n1. Node `stall-detection-workstream-gate`: add an externalDependsOn entry.\n   - id \"local-daemon-pull-fallback-postgres-recovery\"\n   - target {projectKey: telex, workstreamId: local-daemon, nodeId: <the Local node that closes #224; not yet modeled. Bind it when Local assigns one>}\n   - url https://github.com/lossyrob/telex/issues/224\n   - status pending\n   - label: \"Supported Copilot pull-fallback waits on the Entra Postgres profile stay armed. Satisfied by an accepted #224 resolution (merged, exact-head hosted validation, Campaign acceptance), or by #224 closed as environmental with evidence that a supported pull wait on the same profile stays armed past the observed failure window.\"\n2. The gate stays planned and unpassed; outcome and pass criteria are unchanged.\n3. discovered-work.json: update the #224 record from \"no Watcher dependency\" to \"conditional dependency triggered; upstream of stall-detection-workstream-gate\".\nNo other changes."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Er7ZWESoM2ULk98q1D9qNx",
+            "originEvent": {
+              "id": "99fb17ec-42f7-4047-9c7b-ae4ee11d190f",
+              "timestamp": "2026-10-26T19:30:18.856Z",
+              "bytes": 2041,
+              "sha256": "07e63c4443b276c51ea7391975bebda74c03fb0f5aeab2619b62432a12e40095"
+            },
+            "receipt": {
+              "file": "watcher201-blocked224-intake.json",
+              "bytes": 942,
+              "sha256": "d90c93c6326d9fd4e402538a8c1d4e9b21f779afebb77c1dcb4d039c2b2ac9c4"
+            },
+            "verbatim": "Status change for Watcher #201 (stall-detection-workstream-gate): in-progress -> blocked.\n\nThe steward modeled an externalDependsOn on #224 (https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Local has no node for #224 yet. I've asked Local to send you the node id when it models one.\n\nThe owner, 7aca0f50, remains the owner and is holding: no retries, no staged event. Its runtime, registry and branch are retained. Its isolated automated coverage may continue."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_Bi5bSIqdtRu7QH3BvRCGiKG7",
+            "originEvent": {
+              "id": "49193548-3947-4cef-a715-0804c4afdb4c",
+              "timestamp": "2026-10-26T19:32:56.844Z",
+              "bytes": 2026,
+              "sha256": "717c17a1e9de63f0556d6f4a208121e0bee0398d2d37b48c3f975de5c2a2e068"
+            },
+            "receipt": {
+              "file": "watcher201-owner-blocked-intake.json",
+              "bytes": 934,
+              "sha256": "1abed319c86f594c39efdff71ed0b4c453015fd60741f2d3c05502deed2068c4"
+            },
+            "verbatim": "#201 is unpassed and blocked on steward-modeled #224 (decision https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009). Evidence/hold report: https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162 . Validation-only WIP checkpoint 0384a68b is pushed on lossyrob-stall-detection-gate; no PR or completion claim. Runtime/registry retained, root/background cases held until accepted resolution or environmental closure with sustained supported attendance."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_013UzKTLp7ZLfkoJhKYsi9K5",
+            "originEvent": {
+              "id": "8a4c12bf-e186-4f8e-8c4f-b0f87290e5d3",
+              "timestamp": "2026-10-26T20:03:24.540Z",
+              "bytes": 1957,
+              "sha256": "f2bd43450892a54e86063ef8fc5bfc5b03e390bcea3881a58493f8540dc47fe6"
+            },
+            "receipt": {
+              "file": "watcher201-canonical224-binding-intake.json",
+              "bytes": 900,
+              "sha256": "f28b42b424c8e7da842f08a15441299a4c70eb2e1336c2132cd70f69a6ed8fc3"
+            },
+            "verbatim": "Bind #201's external dependency, which the steward set in https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009, to the Local node postgres-fallback-recovery-exhaustion (issue #224), published on main at 51a94f8ef0126e74f89f0f4b7fcd6201d718b793.\n\nLocal has launched owner 769a992c-7319-4d2e-b93a-4977094d7715 for that node; you have its launch receipt.\n\n#201 stays blocked and keeps its owner, 7aca0f50. Nothing else changes."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01WphpY8KBUi1exHB9ug7Hps",
+            "originEvent": {
+              "id": "8cb77638-c008-428c-b98f-623af82be4b3",
+              "timestamp": "2026-10-26T23:24:54.757Z",
+              "bytes": 2230,
+              "sha256": "4d8100aad71b6504ad39ac77bfdf1e709b1b8e16e2eb1cf5afbc5ee80f9fd529"
+            },
+            "receipt": {
+              "file": "campaign201-behavior-accepted-intake.json",
+              "bytes": 888,
+              "sha256": "b107ce6e336913d7ee33c80aeac3492ea62bb4f105325334eae059558f61f5a8"
+            },
+            "verbatim": "#201 behavioral evidence accepted (packet 6429700587). Two real pushed stall events, 4193 and 4194, were each confirmed in the App, rung and handled. The background case completed naturally. This ran on installed build c4f6ac8c with the unchanged Watcher 9e971fd9. The two degraded attempts are expected behavior to be reported only (steward 6429667078). The node is not complete: its closing PR and Campaign gate are still pending."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_jBocpDkO54PvjTOTMmXObbJW",
+            "originEvent": {
+              "id": "4b7da4c3-8a2b-4e88-9f39-4d01474191ff",
+              "timestamp": "2026-10-26T23:36:44.185Z",
+              "bytes": 1719,
+              "sha256": "feface7b9cd13d3a9ac81712d7691e8ed14ba7a69b5212b481b9aeeaeed6ce41"
+            },
+            "receipt": {
+              "file": "owner201-closing-pr-published-intake.json",
+              "bytes": 749,
+              "sha256": "dcb2736aaccae38a03e835240a2a39e29e914ea18b7256e622011c237be6be47"
+            },
+            "verbatim": "#201 closing PR opened: https://github.com/lossyrob/telex/pull/235 at 7b3771818ce38a2b9ff69574d382d706f4731546. Campaign accepted the behavioral evidence in issue comment6429773031; exact-head local targeted validation passed. Independent App review/design receipt/hosted CI pending; not ready."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_lUZAVaSXCKPvtrFLBCEVWIj2",
+            "originEvent": {
+              "id": "296e2df4-a8e9-4d87-b21f-d4a943fd19f7",
+              "timestamp": "2026-10-27T00:23:56.503Z",
+              "bytes": 1759,
+              "sha256": "d0a632f3cfe9115b10deed09b79b75829541cdcbf94f64b28d440d24f7b949f0"
+            },
+            "receipt": {
+              "file": "watcher201-pr235-ready2d32-intake.json",
+              "bytes": 769,
+              "sha256": "acff9b54f8daa2977223dfe190833900425f3563936bd0ccc12da4ed4e2c79bd"
+            },
+            "verbatim": "PR235 / node stall-detection-workstream-gate is ready at2d32acbef6db5e266c1ca49eb939b94c5adc3a06; Campaign gate requested, not yet merged: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 . All22CIchecks green, actual hosted gate execution and exact-head independent/design PASS, closure only201."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01DHg8RjRnH65xJDemrnPH4A",
+            "originEvent": {
+              "id": "1945c249-15ba-4b9f-9915-fcb2fdfc3b1a",
+              "timestamp": "2026-10-27T00:27:05.501Z",
+              "bytes": 2930,
+              "sha256": "0c7c7594cd526a5c6e9b328308ef07a534aeb560e60b808e7c7cd735bd82607f"
+            },
+            "receipt": {
+              "file": "watcher201-merged-fallback234-sequence-intake.json",
+              "bytes": 1387,
+              "sha256": "361b83c8452d11fbd1311682d8857731583f5dfff405b57146d048f3603176d3"
+            },
+            "verbatim": "Status change: stall-detection-workstream-gate (#201) -> completed (main currently shows planned/watch). Evidence: PR #235 merged at exact gated head 2d32acbef6db5e266c1ca49eb939b94c5adc3a06 as 13768159b8a08709895a7d2987dd5ba29cb0c5da at 2026-10-27T00:24:33Z (https://github.com/lossyrob/telex/pull/235); #201 closed COMPLETED at 00:24:35Z. Ready/gate request: https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148 (22/22 checks green at that head, which I verified). Real-case report: https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587. Owner 7aca0f50 keeps follow-through on main CI at the merge, merged validation and the field report; that follow-through is still pending. Campaign has started CI-watch migration onto telex-watcher. Its fallback scheduler stays until #234 merges, so the #234 node publication now gates fallback retirement. I'll staff #233 and #234 once each is verified on main."
+          },
+          {
+            "sessionId": "7aca0f50-2036-46ae-901d-0ff517744e56",
+            "source": "call_WHyLOJ7GXMAnzOHf3RqJS5nQ",
+            "originEvent": {
+              "id": "dc09a75e-fd04-4c94-9302-80f495d29c4b",
+              "timestamp": "2026-10-27T00:50:54.705Z",
+              "bytes": 1839,
+              "sha256": "dd458289967cf31a65601b001e9be0a5b2747c8da9eeab59f47078e079a14b4a"
+            },
+            "receipt": {
+              "file": "watcher201-merged-owner-closeout-intake.json",
+              "bytes": 809,
+              "sha256": "4b78e20f2d83227bc21832613e6602c93b03e0945e1055eda682fd00145d1f8f"
+            },
+            "verbatim": "#201 / stall-detection-workstream-gate closeout is complete at PR235 merge13768159: exact-main CI/Docs attempt1 and merged validation passed; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 . Issue remains closed/completed, design impact none, owner parked; this is the completion evidence for stall-detection-validated."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01CqYpi7HXxEBBKQLphXVVPs",
+            "originEvent": {
+              "id": "c1e8548f-bf22-4639-be86-f5c5a068c796",
+              "timestamp": "2026-10-27T00:50:54.709Z",
+              "bytes": 2200,
+              "sha256": "076582a0303e20036309e8e8f837aa50ce41a22b89481631726bc7fe381b416c"
+            },
+            "receipt": {
+              "file": "campaign201-followthrough-accepted-intake.json",
+              "bytes": 873,
+              "sha256": "ccd97eebbc90a5487915e98380119234953694a2e316f2f6a1e747275d65040c"
+            },
+            "verbatim": "Accepted #201 follow-through: CI 40426207346 at 22/22 and Docs 40426476177 at 2/2, both at 13768159, and field report 6430902526. Proceed with the #201 completion record when you have a slot. Dispositions recorded: the installed build c4f6ac8c stays active with 9e971fd9 as rollback, and registration campaign-stalls-201-20261026 and root-201 are retained as Campaign's standing dogfood. No #231, #233 or #234 credit."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01Mv4hBjJDGSExZesyqLbAo3",
+            "originEvent": {
+              "id": "c7a267a2-b553-4aa4-8677-7f1fb7bc3312",
+              "timestamp": "2026-10-27T00:50:54.712Z",
+              "bytes": 2560,
+              "sha256": "bdb2d0a39fc164bd92baeb2f558a31a2b6687c30c3e79a2fcd776c77192e08d1"
+            },
+            "receipt": {
+              "file": "watcher201-completion-standing-dogfood-intake.json",
+              "bytes": 1202,
+              "sha256": "408ee9aa2d4dbada1ab5ec37d2362fe20ad8339697cb85b6fe03bbf7b404f591"
+            },
+            "verbatim": "Status/owner change: stall-detection-workstream-gate (#201) -> completed. Evidence: Campaign accepted the follow-through at 2026-10-27T00:49Z (Campaign toolu_01RffxRxhY5CuD5Eo6YjKBhL). PR235 merge 13768159b8a08709895a7d2987dd5ba29cb0c5da; on that commit I verified CI (push) and Docs (workflow_dispatch) completed with success; field report https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526 (2026-10-27T00:47:30Z). Owner 7aca0f50 is stopping with no remaining duty. Watcher registration campaign-stalls-201-20261026 rev 1 (root-201, both members parked) stays registered as Campaign's standing stall dogfood, with Campaign as its contact. Its health is part of the migration fallback condition, which stays in force until #234."
+          },
+          {
+            "sessionId": "fe2e883c-debc-4573-a855-2cf1e0f89407",
+            "source": "toolu_01AG3CbrPcyGc6KaxKBKnNyN",
+            "originEvent": {
+              "id": "36e0155a-6c9e-4e28-95fa-1928c0cfdf1e",
+              "timestamp": "2026-10-27T06:43:44.652Z",
+              "bytes": 7620,
+              "sha256": "5e3689cad9b3118409ea267dfc8809e8ebbcf4c00b6ba41bb1079255d5f848bc"
+            },
+            "receipt": {
+              "file": "watcher201-post216-preparation-scope-intake.json",
+              "bytes": 3732,
+              "sha256": "b9d4123a37c6ccb428a279ba8a78e5a2cb1bc76689ccd5192ebcfe9206d5a759"
+            },
+            "verbatim": "#201 closeout preparation: scope CONFIRMED, with the qualifications below. This is not a tuple approval and does not affect current #216 approval or authority.\n\nSource-time observations (read-only, main e5b8f2d1):\n- Node stall-detection-workstream-gate (#201) is planned/watch, its summary is the original 301-char contract, and no node depends on it.\n- Checkpoint stall-detection-validated is planned, with the same five nodeIds. Once the #216 projection lands, all five will be completed after #201.\n- The usable-watcher checkpoint does not include any of these nodes.\n- Field 6430902526 is by lossyrob on #201, created 00:47:30Z.\n- My #201 binding names owner 7aca0f50-2036-46ae-901d-0ff517744e56. I have recorded no release.\n\nQualifications:\n1. Debt 6 identity: the origin is PR #211 gate 6420726231, item 6: \"No host-executed attempt calls back into its own management endpoint; deferred to #201.\"\n   - The field calls it \"#199 gate debt 6\". Record it as #199/#211 gate debt 6, the same family as #211 debt 4, so it is not a new debt.\n   - The brief already records debts 2-7 retained under #199 (lines 748, 790, 793). The ledger has no debt-6-specific field, so the new row qualifications are the first typed record of it.\n2. Retirement versus attribution: the field says \"This discharges #199 gate debt 6.\" Retire debt 6 ONLY if the Campaign acceptance text itself accepts that discharge, or retirement of the debt, by number or unambiguously. If it only accepts #201 completion or follow-through, record it as producer-claimed discharge with attribution, retained-open pending Campaign disposition, and ask Campaign for a one-line ruling.\n   - ID check: my checkpoint records the Campaign #201 acceptance as toolu_01RffxRxhY5CuD5Eo6YjKBhL, not toolu_01CqYpi7HXxEBBKQLphXVVPs. Confirm which raw event carries the acceptance body before binding either.\n   - I can't attest that toolu_01Mv4hBjJDGSExZesyqLbAo3 is mine from memory. Bind it from its raw origin.\n3. Debts that stay exact and open:\n   - #199/#211 debts 5 (FIFO events.jsonl open before regular-file check) and 7 (no Deferred work or Discoveries sections). #215 [2,3] and #216 [4] stay as recorded.\n   - The #216 Postgres optimizer-plan debt. The field explicitly excludes PostgreSQL plan/index assertions and macOS containment: Windows-only evidence.\n   - The #198/#203/#210 boundaries.\n4. No credit or new disposition for:\n   - #224 (pull not retested);\n   - #231 (false ack failures);\n   - #234 (unattributed Watcher stop);\n   - the #182/6430207179 seed-test association;\n   - the two degraded/no-state observations, which keep the steward's report-only disposition 6429667078, causes unknown;\n   - #172 or usable-watcher.\n   The campaign-stalls-201 registration, root-201 and installed build stay Campaign's disposition (and 9591bf30's authorized upgrade sequence). Do not infer an owner release from \"parked member record\" unless Campaign's acceptance says so.\n5. Checkpoint planned -> completed is correct only in a tuple whose base already contains the actual #216 publication. The checkpoint summary criteria (one event, suppression, confirm/ring, status view) map to the field table.\n\nNo other Watcher node, edge or readiness changes. Nothing becomes launchable."
+          },
+          {
+            "sessionId": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "source": "toolu_01RYzcz4s3ipn4jHrNgnaSd7",
+            "originEvent": {
+              "id": "1817b1ad-2989-42c1-8b55-e30c7f50d33a",
+              "timestamp": "2026-10-27T06:45:25.568Z",
+              "bytes": 2574,
+              "sha256": "d70f3b79eb9a25e96f99aa60b139bf6ad50afd7e1f884359a3dd9d89ca28ce39"
+            },
+            "receipt": {
+              "file": "campaign201-explicit-debt6-retirement-intake.json",
+              "bytes": 1599,
+              "sha256": "40e32db75a98678d6b12eb7449d7f89170593542d9f5effced86280f951cbc93"
+            },
+            "verbatim": "Campaign ruling on #199/#211 gate 6420726231 debt 6: RETIRE. Basis: accepted #201 field 6430902526 (exact-merge 13768159, CI 40426207346 / Docs 40426476177 attempt 1) reports the scheduled same-host management callback with durable delivery and dedup passing in real episodes (messages 4193/4194, one each) and states \"This discharges #199 gate debt 6\"; Campaign accepted that follow-through and now explicitly retires debt 6 by number on that basis. Debts 5 and 7 and all other listed debts/limits stay exactly as recorded. No release/launch/runtime change; does not touch the current #216 tuple/hold."
+          }
+        ],
+        "publicComments": [
+          {
+            "id": 6420726231,
+            "url": "https://github.com/lossyrob/telex/pull/211#issuecomment-6420726231",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T16:01:41Z",
+            "updatedAt": "2026-10-26T16:01:41Z",
+            "body": {
+              "file": "complete201v2-comment-6420726231-body.txt",
+              "bytes": 3490,
+              "sha256": "cd5ba3c51f8c5b5953df921b13dc10e187b51fd658502e662bd91c0fbb0062a3"
+            }
+          },
+          {
+            "id": 6424149329,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6424149329",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T18:29:24Z",
+            "updatedAt": "2026-10-26T18:29:24Z",
+            "body": {
+              "file": "complete201v2-comment-6424149329-body.txt",
+              "bytes": 1089,
+              "sha256": "f89cb271b5b68c99bd4be84de6f33b22549153ead5b874e32f64ccbdefb3f318"
+            }
+          },
+          {
+            "id": 6424158582,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6424158582",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T18:29:51Z",
+            "updatedAt": "2026-10-26T18:29:51Z",
+            "body": {
+              "file": "complete201v2-comment-6424158582-body.txt",
+              "bytes": 3110,
+              "sha256": "dacc2ed3ab5a80c848ba7bd1484bb81d4b9a05ce269a45f988b6ee1f6998a68a"
+            }
+          },
+          {
+            "id": 6425382009,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425382009",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:29:30Z",
+            "updatedAt": "2026-10-26T19:29:30Z",
+            "body": {
+              "file": "complete201v2-comment-6425382009-body.txt",
+              "bytes": 2071,
+              "sha256": "81280e282f91625ac2b129b458ab76ce370e416cc3d185fcae2301c6c658f5ba"
+            }
+          },
+          {
+            "id": 6425427162,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6425427162",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T19:31:49Z",
+            "updatedAt": "2026-10-26T19:31:49Z",
+            "body": {
+              "file": "complete201v2-comment-6425427162-body.txt",
+              "bytes": 2585,
+              "sha256": "268835ff1f1173cb156f089fbe4f1baddd9c789a79380f074343d27e934f5aa8"
+            }
+          },
+          {
+            "id": 6429667078,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429667078",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:21:10Z",
+            "updatedAt": "2026-10-26T23:21:10Z",
+            "body": {
+              "file": "complete201v2-comment-6429667078-body.txt",
+              "bytes": 2509,
+              "sha256": "892613cb7c69d4b54d07d30446b0b626f7c0095952860bc3cbc4d505c95c54f5"
+            }
+          },
+          {
+            "id": 6429700587,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429700587",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:23:24Z",
+            "updatedAt": "2026-10-26T23:23:24Z",
+            "body": {
+              "file": "complete201v2-comment-6429700587-body.txt",
+              "bytes": 6142,
+              "sha256": "007576b016b54849cb1efac67c9f6b5c3bf0f0323025e5d98999a6c0cb3892be"
+            }
+          },
+          {
+            "id": 6429773031,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6429773031",
+            "author": "lossyrob",
+            "createdAt": "2026-10-26T23:28:02Z",
+            "updatedAt": "2026-10-26T23:28:02Z",
+            "body": {
+              "file": "complete201v2-comment-6429773031-body.txt",
+              "bytes": 1661,
+              "sha256": "f219edb386bd60d215f22d809d785606a843b60e6e6b53e63ec8a6f373032abc"
+            }
+          },
+          {
+            "id": 6430326490,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430326490",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:06:40Z",
+            "updatedAt": "2026-10-27T00:06:40Z",
+            "body": {
+              "file": "complete201v2-comment-6430326490-body.txt",
+              "bytes": 2286,
+              "sha256": "ce2a7a33ed96f4c04598ed586f3c621b8779a817587649f601a7a14de4221873"
+            }
+          },
+          {
+            "id": 6430458032,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430458032",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:15:32Z",
+            "updatedAt": "2026-10-27T00:15:32Z",
+            "body": {
+              "file": "complete201v2-comment-6430458032-body.txt",
+              "bytes": 3487,
+              "sha256": "14e9411242d25e5c5fe7b3cb923351e953196f29c663a61b8ca783b0a2cf3561"
+            }
+          },
+          {
+            "id": 6430569148,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430569148",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:23:24Z",
+            "updatedAt": "2026-10-27T00:23:24Z",
+            "body": {
+              "file": "complete201v2-comment-6430569148-body.txt",
+              "bytes": 2465,
+              "sha256": "6df6e07a3858597ba75e5e85d74e2a0bab3d152e32f1a83845f1a509250a8c72"
+            }
+          },
+          {
+            "id": 6430584726,
+            "url": "https://github.com/lossyrob/telex/pull/235#issuecomment-6430584726",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:24:30Z",
+            "updatedAt": "2026-10-27T00:24:30Z",
+            "body": {
+              "file": "complete201v2-comment-6430584726-body.txt",
+              "bytes": 1510,
+              "sha256": "f794927042bb6b13746ee22b98a3263e1086fee85cc095329f1ff6cd4c40cc94"
+            }
+          },
+          {
+            "id": 6430902526,
+            "url": "https://github.com/lossyrob/telex/issues/201#issuecomment-6430902526",
+            "author": "lossyrob",
+            "createdAt": "2026-10-27T00:47:30Z",
+            "updatedAt": "2026-10-27T00:47:30Z",
+            "body": {
+              "file": "complete201v2-comment-6430902526-body.txt",
+              "bytes": 4976,
+              "sha256": "dd5db8a46af3ff58ba700804b3ff6678d9c5a2c0b919d1f7f8aaef74cd9e5d3f"
+            }
+          }
+        ],
+        "hostedCi": {
+          "main": {
+            "run": 40426207346,
+            "head": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+            "attempt": 1,
+            "event": "push",
+            "jobs": 22,
+            "conclusion": "success",
+            "jobIds": [
+              121932483195,
+              121932483268,
+              121932483352,
+              121932483360,
+              121932483373,
+              121932483385,
+              121932483395,
+              121932483420,
+              121932483425,
+              121932483427,
+              121932483446,
+              121932483455,
+              121932483456,
+              121932483481,
+              121932483515,
+              121932483526,
+              121932483533,
+              121932483536,
+              121932483586,
+              121932483605,
+              121932483643,
+              121932483689
+            ],
+            "source": {
+              "file": "complete201v2-main-attempt1-jobs-raw.json",
+              "bytes": 92898,
+              "sha256": "afee578d71eb7ba1ac4ec4c025ba6fbf70e76896a4beb7a308845b09df97fe83"
+            },
+            "boundary": "Endpoint-matched run/job/step result metadata only, not fresh execution, per-test, checkout, logs or runtime proof."
+          },
+          "docs": {
+            "run": 40426476177,
+            "head": "13768159b8a08709895a7d2987dd5ba29cb0c5da",
+            "attempt": 1,
+            "event": "workflow_dispatch",
+            "jobs": 2,
+            "conclusion": "success",
+            "jobIds": [
+              121933382000,
+              121933878543
+            ],
+            "source": {
+              "file": "complete201v2-docs-attempt1-jobs-raw.json",
+              "bytes": 5921,
+              "sha256": "a65afa6b10ba52d9f49918fe73bb8e9b147d19a684c491ecdffa01ffcda6a0a9"
+            },
+            "boundary": "Endpoint-matched run/job/step result metadata only, not fresh execution, per-test, checkout, logs or runtime proof."
+          }
+        },
+        "checkpoint": {
+          "id": "stall-detection-validated",
+          "previousStatus": "planned",
+          "currentStatus": "completed",
+          "nodeIds": [
+            "copilot-session-state-classifier",
+            "copilot-group-stall-detector",
+            "stall-detection-agent-guidance",
+            "stall-detection-workstream-gate",
+            "stall-detector-inbox-history"
+          ],
+          "boundary": "Only this existing five-node checkpoint completes after actual #216 publication and #201 completion. No usable-watcher or other checkpoint/node/readiness/edge changes."
+        },
+        "sourceIdentityBoundary": "Direct Campaign Cq receipt is authenticated as its own event. Rffx is a Campaign call quoted in the authenticated Watcher Mv4 report, not a substitute direct origin or an independent authentication of that nested call.",
+        "ownerBoundary": "The historical App owner remains 7aca0f50. Parked/stopping/no-duty are producer/Watcher reports, not an inferred Campaign binding release, replacement, launch or runtime transition.",
+        "operationalBoundary": "Campaign retains campaign-stalls-201-20261026, root-201, installed c4f6ac8c and 9e971fd9 rollback as its sourced standing-dogfood disposition. No current liveness/health, installation, upgrade, registration or fallback-retirement action/proof; 9591bf30 authorized upgrade sequence remains separate.",
+        "methodBoundary": "Windows evidence is attributed to the accepted reports. Endpoint job results are metadata, not fresh tests/native/source/log/checkout/observer/management-callback/cleanup replay. The post-CI archive build, formatting, four scheduled-host cases, twenty unit tests, isolated roots and clean worktree remain producer claims.",
+        "exclusionBoundary": "Debts 5/7, PG optimizer-plan index use, #198/#203/#210, macOS containment/#172, #224 pull-not-retested, #231 false acks, #234 unattributed stop, qualified #182/6430207179 seed-test association and the two unknown-cause degraded report-only observations remain exact. No #233 or usable-watcher credit, new owner, edge, launch, runtime or universal guarantee."
       }
     },
     {
