@@ -10,7 +10,9 @@ import time
 import derived
 
 
-MARKER = re.compile(r"<!-- arm24-intel25-derived-authority-v1 (\{[^\r\n]*\}) -->")
+COMPONENT = "intel25-families-v1"
+ATTEMPT_JOBS = ("Intel25",)
+MARKER = re.compile(r"<!-- intel25-families-authority-v1 (\{[^\r\n]*\}) -->")
 ISSUE = "https://api.github.com/repos/lossyrob/telex/issues/172"
 COMMENT = "https://github.com/lossyrob/telex/issues/172#issuecomment-"
 WORKFLOW = ".github/workflows/macos-cross-static.yml"
@@ -57,10 +59,10 @@ def approved_records(comments):
 def validate(records, context, previous=None):
     require(previous is None and type(context["attempt"]) is int and context["attempt"] == 1,
             "zero retries, including infrastructure; return to design")
-    require(context["job"] in ("ARM24", "Intel25"), "unknown component context")
-    common = {"component": "arm24-intel25-derived-v1", "sha": context["sha"],
+    require(context["job"] in ATTEMPT_JOBS, "unknown component context")
+    common = {"component": COMPONENT, "sha": context["sha"],
               "bounds_sha256": context["bounds_sha256"], "source_manifest_sha256": context["source_manifest_sha256"],
-              "workflow": WORKFLOW, "jobs": ["ARM24", "Intel25"],
+              "workflow": WORKFLOW, "jobs": list(ATTEMPT_JOBS),
               "artifact_id": context["artifact_id"], "candidate_sha256": context["candidate_sha256"],
               "candidate_bytes": context["candidate_bytes"], "expires_at": context["expires_at"],
               "attempt": 1, "retries": 0}
@@ -107,6 +109,7 @@ def check(job):
     here = Path(__file__).resolve().parent
     raw = (here / "bounds.json").read_bytes()
     bounds = derived.strict_json(raw)
+    require(bounds["component"] == COMPONENT, "bounds component identity mismatch")
     pin = bounds["tools"]["ipsw"]
     derived.unexpired(pin)
     require(os.environ.get("GITHUB_EVENT_NAME") == "push" and os.environ.get("GITHUB_RUN_ATTEMPT") == "1" and

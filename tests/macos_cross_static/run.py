@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from macos_static_cache import EvidenceError, require, save
 from macos_static_ridiff import Run, ridiff_output_bound
-from cache import Output, choose_family, collect
+from cache import Output, DomainBudget, DomainOutput, choose_family, collect, intel_domains
 import gate
 import derived
 from native import NativeBinding, bind_hash
@@ -219,6 +219,42 @@ class ComponentRun(Run):
         return parsed
 
 
+def collect_intel_domains(run, mount):
+    require(run.receipt.get("decoder_confirmed_before_semantic_processing") is True,
+            "Intel domains require completed exact-child and post-decoder confirmation")
+    run.phase("Intel25-family-inventory")
+    domains = intel_domains(mount, run.config, run.output, run.deadline)
+    budget = DomainBudget(run.bounds["limits"], run.deadline)
+    summary = {"candidate_only": True, "selection_performed": False, "domains": [],
+               "all_present_passed": False, "aggregate_usage": budget.used,
+               "post_decoder_confirmation": "native-binding-acceptance.json",
+               "native_Intel_family_correspondence_claimed": False}
+    for domain in domains:
+        family = domain["family"]
+        output = DomainOutput(run.output, family, budget)
+        record = {**domain, "evidence_prefix": output.prefix,
+                  "evidence_names": "Names inside domain reports are relative to this flat prefix.",
+                  "post_decoder_confirmation": "native-binding-acceptance.json", "status": "decision-needed"}
+        summary["domains"].append(record)
+        try:
+            run.phase("Intel25-domain-" + family)
+            report = collect(Path(domain["primary"]), family, output, run)
+            record.update(wrapper_report=output.prefix + "wrapper-evidence.json",
+                          missing_count=len(report["missing"]), helper_incomplete_count=report["helper_incomplete_count"])
+            require(not report["missing"] and report["helper_incomplete_count"] == 0,
+                    "Intel domain wrapper closure incomplete: " + family)
+            require(run.receipt.get("decoder_confirmed_before_semantic_processing") is True,
+                    "Intel post-decoder confirmation missing")
+            record["status"] = "checked-offline-candidate"
+        except (EvidenceError, OSError) as error:
+            record["error"] = {"type": type(error).__name__, "message": str(error)}
+        run.output.json("intel-domain-results.json", summary)
+    summary["all_present_passed"] = all(row["status"] == "checked-offline-candidate" for row in summary["domains"])
+    run.output.json("intel-domain-results.json", summary)
+    require(summary["all_present_passed"], "Intel all-present domains decision-needed; no fallback or partial pass")
+    return {"missing": [], "helper_incomplete_count": 0}
+
+
 def execute(run):
     c = run.config
     run.native_binding = NativeBinding(run)
@@ -293,11 +329,14 @@ def execute(run):
     run.receipt["reconstructed_image"] = {"bytes": image.stat().st_size, "sha256": digest.hexdigest()}
     run.delete(patch)
     mount, attached = run.attach(image, "selected-image")
-    primary = choose_family(mount, c)
-    run.output.json("family-selection.json", {"rule": c["family_rule"], "selected": str(primary),
-        "checked_paths": c["cache_primary_candidates"] + c.get("ambiguity_checks", []),
-        "candidate_only": True})
-    report = collect(primary, c["cache_family"], run.output, run)
+    if run.job == "Intel25":
+        report = collect_intel_domains(run, mount)
+    else:
+        primary = choose_family(mount, c)
+        run.output.json("family-selection.json", {"rule": c["family_rule"], "selected": str(primary),
+            "checked_paths": c["cache_primary_candidates"] + c.get("ambiguity_checks", []),
+            "candidate_only": True})
+        report = collect(primary, c["cache_family"], run.output, run)
     run.receipt["wrapper_missing_count"] = len(report["missing"])
     run.receipt["helper_incomplete_count"] = report["helper_incomplete_count"]
     run.detach(attached)
@@ -319,7 +358,7 @@ def execute(run):
 
 
 def main():
-    require(len(sys.argv) == 4 and sys.argv[1] in BOUNDS["jobs"], "usage: run.py JOB ABS_WORK ABS_EVIDENCE")
+    require(len(sys.argv) == 4 and sys.argv[1] in gate.ATTEMPT_JOBS, "usage: run.py Intel25 ABS_WORK ABS_EVIDENCE")
     require(sys.platform == "darwin" and os.getuid() != 0, "ordinary-user macOS decoder required")
     job, work, evidence = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     require(work.is_absolute() and evidence.is_absolute() and work != evidence, "private paths required")

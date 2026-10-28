@@ -1,12 +1,12 @@
 {
-  "component": "arm24-intel25-derived-v1",
+  "component": "intel25-families-v1",
   "authority_comments": [6400716200, 6401198510, 6401453292, 6401508183, 6401764977, 6406113431, 6406617725, 6406629529, 6406665201, 6418752165, 6419297367, 6429489865, 6429608421],
   "preflight_index_sha256": "b0ffc0022622454fbe680496a4d2ece1f4ba68822756cadae6eb2ef7e4d78ce6",
   "baseline_commit": "e946b9f5779d3a291211de5e7f47017cda3a3b5c",
   "prelaunch_status": {
     "launch_ready": false,
     "decoder_pins": "6401453292 permits the declared provider-host observed-hash timing rule. This corrected implementation and its actual loaded-library/backing-cache binding remain unreviewed and unexecuted; any unavailable binding is decision-needed, not a nominal-path fallback.",
-    "intel_family": "6401508183 admits the finite x86_64-only/no-x86_64h stop rule without proof of cache existence. Candidate paths are image-root-relative, with ancestor-symlink, access-error, raw-CPU/subtype and capability checks; the corrected packet still requires issue freeze.",
+    "intel_family": "6432495216 requires every present x86_64/x86_64h family at the four exact locations as a separate domain, with no selection or fallback and all checks passing under shared existing limits. 6468291693 permits only Intel25 job admission after fresh whole-source review, NEW finite and NEW freeze.",
     "required_owner_freeze_fields": ["source_review", "source_review_body_sha256", "finite_disposition", "finite_body_sha256"],
     "derived_stage": "Fresh exact whole-component-source APPROVE, then NEW finite component disposition, then NEW genuine freeze. Earlier BUILD/source/actual approvals never transfer. No preparation launch authority."
   },
@@ -163,7 +163,7 @@
     "successful_job_rerun_forbidden": true,
     "record_required_on_frozen_issue_comment": true,
     "nonretryable": ["infrastructure", "capacity", "provenance", "identity", "decoder", "semantic discrepancy", "incomplete preflight"],
-    "owner_action": "One two-context component attempt, ZERO retries including infrastructure. Any failure or artifact expiry returns to design; no rerun, rebuild, substituted bytes or old retry marker."
+    "owner_action": "One Intel25-only component attempt, ZERO retries including infrastructure. Any failure or artifact expiry returns to design; no rerun, rebuild, substituted bytes or old retry marker."
   },
   "jobs": {
     "ARM24": {
@@ -218,11 +218,17 @@
       ],
       "catalog_entries": 73,
       "manifest_variants": {"CustomerInstall": 8, "CustomerFirmwareUpdate": 8, "RecoveryBoot": 8, "macOS Customer Software Update": 56, "Customer Software Update": 56},
-      "cache_family": "x86_64",
-      "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_x86_64", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64"],
-      "ambiguity_checks": ["System/Library/dyld/dyld_shared_cache_x86_64h", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64h"],
-      "family_rule": "6401508183-admissible finite stop rule: inside only the authenticated image root, require exactly one regular nonsymlink x86_64 primary and no x86_64h competitor at the two exact locations. Reject symlinked ancestors, alias escape, inaccessible/unclassifiable locations and duplicates even if identical. Exact x86_64 magic, raw CPU16777223 and raw subtype3 with zero capability bits are required. No masking, search expansion or post-failure substitution; the patch tag does not prove the cache exists.",
-      "cpu_policy": {"cpu_raw": 16777223, "subtype_raw_allowed": [3], "capability_bits_allowed": 0, "normalization": "none; subtype with any capability bits is rejected"},
+      "cache_domains": {
+        "x86_64": {
+          "locations": ["System/Library/dyld/dyld_shared_cache_x86_64", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64"],
+          "cpu_policy": {"cpu_raw": 16777223, "subtype_raw_allowed": [3], "capability_bits_allowed": 0, "normalization": "none"}
+        },
+        "x86_64h": {
+          "locations": ["System/Library/dyld/dyld_shared_cache_x86_64h", "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64h"],
+          "cpu_policy": {"cpu_raw": 16777223, "subtype_raw_allowed": [8], "capability_bits_allowed": 0, "normalization": "none"}
+        }
+      },
+      "family_rule": "6432495216: classify all four exact confined locations, retaining each present path/lstat type/size/SHA256. Every present family is a separate bound domain, selecting none. Require exact own-family magic, raw CPU16777223, subtype3 for x86_64 or8 for x86_64h with zero capability bits. No family, duplicate within a family, location/content mismatch or any failed check is decision-needed. Full checks per domain and all-present pass required under aggregate existing job limits; no masking, fallback, cap increase or native Intel correspondence claim.",
       "uuid_evidence": "new offline candidates; no expected native library UUIDs"
     }
   }

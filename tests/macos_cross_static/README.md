@@ -1,9 +1,10 @@
 # Derived-tool offline component: local preparation only
 
-This component prepares two offline input contexts, ARM24 and Intel25, on
-**native ARM64 decoder hosts**. Intel25 describes the x86_64 offline image
-family, not native x86 execution evidence. Both jobs use explicit `macos-26`
-and fail unless architecture is arm64, product is 26.6.2 and build is 25G83.
+This component prepares **Intel25 only** on a native ARM64 decoder host.
+Intel25 describes an offline Intel image, not native x86 execution evidence.
+The job uses explicit `macos-26` and fails unless architecture is arm64,
+product is 26.6.2 and build is 25G83. The unchanged ARM24 configuration and
+offline fixtures remain in source but ARM24 is not admitted by the hosted path.
 Runner image version remains recorded.
 
 The derived BUILD stage is complete under
@@ -77,9 +78,10 @@ substring matches. Acceptance checks retention again.
 
 ## Fresh authority sequence, zero retries
 
-The only recognized authority syntax is the versioned
-`arm24-intel25-derived-authority-v1` comment schema implemented in `gate.py`.
-Old static retry markers and BUILD approvals are not recognized. This document
+Under [6468291693](https://github.com/lossyrob/telex/issues/172#issuecomment-6468291693),
+the only recognized authority syntax is the versioned
+`intel25-families-authority-v1` comment schema implemented in `gate.py`.
+Old dual-context/static retry markers and BUILD approvals are not recognized. This document
 does not create an authority record or supply a launch marker.
 
 All three owner-routed comments must be canonical issue-172 comments authored
@@ -89,9 +91,9 @@ by `lossyrob` (account ID 2320142), unedited, distinct and ordered by creation t
 2. A new steward finite component disposition.
 3. A new genuine owner freeze.
 
-Every record binds `component=arm24-intel25-derived-v1`, the exact current
+Every record binds `component=intel25-families-v1`, the exact current
 `sha`, `bounds_sha256`, ordered `source_manifest_sha256`, workflow
-`.github/workflows/macos-cross-static.yml`, jobs `[ARM24, Intel25]`,
+`.github/workflows/macos-cross-static.yml`, jobs exactly `[Intel25]`,
 artifact ID, candidate hash/size, expiry, `attempt=1` and `retries=0`.
 Unknown fields, missing keys, wrong types or ambiguous matches fail closed.
 
@@ -116,16 +118,75 @@ Semantic independence of the owner-routed reviewer and steward remains an
 owner/reviewer obligation; these syntactic bindings are not a substitute for
 their decisions. No earlier BUILD/source/actual approval transfers.
 
-**One two-context component attempt, zero retries, including infrastructure.**
+**One Intel25-only component attempt, zero retries, including infrastructure.**
 The workflow admits attempt 1 only. A rerun, failed-job retry, repeat same-source
-push, expiry or any failure returns to design. Both jobs are contexts within
-that one attempt, not two independently renewable budgets. All five prior
-BUILD attempts are consumed.
+push, expiry or any failure returns to design. The workflow contains only the
+Intel25 job; the gate's `ATTEMPT_JOBS = ("Intel25",)` is also the run admission
+source of truth, so an ARM24 argv fails before host, gate or filesystem work.
+The gate rejects bounds with a different component identity. The 12-file
+source closure, authority headers/keys/order/refetch rules and candidate
+bindings are unchanged. All five prior BUILD attempts and both a06 and 3d
+component attempts are consumed.
+
+## All-present Intel families, no selection
+
+The operator authorized this local preparation and at most one future gated
+Intel25 attempt on 2026-10-28. It does not authorize another ARM24 capture.
+[6432495216](https://github.com/lossyrob/telex/issues/172#issuecomment-6432495216)
+requires classification of all four original image-relative locations:
+the `dyld_shared_cache_x86_64` and `dyld_shared_cache_x86_64h` primaries under
+`System/Library/dyld` and `System/Library/Caches/com.apple.dyld`.
+The unchanged confinement helper treats only ENOENT as absence and rejects
+symlinked ancestors/entries, nonregular or unreadable files, aliases and
+cross-device traversal. Each present primary's path, lstat type, size, full
+SHA256 and magic bytes are retained in `intel-family-inventory.json`.
+File identity/size are checked again after bounded deadline-controlled hashing.
+
+Every present family is analyzed independently; none is selected over another.
+Zero families, duplicates within a family (even identical bytes), wrong
+location/content family, or any failed domain check remains decision-needed.
+The header's full family token must match its domain. Every parsed library or
+helper image requires raw CPU `0x1000007`, raw subtype 3 for x86_64 or 8 for
+x86_64h, and zero capability bits, without masking. Layout, declared subcache
+UUIDs, both selected system libraries, roots, wrappers and helpers are checked
+by the same complete reader for each domain.
+
+Domain files and disassembly command records have `x86_64-` or `x86_64h-`
+prefixes in the one flat evidence directory. Names within each domain report
+are relative to its recorded `evidence_prefix`; equal UUIDs/addresses/body
+indices across domains cannot overwrite each other. The inherited subcache
+table write is routed through that same bounded sink.
+
+Both domains share the existing job's function, entry-analysis, code-byte,
+image-metadata count/byte and fixup-page budgets. File count, per-file and total
+evidence size use one job sink; all work shares the original processing
+deadline, and Intel cache reads check it. Per-analysis CFG, per-function and
+per-image limits remain unchanged. Exhaustion returns to design, never a
+larger cap or partial success. No real image fit is established by tiny
+synthetic tests.
+
+The image is decoded once. Existing exact-child confirmation and the full
+post-decoder native snapshot must complete before *either* domain; both domain
+records bind that same `native-binding-acceptance.json`. No extra decoder
+invocation or native snapshot is introduced. Final native/tool checks remain
+after all domains and cleanup. `intel-domain-results.json` is provisional
+domain status, not final native or semantic acceptance. Every present domain
+must have no missing wrapper records and pass; a failed domain cannot be
+replaced by a successful sibling. Runtime callbacks and helper gaps are not
+automatically exempted.
+
+ARM24's reader/CPU rules, execution branch and callback classifications stay
+unchanged, but its hosted entry is unreachable. Its separate retained-only
+classification is owner work, not implemented or adjudicated here. Intel
+results remain offline candidates, with no claim about which family a real
+Intel host loads, native correspondence or physical Intel coverage.
 
 ## Preserved native and input contract
 
-`cache.py` and the three inherited dependencies remain unchanged. The only
-`native.py` correction is the narrow trace grammar described below.
+The three inherited dependencies remain unchanged. `cache.py` adds the Intel
+domain inventory, namespace and shared-budget path without changing ARM24
+semantics. `native.py` retains the previously reviewed narrow trace grammar
+described below without further changes.
 Native resolution/before-transfer binding precedes acquisition and all input
 transfers. Candidate verification/version checks remain before the original
 Apple input chain. Seven roots, query-wrapper exclusions, family selection,
@@ -170,7 +231,8 @@ attempt reached no post-decoder confirmation, semantics or native acceptance.
 The grammar correction makes no claim about dyld's internal delayed-loading
 behavior or decoder correctness.
 
-All five BUILDs and a06 component attempt 40425113395/1 remain consumed, with
+All five BUILDs, a06 component attempt 40425113395/1 and 3d component attempt
+40435086116/1 remain consumed, with
 zero retries and HOLD unchanged. Before any future attempt: fresh independent
 WHOLE component-source review, a NEW steward finite disposition binding it,
 then a NEW genuine owner freeze. No approval transfers from source review

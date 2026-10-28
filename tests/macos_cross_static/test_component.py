@@ -35,17 +35,17 @@ spec.loader.exec_module(run)
 
 class FreezeTests(unittest.TestCase):
     def setUp(self):
-        self.context = {"sha": "a" * 40, "bounds_sha256": "b" * 64, "job": "ARM24",
+        self.context = {"sha": "a" * 40, "bounds_sha256": "b" * 64, "job": "Intel25",
                         "attempt": 1, "run_id": 12, "source_manifest_sha256": "c" * 64,
                         "artifact_id": 12694487625, "candidate_sha256": "d" * 64, "candidate_bytes": 17,
                         "expires_at": "2099-01-01T00:00:00Z", "run_created_at": "2026-10-27T00:00:04Z"}
         common = {k: self.context[k] for k in ("sha", "bounds_sha256", "source_manifest_sha256",
                   "artifact_id", "candidate_sha256", "candidate_bytes", "expires_at")}
-        common.update(component="arm24-intel25-derived-v1", workflow=gate.WORKFLOW,
-                      jobs=["ARM24", "Intel25"], attempt=1, retries=0)
+        common.update(component="intel25-families-v1", workflow=gate.WORKFLOW,
+                      jobs=["Intel25"], attempt=1, retries=0)
         self.comments = []
         def append(kind, ident, fields, header):
-            body = header + "\n<!-- arm24-intel25-derived-authority-v1 " + json.dumps(
+            body = header + "\n<!-- intel25-families-authority-v1 " + json.dumps(
                 dict(common, kind=kind, **fields)) + " -->"
             timestamp = f"2026-10-27T00:00:0{ident}Z"
             row = {"id": ident, "html_url": gate.COMMENT + str(ident), "issue_url": gate.ISSUE,
@@ -83,7 +83,7 @@ class FreezeTests(unittest.TestCase):
                 gate.validate(records, self.context)
 
     def test_untrusted_comment_cannot_freeze(self):
-        text = "<!-- arm24-intel25-derived-authority-v1 " + json.dumps(self.record["value"]) + " -->"
+        text = "<!-- intel25-families-authority-v1 " + json.dumps(self.record["value"]) + " -->"
         self.assertEqual(gate.approved_records([{"user": {"login": "someone"},
                                                 "body": text, "html_url": "url"}]), [])
 
@@ -103,11 +103,21 @@ class FreezeTests(unittest.TestCase):
             gate.validate(self.records, self.context)
 
 
+def legacy_intel_selection_fixture():
+    """Keep the former refusal tests as historical coverage of the unchanged selector."""
+    return {
+        "cache_primary_candidates": ["System/Library/dyld/dyld_shared_cache_x86_64",
+                                     "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64"],
+        "ambiguity_checks": ["System/Library/dyld/dyld_shared_cache_x86_64h",
+                            "System/Library/Caches/com.apple.dyld/dyld_shared_cache_x86_64h"],
+    }
+
+
 class StaticReaderTests(unittest.TestCase):
     def test_family_selection_has_no_alternate(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve(strict=True)
-            c = run.BOUNDS["jobs"]["Intel25"]
+            c = legacy_intel_selection_fixture()
             selected = root / c["cache_primary_candidates"][0]
             with self.assertRaises(cache.EvidenceError):
                 cache.choose_family(root, c)
@@ -137,7 +147,7 @@ class StaticReaderTests(unittest.TestCase):
                 raw_root = Path(temp)
                 self.assertNotEqual(raw_root, raw_root.resolve(strict=True))
                 with self.assertRaisesRegex(cache.EvidenceError, "image root is not canonical"):
-                    cache.choose_family(raw_root, run.BOUNDS["jobs"]["Intel25"])
+                    cache.choose_family(raw_root, legacy_intel_selection_fixture())
             # Exercise the same positive fixture through a deliberately aliased temp directory.
             with patch.object(tempfile, "TemporaryDirectory",
                               side_effect=lambda: temporary_directory(dir=alias)):
@@ -261,8 +271,8 @@ class ConfigTests(unittest.TestCase):
     def test_workflow_has_two_disjoint_jobs_and_no_dispatch(self):
         text = (HERE.parents[1] / ".github" / "workflows" / "macos-cross-static.yml").read_text()
         self.assertNotIn("workflow_dispatch", text)
-        self.assertEqual(text.count("runs-on:"), 2)
-        self.assertIn("  ARM24:\n", text)
+        self.assertEqual(text.count("runs-on:"), 1)
+        self.assertNotIn("  ARM24:\n", text)
         self.assertIn("  Intel25:\n", text)
         self.assertNotIn("matrix:", text)
         for old in ("macos-group-proof.yml", "macos-provenance-capture.yml", "macos-static-ridiff.yml"):
@@ -456,12 +466,12 @@ class ImageContainmentTests(unittest.TestCase):
             root = Path(temp).resolve()
             (root / "System").symlink_to(Path(other), target_is_directory=True)
             with self.assertRaises(cache.EvidenceError):
-                cache.choose_family(root, run.BOUNDS["jobs"]["Intel25"])
+                cache.choose_family(root, legacy_intel_selection_fixture())
 
     def test_inaccessible_competitor_is_not_absence(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
-            c = run.BOUNDS["jobs"]["Intel25"]
+            c = legacy_intel_selection_fixture()
             primary = root / c["cache_primary_candidates"][0]
             primary.parent.mkdir(parents=True)
             primary.write_bytes(b"candidate")
@@ -476,7 +486,7 @@ class ImageContainmentTests(unittest.TestCase):
     def test_competitor_dangling_symlink_is_not_absence(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
-            c = run.BOUNDS["jobs"]["Intel25"]
+            c = legacy_intel_selection_fixture()
             primary = root / c["cache_primary_candidates"][0]
             primary.parent.mkdir(parents=True)
             primary.write_bytes(b"candidate")
@@ -2135,7 +2145,7 @@ class DerivedGateTests(unittest.TestCase):
         for rows in (fixture.records[:-1],fixture.records+[fixture.records[0]]):
             with self.assertRaises(RuntimeError):gate.validate(rows,fixture.context)
         old = copy.deepcopy(fixture.comments)
-        for comment in old:comment["body"]=comment["body"].replace("arm24-intel25-derived-authority-v1","arm24-intel25-static-v1")
+        for comment in old:comment["body"]=comment["body"].replace("intel25-families-authority-v1","arm24-intel25-static-v1")
         self.assertEqual(gate.approved_records(old),[])
 
     def test_future_authority_requires_unedited_canonical_comments_and_exact_closure(self):
@@ -2169,7 +2179,7 @@ class DerivedGateTests(unittest.TestCase):
                 row["value"]["source_review_body_sha256"]=hashlib.sha256(comments[0]["body"].encode()).hexdigest()
             if i==2:
                 row["value"]["finite_body_sha256"]=hashlib.sha256(comments[1]["body"].encode()).hexdigest()
-            comments[i]["body"]=comments[i]["body"].split("\n")[0]+"\n<!-- arm24-intel25-derived-authority-v1 "+json.dumps(row["value"])+" -->"
+            comments[i]["body"]=comments[i]["body"].split("\n")[0]+"\n<!-- intel25-families-authority-v1 "+json.dumps(row["value"])+" -->"
         current={"id":12,"head_sha":"a"*40,"run_attempt":1,"path":gate.WORKFLOW,"event":"push",
                  "head_branch":gate.BRANCH,"created_at":fixture.context["run_created_at"]}
         env={"GITHUB_EVENT_NAME":"push","GITHUB_RUN_ATTEMPT":"1","GITHUB_REPOSITORY":"lossyrob/telex",
@@ -2188,13 +2198,13 @@ class DerivedGateTests(unittest.TestCase):
                     patch.object(gate,"closure",return_value=([],source_hash)),patch.object(derived,"fetch_json",side_effect=fetch), \
                     patch.object(derived.time,"time",return_value=1793145600):
                 if extra:
-                    with self.assertRaisesRegex(RuntimeError,"another run"):gate.check("ARM24")
+                    with self.assertRaisesRegex(RuntimeError,"another run"):gate.check("Intel25")
                 else:
-                    self.assertFalse(gate.check("ARM24")["retry"])
+                    self.assertFalse(gate.check("Intel25")["retry"])
                     self.assertEqual(calls[-3:],["issues/comments/1","issues/comments/2","issues/comments/3"])
         with patch.dict(os.environ,dict(env,GITHUB_RUN_ATTEMPT="2"),clear=True), \
                 patch.object(derived,"fetch_json") as fetch,patch.object(derived.time,"time",return_value=1793145600):
-            with self.assertRaises(RuntimeError):gate.check("ARM24")
+            with self.assertRaises(RuntimeError):gate.check("Intel25")
             fetch.assert_not_called()
 
 
@@ -2287,8 +2297,8 @@ class TransportBoundaryTests(unittest.TestCase):
         self.assertIn("derived.before_use", text)
         self.assertNotIn("3.1.739\" in version", text)
         workflow=(HERE.parents[1]/".github"/"workflows"/"macos-cross-static.yml").read_text()
-        self.assertEqual(workflow.count("runs-on: macos-26"),2)
-        self.assertEqual(workflow.count("if: github.run_attempt == 1"),2)
+        self.assertEqual(workflow.count("runs-on: macos-26"),1)
+        self.assertEqual(workflow.count("if: github.run_attempt == 1"),1)
         self.assertNotIn("macos-latest",workflow)
         self.assertNotIn("<= 2",workflow)
         self.assertEqual(run.BOUNDS["limits"]["max_same_sha_infrastructure_retries_total"],0)
@@ -2405,6 +2415,370 @@ class DelayedTraceGrammarTests(unittest.TestCase):
                      "dyld[12] move loaded to delayed: AOSKit"):
             with self.subTest(line=line), self.assertRaises(cache.EvidenceError):
                 self.parse(self.image("/other/AOSKit"), self.selected(), line)
+
+
+def tiny_intel_cache(family, subtype=None, cpu=0x1000007, subcache=False, identity=b"\x11" * 16, base=0x1000):
+    raw = bytearray(4096)
+    raw[:16] = ("dyld_v1 " + family).encode().ljust(16, b"\0")
+    struct.pack_into("<II", raw, 16, 0x240, 1)
+    raw[88:104] = identity
+    struct.pack_into("<II", raw, 0x138, 0x240, 1)
+    struct.pack_into("<6Q2I", raw, 0x240, base, 4096, 0, 0, 0, 0, 5, 5)
+    struct.pack_into("<II", raw, 0x188, 0x300, int(subcache))
+    if subcache:
+        raw[0x300:0x310] = b"\x22" * 16
+        raw[0x318:0x31c] = b".01\0"
+    struct.pack_into("<II", raw, 0x1C0, 0x400, 1)
+    struct.pack_into("<QQII", raw, 0x400, base + 0x600, 0, 0, 0)
+    struct.pack_into("<I", raw, 0x418, 0x500)
+    name = b"/usr/lib/system/libsystem_kernel.dylib\0"
+    raw[0x500:0x500 + len(name)] = name
+    selected_subtype = (8 if family == "x86_64h" else 3) if subtype is None else subtype
+    commands = (struct.pack("<II16s", 0x1B, 24, b"\x33" * 16) +
+                struct.pack("<II16sQQQQiiII", 0x19, 72, b"__TEXT", base, 4096, 0, 4096, 5, 5, 0, 0) +
+                struct.pack("<4I", 0x26, 16, 0x800, 1) +
+                struct.pack("<4I", 0x80000033, 16, 0x810, 2))
+    head = struct.pack("<IiiIIIII", 0xFEEDFACF, cpu, selected_subtype, 6, 4, len(commands), 0, 0)
+    raw[0x600:0x600+len(head+commands)] = head + commands
+    return bytes(raw)
+
+
+class IntelDomainTests(unittest.TestCase):
+    @contextmanager
+    def fixture(self, families=("x86_64", "x86_64h"), limits=None):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            mount, evidence = root / "image", root / "evidence"
+            mount.mkdir()
+            evidence.mkdir()
+            config = copy.deepcopy(run.BOUNDS["jobs"]["Intel25"])
+            for family in families:
+                file = mount / config["cache_domains"][family]["locations"][0]
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(tiny_intel_cache(family))
+            output = cache.Output(evidence, dict(run.BOUNDS["limits"], **(limits or {})))
+            yield mount, output, config
+
+    def test_every_presence_combination_is_classified_without_selection(self):
+        for families in (("x86_64",), ("x86_64h",), ("x86_64", "x86_64h"), ()):
+            with self.subTest(families=families), self.fixture(families) as (mount, output, config):
+                if families:
+                    domains = cache.intel_domains(mount, config, output, float("inf"))
+                    self.assertEqual([d["family"] for d in domains], list(families))
+                else:
+                    with self.assertRaises(cache.EvidenceError):
+                        cache.intel_domains(mount, config, output, float("inf"))
+                inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
+                self.assertEqual(len(inventory["locations"]), 4)
+                self.assertFalse(inventory["selection_performed"])
+                for row in inventory["locations"]:
+                    if row["present"]:
+                        raw = Path(row["path"]).read_bytes()
+                        self.assertEqual(row["lstat_type"], 0o100000)
+                        self.assertEqual(row["bytes"], len(raw))
+                        self.assertEqual(row["sha256"], hashlib.sha256(raw).hexdigest())
+                        self.assertEqual(row["magic_hex"], raw[:16].hex())
+
+    def test_second_location_is_valid_but_duplicates_identical_or_not_fail(self):
+        for family in ("x86_64", "x86_64h"):
+            with self.subTest(family=family), self.fixture((family,)) as (mount, output, config):
+                first, second = [mount / loc for loc in config["cache_domains"][family]["locations"]]
+                second.parent.mkdir(parents=True)
+                first.rename(second)
+                domains = cache.intel_domains(mount, config, output, float("inf"))
+                self.assertEqual(domains[0]["primary"], str(second))
+                for data in (second.read_bytes(), second.read_bytes()+b"different"):
+                    first.write_bytes(data)
+                    with self.assertRaises(cache.EvidenceError):
+                        cache.intel_domains(mount, config, output, float("inf"))
+                    inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
+                    self.assertEqual(sum(r.get("present", False) for r in inventory["locations"]), 2)
+                    self.assertIn("duplicate", inventory["errors"][-1]["message"])
+
+    def test_wrong_location_content_is_recorded_and_not_substituted(self):
+        with self.fixture() as (mount, output, config):
+            wrong = mount / config["cache_domains"]["x86_64"]["locations"][0]
+            wrong.write_bytes(tiny_intel_cache("x86_64h"))
+            with self.assertRaises(cache.EvidenceError):
+                cache.intel_domains(mount, config, output, float("inf"))
+            inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
+            self.assertEqual(len(inventory["locations"]), 4)
+            self.assertIn("location/content", inventory["locations"][0]["error"]["message"])
+            self.assertIn("sha256", inventory["locations"][0])
+            self.assertTrue(inventory["locations"][2]["present"])
+
+    def test_unchanged_confinement_applies_to_all_four_paths(self):
+        for family in ("x86_64", "x86_64h"):
+            for index in (0, 1):
+                with self.subTest(family=family, index=index), self.fixture(()) as (mount, output, config):
+                    file = mount / config["cache_domains"][family]["locations"][index]
+                    file.parent.mkdir(parents=True)
+                    file.symlink_to(mount / "missing")
+                    with self.assertRaises(cache.EvidenceError):
+                        cache.intel_domains(mount, config, output, float("inf"))
+                    rows = json.loads((output.root / "intel-family-inventory.json").read_bytes())["locations"]
+                    self.assertEqual(len(rows), 4)
+                    self.assertTrue(any("symlink" in r.get("error", {}).get("message", "") for r in rows))
+        with self.fixture(()) as (mount, output, config):
+            (mount / "System").symlink_to(output.root, target_is_directory=True)
+            with self.assertRaises(cache.EvidenceError):
+                cache.intel_domains(mount, config, output, float("inf"))
+
+    def test_permission_nonregular_and_cross_device_are_not_absence(self):
+        for failure in ("denied", "directory", "device"):
+            with self.subTest(failure=failure), self.fixture() as (mount, output, config):
+                path = mount / config["cache_domains"]["x86_64h"]["locations"][0]
+                original = Path.lstat
+                def lstat(file):
+                    found = original(file)
+                    if file == path:
+                        if failure == "denied":
+                            raise PermissionError("synthetic access failure")
+                        values = list(found)
+                        values[0 if failure == "directory" else 2] = 0o040700 if failure == "directory" else found.st_dev+1
+                        return os.stat_result(values)
+                    return found
+                with patch.object(Path, "lstat", lstat), self.assertRaises(cache.EvidenceError):
+                    cache.intel_domains(mount, config, output, float("inf"))
+                inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
+                self.assertTrue(inventory["errors"])
+                self.assertEqual(len(inventory["locations"]), 4)
+
+    def test_exact_cpu_subtype_and_capabilities_each_domain(self):
+        for family, subtype in (("x86_64", 3), ("x86_64h", 8)):
+            cache.validate_cpu(family, 0x1000007, subtype)
+            for cpu, wrong in ((0x100000C, subtype), (7, subtype), (0x1000007, 8 if subtype==3 else 3),
+                               (0x1000007, 0x01000000|subtype), (0x1000007, -2147483648+subtype)):
+                with self.subTest(family=family,cpu=cpu,subtype=wrong), self.assertRaises(cache.EvidenceError):
+                    cache.validate_cpu(family, cpu, wrong)
+        with self.assertRaises(cache.EvidenceError):
+            cache.validate_cpu("future", 0x1000007, 3)
+
+    def test_actual_tiny_cache_layout_subcache_and_macho_checks_in_both_domains(self):
+        with self.fixture() as (mount, output, config):
+            budget = cache.DomainBudget(output.limits, float("inf"))
+            for family in ("x86_64", "x86_64h"):
+                primary = mount / config["cache_domains"][family]["locations"][0]
+                primary.write_bytes(tiny_intel_cache(family, subcache=True))
+                sub = primary.with_name(primary.name + ".01")
+                sub.write_bytes(tiny_intel_cache(family, identity=b"\x22"*16, base=0x3000))
+                scoped = cache.DomainOutput(output, family, budget)
+                reader = cache.CandidateCache(primary, scoped, family)
+                image = reader.macho(reader.images[0])
+                self.assertEqual(image["cpu"], 0x1000007)
+                self.assertEqual(image["subtype"], 3 if family=="x86_64" else 8)
+                self.assertEqual(image["capability_bits"], 0)
+                self.assertEqual(len(reader.subcaches), 1)
+                self.assertTrue(scoped.path("subcache-table.bin").is_file())
+                self.assertTrue(scoped.path(image["header_file"]).is_file())
+                for corrupt in (tiny_intel_cache("x86_64" if family=="x86_64h" else "x86_64h", identity=b"\x22"*16, base=0x3000),
+                                tiny_intel_cache(family, identity=b"\x44"*16, base=0x3000)):
+                    sub.write_bytes(corrupt)
+                    with self.assertRaises(cache.EvidenceError):
+                        cache.CandidateCache(primary, scoped, family)
+            self.assertFalse((output.root / "subcache-table.bin").exists())
+            self.assertEqual(budget.used["image_metadata_count"], 2)
+
+    def test_selected_image_wrong_cpu_is_rejected_by_actual_reader(self):
+        for family, wrong in (("x86_64", 8), ("x86_64h", 3), ("x86_64h", 0x1000008)):
+            with self.subTest(family=family,wrong=wrong), self.fixture((family,)) as (mount, output, config):
+                primary = mount / config["cache_domains"][family]["locations"][0]
+                primary.write_bytes(tiny_intel_cache(family, subtype=wrong))
+                reader = cache.CandidateCache(primary, cache.DomainOutput(output,family,
+                    cache.DomainBudget(output.limits,float("inf"))), family)
+                with self.assertRaises(cache.EvidenceError):
+                    reader.macho(reader.images[0])
+
+    def test_every_shared_counter_and_artifact_budget_is_aggregate(self):
+        for key in cache.DomainBudget(run.BOUNDS["limits"],float("inf")).used:
+            limits = dict(run.BOUNDS["limits"], **{key: 1})
+            budget = cache.DomainBudget(limits,float("inf"))
+            budget.charge(key,1)
+            with self.subTest(key=key),self.assertRaisesRegex(cache.EvidenceError,"aggregate Intel"):
+                budget.charge(key,1)
+            self.assertEqual(budget.used[key],1)
+        with self.fixture((), {"artifact_files_per_job":3}) as (_, output, _):
+            budget=cache.DomainBudget(output.limits,float("inf"))
+            left,right=[cache.DomainOutput(output,f,budget) for f in ("x86_64","x86_64h")]
+            left.write("same.bin",b"first")
+            with self.assertRaises(cache.EvidenceError):
+                right.write("same.bin",b"second")
+            self.assertEqual(left.path("same.bin").read_bytes(),b"first")
+        with self.fixture((), {"artifact_bytes_per_job":1048580}) as (_, output, _):
+            budget=cache.DomainBudget(output.limits,float("inf"))
+            cache.DomainOutput(output,"x86_64",budget).write("a.bin",b"123")
+            with self.assertRaises(cache.EvidenceError):
+                cache.DomainOutput(output,"x86_64h",budget).write("a.bin",b"45")
+        with self.assertRaises(cache.EvidenceError):
+            cache.DomainBudget(run.BOUNDS["limits"],0).charge("functions",1)
+
+    def test_all_present_domains_called_no_fallback_or_partial_pass(self):
+        for failed in (None,"x86_64","x86_64h"):
+            with self.subTest(failed=failed),self.fixture() as (mount, output, config):
+                calls=[]
+                controller=SimpleNamespace(config=config,bounds=run.BOUNDS,output=output,deadline=float("inf"),
+                    receipt={"decoder_confirmed_before_semantic_processing":True},phase=lambda name:None)
+                def collect(primary,family,domain,owner):
+                    calls.append(family)
+                    domain.budget.charge("functions",1)
+                    domain.write("same.bin",family.encode())
+                    self.assertIs(owner,controller)
+                    return {"missing":[{"reason":"unresolved import"}] if family==failed else [],
+                            "helper_incomplete_count":int(family==failed)}
+                with patch.object(run,"collect",side_effect=collect):
+                    if failed:
+                        with self.assertRaises(cache.EvidenceError):run.collect_intel_domains(controller,mount)
+                    else:
+                        self.assertEqual(run.collect_intel_domains(controller,mount),{"missing":[],"helper_incomplete_count":0})
+                self.assertEqual(calls,["x86_64","x86_64h"])
+                summary=json.loads((output.root/"intel-domain-results.json").read_bytes())
+                self.assertFalse(summary["selection_performed"])
+                self.assertEqual(summary["all_present_passed"],failed is None)
+                self.assertEqual(summary["aggregate_usage"]["functions"],2)
+                self.assertEqual((output.root/"x86_64-same.bin").read_bytes(),b"x86_64")
+                self.assertEqual((output.root/"x86_64h-same.bin").read_bytes(),b"x86_64h")
+                self.assertTrue(all(d["post_decoder_confirmation"]=="native-binding-acceptance.json" for d in summary["domains"]))
+
+    def test_failed_domain_layout_still_cannot_select_other_domain(self):
+        with self.fixture() as (mount, output, config):
+            controller=SimpleNamespace(config=config,bounds=run.BOUNDS,output=output,deadline=float("inf"),
+                receipt={"decoder_confirmed_before_semantic_processing":True},phase=lambda name:None)
+            calls=[]
+            def collect(primary,family,domain,owner):
+                calls.append(family)
+                if family=="x86_64":raise cache.EvidenceError("synthetic invalid subcache")
+                return {"missing":[],"helper_incomplete_count":0}
+            with patch.object(run,"collect",side_effect=collect),self.assertRaises(cache.EvidenceError):
+                run.collect_intel_domains(controller,mount)
+            self.assertEqual(calls,["x86_64","x86_64h"])
+            summary=json.loads((output.root/"intel-domain-results.json").read_bytes())
+            self.assertFalse(summary["all_present_passed"])
+            self.assertIn("subcache",summary["domains"][0]["error"]["message"])
+
+    def test_postdecoder_confirmation_is_prerequisite_and_budget_failure_is_not_pass(self):
+        with self.fixture() as (mount, output, config):
+            controller=SimpleNamespace(config=config,bounds=run.BOUNDS,output=output,deadline=float("inf"),receipt={},phase=lambda n:None)
+            with patch.object(run,"intel_domains") as inventory,self.assertRaises(cache.EvidenceError):
+                run.collect_intel_domains(controller,mount)
+            inventory.assert_not_called()
+            controller.receipt["decoder_confirmed_before_semantic_processing"]=True
+            controller.bounds=dict(run.BOUNDS,limits=dict(run.BOUNDS["limits"],functions=1))
+            def collect(primary,family,domain,owner):
+                domain.budget.charge("functions",1)
+                return {"missing":[],"helper_incomplete_count":0}
+            with patch.object(run,"collect",side_effect=collect),self.assertRaises(cache.EvidenceError):
+                run.collect_intel_domains(controller,mount)
+            summary=json.loads((output.root/"intel-domain-results.json").read_bytes())
+            self.assertFalse(summary["all_present_passed"])
+            self.assertIn("aggregate Intel",summary["domains"][1]["error"]["message"])
+
+    def test_tiny_domain_collection_uses_namespaced_disassembly_and_shared_budget(self):
+        class Fixture:
+            images=[{"name":"/usr/lib/system/libsystem_c.dylib","address":0x1000},
+                    {"name":"/usr/lib/system/libsystem_kernel.dylib","address":0x2000}]
+            def macho(self,image):
+                return {**image,"uuid":image["name"],"cpu":0x1000007,"subtype":3,"header_file":"header",
+                        "symbols":[{"name":"_kill","address":0x2000,"flags":0}]}
+            def body(self,address):
+                return self.macho(self.images[1]),0x2000,0x2001,"synthetic",b"\xc3"
+            def pointer(self,address):raise AssertionError("unexpected pointer")
+        with self.fixture(()) as (_,output,_):
+            budget=cache.DomainBudget(dict(output.limits,entry_analyses=1),float("inf"))
+            calls=[]
+            controller=SimpleNamespace(bounds={"roots":["kill"]},otool_path=run.BOUNDS["native_binding"]["otool_canonical_path"],
+                command=lambda name,args:(calls.append((name,args)) or {"stdout":"synthetic"}))
+            for family in ("x86_64","x86_64h"):
+                scoped=cache.DomainOutput(output,family,budget)
+                with patch.object(cache,"CandidateCache",return_value=Fixture()), \
+                        patch.object(cache,"otool_instructions",return_value=[row(0x2000,"retq","")]):
+                    if family=="x86_64":
+                        self.assertFalse(cache.collect(Path("synthetic"),family,scoped,controller)["missing"])
+                    else:
+                        with self.assertRaises(cache.EvidenceError):
+                            cache.collect(Path("synthetic"),family,scoped,controller)
+                self.assertTrue(str(calls[-1][1][-1]).endswith(family+"-body-00-2000.macho"))
+                self.assertTrue(calls[-1][0].startswith(family+"-"))
+            self.assertEqual(budget.used["entry_analyses"],1)
+
+    def test_inventory_deadline_size_change_and_budget_failures_are_explicit(self):
+        for kind in ("deadline","oversize","changed"):
+            with self.subTest(kind=kind),self.fixture(("x86_64",)) as (mount,output,config):
+                primary=mount/config["cache_domains"]["x86_64"]["locations"][0]
+                original=Path.lstat
+                calls=[]
+                def lstat(file):
+                    found=original(file)
+                    if file==primary:
+                        calls.append(file)
+                        # image_location obtains the first sample; then hashing captures before/after.
+                        if kind=="oversize" and len(calls)==2:
+                            return SimpleNamespace(st_mode=found.st_mode,st_size=output.limits["image_bytes"]+1)
+                        if kind=="changed" and len(calls)==3:
+                            return SimpleNamespace(st_dev=found.st_dev,st_ino=found.st_ino,st_mode=found.st_mode,
+                                st_size=found.st_size,st_mtime_ns=found.st_mtime_ns+1)
+                    return found
+                with patch.object(Path,"lstat",lstat),self.assertRaises(cache.EvidenceError):
+                    cache.intel_domains(mount,config,output,0 if kind=="deadline" else float("inf"))
+                report=json.loads((output.root/"intel-family-inventory.json").read_bytes())
+                self.assertTrue(report["errors"])
+                self.assertFalse(report["selection_performed"])
+
+    def test_per_domain_cache_reads_and_metadata_share_deadline_and_counts(self):
+        with self.fixture() as (mount,output,config):
+            budget=cache.DomainBudget(dict(output.limits,image_metadata_count=1),float("inf"))
+            for family in ("x86_64","x86_64h"):
+                primary=mount/config["cache_domains"][family]["locations"][0]
+                reader=cache.CandidateCache(primary,cache.DomainOutput(output,family,budget),family)
+                if family=="x86_64":
+                    reader.macho(reader.images[0])
+                else:
+                    with self.assertRaisesRegex(cache.EvidenceError,"aggregate Intel"):
+                        reader.macho(reader.images[0])
+            budget.deadline=0
+            with self.assertRaisesRegex(cache.EvidenceError,"cache read deadline"):
+                reader.read(primary,0,16)
+            self.assertEqual(budget.used["image_metadata_count"],1)
+
+
+class IntelOnlyAdmissionTests(unittest.TestCase):
+    def test_old_dual_markers_components_jobs_and_ARM_context_cannot_authorize(self):
+        fixture=FreezeTests()
+        fixture.setUp()
+        self.assertEqual(gate.ATTEMPT_JOBS,("Intel25",))
+        self.assertEqual(gate.COMPONENT,"intel25-families-v1")
+        for marker in ("arm24-intel25-derived-authority-v1","arm24-intel25-static-v1"):
+            comments=copy.deepcopy(fixture.comments)
+            for c in comments:c["body"]=c["body"].replace("intel25-families-authority-v1",marker)
+            self.assertEqual(gate.approved_records(comments),[])
+        for key,value in (("component","arm24-intel25-derived-v1"),("jobs",["ARM24","Intel25"]),("jobs",["ARM24"])):
+            records=copy.deepcopy(fixture.records)
+            for r in records:r["value"][key]=value
+            with self.subTest(key=key,value=value),self.assertRaises(RuntimeError):
+                gate.validate(records,fixture.context)
+        with self.assertRaisesRegex(RuntimeError,"unknown component context"):
+            gate.validate(fixture.records,dict(fixture.context,job="ARM24"))
+        self.assertFalse(gate.validate(fixture.records,fixture.context)["retry"])
+
+    def test_ARM_argv_is_rejected_before_UID_gate_paths_or_native_work(self):
+        self.assertIn("ARM24",run.BOUNDS["jobs"])
+        with patch.object(run.sys,"argv",["run.py","ARM24","/work","/evidence"]), \
+                patch.object(run.os,"getuid",side_effect=AssertionError("UID must not be queried")) as uid, \
+                patch.object(Path,"mkdir",side_effect=AssertionError("no directories")) as mkdir, \
+                patch.object(gate,"check",side_effect=AssertionError("no gate")) as check:
+            with self.assertRaisesRegex(cache.EvidenceError,"usage: run.py Intel25"):
+                run.main()
+            uid.assert_not_called()
+            mkdir.assert_not_called()
+            check.assert_not_called()
+
+    def test_bounds_identity_check_precedes_reads_or_network_authority(self):
+        wrong=copy.deepcopy(run.BOUNDS)
+        wrong["component"]="arm24-intel25-derived-v1"
+        with patch.object(Path,"read_bytes",return_value=json.dumps(wrong).encode()), \
+                patch.object(derived,"fetch_json",side_effect=AssertionError("no network")) as fetch:
+            with self.assertRaisesRegex(RuntimeError,"bounds component identity mismatch"):
+                gate.check("Intel25")
+            fetch.assert_not_called()
 
 
 if __name__ == "__main__":

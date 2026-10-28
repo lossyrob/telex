@@ -10,6 +10,7 @@ import re
 import stat
 import struct
 import sys
+import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -39,6 +40,53 @@ class Output:
 
     def json(self, name, data):
         return self.write(name, json.dumps(data, sort_keys=True, indent=2) + "\n")
+
+class DomainBudget:
+    def __init__(self, limits, deadline):
+        self.limits, self.deadline = limits, deadline
+        self.used = dict.fromkeys(("functions", "entry_analyses", "code_bytes",
+                                  "image_metadata_count", "image_metadata_bytes", "fixup_pages"), 0)
+
+    def charge(self, name, amount):
+        require(time.monotonic() < self.deadline, "aggregate Intel domain deadline exhausted")
+        require(self.used[name] + amount <= self.limits[name],
+                "aggregate Intel domain budget exhausted: " + name + "; return to design")
+        self.used[name] += amount
+
+
+class DomainOutput:
+    """Flat domain-prefixed evidence with one shared job sink and analysis budget."""
+    def __init__(self, output, family, budget):
+        require(family in ("x86_64", "x86_64h"), "unsupported Intel domain")
+        self.output, self.root, self.limits = output, output.root, output.limits
+        self.prefix, self.budget = family + "-", budget
+
+    def write(self, name, data):
+        return self.output.write(self.prefix + name, data)
+
+    def json(self, name, data):
+        return self.write(name, json.dumps(data, sort_keys=True, indent=2) + "\n")
+
+    def path(self, name):
+        return self.root / (self.prefix + name)
+
+
+class _CacheArtifact:
+    def __init__(self, output, name):
+        self.output, self.name = output, name
+
+    def write_bytes(self, data):
+        self.output.write(self.name, data)
+        return len(data)
+
+
+class _CacheEvidence:
+    """Route the inherited Cache constructor's subcache-table write through the shared sink."""
+    def __init__(self, output):
+        self.output = output
+
+    def __truediv__(self, name):
+        return _CacheArtifact(self.output, name)
 
 
 def image_location(root, relative):
@@ -82,9 +130,64 @@ def choose_family(mount, config):
     return existing[0]
 
 
+def intel_domains(mount, config, output, deadline):
+    locations, domains = [], []
+    errors = []
+    for family in ("x86_64", "x86_64h"):
+        specification = config["cache_domains"][family]
+        present = []
+        for relative in specification["locations"]:
+            row = {"family": family, "relative_path": relative}
+            locations.append(row)
+            try:
+                path = image_location(mount, relative)
+                row["present"] = path is not None
+                if path is None:
+                    continue
+                before = path.lstat()
+                row.update(path=str(path), lstat_type=stat.S_IFMT(before.st_mode), bytes=before.st_size)
+                require(before.st_size <= output.limits["image_bytes"], "Intel primary exceeds image bound")
+                digest, count, magic = hashlib.sha256(), 0, b""
+                with path.open("rb") as source:
+                    while True:
+                        require(time.monotonic() < deadline, "Intel primary hash deadline")
+                        raw = source.read(min(output.limits["read_bytes"], before.st_size + 1 - count))
+                        if not raw:
+                            break
+                        if not magic:
+                            magic = raw[:16]
+                        count += len(raw)
+                        require(count <= before.st_size, "Intel primary grew during hash")
+                        digest.update(raw)
+                after = path.lstat()
+                require(count == before.st_size and
+                        (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) ==
+                        (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns),
+                        "Intel primary identity changed during hash")
+                row.update(sha256=digest.hexdigest(), magic_hex=magic.hex())
+                require(len(magic) == 16 and magic.rstrip(b"\0 ").split() ==
+                        [b"dyld_v1", family.encode("ascii")], "Intel location/content family mismatch")
+                present.append(path)
+            except (EvidenceError, OSError) as error:
+                row["error"] = {"type": type(error).__name__, "message": str(error)}
+                errors.append(row["error"])
+        if len(present) > 1:
+            errors.append({"type": "EvidenceError", "message": "duplicate Intel domain primary: " + family})
+        elif present:
+            domains.append({"family": family, "primary": str(present[0]),
+                            "cpu_policy": specification["cpu_policy"]})
+    if not any(row.get("present") for row in locations):
+        errors.append({"type": "EvidenceError", "message": "no Intel family present"})
+    output.json("intel-family-inventory.json", {"locations": locations, "domains": domains,
+                "errors": errors, "selection_performed": False, "candidate_only": True})
+    require(not errors, "Intel domain inventory decision-needed; no selection or fallback")
+    return domains
+
+
 def validate_cpu(family, cpu, subtype):
+    require(family in ("arm64e", "x86_64", "x86_64h"), "undeclared cache family")
     expected_cpu = 0x100000C if family == "arm64e" else 0x1000007
-    allowed = (2, -2147483646) if family == "arm64e" else (3,)
+    allowed = (2, -2147483646) if family == "arm64e" else (8,) if family == "x86_64h" else (3,)
     require(cpu == expected_cpu and subtype in allowed, "raw CPU/subtype/capabilities not in frozen policy")
 
 
@@ -126,12 +229,18 @@ class CandidateCache(Cache):
         self.output, self.family = output, family
         self.parsed, self.pages = {}, {}
         self.metadata_bytes = 0
-        super().__init__(primary, output.root)
+        self.budget = getattr(output, "budget", None)
+        super().__init__(primary, _CacheEvidence(output) if self.budget is not None else output.root)
         self.output.json("cache-layout.json", {
             "candidate_only": True, "family": family, "primary": str(primary),
             "files": [{k: v for k, v in h.items() if k != "raw"} for h in self.files.values()],
             "subcaches": self.subcaches, "mapping_count": len(self.mappings),
             "image_count": len(self.images)})
+
+    def read(self, path, offset, size):
+        if getattr(self, "budget", None) is not None:
+            require(time.monotonic() < self.budget.deadline, "Intel domain cache read deadline")
+        return super().read(path, offset, size)
 
     def add_file(self, path):
         require(path.is_file() and not path.is_symlink(), "missing declared subcache")
@@ -164,6 +273,8 @@ class CandidateCache(Cache):
         if image["address"] in self.parsed:
             return self.parsed[image["address"]]
         require(len(self.parsed) < self.output.limits["image_metadata_count"], "image metadata cap")
+        if getattr(self, "budget", None) is not None:
+            self.budget.charge("image_metadata_count", 1)
         head = self.vmread(image["address"], 32)
         magic, cpu, subtype, _, count, size, _, _ = struct.unpack("<IiiIIIII", head)
         require(magic == 0xFEEDFACF, "image is not Mach-O64")
@@ -204,6 +315,8 @@ class CandidateCache(Cache):
         entries = self.filedata(result, result["exports"])
         starts = self.filedata(result, result["starts"])
         self.metadata_bytes += len(raw) + len(entries) + len(starts)
+        if getattr(self, "budget", None) is not None:
+            self.budget.charge("image_metadata_bytes", len(raw) + len(entries) + len(starts))
         require(len(entries) <= self.output.limits["export_trie_bytes"] and
                 self.metadata_bytes <= self.output.limits["image_metadata_bytes"], "image linkedit cap")
         self.output.write(stem + ".exports.bin", entries)
@@ -259,6 +372,8 @@ class CandidateCache(Cache):
         key = (mapping["cache_uuid"], mapping["record_offset"], index)
         if key not in self.pages:
             require(len(self.pages) < self.output.limits["fixup_pages"], "fixup page budget")
+            if getattr(self, "budget", None) is not None:
+                self.budget.charge("fixup_pages", 1)
             if version == 2:
                 starts_offset, count, extras_offset, extras_count, mask, add = struct.unpack_from("<4I2Q", header, 8)
                 require(mask and ((mask >> ((mask & -mask).bit_length() - 1)) + 1) &
@@ -530,6 +645,7 @@ def collect(primary, family, output, run):
         queue.append((matches[0]["address"], 0, symbol, None))
         root_records[symbol] = matches[0]
     captures, missing, seen, bodies, total, analysis_count = [], [], set(), {}, 0, 0
+    budget = getattr(output, "budget", None)
     while queue:
         address, depth, root, parent = queue.popleft()
         if (address, root) in seen:
@@ -545,12 +661,17 @@ def collect(primary, family, output, run):
                 require(len(captures) < output.limits["functions"], "function extent cap")
                 total += len(raw)
                 require(total <= output.limits["code_bytes"], "total code byte cap")
+                if budget is not None:
+                    budget.charge("functions", 1)
+                    budget.charge("code_bytes", len(raw))
                 stem = f"body-{len(captures):02d}-{start:x}"
                 output.write(stem + ".bin", raw)
                 output.write(stem + ".macho", macho_function(start, raw, "arm64" if family == "arm64e" else "x86_64"))
-                dis = run.command(stem + "-disassembly", [run.otool_path, "-tvV", output.root / (stem + ".macho")])
+                container = output.path(stem + ".macho") if budget is not None else output.root / (stem + ".macho")
+                command_name = output.prefix + stem if budget is not None else stem
+                dis = run.command(command_name + "-disassembly", [run.otool_path, "-tvV", container])
                 output.write(stem + ".txt", dis["stdout"])
-                decoded = otool_instructions(dis["stdout"], output.root / (stem + ".macho"), start, end)
+                decoded = otool_instructions(dis["stdout"], container, start, end)
                 record = {"root": root, "parent": parent, "entry": hex(address), "start": hex(start),
                           "end": hex(end), "extent": derivation, "bytes": len(raw),
                           "sha256": hashlib.sha256(raw).hexdigest(), "image": image["name"],
@@ -563,6 +684,8 @@ def collect(primary, family, output, run):
             stem = record["stem"]
             require(hashlib.sha256(raw).hexdigest() == record["sha256"], "extent bytes changed between entries")
             analysis_count += 1
+            if budget is not None:
+                budget.charge("entry_analyses", 1)
             branches = edges(decoded, "arm64" if family == "arm64e" else "x86_64",
                              start, end, cache.pointer, raw, entry=address)
             record["analyses"].append({"root": root, "entry": hex(address), "parent": parent,
