@@ -2543,6 +2543,15 @@ class IntelDomainTests(unittest.TestCase):
                 inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
                 self.assertTrue(inventory["errors"])
                 self.assertEqual(len(inventory["locations"]), 4)
+        for outcomes in ([PermissionError("unknown")] * 4, [None, None, None, PermissionError("unknown")]):
+            with self.subTest(outcomes=outcomes), self.fixture(()) as (mount, output, config):
+                with patch.object(cache, "image_location", side_effect=outcomes), self.assertRaises(cache.EvidenceError):
+                    cache.intel_domains(mount, config, output, float("inf"))
+                inventory = json.loads((output.root / "intel-family-inventory.json").read_bytes())
+                self.assertEqual(len(inventory["locations"]), 4)
+                self.assertTrue(any("error" in row for row in inventory["locations"]))
+                self.assertTrue(inventory["errors"])
+                self.assertNotIn("no Intel family present", [error["message"] for error in inventory["errors"]])
 
     def test_exact_cpu_subtype_and_capabilities_each_domain(self):
         for family, subtype in (("x86_64", 3), ("x86_64h", 8)):

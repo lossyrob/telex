@@ -176,7 +176,7 @@ def intel_domains(mount, config, output, deadline):
         elif present:
             domains.append({"family": family, "primary": str(present[0]),
                             "cpu_policy": specification["cpu_policy"]})
-    if not any(row.get("present") for row in locations):
+    if all(row.get("present") is False for row in locations):
         errors.append({"type": "EvidenceError", "message": "no Intel family present"})
     output.json("intel-family-inventory.json", {"locations": locations, "domains": domains,
                 "errors": errors, "selection_performed": False, "candidate_only": True})
