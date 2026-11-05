@@ -2,6 +2,105 @@ use super::*;
 use crate::protocol_v2::parse_registration;
 use telex::application_client::*;
 
+#[test]
+fn stderr_excerpts_migrate_reopen_and_stay_associated_with_the_latest_failure() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    let (_, first) = registry.begin_attempt("watch", "runtime", 1000).unwrap();
+    registry
+        .fail_attempt(
+            &first.id,
+            DiagnosticCategory::DetectorDegraded,
+            "degraded",
+            1100,
+        )
+        .unwrap();
+    drop(registry);
+
+    let connection = Connection::open(fixture.path()).unwrap();
+    connection
+        .execute_batch(
+            "UPDATE watcher_v2_attempts SET data=json_remove(data,'$.stderrExcerpt');
+         UPDATE watcher_v2_watches SET data=json_remove(data,'$.latestFailure');",
+        )
+        .unwrap();
+    drop(connection);
+    let mut registry = fixture.open();
+    assert!(registry.attempts("watch", 10).unwrap()[0]
+        .stderr_excerpt
+        .is_none());
+    assert!(registry
+        .get("watch")
+        .unwrap()
+        .unwrap()
+        .latest_failure
+        .is_none());
+    let stored: String = registry
+        .connection
+        .query_row(
+            "SELECT data FROM watcher_v2_attempts WHERE id=?1",
+            [&first.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&stored).unwrap()["stderrExcerpt"],
+        Value::Null
+    );
+    assert!(serde_json::from_str::<Value>(&stored)
+        .unwrap()
+        .get("stderrExcerpt")
+        .is_some());
+
+    let (_, second) = registry.begin_attempt("watch", "runtime", 2000).unwrap();
+    assert!(registry
+        .record_stderr(&second.id, &"x".repeat(4097))
+        .is_err());
+    registry
+        .record_stderr(&second.id, "actual cause [REDACTED]")
+        .unwrap();
+    registry
+        .fail_attempt(
+            &second.id,
+            DiagnosticCategory::DetectorDegraded,
+            "degraded",
+            2100,
+        )
+        .unwrap();
+    let (_, third) = registry.begin_attempt("watch", "runtime", 3000).unwrap();
+    registry.record_stderr(&third.id, "").unwrap();
+    registry
+        .finish_direct(&third.id, json!({"cursor":2}), false, 3100)
+        .unwrap();
+    drop(registry);
+    let registry = fixture.open();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert_eq!(watch.health, Health::Ready);
+    assert!(watch.diagnostic_category.is_none());
+    let failure = watch.latest_failure.unwrap();
+    assert_eq!(failure.attempt_id, second.id);
+    assert_eq!(
+        failure.diagnostic_category,
+        DiagnosticCategory::DetectorDegraded
+    );
+    assert_eq!(
+        failure.stderr_excerpt.as_deref(),
+        Some("actual cause [REDACTED]")
+    );
+    let health = registry.health("watch", true).unwrap();
+    assert_eq!(health.latest_failure.unwrap().attempt_id, second.id);
+    let attempts = registry.attempts("watch", 10).unwrap();
+    assert_eq!(attempts[0].stderr_excerpt.as_deref(), Some(""));
+    assert_eq!(
+        attempts[1].stderr_excerpt.as_deref(),
+        Some("actual cause [REDACTED]")
+    );
+    assert!(attempts[2].stderr_excerpt.is_none());
+}
+
 struct Fixture {
     root: std::path::PathBuf,
 }

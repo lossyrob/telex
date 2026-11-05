@@ -115,6 +115,7 @@ async fn direct_argv_canonical_cwd_environment_and_redaction() {
     );
     assert!(output.stderr.contains("[REDACTED]"));
     assert!(!output.stderr.contains("test-only-secret"));
+    assert_eq!(output.stderr_excerpt, "token=[REDACTED]\n");
     assert_eq!(
         probe_previous(&output.containment).await,
         ContainmentStatus::Ended
@@ -193,6 +194,7 @@ async fn nonzero_exit_and_missing_executable_are_typed() {
     .unwrap_err();
     assert_eq!(error.kind, ProcessFailureKind::NonzeroExit);
     assert!(!error.message.contains("test-only-secret"));
+    assert_eq!(error.stderr_excerpt.as_deref(), Some("token=[REDACTED]\n"));
     let mut spec = isolated.spec("emit");
     spec.command[0] = isolated
         .root
@@ -204,6 +206,7 @@ async fn nonzero_exit_and_missing_executable_are_typed() {
         .await
         .unwrap_err();
     assert_eq!(error.kind, ProcessFailureKind::Spawn);
+    assert!(error.stderr_excerpt.is_none());
 }
 
 #[tokio::test]

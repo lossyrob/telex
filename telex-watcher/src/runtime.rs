@@ -374,6 +374,13 @@ impl Runtime {
             attempt,
             output,
         } = completion;
+        let stderr_excerpt = match &output {
+            Ok(output) => Some(output.stderr_excerpt.as_str()),
+            Err(error) => error.stderr_excerpt.as_deref(),
+        };
+        if let Some(excerpt) = stderr_excerpt {
+            lock(&self.registry)?.record_stderr(&attempt.id, excerpt)?;
+        }
         if !lock(&self.registry)?.attempt_is_current(&attempt)? {
             let mut registry = lock(&self.registry)?;
             registry.fail_attempt(

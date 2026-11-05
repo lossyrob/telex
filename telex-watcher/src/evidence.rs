@@ -102,6 +102,8 @@ pub struct Watch {
     pub consecutive_failures: u32,
     pub latest_attempt_duration_ms: Option<u64>,
     pub diagnostic_category: Option<DiagnosticCategory>,
+    #[serde(default)]
+    pub latest_failure: Option<AttemptFailure>,
     pub recurrence: Recurrence,
 }
 
@@ -148,6 +150,8 @@ pub struct Attempt {
     pub outcome: AttemptOutcome,
     pub diagnostic_category: Option<DiagnosticCategory>,
     pub diagnostic: Option<String>,
+    #[serde(default)]
+    pub stderr_excerpt: Option<String>,
     pub containment: Option<Value>,
     pub state_committed: bool,
 }
@@ -163,6 +167,25 @@ pub enum AttemptOutcome {
     Failed,
     Interrupted,
     Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttemptFailure {
+    pub attempt_id: String,
+    pub diagnostic_category: DiagnosticCategory,
+    pub stderr_excerpt: Option<String>,
+}
+
+impl Attempt {
+    pub(crate) fn failure(&self) -> Option<AttemptFailure> {
+        self.diagnostic_category
+            .map(|diagnostic_category| AttemptFailure {
+                attempt_id: self.id.clone(),
+                diagnostic_category,
+                stderr_excerpt: self.stderr_excerpt.clone(),
+            })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +374,8 @@ pub struct WatchHealth {
     pub suppressed_due_count: u64,
     pub consecutive_failures: u32,
     pub diagnostic_category: Option<DiagnosticCategory>,
+    #[serde(default)]
+    pub latest_failure: Option<AttemptFailure>,
     pub recurrence: Recurrence,
     pub sender_ready: bool,
     pub logical_store_id: Option<String>,

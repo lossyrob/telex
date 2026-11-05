@@ -799,6 +799,7 @@ fn watch() -> Watch {
         consecutive_failures: 0,
         latest_attempt_duration_ms: Some(2),
         diagnostic_category: None,
+        latest_failure: None,
         recurrence: Recurrence::default(),
     }
 }
@@ -943,6 +944,7 @@ fn safe_projection_omits_all_opaque_policy_state_attempt_and_operation_fields() 
         outcome: AttemptOutcome::Failed,
         diagnostic_category: Some(DiagnosticCategory::ProcessFailure),
         diagnostic: Some(SECRET.into()),
+        stderr_excerpt: Some("[REDACTED]".into()),
         containment: Some(json!({"anything":SECRET})),
         state_committed: false,
     }]));
