@@ -234,7 +234,7 @@
       "id": "watcher-macos-containment-runtime",
       "type": "task",
       "title": "Implement and prove macOS assigned-group containment",
-      "summary": "Split from #165 on 2026-10-23 under the operator's one-item, one-PR rule. Implements ordinary-user, per-attempt macOS containment for the trusted non-detaching detector contract and proves it on native ARM64 and x64; one product PR must say Closes #172. Source and native proof work is active. Product integration is held until PR #168 merges, the plan incorporates every design-steward correction, pinned XNU reasoning is mapped to both target releases, barrier-controlled native ARM64 and x64 evidence proves the selected completion algorithm, fork/spawn/exec closure, PID/PGID reuse safety, and no post-seal signal authority, and the design steward gives final authorization. The node also depends on watcher-host-containment-doc-alignment under #177. #177 is a prerequisite for #172 product-PR readiness and closure only; it does not stop the active source and native proof work and grants no implementation authorization. The shipping PR must remove the temporary fail-closed sentence in docs/design/watcher.md and rewrite the macOS containment bullet into unqualified present tense only if the complete runtime implementation, source/native proof, guard-loss/restart behavior, and final design authorization land together at that exact head. Native ARM64/x86_64 run 39904383638 rejected one-shot SIGKILL completion without producing false absence; if no ordinary-user completion predicate can be proved, the node returns decision-needed. The runtime-core merge prerequisite was satisfied by PR #164 merge d0237dbb, and watcher-runtime-core completed on 2026-10-23, so that dependency is satisfied. Any privileged, entitled, installed, persistent, shared, launchd-managed, brokered, or VM-backed architecture returns to the operator. Windows and Linux behavior and all receipt, store, and readiness fences stay unchanged; #162 remains fail-closed on macOS until this node lands. The node does not block the Windows-path five-minute gate, but it blocks product-level usable-watcher and closure. Owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b; Campaign runs the merge gate and merges at the exact cleared SHA.",
+      "summary": "Split from #165 on 2026-10-23 under the operator's one-item, one-PR rule. Implements ordinary-user, per-attempt macOS containment for the trusted non-detaching detector contract and proves it on native ARM64 and x64; one product PR must say Closes #172. Source and native proof work is active. Product integration is held until PR #168 merges, the plan incorporates every design-steward correction, pinned XNU reasoning is mapped to both target releases, barrier-controlled native ARM64 and x64 evidence proves the selected completion algorithm, fork/spawn/exec closure, PID/PGID reuse safety, and no post-seal signal authority, and the design steward gives final authorization. The node also depends on watcher-host-containment-doc-alignment under #177. #177 is a prerequisite for #172 product-PR readiness and closure only; it does not stop the active source and native proof work and grants no implementation authorization. The shipping PR must remove the temporary fail-closed sentence in docs/design/watcher.md and rewrite the macOS containment bullet into unqualified present tense only if the complete runtime implementation, source/native proof, guard-loss/restart behavior, and final design authorization land together at that exact head. Native ARM64/x86_64 run 39904383638 rejected one-shot SIGKILL completion without producing false absence; if no ordinary-user completion predicate can be proved, the node returns decision-needed. The runtime-core merge prerequisite was satisfied by PR #164 merge d0237dbb, and watcher-runtime-core completed on 2026-10-23, so that dependency is satisfied. Any privileged, entitled, installed, persistent, shared, launchd-managed, brokered, or VM-backed architecture returns to the operator. Windows and Linux behavior and all receipt, store, and readiness fences stay unchanged; #162 remains fail-closed on macOS until this node lands. The node does not block the Windows-path five-minute gate, but it blocks product-level usable-watcher and closure. Owner session d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b; Campaign runs the merge gate and merges at the exact cleared SHA. On 2026-11-05 the operator removed macOS from the initial Watcher release; this node now gates only closure-gate and closure-ready (https://github.com/lossyrob/telex/issues/172#issuecomment-6664653921). It remains unfinished: proof, finite, freeze, HOLD history and safety contract are unchanged, deferral is not acceptance, and macOS stays unsupported and fail-closed until accepted.",
       "status": "in-progress",
       "attention": "focus",
       "repoIds": [
@@ -399,7 +399,7 @@
       "id": "runtime-hardening",
       "type": "task",
       "title": "Watcher runtime reliability and packaging hardening",
-      "summary": "Exercise restart/crash, malformed or hung scripts, output caps, many watches, SQLite/Postgres routes, diagnostics retention, packaging, upgrade, and operational recovery after the minimal UX and examples are accepted. Seven completion criteria (coverage map, many watches at capacity defaults, versioned compaction, backup/restore, Windows/Linux release archives with upgrade, recovery runbook, no weakening of #239 coverage), reuse of #234/#239/#225/#233/#222 evidence, and out-of-scope items (macOS, #242 fixture cost, v1 adapter, recipes, #201, #243 capture) are pinned in tracker #245. Tracker creation does not authorize launch.",
+      "summary": "Exercise restart/crash, malformed or hung scripts, output caps, many watches, SQLite/Postgres routes, diagnostics retention, packaging, upgrade, and operational recovery after the minimal UX and examples are accepted. Windows is the initial release platform: Windows evidence is required for all eight criteria pinned in tracker #245 (coverage map, many watches at capacity defaults, versioned compaction, backup/restore, Windows x86_64 release archive with upgrade and no telex-watcher in macOS archives, recovery runbook, no weakening of #239 coverage, truthful platform statement); existing Linux coverage is kept, with new Linux-only failures filed as follow-ups. Reuses #234/#239/#225/#233/#222 evidence; macOS, #242 fixture cost, v1 adapter, recipes, #201 and #243 capture are out of scope. Feeds windows-initial-release-gate (#246). Tracker creation does not authorize launch.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
@@ -419,17 +419,37 @@
       }
     },
     {
+      "id": "windows-initial-release-gate",
+      "type": "gate",
+      "title": "Windows initial Watcher release ready",
+      "summary": "Operator decision 2026-11-05: Windows is the initial Watcher release platform and macOS is not a prerequisite. The gate runner exercises one exact main commit on a clean Windows x86_64 host with the CI-built archive: install, first five-minute watch, upgrade from the #222 source-built registry, crash recovery, degraded-cause diagnosis, 24-hour soak, truthful platform statement (macOS unsupported and fail-closed), and green Windows/Linux CI without weakened coverage; the Builder rules. Readiness only: no tag, release or Operator Station launch is authorized. Protocol pinned in tracker #246.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 246
+      },
+      "dependsOn": [
+        "runtime-hardening"
+      ]
+    },
+    {
       "id": "closure-gate",
       "type": "gate",
       "title": "External watch loops reliably deliver Telex attention",
-      "summary": "Builder validates several real long-duration watches, confirms session queues remain free of background waiters, accepts the minimal authoring UX and diagnostics, reviews hardening evidence, and accepts campaign integration with Operator Station.",
+      "summary": "Builder validates several real long-duration watches, confirms session queues remain free of background waiters, accepts the minimal authoring UX and diagnostics, reviews hardening evidence, and accepts campaign integration with Operator Station. Full cross-platform closure after the initial Windows release (windows-initial-release-gate); macOS acceptance (#172) is required here, not for the initial release.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "runtime-hardening",
+        "windows-initial-release-gate",
         "watcher-macos-containment-runtime"
       ]
     },
@@ -653,7 +673,7 @@
     {
       "id": "usable-watcher",
       "title": "Minimal Watcher runtime, CLI, and examples usable",
-      "summary": "The supported client, minimal runtime/CLI, and optional examples let agents create, operate, and diagnose watches without session-owned polling or authoring ceremony.",
+      "summary": "The supported client, minimal runtime/CLI, and optional examples let agents create, operate, and diagnose watches without session-owned polling or authoring ceremony. Usable on Windows and Linux; macOS fails closed before detector launch until watcher-macos-containment-runtime (#172) is accepted under closure-ready.",
       "status": "planned",
       "nodeIds": [
         "watcher-runtime-core",
@@ -661,16 +681,26 @@
         "five-minute-custom-watch-gate",
         "minimal-example-pack",
         "examples-accelerate-gate",
-        "watcher-macos-containment-runtime",
         "watcher-macos-sqlite-registry-open",
         "watcher-runtime-backend-resilience",
         "detector-degraded-cause"
       ]
     },
     {
+      "id": "windows-initial-release",
+      "title": "Initial Windows Watcher release ready",
+      "summary": "Windows is the initial release platform (operator decision 2026-11-05). Released Windows archives install, upgrade, recover and deliver exactly once with visible degraded causes; existing Linux behavior is kept; macOS is stated unsupported and fails closed and is not a prerequisite. Readiness does not authorize tag, release or Operator Station launch.",
+      "status": "planned",
+      "nodeIds": [
+        "detector-degraded-cause",
+        "runtime-hardening",
+        "windows-initial-release-gate"
+      ]
+    },
+    {
       "id": "closure-ready",
       "title": "Telex Watcher operationally validated",
-      "summary": "Long-duration external observation and Telex event delivery have survived realistic reliability, security, packaging, and scale validation.",
+      "summary": "Long-duration external observation and Telex event delivery have survived realistic reliability, security, packaging, and scale validation. Full cross-platform closure, following the initial Windows release; includes macOS (#172) and Operator Station integration.",
       "status": "planned",
       "nodeIds": [
         "runtime-hardening",
