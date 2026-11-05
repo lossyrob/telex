@@ -574,7 +574,12 @@ destination write transaction**, under both locks through commit. The original
 physical file/lock never moves; there is no missing-path window or displaced
 WAL/SHM. A process death before commit leaves the original unchanged, and the
 command can be rerun. A death after commit leaves the complete fenced image.
-Private temporary images left by a crash are not live registry paths.
+A crash can leave an owner-only `.watcher-restore-<uuid>.tmp` image beside the
+original. After confirming the restore process has exited, remove that restore's
+temporary image and any of its SQLite sidecars; retain the
+`.pre-restore-<uuid>` evidence. **Never start a runtime against a temporary
+image.** Preparation can already have marked it restored, so startup may accept
+it with its watches fenced. Only the original path is the designated live copy.
 
 The startup-refusing backup mark is converted to **restored** in that same
 transaction. Separately, every active/paused watch becomes paused/blocked with
