@@ -252,8 +252,10 @@ interval can restart grace once per unchanged episode.
 
 ## Recover degraded monitoring without losing history
 
-An observation failure leaves the watch active/degraded, with no event or state
-advance. Inspect `attempts` and `latestFailure` for the bounded, redacted
+An observation failure leaves the watch active/degraded with
+`diagnosticCategory: "detector-degraded"`. It emits no event and does not advance
+detector state.
+Inspect `attempts` and `latestFailure` for the bounded, redacted
 stderr tail: at most 4096 UTF-8 bytes including `[truncated]`. Unavailable or
 historical capture is `null`; captured empty stderr is `""`. Redaction covers
 configured sensitive environment values, not arbitrary provider text or
