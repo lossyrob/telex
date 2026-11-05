@@ -136,6 +136,34 @@ fn no_sidecars(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn same_path(left: &Path, right: &Path) -> Result<bool> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Globalization::{CompareStringOrdinal, CSTR_EQUAL};
+    let left: Vec<u16> = left.as_os_str().encode_wide().collect();
+    let right: Vec<u16> = right.as_os_str().encode_wide().collect();
+    let result = unsafe {
+        CompareStringOrdinal(
+            left.as_ptr(),
+            i32::try_from(left.len())?,
+            right.as_ptr(),
+            i32::try_from(right.len())?,
+            1,
+        )
+    };
+    anyhow::ensure!(
+        result != 0,
+        "backup-path-comparison-failed: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(result == CSTR_EQUAL)
+}
+
+#[cfg(not(windows))]
+fn same_path(left: &Path, right: &Path) -> Result<bool> {
+    Ok(left == right)
+}
+
 /// Publish without replacement, with no overwrite fallback.
 fn publish_snapshot(source: &Connection, path: &Path, metadata: &BackupMetadata) -> Result<()> {
     let temporary = path.with_file_name(format!(".watcher-backup-{}.tmp", Uuid::new_v4()));
@@ -163,10 +191,18 @@ fn publish_snapshot(source: &Connection, path: &Path, metadata: &BackupMetadata)
         std::fs::File::open(path.parent().context("backup parent missing")?)?.sync_all()?;
         Ok(())
     })();
-    if temporary.exists() {
-        std::fs::remove_file(&temporary).context("remove private backup temporary file")?;
+    remove_temporary(&temporary, result)
+}
+
+fn remove_temporary<T>(path: &Path, result: Result<T>) -> Result<T> {
+    match (result, std::fs::remove_file(path)) {
+        (result, Ok(())) => result,
+        (result, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => result,
+        (Ok(_), Err(error)) => Err(error).context("remove private snapshot temporary file"),
+        (Err(error), Err(cleanup)) => {
+            Err(error).context(format!("private snapshot cleanup also failed: {cleanup}"))
+        }
     }
-    result
 }
 
 fn sync_file(path: &Path) -> Result<()> {
@@ -210,7 +246,10 @@ impl Registry {
         let path = canonical_new_path(path)?;
         for suffix in ["-wal", "-shm", "-journal"] {
             anyhow::ensure!(
-                path != Path::new(&format!("{}{suffix}", self._ownership.path.display())),
+                !same_path(
+                    &path,
+                    Path::new(&format!("{}{suffix}", self._ownership.path.display()))
+                )?,
                 "backup-path-is-registry-sidecar"
             );
         }
@@ -437,6 +476,11 @@ pub(crate) fn restore_with_progress(
         progress("committed");
         integrity(&original)?;
         image.close().map_err(|(_, error)| error)?;
+        original
+            .close()
+            .map_err(|(_, error)| error)
+            .context("close restored registry")?;
+        sync_file(&original_ownership.path).context("sync restored registry")?;
         Ok(RestoreReport {
             version: 1,
             original_evidence,
@@ -444,6 +488,26 @@ pub(crate) fn restore_with_progress(
             fenced_watches,
         })
     })();
-    std::fs::remove_file(&staging).context("remove private restore staging file")?;
-    result
+    remove_temporary(&staging, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_cleanup_preserves_the_original_failure() {
+        let directory = std::env::temp_dir().join(format!("watcher-cleanup-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let error = remove_temporary::<()>(&directory, Err(anyhow::anyhow!("restore-copy-failed")))
+            .unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "restore-copy-failed");
+        assert!(error.to_string().contains("cleanup also failed"));
+        let error = remove_temporary(&directory, Ok(())).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("remove private snapshot temporary file"));
+        std::fs::remove_dir(&directory).unwrap();
+        assert_eq!(remove_temporary(&directory, Ok(7)).unwrap(), 7);
+    }
 }

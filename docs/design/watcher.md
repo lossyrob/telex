@@ -1150,6 +1150,11 @@ containment references from retained attempts. Each batch removes at most 256
 rows total; a cooperative two-second SQLite work deadline rolls back excess
 work. The [runtime runbook](../watcher-runtime.md#capacity-and-compaction)
 documents the mutex/busy-timeout and filesystem-latency caveat.
+Per-watch indexed seeks and a rotating cursor bound candidate work independently
+of total completed history. Automatic deadline expiry reports
+`maintenance-deferred` and retries after a minute without stopping the owner;
+genuine registry failures remain fatal. Automatic maintenance normally runs
+once per minute and drains full batches at one-second intervals.
 
 Deletion preserves aggregate outcome, diagnostic-category and byte counters
 transactionally. Retained operations explicitly mark `attemptCompacted` for

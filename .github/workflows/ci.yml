@@ -267,6 +267,13 @@ jobs:
           --test installed_current_process
           -- -D warnings
 
+      - name: Record Watcher capacity and recovery sizing evidence
+        timeout-minutes: 10
+        run: >-
+          cargo build -p telex -p telex-watcher --all-features --bins
+          && cargo test -p telex-watcher --all-features --lib
+          sqlite_watcher_runtime_hardening -- --test-threads=1 --nocapture
+
       - name: Fail on collected Windows crash dumps
         if: always() && runner.os == 'Windows'
         shell: pwsh

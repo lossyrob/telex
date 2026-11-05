@@ -144,6 +144,7 @@
         "diagnostics": {
           "type": "array",
           "items": { "enum": ["membership-reconciliation-pending", "sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "containment-unproven", "registry-failure"] }
+          "maintenance-deferred", "containment-unproven", "registry-failure"] }
         },
         "detach": { "type": "array", "items": { "type": "object" } }
       }

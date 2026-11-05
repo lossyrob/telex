@@ -354,6 +354,7 @@ pub enum RuntimeDiagnostic {
     PartialMembership,
     InboundActionableBacklog,
     RetentionWarning,
+    MaintenanceDeferred,
     ContainmentUnproven,
     RegistryFailure,
 }

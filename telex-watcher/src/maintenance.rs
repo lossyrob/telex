@@ -3,6 +3,10 @@
 use super::*;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 pub const COMPACTION_VERSION: u32 = 1;
@@ -10,12 +14,24 @@ pub const COMPLETED_ATTEMPTS_PER_WATCH: u32 = 100;
 pub const COMPACTION_BATCH_LIMIT: u32 = 256;
 pub const RUNTIME_HISTORY_LIMIT: u32 = 10;
 
+#[derive(Debug)]
+pub(crate) struct CompactionBudgetExceeded;
+
+impl std::fmt::Display for CompactionBudgetExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("compaction-budget-exceeded")
+    }
+}
+
+impl std::error::Error for CompactionBudgetExceeded {}
+
 pub fn failure_code(error: &anyhow::Error) -> Option<&'static str> {
     const CODES: &[&str] = &[
         "backup-restore-required",
         "backup-publication-failed",
         "backup-integrity-failed",
         "backup-sidecar-present",
+        "backup-path-comparison-failed",
         "backup-path-must-be-absolute",
         "backup-destination-exists",
         "backup-path-is-registry-sidecar",
@@ -34,6 +50,7 @@ pub fn failure_code(error: &anyhow::Error) -> Option<&'static str> {
         "unsupported-compaction-version",
         "backup-failed",
         "compaction-failed",
+        "compaction-budget-exceeded",
     ];
     for cause in error.chain() {
         let message = cause.to_string();
@@ -147,7 +164,11 @@ impl Registry {
                 ON watcher_v2_operations(json_extract(data,'$.attemptId'));
              CREATE INDEX IF NOT EXISTS watcher_v2_attempt_containment_runtime
                 ON watcher_v2_attempts(json_extract(data,'$.runtimeId'))
-                WHERE json_extract(data,'$.containment') IS NOT NULL;",
+                WHERE json_extract(data,'$.containment') IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS watcher_v2_completed_attempts
+                ON watcher_v2_attempts(watch_id,started DESC,id DESC)
+                WHERE json_extract(data,'$.finishedAtMs') IS NOT NULL
+                  AND json_extract(data,'$.outcome')<>'running';",
         )?;
         let unsupported: bool = self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM watcher_v2_compaction WHERE version<>?1)",
@@ -182,43 +203,98 @@ impl Registry {
 
     fn compact_with_audit(&mut self, manual: bool) -> Result<CompactionReport> {
         let started = Instant::now();
+        let exhausted = Arc::new(AtomicBool::new(false));
+        let signal = exhausted.clone();
+        #[cfg(test)]
+        let checks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        #[cfg(test)]
+        let check_counter = checks.clone();
+        #[cfg(test)]
+        let forced = std::mem::take(&mut self.fail_next_compaction_deadline);
+        #[cfg(not(test))]
+        let forced = false;
         self.connection.progress_handler(
             1000,
-            Some(move || started.elapsed() > Duration::from_secs(2)),
+            Some(move || {
+                #[cfg(test)]
+                check_counter.fetch_add(1, Ordering::Relaxed);
+                let interrupt = forced || started.elapsed() > Duration::from_secs(2);
+                if interrupt {
+                    signal.store(true, Ordering::Relaxed);
+                }
+                interrupt
+            }),
         );
         let result = self.compact_batch(manual);
         self.connection.progress_handler(0, None::<fn() -> bool>);
-        result
+        #[cfg(test)]
+        {
+            self.last_compaction_vm_checks = checks.load(Ordering::Relaxed);
+        }
+        let result = if exhausted.load(Ordering::Relaxed) {
+            result.map_err(|error| error.context(CompactionBudgetExceeded))
+        } else {
+            result
+        };
+        let mut report = result?;
+        report.totals = self.compaction_stats(None)?;
+        Ok(report)
     }
 
     fn compact_batch(&mut self, manual: bool) -> Result<CompactionReport> {
+        let cursor = self.compaction_cursor.clone();
         let tx = self.connection.transaction()?;
-        let candidates = {
+        let watches = {
             let mut query = tx.prepare(
-                "WITH completed AS (
-                    SELECT id,watch_id,started,data,
-                           row_number() OVER (PARTITION BY watch_id ORDER BY started DESC,id DESC) AS position
-                    FROM watcher_v2_attempts
-                    WHERE json_extract(data,'$.finishedAtMs') IS NOT NULL
-                      AND json_extract(data,'$.outcome')<>'running'
-                )
-                SELECT a.id,a.watch_id,json_extract(a.data,'$.outcome'),
+                "SELECT id,json_extract(data,'$.lastAttemptId'),json_extract(data,'$.runningAttemptId'),
+                        json_extract(data,'$.latestFailure.attemptId')
+                 FROM watcher_v2_watches ORDER BY (id<=?1),id",
+            )?;
+            let rows = query
+                .query_map([cursor], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        let mut candidates = Vec::new();
+        let mut last_watch = None;
+        for (watch, last, running, failure) in watches {
+            let mut query = tx.prepare(
+                "SELECT a.id,a.watch_id,json_extract(a.data,'$.outcome'),
                        json_extract(a.data,'$.diagnosticCategory'),length(CAST(a.data AS BLOB))
-                FROM completed a JOIN watcher_v2_watches w ON w.id=a.watch_id
-                WHERE a.position>?1
-                  AND a.id IS NOT json_extract(w.data,'$.lastAttemptId')
-                  AND a.id IS NOT json_extract(w.data,'$.runningAttemptId')
-                  AND a.id IS NOT json_extract(w.data,'$.latestFailure.attemptId')
+                FROM watcher_v2_attempts a
+                WHERE a.watch_id=?1
+                  AND json_extract(a.data,'$.finishedAtMs') IS NOT NULL
+                  AND json_extract(a.data,'$.outcome')<>'running'
+                  AND (a.started,a.id)<(
+                    SELECT started,id FROM watcher_v2_attempts
+                    WHERE watch_id=?1 AND json_extract(data,'$.finishedAtMs') IS NOT NULL
+                      AND json_extract(data,'$.outcome')<>'running'
+                    ORDER BY started DESC,id DESC LIMIT 1 OFFSET ?2)
+                  AND a.id IS NOT ?4 AND a.id IS NOT ?5 AND a.id IS NOT ?6
                   AND NOT EXISTS (
                     SELECT 1 FROM watcher_v2_operations o
                     WHERE o.watch_id=a.watch_id AND json_extract(o.data,'$.attemptId')=a.id
                       AND json_extract(o.data,'$.status') NOT IN
                         ('accepted','closed-not-accepted','removed-not-recorded','removed-rejected'))
-                ORDER BY a.started,a.id LIMIT ?2",
+                ORDER BY a.started,a.id LIMIT ?3",
             )?;
             let rows = query
                 .query_map(
-                    params![COMPLETED_ATTEMPTS_PER_WATCH, COMPACTION_BATCH_LIMIT],
+                    params![
+                        watch,
+                        COMPLETED_ATTEMPTS_PER_WATCH - 1,
+                        COMPACTION_BATCH_LIMIT as usize - candidates.len(),
+                        last,
+                        running,
+                        failure
+                    ],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -230,8 +306,12 @@ impl Registry {
                     },
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            rows
-        };
+            candidates.extend(rows);
+            last_watch = Some(watch);
+            if candidates.len() == COMPACTION_BATCH_LIMIT as usize {
+                break;
+            }
+        }
         let mut deltas: BTreeMap<String, CompactionStats> = BTreeMap::new();
         let mut attempts_deleted = 0;
         let mut bytes_deleted = 0;
@@ -307,12 +387,13 @@ impl Registry {
             )?;
         }
         tx.commit()?;
+        self.compaction_cursor = last_watch;
         Ok(CompactionReport {
             version: COMPACTION_VERSION,
             attempts_deleted,
             runtimes_deleted,
             bytes_deleted,
-            totals: self.compaction_stats(None)?,
+            totals: CompactionStats::default(),
         })
     }
 }

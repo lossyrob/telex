@@ -392,6 +392,98 @@ async fn battery(iso: &isolation::Isolation) {
     actor_lifecycle(iso).await;
     stderr_excerpt_battery(iso).await;
     backup_restore_battery(iso).await;
+    compaction_deadline_battery(iso).await;
+}
+
+async fn compaction_deadline_battery(iso: &isolation::Isolation) {
+    use crate::management::{Command, Response};
+    use std::time::Duration;
+
+    let path = iso.root.join("maintenance-deadline.sqlite");
+    let detector = isolation::branch_binary()
+        .with_file_name(format!("fake_detector{}", std::env::consts::EXE_SUFFIX));
+    let input = iso.root.join("maintenance-detector.json");
+    std::fs::write(
+        &input,
+        json!({
+            "stdout":r#"{"schemaVersion":2,"outcome":"idle","nextState":{"cursor":9999}}"#
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut registration = registration(iso, "maintenance", "service:maintenance-suite");
+    registration.command = vec![
+        detector.to_string_lossy().into(),
+        input.to_string_lossy().into(),
+    ];
+    registration.interval_seconds = 3600;
+    let mut registry = Registry::open(&path, 10000, 10_000_000).unwrap();
+    registry.register(registration, 1000).unwrap();
+    for i in 0..400 {
+        let (_, attempt) = registry
+            .begin_attempt("maintenance", "seed", 2000 + i * 10)
+            .unwrap();
+        registry
+            .finish_direct(&attempt.id, json!({"cursor":i}), false, 2001 + i * 10)
+            .unwrap();
+    }
+    drop(registry);
+    let (runtime, management) =
+        Runtime::open(RuntimeConfig::installed(path, iso.trusted_root())).unwrap();
+    runtime.interrupt_next_compaction().unwrap();
+    let owner = tokio::spawn(runtime.run());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let prior = loop {
+        let response = management.execute(Command::Health).await.unwrap();
+        if let Response::Health(health) = response {
+            if health
+                .diagnostics
+                .contains(&RuntimeDiagnostic::MaintenanceDeferred)
+            {
+                break health;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "automatic maintenance did not expose its deferred budget"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    loop {
+        let response = management
+            .execute(Command::Show {
+                id: "maintenance".into(),
+            })
+            .await
+            .unwrap();
+        if matches!(response, Response::Watch(Some(ref watch)) if watch.state == json!({"cursor":9999}))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "scheduling stopped after deferred maintenance"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let Response::Health(health) = management.execute(Command::Health).await.unwrap() else {
+        panic!("health")
+    };
+    assert_eq!(health.runtime_id, prior.runtime_id);
+    assert!(health.heartbeat_at > prior.heartbeat_at);
+    let Response::Compaction(report) = management.execute(Command::Compact).await.unwrap() else {
+        panic!("compact")
+    };
+    assert_eq!(report.attempts_deleted, 256);
+    let Response::Health(health) = management.execute(Command::Health).await.unwrap() else {
+        panic!("health")
+    };
+    assert!(!health
+        .diagnostics
+        .contains(&RuntimeDiagnostic::MaintenanceDeferred));
+    management.execute(Command::Shutdown).await.unwrap();
+    owner.await.unwrap().unwrap();
 }
 
 async fn backup_restore_battery(iso: &isolation::Isolation) {

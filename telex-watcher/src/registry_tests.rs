@@ -580,6 +580,128 @@ fn maintenance_restore_kill_at_each_boundary_is_atomic_and_rerunnable() {
     }
 }
 
+#[test]
+#[cfg(windows)]
+fn maintenance_backup_refuses_windows_case_aliases_of_reserved_source_sidecars() {
+    let fixture = Fixture::new();
+    let path = fixture.root.join("caf\u{e9}.sqlite");
+    let registry = Registry::open(&path, 10000, 10_000_000).unwrap();
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let destination = fixture.root.join(format!("CAF\u{c9}.SQLITE{suffix}"));
+        let error = registry.backup(&destination).unwrap_err();
+        assert_eq!(
+            crate::maintenance::failure_code(&error),
+            Some("backup-path-is-registry-sidecar")
+        );
+        assert!(!destination.exists());
+        assert!(!fixture
+            .root
+            .join(format!("caf\u{e9}.sqlite{suffix}"))
+            .exists());
+    }
+    registry
+        .backup(&fixture.root.join("ordinary.sqlite"))
+        .unwrap();
+}
+
+#[test]
+fn maintenance_large_history_makes_bounded_progress_and_deadline_rolls_back() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "history", false);
+    registry
+        .evidence(
+            &operation.operation_id,
+            SendEvidence::send(Ok(accepted(&operation))),
+            2200,
+        )
+        .unwrap();
+    let (_, prototype) = registry.begin_attempt("history", "seed", 3000).unwrap();
+    registry
+        .finish_direct(&prototype.id, json!({"cursor":2}), false, 3001)
+        .unwrap();
+    registry.connection.execute(
+        "WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<50000)
+         INSERT INTO watcher_v2_attempts(id,watch_id,started,data)
+         SELECT printf('bulk-%06d',value),watch_id,value+10000,
+                json_set(data,'$.id',printf('bulk-%06d',value),'$.startedAtMs',value+10000,
+                              '$.finishedAtMs',value+10001)
+         FROM watcher_v2_attempts,n WHERE id=?1", [&prototype.id],
+    ).unwrap();
+    let before = serde_json::to_value(registry.list().unwrap()).unwrap();
+    let count = registry.retention(None).unwrap().rows;
+    registry.fail_next_compaction_deadline = true;
+    let error = registry.compact().unwrap_err();
+    assert_eq!(
+        crate::maintenance::failure_code(&error),
+        Some("compaction-budget-exceeded")
+    );
+    assert_eq!(count, registry.retention(None).unwrap().rows);
+    assert_eq!(registry.compaction_stats(None).unwrap().attempts, 0);
+    assert_eq!(
+        before,
+        serde_json::to_value(registry.list().unwrap()).unwrap()
+    );
+    let report = registry.compact().unwrap();
+    assert_eq!(report.attempts_deleted, 256);
+    assert!(
+        registry.last_compaction_vm_checks < 200,
+        "selection scanned historical rows: {}",
+        registry.last_compaction_vm_checks
+    );
+    assert_eq!(
+        before,
+        serde_json::to_value(registry.list().unwrap()).unwrap()
+    );
+    let retained = registry
+        .operation(&operation.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.envelope, operation.envelope);
+    assert_eq!(retained.receipt.unwrap().message_id, 7);
+    assert_eq!(registry.compact().unwrap().attempts_deleted, 256);
+}
+
+#[test]
+fn maintenance_correcting_stronger_blocks_reveals_restore_review_reason() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    registry.bind_store("watch", "store-1").unwrap();
+    let (_, attempt) = registry.begin_attempt("watch", "runtime", 2000).unwrap();
+    registry
+        .containment(&attempt.id, json!({"fixture":"ended"}))
+        .unwrap();
+    registry
+        .start_runtime("replacement", 2100, |_| false)
+        .unwrap();
+    let snapshot = fixture.root.join("snapshot.sqlite");
+    registry.backup(&snapshot).unwrap();
+    drop(registry);
+    crate::backup::restore(&fixture.path(), &snapshot).unwrap();
+    let mut registry = fixture.open();
+    registry.recheck_containment("watch", |_| true).unwrap();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert_eq!(
+        watch.blocked_reason,
+        Some(BlockedReason::RestoredBackupReview)
+    );
+    assert_eq!(watch.health, Health::Blocked);
+    registry
+        .block_watch("watch", BlockedReason::LogicalStoreMismatch)
+        .unwrap();
+    registry.bind_store("watch", "store-1").unwrap();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert!(watch.restore_review_required);
+    assert_eq!(
+        watch.blocked_reason,
+        Some(BlockedReason::RestoredBackupReview)
+    );
+    assert_eq!(watch.health, Health::Blocked);
+}
+
 struct Fixture {
     root: std::path::PathBuf,
 }

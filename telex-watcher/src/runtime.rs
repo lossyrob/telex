@@ -49,6 +49,7 @@ pub struct Runtime {
     containment_directory: PathBuf,
     reconciled_registry_revision: Option<u64>,
     stopping: bool,
+    maintenance_deferred: bool,
     #[cfg(all(test, any(windows, target_os = "linux")))]
     pub(crate) send_barrier: Option<crate::runtime_resilience_tests::SendBarrier>,
 }
@@ -112,6 +113,7 @@ impl Runtime {
                 containment_directory,
                 reconciled_registry_revision: None,
                 stopping: false,
+                maintenance_deferred: false,
                 #[cfg(all(test, any(windows, target_os = "linux")))]
                 send_barrier: None,
             },
@@ -121,6 +123,12 @@ impl Runtime {
 
     pub fn runtime_id(&self) -> &str {
         &self.id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn interrupt_next_compaction(&self) -> Result<()> {
+        lock(&self.registry)?.fail_next_compaction_deadline = true;
+        Ok(())
     }
 
     /// Keep the existing registry lock alive until a host has removed its
@@ -302,8 +310,20 @@ impl Runtime {
                     }
                     self.launch_due()?;
                     if now >= next_compaction {
-                        lock(&self.registry)?.compact_automatic()?;
-                        next_compaction = now_ms().saturating_add(1000);
+                        let result = lock(&self.registry)?.compact_automatic();
+                        let delay = match result {
+                            Ok(report) => {
+                                self.maintenance_deferred = false;
+                                if report.attempts_deleted + report.runtimes_deleted
+                                    == u64::from(crate::maintenance::COMPACTION_BATCH_LIMIT) { 1000 } else { 60_000 }
+                            }
+                            Err(error) if error.downcast_ref::<crate::maintenance::CompactionBudgetExceeded>().is_some() => {
+                                self.maintenance_deferred = true;
+                                60_000
+                            }
+                            Err(error) => return Err(error),
+                        };
+                        next_compaction = now_ms().saturating_add(delay);
                     }
                     self.refresh_health()?;
                 }
@@ -644,6 +664,11 @@ impl Runtime {
         if health.retention.warning {
             health.diagnostics.push(RuntimeDiagnostic::RetentionWarning);
         }
+        if self.maintenance_deferred {
+            health
+                .diagnostics
+                .push(RuntimeDiagnostic::MaintenanceDeferred);
+        }
         if watches
             .iter()
             .any(|watch| watch.blocked_reason == Some(BlockedReason::OrphanContainmentUnproven))
@@ -849,11 +874,14 @@ impl Runtime {
             } => Ok(Response::ReceiptEvidence(
                 lock(&self.registry)?.receipt_evidence(&operation_id, limit)?,
             )),
-            Command::Compact => Ok(Response::Compaction(
-                lock(&self.registry)?
+            Command::Compact => {
+                let report = lock(&self.registry)?
                     .compact()
-                    .context("compaction-failed")?,
-            )),
+                    .context("compaction-failed")?;
+                self.maintenance_deferred = false;
+                self.refresh_health()?;
+                Ok(Response::Compaction(report))
+            }
             Command::Backup { path } => Ok(Response::Backup(
                 lock(&self.registry)?
                     .backup(&path)

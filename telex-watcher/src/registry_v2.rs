@@ -107,6 +107,11 @@ pub(crate) struct Registry {
     warning_bytes: u64,
     #[cfg(test)]
     pub fail_next_accept_commit: bool,
+    #[cfg(test)]
+    pub fail_next_compaction_deadline: bool,
+    #[cfg(test)]
+    pub last_compaction_vm_checks: u64,
+    compaction_cursor: Option<String>,
 }
 
 impl Registry {
@@ -192,6 +197,11 @@ impl Registry {
             warning_bytes,
             #[cfg(test)]
             fail_next_accept_commit: false,
+            #[cfg(test)]
+            fail_next_compaction_deadline: false,
+            #[cfg(test)]
+            last_compaction_vm_checks: 0,
+            compaction_cursor: None,
         };
         registry.initialize_maintenance()?;
         registry.isolate_v1()?;
@@ -542,6 +552,7 @@ impl Registry {
         {
             watch.block(BlockedReason::LogicalStoreMismatch);
         }
+        restore_fence(&mut watch);
         save_watch(&tx, &watch)?;
         if previous_observation != watch.observed_logical_store_id
             || previous_reason != watch.blocked_reason
@@ -1121,6 +1132,7 @@ impl Registry {
                 if !watch.store_verified() {
                     watch.block(BlockedReason::LogicalStoreMismatch);
                 }
+                restore_fence(&mut watch);
                 audit(
                     &tx,
                     Some(id),

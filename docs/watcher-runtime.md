@@ -462,7 +462,8 @@ not an unlimited or real-time scheduling promise. Global concurrency remains
 queueing one execution per missed interval. Heartbeat and local management
 remain observable while detectors run.
 
-Automatic version-1 compaction runs at most once per second. It keeps the newest
+Automatic version-1 compaction checks once per minute, draining a full batch
+again after one second while backlog remains. It keeps the newest
 100 completed attempts per watch, plus pinned last/running/latest-failure
 attempts and every attempt referenced by an unresolved operation. Historical
 runtime records keep the newest 10 eligible non-running records; a retained
@@ -471,7 +472,12 @@ never pruned. These exceptions can exceed the nominal history counts.
 
 One transaction deletes at most **256 total attempt/runtime rows**. SQLite's
 progress handler checks a two-second work deadline every 1000 VM instructions;
-interruption rolls back the batch. This is a cooperative SQL-work bound, not a
+interruption rolls back the batch. Automatic maintenance exposes
+`maintenance-deferred` in runtime health and backs off for one minute without
+stopping heartbeat, management or scheduling; manual `compact` reports
+`compaction-budget-exceeded`. Other registry errors remain fatal. Selection uses
+per-watch indexed seeks and rotates between watches instead of rescanning all
+completed history. This is a cooperative SQL-work bound, not a
 hard wall-clock latency guarantee: filesystem synchronization, contention and
 the registry's five-second SQLite busy timeout can add time while the owner
 holds its registry mutex. No unbounded drain holds the lock. `compact` runs
@@ -499,6 +505,25 @@ count until an operator-approved offline SQLite `VACUUM`. Stop the owner,
 retain a verified backup and allow enough spare disk before that separate
 maintenance; `compact` never vacuums or discards permanent evidence.
 
+For sizing, a local **Windows x86_64 / SQLite** hardening run of implementation
+`db56467f` with this change's review corrections measured the following
+workload-qualified deltas. These are serialized logical JSON bytes, not disk
+allocation or a stable per-watch/event tariff:
+
+| Workload | Retained rows | Retained bytes | Measured delta |
+| --- | --- | --- | --- |
+| 100 registrations, 101 detector executions, concurrency four, including one coalesced follow-up | 1 -> 502 | 609 -> 355873 | 355264 / 100 = **3552.64 bytes/new watch**, including completed detector history |
+| One staged event recovered after runtime death | 6 -> 16 | 5639 -> 14426 | **8787 bytes/committed event**, including this restart's runtime, audit and receipt evidence |
+
+Paths, backend routes, payloads, detector history and restart frequency change
+these costs. Permanent proof growth remains unbounded by this measurement.
+The CI step **Record Watcher capacity and recovery sizing evidence** emits the
+same measurements on Windows and Linux with its checkout identity. Reproduce
+after building the branch binaries with
+`cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening -- --test-threads=1 --nocapture`.
+Credentialed PostgreSQL runs exercise the same battery; the table is not a
+PostgreSQL storage or clean-host-soak measurement.
+
 ### Backup and restore
 
 With the owner running, publish to a **new absolute path in a private directory**:
@@ -508,7 +533,11 @@ With the owner running, publish to a **new absolute path in a private directory*
 ```
 
 The owner serializes the native SQLite snapshot with registry work and audits
-the request. Its metadata records source physical identity, responsibility,
+the request, including refusals. Copy, private-image vacuum, integrity checks
+and filesystem synchronization hold the registry mutex: "live" means the owner
+need not stop, not uninterrupted heartbeat or scheduling latency during a large
+backup. An execution timeout is outcome-unknown; inspect the destination before
+retrying. Its metadata records source physical identity, responsibility,
 host, schema/revision, per-watch sequence/pending marks and backend/store
 bindings. The temporary file is owner-only before any bytes are written.
 Publication is no-replace (Windows `MoveFileExW` with write-through and without
@@ -565,6 +594,10 @@ snapshot can roll back detector state and sequence high-water after later sends,
 causing repeated emissions or recipient `(watchId,eventSequence)` dedupe loss.
 Before resuming a stale restore, review post-backup sends and receiver history;
 automatic sequence advancement or inferred lossless rollback is not provided.
+Registrations and removals also rewind: post-snapshot watches disappear, while
+watches removed after the snapshot can return paused. Original evidence retains
+those later records. Captured finite recovery budgets/deadlines are not renewed;
+expired budgets still need the ordinary proof-gated management grants.
 
 ### Recovery decisions
 
