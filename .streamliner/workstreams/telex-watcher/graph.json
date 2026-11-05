@@ -289,9 +289,9 @@
       "id": "detector-degraded-cause",
       "type": "task",
       "title": "Surface detector stderr for degraded attempts",
-      "summary": "Retain a bounded, redacted stderr excerpt (last 4 KiB UTF-8, leading [truncated] marker when cut) on completed attempts whose stderr was captured, required for detector-degraded attempts; show it in attempts and the latest failing excerpt in status/show; forward-migrate the SQLite registry; document the field; test degraded, truncation and redaction. Conformance gap in the accepted diagnose-failures outcome (watcher.md assumes retained attempt stderr). Stall-detect message wording, the 256-byte limit and fail-closed group behavior are out of scope; retention/compaction of the excerpt belongs to runtime-hardening. Steward disposition https://github.com/lossyrob/telex/issues/243#issuecomment-6664537088.",
-      "status": "planned",
-      "attention": "focus",
+      "summary": "Completed 2026-11-05: PR #247 merged at 9047a9cf6bd2af374dfc78a082a51cf887d13185 and closed #243; exact-merge main push CI 42094898688 attempt 1 succeeded; owner field report 6667906335 (design impact updated-docs). Steward exact-head inspections 6666181135, 6666239825 and 6666628290 found it conforming. Completed attempts with captured stderr retain a redacted UTF-8 tail of at most 4096 bytes including a leading [truncated] marker, also on the stdin-writer error path; show/status/health expose latestFailure {attemptId, diagnosticCategory, stderrExcerpt}, which a later success does not clear or relabel. Captured empty stderr is \"\", unavailable or historical capture is null and is not reconstructed. The registry migration is additive at version 2 and forward-only: earlier Watcher builds cannot open a registry this build has opened. Owner validation used isolated branch-built binaries; no operator installation, daemon or release changed. Retention and compaction remain with runtime-hardening. Earlier summary retained as source-time history: Retain a bounded, redacted stderr excerpt (last 4 KiB UTF-8, leading [truncated] marker when cut) on completed attempts whose stderr was captured, required for detector-degraded attempts; show it in attempts and the latest failing excerpt in status/show; forward-migrate the SQLite registry; document the field; test degraded, truncation and redaction. Conformance gap in the accepted diagnose-failures outcome (watcher.md assumes retained attempt stderr). Stall-detect message wording, the 256-byte limit and fail-closed group behavior are out of scope; retention/compaction of the excerpt belongs to runtime-hardening. Steward disposition https://github.com/lossyrob/telex/issues/243#issuecomment-6664537088.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -379,9 +379,9 @@
       "id": "examples-accelerate-gate",
       "type": "gate",
       "title": "Examples accelerate rather than constrain",
-      "summary": "Builder verifies agents may use an example or ignore the pack and write a detector directly, and that examples reduce setup cycles without imposing a provider framework. Executable protocol, paired direct-first arms, budgets, measures and pass criteria are pinned in tracker #244; accepted #232 evidence is reused only for optionality and no-framework criteria, not for comparative acceleration.",
-      "status": "planned",
-      "attention": "focus",
+      "summary": "Completed 2026-11-05: the Builder accepted the paired examples gate with the ruling \"accept and close\" (6667852967, user message 2026-11-05T19:56:13.317Z), and #244 was closed. Evidence 6667762062, with arms D 6667503330 and E 6667740855, preconditions 6667252934 and environment ruling 6665288953: direct arm D and example arm E each reached ready in one user turn and one setup cycle (113.650 and 86.341 active seconds, both gpt-6.1-sol), and each delivered exactly one message after subject archive with no duplicate through three further intervals. All four criteria were accepted. The acceleration finding is one paired task with one model, not a universal or causal claim. Retained qualifications: optional local testing effort differed (D ran 8 successful and 7 expected-rejection cases, E 8 successful); each arm had one unexpected setup or discovery command failure; E did not invoke companion verify; E's list could see D's removed tombstone but E did not read D's detector; one E discovery result survives only as a preview and is not reconstructed; durable inbox acceptance to an unattached target is not attended push or consumption proof. Runner b55c6c9e-a5ab-4b5a-b2d9-dfb445c66c49 reports cleanup complete (6667895005): both subjects archived; both watches removed with tombstones and receipts retained; the isolated Watcher owner and private daemon were identity-verified and stopped; the private root and all evidence were retained. These are runner reports, not a reconciler replay. The launch binding is completed, not released. No shared-install, merge or release authority. Earlier summary retained as source-time history: Builder verifies agents may use an example or ignore the pack and write a detector directly, and that examples reduce setup cycles without imposing a provider framework. Executable protocol, paired direct-first arms, budgets, measures and pass criteria are pinned in tracker #244; accepted #232 evidence is reused only for optionality and no-framework criteria, not for comparative acceleration.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -674,7 +674,7 @@
       "id": "usable-watcher",
       "title": "Minimal Watcher runtime, CLI, and examples usable",
       "summary": "The supported client, minimal runtime/CLI, and optional examples let agents create, operate, and diagnose watches without session-owned polling or authoring ceremony. Usable on Windows and Linux; macOS fails closed before detector launch until watcher-macos-containment-runtime (#172) is accepted under closure-ready.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "watcher-runtime-core",
         "watcher-cli-ux",
