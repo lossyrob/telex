@@ -125,7 +125,7 @@ impl Runtime {
         &self.id
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, any(windows, target_os = "linux")))]
     pub(crate) fn interrupt_next_compaction(&self) -> Result<()> {
         lock(&self.registry)?.fail_next_compaction_deadline = true;
         Ok(())
