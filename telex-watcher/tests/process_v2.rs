@@ -115,6 +115,7 @@ async fn direct_argv_canonical_cwd_environment_and_redaction() {
     );
     assert!(output.stderr.contains("[REDACTED]"));
     assert!(!output.stderr.contains("test-only-secret"));
+    assert_eq!(output.stderr_excerpt, "token=[REDACTED]\n");
     assert_eq!(
         probe_previous(&output.containment).await,
         ContainmentStatus::Ended
@@ -193,6 +194,7 @@ async fn nonzero_exit_and_missing_executable_are_typed() {
     .unwrap_err();
     assert_eq!(error.kind, ProcessFailureKind::NonzeroExit);
     assert!(!error.message.contains("test-only-secret"));
+    assert_eq!(error.stderr_excerpt.as_deref(), Some("token=[REDACTED]\n"));
     let mut spec = isolated.spec("emit");
     spec.command[0] = isolated
         .root
@@ -204,6 +206,73 @@ async fn nonzero_exit_and_missing_executable_are_typed() {
         .await
         .unwrap_err();
     assert_eq!(error.kind, ProcessFailureKind::Spawn);
+    assert!(error.stderr_excerpt.is_none());
+}
+
+#[tokio::test]
+async fn stdin_writer_failure_retains_captured_redacted_stderr() {
+    let isolated = Isolated::new();
+    let request = serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": 2,
+        "attempt": {"id": "stdin-writer", "now": "2026-07-30T18:00:00Z"},
+        "watch": {
+            "id": "stdin-writer", "activatedAt": "2026-07-30T17:45:00Z",
+            "lastSuccessAt": null, "parameters": {"padding": "x".repeat(128 * 1024)}
+        },
+        "state": null
+    }))
+    .unwrap();
+    telex_watcher::protocol_v2::parse_request(&request).unwrap();
+    let cause = format!(
+        "{}actual cause: test-only-secret-0123456789",
+        "prefix ".repeat(1000)
+    );
+    for read_stdin in [true, false] {
+        for stderr in [cause.as_str(), ""] {
+            let config = isolated.root.join("detector.json");
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({
+                    "readStdin": read_stdin,
+                    "stdout": r#"{"schemaVersion":2,"outcome":"degraded"}"#,
+                    "stderr": stderr
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let mut spec = isolated.spec("unused");
+            spec.command = vec![
+                env!("CARGO_BIN_EXE_fake_detector").into(),
+                config.to_string_lossy().into_owned(),
+            ];
+            let (_keepalive, cancel) = oneshot::channel();
+            let result = execute(&spec, request.clone(), cancel, |_| async { Ok(()) }).await;
+            let (excerpt, containment) = if read_stdin {
+                let output = result.unwrap();
+                (output.stderr_excerpt, output.containment)
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.kind, ProcessFailureKind::Io);
+                assert!(!error.message.contains("test-only-secret"));
+                (
+                    error.stderr_excerpt.expect("stderr capture completed"),
+                    *error.containment.unwrap(),
+                )
+            };
+            if stderr.is_empty() {
+                assert_eq!(excerpt, "");
+            } else {
+                assert_eq!(
+                    excerpt.len(),
+                    telex_watcher::process::MAX_STDERR_EXCERPT_BYTES
+                );
+                assert!(excerpt.starts_with("[truncated]"));
+                assert!(excerpt.ends_with("actual cause: [REDACTED]"));
+                assert!(!excerpt.contains("test-only-secret"));
+            }
+            assert_eq!(probe_previous(&containment).await, ContainmentStatus::Ended);
+        }
+    }
 }
 
 #[tokio::test]

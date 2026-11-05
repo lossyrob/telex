@@ -107,7 +107,7 @@ impl Envelope {
                     .collect(),
             ),
             Response::Health(health) => ("health", runtime_health(health, now_ms)),
-            // WatchHealth contains only public identities, hashes, enums, counters and budgets.
+            // WatchHealth excludes raw state and diagnostics; stderr excerpts are already redacted.
             Response::WatchHealth(health) => ("watchHealth", json!(health)),
             Response::Attempts(items) => ("attempts", items.iter().map(attempt).collect()),
             Response::Events(items) => ("events", items.iter().map(operation).collect()),
@@ -218,6 +218,9 @@ fn human_watch(item: &Value) -> Vec<String> {
     {
         lines.push(format!("  diagnostic: {category}"));
     }
+    if let Some(failure) = item.get("latestFailure").filter(|value| !value.is_null()) {
+        lines.push(format!("  latest failure: {failure}"));
+    }
     lines
 }
 
@@ -273,6 +276,7 @@ fn watch(item: &Watch) -> Value {
         "consecutiveFailures":item.consecutive_failures,
         "latestAttemptDurationMs":item.latest_attempt_duration_ms,
         "diagnosticCategory":item.diagnostic_category,
+        "latestFailure":item.latest_failure,
         "recurrence":item.recurrence,
         "stateHashStatus":if supported { "canonical-v2" } else { "not-applicable" },
     });
@@ -304,6 +308,7 @@ fn attempt(item: &Attempt) -> Value {
         "outcome":item.outcome,
         "diagnosticCategory":item.diagnostic_category,
         "diagnosticPresent":item.diagnostic.is_some(),
+        "stderrExcerpt":item.stderr_excerpt,
         "containmentEvidencePresent":item.containment.is_some(),
         "stateCommitted":item.state_committed,
     })

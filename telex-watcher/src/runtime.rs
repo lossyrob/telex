@@ -59,6 +59,15 @@ struct CompletedAttempt {
     output: Result<ProcessOutput, process::ProcessFailure>,
 }
 
+impl CompletedAttempt {
+    fn stderr_excerpt(&self) -> Option<&str> {
+        match &self.output {
+            Ok(output) => Some(output.stderr_excerpt.as_str()),
+            Err(error) => error.stderr_excerpt.as_deref(),
+        }
+    }
+}
+
 struct HeartbeatTask(Option<tokio::task::JoinHandle<()>>);
 
 impl Drop for HeartbeatTask {
@@ -183,6 +192,9 @@ impl Runtime {
             match completion {
                 Ok(completion) => {
                     let mut registry = lock(&self.registry)?;
+                    if let Some(excerpt) = completion.stderr_excerpt() {
+                        registry.record_stderr(&completion.attempt.id, excerpt)?;
+                    }
                     registry.fail_attempt(
                         &completion.attempt.id,
                         DiagnosticCategory::RuntimeInterrupted,
@@ -369,6 +381,9 @@ impl Runtime {
     }
 
     async fn complete_attempt(&mut self, completion: CompletedAttempt) -> Result<()> {
+        if let Some(excerpt) = completion.stderr_excerpt() {
+            lock(&self.registry)?.record_stderr(&completion.attempt.id, excerpt)?;
+        }
         let CompletedAttempt {
             watch,
             attempt,

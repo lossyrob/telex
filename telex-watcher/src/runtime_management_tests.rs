@@ -74,6 +74,84 @@ async fn health(runtime: &mut Runtime) -> RuntimeHealth {
     }
 }
 
+#[tokio::test]
+async fn shutdown_retains_stderr_captured_by_a_drained_attempt() {
+    for failed_process in [false, true] {
+        let fixture = Fixture::new();
+        let (mut runtime, management) = fixture.open();
+        fixture.register(&mut runtime).await;
+        let registry = runtime.registry.clone();
+        let runtime_id = runtime.id.clone();
+        let (completion, completed) = oneshot::channel();
+        runtime
+            .attempts
+            .spawn(async move { completed.await.unwrap() });
+        let owner = tokio::spawn(runtime.run());
+        management.execute(Command::Health).await.unwrap();
+        let (watch, attempt) = lock(&registry)
+            .unwrap()
+            .begin_attempt("watch", &runtime_id, now_ms())
+            .unwrap();
+        let attempt_id = attempt.id.clone();
+        // Shutdown must reach its drain before the captured completion is released.
+        management.execute(Command::Shutdown).await.unwrap();
+        let excerpt = "captured before shutdown [REDACTED]";
+        let output = if failed_process {
+            Err(process::ProcessFailure {
+                kind: process::ProcessFailureKind::NonzeroExit,
+                message: "detector exited".into(),
+                stderr_excerpt: Some(excerpt.into()),
+                containment: None,
+            })
+        } else {
+            Ok(process::ProcessOutput {
+                stdout: Vec::new(),
+                stderr: excerpt.into(),
+                stderr_excerpt: excerpt.into(),
+                exit_code: Some(0),
+                containment: process::ContainmentIdentity::WindowsJob {
+                    name: "unlaunched-test-identity".into(),
+                    owner_pid: 0,
+                    owner_created: 0,
+                },
+            })
+        };
+        assert!(completion
+            .send(CompletedAttempt {
+                watch,
+                attempt,
+                output
+            })
+            .is_ok());
+        tokio::time::timeout(DURABLE_MANAGEMENT_HANG_GUARD, owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let registry = lock(&registry).unwrap();
+        let attempts = registry.attempts("watch", 10).unwrap();
+        assert_eq!(attempts[0].id, attempt_id);
+        assert_eq!(attempts[0].outcome, AttemptOutcome::Failed);
+        assert_eq!(
+            attempts[0].diagnostic_category,
+            Some(DiagnosticCategory::RuntimeInterrupted)
+        );
+        assert_eq!(attempts[0].stderr_excerpt.as_deref(), Some(excerpt));
+        let failure = registry
+            .get("watch")
+            .unwrap()
+            .unwrap()
+            .latest_failure
+            .unwrap();
+        assert_eq!(failure.attempt_id, attempt_id);
+        assert_eq!(
+            failure.diagnostic_category,
+            DiagnosticCategory::RuntimeInterrupted
+        );
+        assert_eq!(failure.stderr_excerpt.as_deref(), Some(excerpt));
+    }
+}
+
 #[test]
 fn fixture_cleanup_failure_while_unwinding_preserves_the_original_panic() {
     let unwound = std::panic::catch_unwind(|| {

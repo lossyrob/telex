@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 pub const MAX_STDIN_BYTES: usize = 1024 * 1024;
 pub const MAX_STDOUT_BYTES: usize = 256 * 1024;
 pub const MAX_STDERR_BYTES: usize = 64 * 1024;
+pub const MAX_STDERR_EXCERPT_BYTES: usize = 4 * 1024;
 #[cfg(any(target_os = "linux", windows))]
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -78,6 +79,7 @@ pub enum ProcessFailureKind {
 pub struct ProcessFailure {
     pub kind: ProcessFailureKind,
     pub message: String,
+    pub stderr_excerpt: Option<String>,
     /// Present when an attempt may need restart reconciliation.
     pub containment: Option<Box<ContainmentIdentity>>,
 }
@@ -107,6 +109,7 @@ impl ProcessFailure {
         Self {
             kind,
             message: message.into(),
+            stderr_excerpt: None,
             containment: None,
         }
     }
@@ -122,6 +125,7 @@ pub struct ProcessOutput {
     pub stdout: Vec<u8>,
     /// UTF-8 lossily decoded, with sensitive allowlist values redacted.
     pub stderr: String,
+    pub stderr_excerpt: String,
     pub exit_code: Option<i32>,
     pub containment: ContainmentIdentity,
 }
@@ -183,7 +187,7 @@ where
                 biased;
                 _ = &mut cancellation => Err(ProcessFailure::new(ProcessFailureKind::Cancelled, "runtime shutdown")),
                 _ = tokio::time::sleep_until(deadline) => Err(ProcessFailure::new(ProcessFailureKind::Timeout, "detector timed out")),
-                result = child.complete() => result,
+                result = child.complete(&sensitive) => result,
             },
         },
     };
@@ -193,22 +197,29 @@ where
         return Err(ProcessFailure {
             kind: ProcessFailureKind::ContainmentUnproven,
             message: "could not prove the detector containment ended".into(),
+            stderr_excerpt: match &result {
+                Ok((_, stderr, _)) => Some(stderr_excerpt(stderr, &sensitive)),
+                Err(error) => error.stderr_excerpt.clone(),
+            },
             containment: Some(Box::new(identity)),
         });
     }
     match result {
         Ok((stdout, stderr, exit_code)) => {
+            let stderr_excerpt = stderr_excerpt(&stderr, &sensitive);
             let stderr = redact(&stderr, &sensitive);
             if exit_code != Some(0) {
                 return Err(ProcessFailure {
                     kind: ProcessFailureKind::NonzeroExit,
                     message: format!("detector exited with {exit_code:?}; stderr: {stderr}"),
+                    stderr_excerpt: Some(stderr_excerpt),
                     containment: Some(Box::new(identity)),
                 });
             }
             Ok(ProcessOutput {
                 stdout,
                 stderr,
+                stderr_excerpt,
                 exit_code,
                 containment: identity,
             })
@@ -296,11 +307,29 @@ fn environment_key(name: &str) -> OsString {
     }
 }
 
-fn redact(bytes: &[u8], sensitive: &[String]) -> String {
+fn redact_values(bytes: &[u8], sensitive: &[String]) -> String {
     let mut text = String::from_utf8_lossy(bytes).into_owned();
     for value in sensitive {
         text = text.replace(value, "[REDACTED]");
     }
+    text
+}
+
+fn stderr_excerpt(bytes: &[u8], sensitive: &[String]) -> String {
+    let text = redact_values(bytes, sensitive);
+    if text.len() <= MAX_STDERR_EXCERPT_BYTES {
+        return text;
+    }
+    const MARKER: &str = "[truncated]";
+    let mut start = text.len() - (MAX_STDERR_EXCERPT_BYTES - MARKER.len());
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{MARKER}{}", &text[start..])
+}
+
+fn redact(bytes: &[u8], sensitive: &[String]) -> String {
+    let mut text = redact_values(bytes, sensitive);
     // Redaction and lossy UTF-8 conversion must not increase diagnostic bounds.
     if text.len() > MAX_STDERR_BYTES {
         let mut end = MAX_STDERR_BYTES;
@@ -313,6 +342,68 @@ fn redact(bytes: &[u8], sensitive: &[String]) -> String {
 }
 
 type Completion = (Vec<u8>, Vec<u8>, Option<i32>);
+
+#[cfg(any(target_os = "linux", windows))]
+async fn finish_stdin(
+    writer: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+    stderr: &[u8],
+    sensitive: &[String],
+) -> Result<(), ProcessFailure> {
+    if let Some(writer) = writer {
+        writer
+            .await
+            .map_err(ProcessFailure::io)
+            .and_then(|result| result.map_err(ProcessFailure::io))
+            .map_err(|mut error| {
+                error.stderr_excerpt = Some(stderr_excerpt(stderr, sensitive));
+                error
+            })?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod excerpt_tests {
+    use super::*;
+
+    #[test]
+    fn excerpt_bound_includes_marker_and_keeps_the_utf8_tail() {
+        for length in [0, 1, 4095, 4096, 4097, MAX_STDERR_BYTES] {
+            let input = "x".repeat(length);
+            let excerpt = stderr_excerpt(input.as_bytes(), &[]);
+            assert!(excerpt.len() <= MAX_STDERR_EXCERPT_BYTES);
+            if length <= MAX_STDERR_EXCERPT_BYTES {
+                assert_eq!(excerpt, input);
+            } else {
+                assert_eq!(excerpt.len(), MAX_STDERR_EXCERPT_BYTES);
+                assert!(excerpt.starts_with("[truncated]"));
+            }
+        }
+        let input = format!("{}tail", "\u{1f980}".repeat(2048));
+        let excerpt = stderr_excerpt(input.as_bytes(), &[]);
+        assert!(excerpt.starts_with("[truncated]"));
+        assert!(excerpt.ends_with("tail"));
+        assert!(excerpt.len() <= MAX_STDERR_EXCERPT_BYTES);
+        assert!(input.ends_with(excerpt.strip_prefix("[truncated]").unwrap()));
+        assert_eq!(stderr_excerpt(b"bad \xff utf8", &[]), "bad \u{fffd} utf8");
+    }
+
+    #[test]
+    fn redaction_precedes_tail_selection_even_when_replacements_expand_capture() {
+        let secret = "boundary-sensitive-value";
+        let input = format!("{}{}{}", "prefix".repeat(900), secret, "z".repeat(4080));
+        let excerpt = stderr_excerpt(input.as_bytes(), &[secret.into()]);
+        assert!(excerpt.starts_with("[truncated]"));
+        assert!(!excerpt.contains("sensitive"));
+        assert!(!excerpt.contains("value"));
+        let input = format!("{}final cause", "s".repeat(MAX_STDERR_BYTES - 11));
+        let excerpt = stderr_excerpt(input.as_bytes(), &["s".into()]);
+        assert!(excerpt.len() <= MAX_STDERR_EXCERPT_BYTES);
+        assert!(excerpt.starts_with("[truncated]"));
+        assert!(excerpt.ends_with("final cau[REDACTED]e"));
+        assert_eq!(stderr_excerpt(b"secret", &["secret".into()]), "[REDACTED]");
+    }
+}
 
 #[cfg(target_os = "linux")]
 async fn read_capped<R: tokio::io::AsyncRead + Unpin>(
@@ -737,7 +828,10 @@ mod platform {
             Ok(())
         }
 
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            sensitive: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             let stdout = self
                 .stdout
                 .take()
@@ -775,12 +869,7 @@ mod platform {
                 async { stderr.await.map_err(ProcessFailure::io)? },
                 wait,
             )?;
-            if let Some(writer) = self.writer.take() {
-                writer
-                    .await
-                    .map_err(ProcessFailure::io)?
-                    .map_err(ProcessFailure::io)?;
-            }
+            finish_stdin(self.writer.take(), &stderr, sensitive).await?;
             Ok((stdout, stderr, code))
         }
 
@@ -1032,7 +1121,10 @@ mod platform {
             Ok(())
         }
 
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            sensitive: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             let stdout = self
                 .child
                 .stdout
@@ -1067,12 +1159,7 @@ mod platform {
                 read_capped(stderr, MAX_STDERR_BYTES, ProcessFailureKind::StderrLimit),
                 wait,
             )?;
-            if let Some(writer) = self.writer.take() {
-                writer
-                    .await
-                    .map_err(ProcessFailure::io)?
-                    .map_err(ProcessFailure::io)?;
-            }
+            finish_stdin(self.writer.take(), &stderr, sensitive).await?;
             Ok((stdout, stderr, code))
         }
 
@@ -1335,7 +1422,10 @@ mod platform {
         pub(super) async fn start(&mut self, _: Vec<u8>) -> Result<(), ProcessFailure> {
             unreachable!()
         }
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            _: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             unreachable!()
         }
         pub(super) async fn cleanup(&mut self) -> ContainmentStatus {

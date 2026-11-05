@@ -261,13 +261,43 @@ Neither hash key is present. The registry's existing audit payload additionally
 retains its `revision` field; prior/resulting revision metadata is additive.
 
 Default output omits opaque state and parameters, arbitrary command argument
-values, detector diagnostic text, event bodies/metadata, and credential-bearing
+values, arbitrary detector diagnostic text, event bodies/metadata, and credential-bearing
 client details. Effective policy still shows the executable, argument count,
 directory, cadence, timeout, attention/disposition, inherited environment
 **names**, backend, and fixed sender/target. Receipt identity, axes, hashes,
 budgets, and typed diagnostic categories remain inspectable. A timeout or lost
 reply is not proof that an admitted mutation failed; inspect the watch and
 pending/evidence commands before retrying.
+
+### Detector failure causes
+
+`attempts ID` exposes `stderrExcerpt` for each completed attempt whose stderr
+was captured, including degraded, malformed-output, nonzero-exit and successful
+results. It retains the last 4 KiB of redacted UTF-8, with a leading
+`[truncated]` marker when cut. The 4096-byte bound includes that marker.
+Redaction happens before tail selection, using values inherited through
+token/PAT/key/secret/password/credential-like allowlist names. The 64 KiB
+process-capture limit is unchanged. Review diagnostics before sharing them:
+unconfigured credentials and arbitrary provider text cannot be reliably
+identified.
+
+`show ID` and `status ID` (also `health ID`) expose `latestFailure` with
+`attemptId`, `diagnosticCategory`, and `stderrExcerpt`. For example:
+
+```json
+{"attemptId":"attempt-example","diagnosticCategory":"detector-degraded","stderrExcerpt":"member address or reason is invalid or exceeds 256 bytes"}
+```
+
+The summary remains associated with that failure after a newer attempt starts
+or succeeds; current health and `diagnosticCategory` remain independent.
+`latestFailure` is null until a failure summary is recorded. An unavailable
+stderr capture is null; captured empty stderr is an empty string. Registry
+startup atomically adds missing nullable JSON fields to existing v2 records,
+without changing registry version, identities, outcomes or opaque state.
+This migration is forward-only: earlier Watcher builds use `deny_unknown_fields`
+and cannot open a registry after this build has opened it.
+Historical attempts have null excerpts; the migration cannot recover discarded
+stderr or reconstruct historical failure summaries.
 
 ## Persistent event transaction
 

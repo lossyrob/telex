@@ -60,6 +60,7 @@
     "suppressedDueCount": 0,
     "consecutiveFailures": 0,
     "diagnosticCategory": "receipt-reconciliation-pending",
+    "latestFailure": null,
     "recurrence": {
       "lastRecurrenceHash": null,
       "consecutiveIdenticalRecurrences": 0,

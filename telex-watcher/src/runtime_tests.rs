@@ -390,6 +390,150 @@ async fn battery(iso: &isolation::Isolation) {
 
     cli_recovery_battery(iso, &registry_path).await;
     actor_lifecycle(iso).await;
+    stderr_excerpt_battery(iso).await;
+}
+
+async fn stderr_excerpt_battery(iso: &isolation::Isolation) {
+    use crate::management::{Command, Response};
+    use std::time::Duration;
+
+    let mut environment = isolation::EnvRestore::default();
+    environment.set("WATCHER_EXCERPT_TOKEN", "configured-sensitive-value");
+    let registry = iso.root.join("stderr.sqlite");
+    let (runtime, management) = Runtime::open(RuntimeConfig::installed(
+        registry.clone(),
+        iso.trusted_root(),
+    ))
+    .unwrap();
+    let ownership = runtime.retain_registry_ownership();
+    let server = crate::transport::Server::bind(&registry, management.clone()).unwrap();
+    let server = tokio::spawn(server.run());
+    let owner = tokio::spawn(runtime.run());
+    let detector = isolation::branch_binary()
+        .with_file_name(format!("fake_detector{}", std::env::consts::EXE_SUFFIX));
+    let stderr = format!(
+        "{}actual cause: configured-sensitive-value",
+        "prefix ".repeat(1000)
+    );
+    let cases = [
+        (
+            "degraded",
+            r#"{"schemaVersion":2,"outcome":"degraded"}"#,
+            0,
+            AttemptOutcome::Failed,
+        ),
+        (
+            "stdin-write-failed",
+            r#"{"schemaVersion":2,"outcome":"degraded"}"#,
+            0,
+            AttemptOutcome::Failed,
+        ),
+        ("malformed", "not-json", 0, AttemptOutcome::Failed),
+        ("nonzero", "", 7, AttemptOutcome::Failed),
+        (
+            "idle",
+            r#"{"schemaVersion":2,"outcome":"idle"}"#,
+            0,
+            AttemptOutcome::Idle,
+        ),
+        (
+            "terminal",
+            r#"{"schemaVersion":2,"outcome":"terminal"}"#,
+            0,
+            AttemptOutcome::Terminal,
+        ),
+    ];
+    for (id, stdout, exit_code, _) in &cases {
+        let input = iso.root.join(format!("stderr-{id}.json"));
+        std::fs::write(
+            &input,
+            serde_json::to_vec(&json!({
+                "stdout":stdout, "stderr":stderr, "exitCode":exit_code,
+                "readStdin":id != &"stdin-write-failed"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let response = management.execute(Command::Register {
+            json: serde_json::to_vec(&json!({
+                "schemaVersion":2,"id":id,"command":[detector,input],
+                "backendProfile":"watcher-test","sender":"service:stderr-suite","target":"agent:watcher-recipient",
+                "intervalSeconds":3600,"timeoutSeconds":10,
+                "parameters":if id == &"stdin-write-failed" {
+                    json!({"padding":"x".repeat(128 * 1024)})
+                } else {
+                    json!({})
+                },
+                "environmentAllowlist":["TELEX_HOME","TELEX_DB","TELEX_INSTALL_ROOT","WATCHER_EXCERPT_TOKEN"]
+            })).unwrap(),
+            working_directory:iso.root.clone(),
+        }).await.unwrap();
+        assert!(matches!(response,Response::Mutation(ref result) if result.refusal.is_none()));
+    }
+    for (id, _, _, outcome) in cases {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        let attempt = loop {
+            let response = management
+                .execute(Command::Attempts {
+                    id: id.into(),
+                    limit: 1,
+                })
+                .await
+                .unwrap();
+            if let Response::Attempts(attempts) = response {
+                if let Some(attempt) = attempts
+                    .into_iter()
+                    .find(|attempt| attempt.finished_at_ms.is_some())
+                {
+                    break attempt;
+                }
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "stderr attempt {id} did not complete"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        assert_eq!(attempt.outcome, outcome);
+        let excerpt = attempt.stderr_excerpt.as_deref().unwrap();
+        assert_eq!(excerpt.len(), crate::process::MAX_STDERR_EXCERPT_BYTES);
+        assert!(excerpt.starts_with("[truncated]"));
+        assert!(excerpt.ends_with("actual cause: [REDACTED]"));
+        assert!(!excerpt.contains("configured-sensitive-value"));
+        let response = cli(iso, &registry, &["attempts", id], true).await;
+        assert_eq!(response["result"]["value"][0]["stderrExcerpt"], excerpt);
+        for command in ["show", "status"] {
+            let response = cli(iso, &registry, &[command, id], true).await;
+            if outcome == AttemptOutcome::Failed {
+                let failure = &response["result"]["value"]["latestFailure"];
+                assert_eq!(failure["attemptId"], attempt.id);
+                assert_eq!(
+                    failure["diagnosticCategory"],
+                    serde_json::to_value(attempt.diagnostic_category).unwrap()
+                );
+                assert_eq!(failure["stderrExcerpt"], excerpt);
+                let envelope: crate::presentation::Envelope =
+                    serde_json::from_value(response).unwrap();
+                let human = envelope.human();
+                assert!(human.contains("actual cause: [REDACTED]"));
+                assert!(human.contains(&attempt.id));
+            } else {
+                assert!(response["result"]["value"]["latestFailure"].is_null());
+            }
+        }
+    }
+    cli(iso, &registry, &["shutdown"], true).await;
+    tokio::time::timeout(Duration::from_secs(20), owner)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(ownership);
 }
 
 async fn cli(

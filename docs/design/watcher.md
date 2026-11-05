@@ -652,6 +652,19 @@ token/PAT/key/secret-like allowlist names are redacted from retained stderr on a
 best-effort basis. Arbitrary local code and provider error bodies can still
 expose sensitive context, so exported diagnostics require review/redaction.
 
+Completed attempts whose stderr was captured retain `stderrExcerpt`: a tail
+bounded to 4 KiB (4096 UTF-8 bytes), including a leading `[truncated]` marker
+when earlier text is omitted. UTF-8 decoding and sensitive-value redaction
+precede tail selection; a cut never splits a UTF-8 character or exposes a
+partial configured secret. This persisted bound is independent of the 64 KiB
+process capture limit. Empty captured stderr is `""`; unavailable capture and
+attempts predating the additive registry migration have `null`.
+
+Registry startup adds missing nullable `stderrExcerpt` and `latestFailure`
+fields to existing v2 attempt and watch rows without changing the registry
+version. This migration is forward-only: earlier Watcher builds use
+`deny_unknown_fields` and cannot open a registry after this build has opened it.
+
 When the runtime host exits with `runtime-failed`, it writes a stage-labeled
 cause chain to stderr before returning exit code 1. Stages distinguish runtime
 and registry open, endpoint bind, runtime start, runtime run, heartbeat and
@@ -997,6 +1010,9 @@ V2 per-watch status includes:
 - last attempt, success, event, and next-attempt times;
 - latest attempt duration and suppressed due-tick count;
 - consecutive failures and diagnostic category;
+- `latestFailure`, containing the latest failing attempt's `attemptId`,
+  `diagnosticCategory`, and bounded, redacted `stderrExcerpt`, or `null` when
+  no failure summary has been recorded;
 - recurrence hash/count/timestamps/last sequence;
 - sender readiness; and
 - retained rows/bytes and warning state.
@@ -1013,6 +1029,15 @@ Per-watch `diagnosticCategory` includes:
 - `unknown-receipt`;
 - `receipt-reconciliation-pending`; and
 - `runtime-interrupted`.
+
+`attempts` exposes each retained `stderrExcerpt`, including
+`detector-degraded` attempts whose generic diagnostic alone cannot explain the
+failure. `show` and per-watch `status`/`health` expose `latestFailure` beside
+the current diagnostic category. This summary preserves its own attempt and
+category after subsequent success or another attempt starts; it does not
+change current health or imply that an older failure is still active.
+Failed attempts and runtime-interrupted attempts update the summary with their
+recorded category; successful and pending-send attempts leave it unchanged.
 
 An active watch with `eligibility = reconciliation-pending` is not scheduler
 eligible even though lifecycle remains active. Exhausted reconciliation changes
@@ -1079,6 +1104,8 @@ unsupported-v1 removal exposes the explicit non-applicable hash status below.
 Safe JSON output and concise human output derive from the same typed result.
 Opaque detector state, parameters, arbitrary argument values, payload bodies,
 and credential-bearing diagnostics are excluded from default output.
+The bounded, redacted `stderrExcerpt` and `latestFailure` fields are the
+detector-stderr exception; arbitrary diagnostic text remains excluded.
 
 | Operation | Required effect and refusal rules |
 |---|---|

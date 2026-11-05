@@ -96,6 +96,20 @@ class SchemaConformanceTests(unittest.TestCase):
         self.assertFalse(health.is_valid(invalid))
         invalid["productionReady"] = False
         self.assertTrue(health.is_valid(invalid))
+        watch = copy.deepcopy(corpus["watch"])
+        watch["latestFailure"] = {
+            "attemptId": "attempt-failed",
+            "diagnosticCategory": "detector-degraded",
+            "stderrExcerpt": "[truncated]actual cause: [REDACTED]",
+        }
+        health.validate(watch)
+        watch["latestFailure"]["stderrExcerpt"] = None
+        health.validate(watch)
+        watch["latestFailure"]["stderrExcerpt"] = "x" * 4097
+        self.assertFalse(health.is_valid(watch))
+        watch["latestFailure"]["stderrExcerpt"] = ""
+        watch["latestFailure"]["diagnosticCategory"] = None
+        self.assertFalse(health.is_valid(watch))
 
     def test_all_watcher_v2_schemas_are_valid_draft202012(self):
         paths = sorted(SCHEMA_DIRECTORY.glob("watcher-*-v2.schema.json"))

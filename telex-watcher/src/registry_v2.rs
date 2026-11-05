@@ -110,7 +110,7 @@ impl Registry {
             bail!("retention warning thresholds must be positive");
         }
         let ownership = Ownership::acquire(path)?;
-        let connection = Connection::open(&ownership.path)?;
+        let mut connection = Connection::open(&ownership.path)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         let has_version: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='watcher_v2_meta')",
@@ -162,6 +162,18 @@ impl Registry {
         if version != 2 {
             bail!("unsupported-registry-version: {version}");
         }
+        let tx = connection.transaction()?;
+        tx.execute(
+            "UPDATE watcher_v2_attempts SET data=json_set(data,'$.stderrExcerpt',NULL)
+             WHERE json_type(data,'$.stderrExcerpt') IS NULL",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE watcher_v2_watches SET data=json_set(data,'$.latestFailure',NULL)
+             WHERE json_type(data,'$.latestFailure') IS NULL",
+            [],
+        )?;
+        tx.commit()?;
         let mut registry = Self {
             connection,
             _ownership: ownership,
@@ -582,6 +594,7 @@ impl Registry {
             outcome: AttemptOutcome::Running,
             diagnostic_category: None,
             diagnostic: None,
+            stderr_excerpt: None,
             containment: None,
             state_committed: false,
         };
@@ -616,6 +629,23 @@ impl Registry {
             && watch.lifecycle == Lifecycle::Active
             && watch.pending_operation_id.is_none()
             && hash_value(&watch.state)? == attempt.prior_state_hash)
+    }
+
+    pub fn record_stderr(&mut self, attempt_id: &str, excerpt: &str) -> Result<()> {
+        anyhow::ensure!(
+            excerpt.len() <= crate::process::MAX_STDERR_EXCERPT_BYTES,
+            "stderr excerpt exceeds byte cap"
+        );
+        let tx = self.connection.transaction()?;
+        let mut attempt = require_attempt(&tx, attempt_id)?;
+        anyhow::ensure!(
+            attempt.outcome == AttemptOutcome::Running,
+            "attempt already completed"
+        );
+        attempt.stderr_excerpt = Some(excerpt.to_owned());
+        save_attempt(&tx, &attempt)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn finish_direct(
@@ -661,6 +691,7 @@ impl Registry {
         attempt.outcome = AttemptOutcome::Failed;
         attempt.diagnostic_category = Some(category);
         attempt.diagnostic = Some(diagnostic.chars().take(4096).collect());
+        watch.latest_failure = attempt.failure();
         if watch.lifecycle == Lifecycle::Active {
             watch.health = Health::Degraded;
             watch.diagnostic_category = Some(category);
@@ -952,6 +983,7 @@ impl Registry {
                 let ended = containment_ended(attempt.containment.as_ref());
                 attempt.outcome = AttemptOutcome::Interrupted;
                 attempt.diagnostic_category = Some(DiagnosticCategory::RuntimeInterrupted);
+                watch.latest_failure = attempt.failure();
                 finish(&mut watch, &mut attempt, now);
                 if !ended {
                     watch.block(BlockedReason::OrphanContainmentUnproven);
@@ -1161,6 +1193,7 @@ impl Registry {
             suppressed_due_count: watch.suppressed_due_count,
             consecutive_failures: watch.consecutive_failures,
             diagnostic_category: watch.diagnostic_category,
+            latest_failure: watch.latest_failure,
             recurrence: watch.recurrence,
             sender_ready,
             logical_store_id: watch.logical_store_id,
@@ -1199,6 +1232,7 @@ fn new_watch(id: String, registration: Option<Registration>, state: Value, now: 
         consecutive_failures: 0,
         latest_attempt_duration_ms: None,
         diagnostic_category: None,
+        latest_failure: None,
         recurrence: Recurrence::default(),
     }
 }

@@ -11,6 +11,20 @@
     },
     "optionalTimestamp": { "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] },
     "optionalString": { "type": ["string", "null"] },
+    "attemptFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attemptId", "diagnosticCategory", "stderrExcerpt"],
+      "properties": {
+        "attemptId": { "type": "string", "minLength": 1 },
+        "diagnosticCategory": { "$ref": "#/$defs/watch/properties/diagnosticCategory", "type": "string" },
+        "stderrExcerpt": {
+          "type": ["string", "null"],
+          "maxLength": 4096,
+          "description": "Redacted detector stderr tail, bounded by the runtime to 4096 UTF-8 bytes including a leading [truncated] marker when cut. Null when stderr was not captured."
+        }
+      }
+    },
     "count": { "type": "integer", "minimum": 0 },
     "retention": {
       "type": "object",
@@ -120,7 +134,7 @@
     "watch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "id", "registrationRevision", "detectorSchemaVersion", "activatedAt", "lifecycle", "eligibility", "health", "blockedReason", "lastAllocatedEventSequence", "lastCommittedEventSequence", "pending", "lastAttemptId", "lastSuccessAt", "lastEventAt", "nextAttemptMs", "latestAttemptDurationMs", "suppressedDueCount", "consecutiveFailures", "diagnosticCategory", "recurrence", "senderReady", "logicalStoreId", "observedLogicalStoreId", "retention"],
+      "required": ["schemaVersion", "id", "registrationRevision", "detectorSchemaVersion", "activatedAt", "lifecycle", "eligibility", "health", "blockedReason", "lastAllocatedEventSequence", "lastCommittedEventSequence", "pending", "lastAttemptId", "lastSuccessAt", "lastEventAt", "nextAttemptMs", "latestAttemptDurationMs", "suppressedDueCount", "consecutiveFailures", "diagnosticCategory", "latestFailure", "recurrence", "senderReady", "logicalStoreId", "observedLogicalStoreId", "retention"],
       "properties": {
         "schemaVersion": { "const": 2 },
         "id": { "type": "string", "minLength": 1 },
@@ -146,6 +160,7 @@
         "diagnosticCategory": {
           "enum": [null, "detector-degraded", "process-failure", "malformed-output", "canonicalization-failed", "output-limit", "timeout", "send-failure", "unknown-receipt", "receipt-reconciliation-pending", "runtime-interrupted"]
         },
+        "latestFailure": { "oneOf": [{ "$ref": "#/$defs/attemptFailure" }, { "type": "null" }] },
         "recurrence": { "$ref": "#/$defs/recurrence" },
         "senderReady": { "type": "boolean" },
         "logicalStoreId": { "$ref": "#/$defs/optionalString" },
