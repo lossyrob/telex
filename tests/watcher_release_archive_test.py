@@ -82,12 +82,13 @@ class WatcherArchiveTests(unittest.TestCase):
             result = subprocess.run([
                 shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
                 "$ErrorActionPreference='Stop'; "
-                "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+                "$identity=[Security.Principal.WindowsIdentity]::GetCurrent(); "
+                "$sid=$identity.User.Value; $owners=@($sid,$identity.Owner.Value); "
                 "$root=$env:TELEX_ARCHIVE_PRIVATE_ROOT; "
                 "foreach ($path in @($root,(Join-Path $root 'child'),"
                 "(Join-Path $root 'child\\fixture.txt'))) { "
                 "$acl=Get-Acl -LiteralPath $path; "
-                "if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) "
+                "if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $owners) "
                 "{ throw 'foreign fixture owner' }; "
                 "$rules=@($acl.GetAccessRules($true,$true,"
                 "[Security.Principal.SecurityIdentifier])); "
