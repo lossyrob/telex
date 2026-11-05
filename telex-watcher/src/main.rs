@@ -3,7 +3,7 @@ mod diagnostics;
 use anyhow::Context;
 use clap::Parser;
 use std::process::ExitCode;
-use telex_watcher::cli::{Cli, InputError};
+use telex_watcher::cli::{Action, Cli, InputError};
 use telex_watcher::management::{Command, Response};
 use telex_watcher::presentation::{transport_error_message, Envelope};
 use telex_watcher::{transport, Runtime, RuntimeConfig};
@@ -48,7 +48,29 @@ async fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let command_name = args.command_name();
-    let envelope = if args.is_runtime() {
+    let envelope = if let Some(Action::Restore { file }) = &args.action {
+        match telex_watcher::backup::restore(registry, file) {
+            Ok(report) => Envelope {
+                schema_version: telex_watcher::presentation::OUTPUT_SCHEMA_VERSION,
+                command: command_name.into(),
+                ok: true,
+                result: Some(telex_watcher::presentation::ProjectedResult {
+                    r#type: "restore".into(),
+                    value: serde_json::to_value(report).expect("restore report serialization"),
+                }),
+                error: None,
+            },
+            Err(error) => {
+                let code =
+                    telex_watcher::maintenance::failure_code(&error).unwrap_or("restore-failed");
+                eprint!(
+                    "{}",
+                    diagnostics::runtime_failure(&error.context("offline restore"))
+                );
+                Envelope::error(command_name, code, "offline restore refused or failed; inspect stderr and preserved evidence before retrying")
+            }
+        }
+    } else if args.is_runtime() {
         match run_host(&args).await {
             Ok(()) => Envelope::from_response(
                 command_name,
@@ -119,6 +141,11 @@ fn host_error(error: anyhow::Error) -> InputError {
         InputError {
             code: "registry-already-owned",
             message: "another runtime owns this registry; manage the existing owner instead",
+        }
+    } else if let Some(code) = telex_watcher::maintenance::failure_code(&error) {
+        InputError {
+            code,
+            message: "registry startup refused; inspect registry version and backup provenance before recovery",
         }
     } else if let Some(error) = error.downcast_ref::<transport::TransportError>() {
         InputError {

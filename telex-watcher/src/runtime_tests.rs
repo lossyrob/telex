@@ -391,6 +391,231 @@ async fn battery(iso: &isolation::Isolation) {
     cli_recovery_battery(iso, &registry_path).await;
     actor_lifecycle(iso).await;
     stderr_excerpt_battery(iso).await;
+    backup_restore_battery(iso).await;
+    compaction_deadline_battery(iso).await;
+}
+
+async fn compaction_deadline_battery(iso: &isolation::Isolation) {
+    use crate::management::{Command, Response};
+    use std::time::Duration;
+
+    let path = iso.root.join("maintenance-deadline.sqlite");
+    let detector = isolation::branch_binary()
+        .with_file_name(format!("fake_detector{}", std::env::consts::EXE_SUFFIX));
+    let input = iso.root.join("maintenance-detector.json");
+    std::fs::write(
+        &input,
+        json!({
+            "stdout":r#"{"schemaVersion":2,"outcome":"idle","nextState":{"cursor":9999}}"#
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut registration = registration(iso, "maintenance", "service:maintenance-suite");
+    registration.command = vec![
+        detector.to_string_lossy().into(),
+        input.to_string_lossy().into(),
+    ];
+    registration.interval_seconds = 3600;
+    let mut registry = Registry::open(&path, 10000, 10_000_000).unwrap();
+    registry.register(registration, 1000).unwrap();
+    for i in 0..400 {
+        let (_, attempt) = registry
+            .begin_attempt("maintenance", "seed", 2000 + i * 10)
+            .unwrap();
+        registry
+            .finish_direct(&attempt.id, json!({"cursor":i}), false, 2001 + i * 10)
+            .unwrap();
+    }
+    drop(registry);
+    let (runtime, management) =
+        Runtime::open(RuntimeConfig::installed(path, iso.trusted_root())).unwrap();
+    runtime.interrupt_next_compaction().unwrap();
+    let owner = tokio::spawn(runtime.run());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let prior = loop {
+        let response = management.execute(Command::Health).await.unwrap();
+        if let Response::Health(health) = response {
+            if health
+                .diagnostics
+                .contains(&RuntimeDiagnostic::MaintenanceDeferred)
+            {
+                break health;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "automatic maintenance did not expose its deferred budget"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    loop {
+        let response = management
+            .execute(Command::Show {
+                id: "maintenance".into(),
+            })
+            .await
+            .unwrap();
+        if matches!(response, Response::Watch(Some(ref watch)) if watch.state == json!({"cursor":9999}))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "scheduling stopped after deferred maintenance"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let Response::Health(health) = management.execute(Command::Health).await.unwrap() else {
+        panic!("health")
+    };
+    assert_eq!(health.runtime_id, prior.runtime_id);
+    assert!(health.heartbeat_at > prior.heartbeat_at);
+    let Response::Compaction(report) = management.execute(Command::Compact).await.unwrap() else {
+        panic!("compact")
+    };
+    assert_eq!(report.attempts_deleted, 256);
+    let Response::Health(health) = management.execute(Command::Health).await.unwrap() else {
+        panic!("health")
+    };
+    assert!(!health
+        .diagnostics
+        .contains(&RuntimeDiagnostic::MaintenanceDeferred));
+    management.execute(Command::Shutdown).await.unwrap();
+    owner.await.unwrap().unwrap();
+}
+
+async fn backup_restore_battery(iso: &isolation::Isolation) {
+    let path = iso.root.join("backup-runtime.sqlite");
+    let snapshot = iso.root.join("live-snapshot.sqlite");
+    let mut registry = Registry::open(&path, 10000, 10_000_000).unwrap();
+    for id in ["backup-recorded", "backup-absent"] {
+        registry
+            .register(registration(iso, id, "service:backup-suite"), now_ms())
+            .unwrap();
+    }
+    let mut clients = Clients::new(
+        registry.responsibility.clone(),
+        ApplicationDaemonBootstrap::InstalledCurrent {
+            trusted_root: iso.trusted_root(),
+        },
+    );
+    clients.reconcile(&registry.list().unwrap()).await;
+    let client = clients.get("watcher-test").unwrap();
+    let recorded = staged(&mut registry, &clients, "backup-recorded").await;
+    let absent = staged(&mut registry, &clients, "backup-absent").await;
+    assert!(registry
+        .reserve_recovery(&recorded.operation_id, true, false, now_ms())
+        .unwrap());
+    let receipt = client.send(recorded.envelope.clone()).await.unwrap();
+    registry.backup(&snapshot).unwrap();
+    drop(registry);
+    let report = crate::backup::restore(&path, &snapshot).unwrap();
+    assert!(
+        report.source_matches_snapshot,
+        "only an unchanged original proves snapshot currency"
+    );
+    let mut registry = Registry::open(&path, 10000, 10_000_000).unwrap();
+    registry
+        .start_runtime("snapshot-replacement", now_ms(), |_| true)
+        .unwrap();
+    for operation in [&recorded, &absent] {
+        let pending = registry
+            .operation(&operation.operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.envelope, operation.envelope);
+        assert_eq!(pending.recovery, operation.recovery);
+        assert_eq!(pending.status, OperationStatus::QueryRequired);
+        assert!(!registry
+            .reserve_recovery(&pending.operation_id, true, false, now_ms())
+            .unwrap());
+        assert!(registry
+            .reserve_recovery(&pending.operation_id, false, true, now_ms())
+            .unwrap());
+        let proof = client.reconcile_operation(&pending.recovery).await.unwrap();
+        assert!(matches!(
+            (&proof, operation.watch_id.as_str()),
+            (OperationReconciliation::Recorded(_), "backup-recorded")
+                | (OperationReconciliation::NotRecorded(_), "backup-absent")
+        ));
+        registry
+            .evidence(
+                &pending.operation_id,
+                SendEvidence::Reconciliation(Ok(proof)),
+                now_ms(),
+            )
+            .unwrap();
+        assert!(
+            registry
+                .get(&operation.watch_id)
+                .unwrap()
+                .unwrap()
+                .restore_review_required
+        );
+    }
+    assert_eq!(
+        registry.get("backup-recorded").unwrap().unwrap().state,
+        recorded.proposed_state
+    );
+    assert_eq!(
+        registry.events("backup-recorded", 10).unwrap()[0]
+            .receipt
+            .as_ref()
+            .unwrap()
+            .message_id,
+        receipt.message_id
+    );
+    assert!(registry
+        .change(
+            "backup-absent",
+            Change::GrantSendRetry {
+                attempts: 2,
+                seconds: 60
+            },
+            now_ms()
+        )
+        .unwrap()
+        .refusal
+        .is_none());
+    assert_eq!(
+        registry.get("backup-absent").unwrap().unwrap().lifecycle,
+        Lifecycle::Paused
+    );
+    for id in ["backup-recorded", "backup-absent"] {
+        assert!(registry
+            .change(id, Change::Resume, now_ms())
+            .unwrap()
+            .refusal
+            .is_none());
+    }
+    assert!(registry
+        .reserve_recovery(&absent.operation_id, true, false, now_ms())
+        .unwrap());
+    let recovered = client.send(absent.envelope.clone()).await.unwrap();
+    registry
+        .evidence(
+            &absent.operation_id,
+            SendEvidence::send(Ok(recovered.clone())),
+            now_ms(),
+        )
+        .unwrap();
+    for (operation, expected) in [
+        (&recorded, receipt.message_id),
+        (&absent, recovered.message_id),
+    ] {
+        let replay = client.send(operation.envelope.clone()).await.unwrap();
+        assert_eq!(
+            replay.message_id, expected,
+            "restored identity must resolve to one durable message"
+        );
+        let watch = registry.get(&operation.watch_id).unwrap().unwrap();
+        assert_eq!(watch.last_allocated_event_sequence, 1);
+        assert_eq!(watch.last_committed_event_sequence, 1);
+        assert_eq!(watch.state, operation.proposed_state);
+    }
+    assert!(clients.shutdown().await.iter().all(|outcome| outcome.ready));
 }
 
 async fn stderr_excerpt_battery(iso: &isolation::Isolation) {

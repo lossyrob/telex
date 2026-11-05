@@ -99,6 +99,17 @@ jobs:
           TELEX_BUILD_ID: ${{ github.sha }}
         run: cargo build --release --target ${{ matrix.target }} --features entra
 
+      - name: Build Windows x64 Watcher
+        # No macOS containment support or native Windows ARM Watcher proof yet.
+        # Linux packaging remains Telex-only (Watcher also needs its process guard).
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        env:
+          TELEX_BUILD_ID: ${{ github.sha }}
+        run: >-
+          cargo build --release --locked --target ${{ matrix.target }}
+          -p telex-watcher --no-default-features --features sqlite,postgres,entra
+          --bin telex-watcher
+
       - name: Verify release binary build identity
         shell: pwsh
         run: |
@@ -147,8 +158,13 @@ jobs:
           $archive = "telex-$tag-$target.zip"
           New-Item -ItemType Directory -Force -Path dist, package | Out-Null
           Copy-Item "target\$target\release\telex.exe" "package\telex.exe" -Force
+          $members = @("package\telex.exe", "package\LICENSE")
+          if ($target -eq "x86_64-pc-windows-msvc") {
+            Copy-Item "target\$target\release\telex-watcher.exe" "package\telex-watcher.exe" -Force
+            $members += "package\telex-watcher.exe"
+          }
           Copy-Item "LICENSE" "package\LICENSE" -Force
-          Compress-Archive -Path "package\*" -DestinationPath "dist\$archive" -Force
+          Compress-Archive -LiteralPath $members -DestinationPath "dist\$archive" -Force
           $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii -NoNewline "dist\$archive.sha256"
 
@@ -188,6 +204,41 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_windows_publication_test.py --report evidence/native-file-observer.json
+
+      - name: Checkout genuine source-built Watcher bootstrap baseline
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/checkout@v4
+        with:
+          ref: 7036e7103aae4416cf0a0e2030175dc901ece893
+          path: watcher-baseline-source
+          persist-credentials: false
+
+      - name: Build genuine pre-diagnostics #222 baseline
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        env:
+          TELEX_BUILD_ID: 7036e7103aae4416cf0a0e2030175dc901ece893
+        run: >-
+          cargo build --release --locked
+          --manifest-path watcher-baseline-source/Cargo.toml
+          --target-dir watcher-baseline-target --target ${{ matrix.target }}
+          -p telex -p telex-watcher --features telex/entra,telex-watcher/entra
+          --bin telex --bin telex-watcher
+
+      - name: Prove Windows x64 Watcher archive installation and forward upgrade
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: pwsh
+        run: |
+          python tests/watcher_release_archive_test.py
+          if ($LASTEXITCODE -ne 0) { throw "Watcher archive fixture tests failed" }
+          python tests/watcher_release_archive.py `
+            --archive "dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.zip" `
+            --source-sha "${{ github.sha }}" `
+            --baseline-root watcher-baseline-source `
+            --baseline-bin-dir "watcher-baseline-target/${{ matrix.target }}/release" `
+            --report evidence/watcher-archive-proof.json
+          if ($LASTEXITCODE -ne 0) { throw "Watcher archive proof failed" }
 
       - name: Upload native release evidence
         if: always()

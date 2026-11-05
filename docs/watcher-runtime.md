@@ -16,13 +16,16 @@ Omitting `run` preserves the original runtime-host invocation. In another
 process, use the same `--registry` with the management commands below. Only
 runtime startup requires `--install-root`; management never connects a sender.
 Service installation, supervision, and automatic upgrades remain separate work.
-For the supported Windows/Linux installation record, required authentication
+For the Windows-first installation record, required authentication
 features and launch/rollback procedure, start with
 [Watcher installation and launch](guide/src/guides/watcher-installation.md).
 The experimental v1 CLI adapter is retired; v1 example detectors and schemas
 remain historical evidence and are not accepted by this runtime.
 
-This runtime delivery requires process containment on Windows and Linux.
+Windows x86_64 is the initial supported Watcher distribution. Linux is covered
+by the automated SQLite/PostgreSQL tests described below, with the same-build
+process guard; that evidence does not substitute for a clean-host production
+soak. This runtime delivery requires process containment on Windows and Linux.
 macOS and other unclaimed hosts reject detector execution. macOS remains a
 required Watcher product capability tracked in
 [#165](https://github.com/lossyrob/telex/issues/165); this delivery does not claim
@@ -101,8 +104,9 @@ Unix domain socket in a user-private directory. Windows uses a named pipe with
 an owner-only current-token-user DACL and rejects remote clients. Physical file
 identity makes canonical path aliases and hard links reach the same owner.
 
-The CLI never opens SQLite, acquires the registry lock, or falls back to offline
-mutation. A missing registry, absent owner, or stale endpoint returns
+Ordinary management never opens SQLite, acquires the registry lock, or falls
+back to offline mutation. Explicit `restore` is the sole offline maintenance
+exception described below. A missing registry, absent owner, or stale endpoint returns
 `runtime-not-running`. Shutdown removes or invalidates the endpoint before
 releasing the registry lock. Hosts embedding the library must retain the opaque
 `Runtime::retain_registry_ownership()` guard until endpoint teardown completes.
@@ -166,7 +170,8 @@ Every admitted mutation runs in the same SQLite transactions as scheduler and
 recovery work. Refusals have a typed `Refusal`; results contain the current
 registration revision, lifecycle, eligibility, and health. Updates cannot
 change ID, backend profile, sender, or target. Pending operations refuse update,
-pause, and resume. `None` state replacement preserves the cursor;
+pause, and resume, except an individual restore-review resume may re-enable
+exact pending-operation reconciliation. `None` state replacement preserves the cursor;
 `Some(Value::Null)` replaces it with JSON null.
 
 The registry records successful and refused management operations. An update
@@ -187,7 +192,7 @@ require a running owner; `run` (or no command) starts that owner.
 | --- | --- |
 | `register FILE` | Validate one v2 registration and capture the current absolute directory when omitted. |
 | `list [FILTERS]`, `show ID [FILTERS]` | Inspect effective policy, revision, lifecycle, sequence high-water marks, pending identity, recurrence, and attempt summary. |
-| `pause ID`, `resume ID` | Pause execution or explicitly resume a corrected watch. Pending operations refuse both. |
+| `pause ID`, `resume ID` | Pause execution or explicitly resume a corrected watch. Pending operations refuse both except an individual restore-review resume. |
 | `update ID FILE [--state-file FILE]` | Replace mutable registration policy; preserve committed state unless a state file is supplied. |
 | `reconcile-now ID` | Query the exact pending operation, including on a removed tombstone. |
 | `grant-reconciliation ID --attempts N --seconds N` | Grant finite query-only recovery for `receipt-outcome-unresolved`. |
@@ -199,6 +204,9 @@ require a running owner; `run` (or no command) starts that owner.
 | `pending ID` | Inspect the exact staged operation and its independent query/send budgets. |
 | `receipt-evidence OPERATION_ID [--limit N]` | Inspect typed receipt observations. |
 | `removed-evidence ID [--limit N]` | Inspect retained operation evidence for a removed watch. |
+| `compact` | Run one audited, bounded version-1 diagnostic-history batch through the owner. |
+| `backup FILE` | Publish an owner-only, marked, consistent snapshot at a new absolute path. |
+| `restore FILE` | Offline only: preserve the original, restore in place, fence each non-terminal watch. |
 | `shutdown` (alias `stop`) | Gracefully stop the owner and detach its known senders. |
 
 Filters are `--active`, `--paused`, `--terminal`, `--removed`,
@@ -292,10 +300,11 @@ The summary remains associated with that failure after a newer attempt starts
 or succeeds; current health and `diagnosticCategory` remain independent.
 `latestFailure` is null until a failure summary is recorded. An unavailable
 stderr capture is null; captured empty stderr is an empty string. Registry
-startup atomically adds missing nullable JSON fields to existing v2 records,
-without changing registry version, identities, outcomes or opaque state.
-This migration is forward-only: earlier Watcher builds use `deny_unknown_fields`
-and cannot open a registry after this build has opened it.
+startup atomically adds missing nullable JSON fields to existing v2 records.
+This build also upgrades registry metadata from version 2 to **version 3**
+without changing detector schema v2, identities, outcomes or opaque state.
+The migration is forward-only: older Watcher binaries refuse the version-3
+registry, including marked snapshots and restored fenced registries.
 Historical attempts have null excerpts; the migration cannot recover discarded
 stderr or reconstruct historical failure summaries.
 
@@ -445,13 +454,192 @@ The versioned machine projections are
 Detailed local evidence retains typed public-client results, not private daemon
 frames. Opaque detector state never appears in normalized Telex metadata.
 
-Completed identity/receipt evidence and unresolved payloads are retained.
-Health exposes retained logical row/byte counts and positive warning
-thresholds. Default warnings are 100,000 rows or 256 MiB; these are warnings,
-not compaction or a capacity guarantee. Capacity policy and versioned safe
-compaction remain operational hardening work.
+### Capacity and compaction
+
+The documented operating target is **100 registered watches at concurrency 4**,
+not an unlimited or real-time scheduling promise. Global concurrency remains
+1-16; watches are single-flight. Slow detectors coalesce due ticks rather than
+queueing one execution per missed interval. Heartbeat and local management
+remain observable while detectors run.
+
+Automatic version-1 compaction checks once per minute, draining a full batch
+again after one second while backlog remains. It keeps the newest
+100 completed attempts per watch, plus pinned last/running/latest-failure
+attempts and every attempt referenced by an unresolved operation. Historical
+runtime records keep the newest 10 eligible non-running records; a retained
+attempt's containment reference pins its runtime. Running runtime records are
+never pruned. These exceptions can exceed the nominal history counts.
+
+One transaction deletes at most **256 total attempt/runtime rows**. SQLite's
+progress handler checks a two-second work deadline every 1000 VM instructions;
+interruption rolls back the batch. Automatic maintenance exposes
+`maintenance-deferred` in runtime health and backs off for one minute without
+stopping heartbeat, management or scheduling; manual `compact` reports
+`compaction-budget-exceeded`. Other registry errors remain fatal. Selection uses
+per-watch indexed seeks and rotates between watches instead of rescanning all
+completed history. This is a cooperative SQL-work bound, not a
+hard wall-clock latency guarantee: filesystem synchronization, contention and
+the registry's five-second SQLite busy timeout can add time while the owner
+holds its registry mutex. No unbounded drain holds the lock. `compact` runs
+one batch and audits even a no-op; automatic no-ops do not grow the audit spine.
+
+Each deleted attempt contributes transactionally to per-watch outcome/category
+and byte counters. Runtime counters are global. `health`/`status` expose
+`retention.compaction` with policy version, bounds and cumulative counters.
+`events` marks retained operation references with `attemptCompacted: true`
+when their diagnostic attempt was deliberately removed, not missing or failed.
+Compaction does not change registration revision, lifecycle, eligibility,
+health, detector state, sequence marks, or receipt binding.
+
+All watches/tombstones, registration revisions, operations in every status,
+receipt observations and management audits remain permanent. Their hashes,
+dedupe identities, recurrence summary and unresolved payloads are retained.
+Consequently the proof spine grows with accepted events and management activity.
+This policy bounds disposable history, **not total registry size indefinitely**.
+
+Default warnings are **100,000 rows or 256 MiB of live serialized JSON bytes**.
+`retention.bytes` counts live JSON BLOB content, not SQLite pages, indexes,
+free pages or sidecars. Warnings are observations, not hard admission limits.
+Deleting rows does not shrink the physical file: it can exceed the live-byte
+count until an operator-approved offline SQLite `VACUUM`. Stop the owner,
+retain a verified backup and allow enough spare disk before that separate
+maintenance; `compact` never vacuums or discards permanent evidence.
+
+For sizing, a local **Windows x86_64 / SQLite** hardening run of implementation
+`db56467f` with this change's review corrections measured the following
+workload-qualified deltas. These are serialized logical JSON bytes, not disk
+allocation or a stable per-watch/event tariff:
+
+| Workload | Retained rows | Retained bytes | Measured delta |
+| --- | --- | --- | --- |
+| 100 registrations, 101 detector executions, concurrency four, including one coalesced follow-up | 1 -> 502 | 609 -> 355873 | 355264 / 100 = **3552.64 bytes/new watch**, including completed detector history |
+| One staged event recovered after runtime death | 6 -> 16 | 5639 -> 14426 | **8787 bytes/committed event**, including this restart's runtime, audit and receipt evidence |
+
+Paths, backend routes, payloads, detector history and restart frequency change
+these costs. Permanent proof growth remains unbounded by this measurement.
+The CI step **Record Watcher capacity and recovery sizing evidence** emits the
+same measurements on Windows and Linux with its checkout identity. Reproduce
+after building the branch binaries with
+`cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening -- --test-threads=1 --nocapture`.
+Credentialed PostgreSQL runs exercise the same battery; the table is not a
+PostgreSQL storage or clean-host-soak measurement.
+
+### Backup and restore
+
+With the owner running, publish to a **new absolute path in a private directory**:
+
+```powershell
+& $watcher --registry $registry --json backup 'C:\private-watch\snapshot.sqlite'
+```
+
+The owner serializes the native SQLite snapshot with registry work and audits
+the request, including refusals. Copy, private-image vacuum, integrity checks
+and filesystem synchronization hold the registry mutex: "live" means the owner
+need not stop, not uninterrupted heartbeat or scheduling latency during a large
+backup. An execution timeout is outcome-unknown; inspect the destination before
+retrying. Its metadata records source physical identity, responsibility,
+host, schema/revision, per-watch sequence/pending marks and backend/store
+bindings. The temporary file is owner-only before any bytes are written.
+Publication is no-replace (Windows `MoveFileExW` with write-through and without
+replace; Unix hard link with no overwrite fallback). Unsupported publication
+fails closed with `backup-publication-failed`. Existing destinations and
+sidecars are refused. The destination is closed in DELETE journal mode with
+no journal/WAL/SHM, synced, and integrity-checked at its published path.
+Backups contain sensitive state, routes, parameters and frozen payloads even
+though ordinary management output omits them.
+
+A snapshot is marked **backup**, distinct from a live registry. Startup refuses
+it with `backup-restore-required`, so a copied snapshot cannot become a second
+owner. Do not copy/rename it into place or run two physical registry copies.
+The physical ownership lock remains the one-live-copy authority.
+
+For an approved recovery, stop the original runtime, wait for its exact process
+to exit and retain logs/containment evidence. Keep the original file at its
+original path. Then:
+
+```powershell
+& $watcher --registry $registry --json restore 'C:\private-watch\snapshot.sqlite'
+```
+
+Restore locks both original and snapshot. Schema, source physical identity,
+responsibility, host, backend/store route or SQLite page-size mismatch fails
+closed with a typed `restore-*-mismatch` code. Before any original write, it
+durably publishes an owner-only, marked, integrity-checked
+`registry.sqlite.pre-restore-<uuid>` snapshot. This evidence preserves the
+original's **logical content**, not its free pages. Do not delete it to make a
+failed restore appear successful.
+
+The fenced image replaces the original's logical contents in **one SQLite
+destination write transaction**, under both locks through commit. The original
+physical file/lock never moves; there is no missing-path window or displaced
+WAL/SHM. A process death before commit leaves the original unchanged, and the
+command can be rerun. A death after commit leaves the complete fenced image.
+A crash can leave an owner-only `.watcher-restore-<uuid>.tmp` image beside the
+original. After confirming the restore process has exited, remove that restore's
+temporary image and any of its SQLite sidecars; retain the
+`.pre-restore-<uuid>` evidence. **Never start a runtime against a temporary
+image.** Preparation can already have marked it restored, so startup may accept
+it with its watches fenced. Only the original path is the designated live copy.
+
+The startup-refusing backup mark is converted to **restored** in that same
+transaction. Separately, every active/paused watch becomes paused/blocked with
+`restoreReviewRequired: true` and `restored-backup-review` (or its existing
+stronger blocker). The runtime can start, but no restored watch resumes
+automatically. Pending operations become query-required. Inspect each watch,
+resolve stronger receipt/store/containment blockers, then explicitly
+`resume ID` individually. That command alone clears its review fence; granting
+budgets, reconciling receipts, updating policy or restarting does not.
+
+`sourceMatchesSnapshot: true` means the stopped original's conservative
+logical-content digest matches the captured snapshot. Only **unchanged** is
+evidence of currency; audit/diagnostic changes can report changed even when
+event state did not. No-loss/no-duplicate continuation is claimed only for a
+provably current snapshot and exact pending-operation reconciliation. A stale
+snapshot can roll back detector state and sequence high-water after later sends,
+causing repeated emissions or recipient `(watchId,eventSequence)` dedupe loss.
+Before resuming a stale restore, review post-backup sends and receiver history;
+automatic sequence advancement or inferred lossless rollback is not provided.
+Registrations and removals also rewind: post-snapshot watches disappear, while
+watches removed after the snapshot can return paused. Original evidence retains
+those later records. Captured finite recovery budgets/deadlines are not renewed;
+expired budgets still need the ordinary proof-gated management grants.
+
+### Recovery decisions
+
+Start with `status`, `show ID`, `attempts ID`, `pending ID` and
+`receipt-evidence OPERATION_ID`; retain the exact runtime/watch/operation IDs.
+
+| Observation | Supported response |
+| --- | --- |
+| Runtime died idle or mid-detector | Restart the same registry. In-flight work becomes interrupted; containment must be proven ended before another launch. No missed-cadence replay. |
+| Staged send or local acceptance commit interrupted | Query the exact operation with `reconcile-now ID`. Matching durable acceptance commits its frozen state once; authoritative absence alone permits exact retry. Never re-register or invent an operation ID. |
+| `receipt-outcome-unresolved` | Inspect retained evidence; grant finite query-only attempts if appropriate. Unknown/expired client history is not absence. |
+| `send-retry-exhausted` | Require authoritative retry proof before a finite `grant-send-retry`; never grant around identity/store uncertainty. |
+| Permanent rejection | Correct the external cause, audit `close-not-accepted`, then resume. The allocated sequence stays reserved. |
+| `orphan-containment-unproven` or store mismatch | Verify exact containment identity or restore the original logical store; do not kill a reused PID or switch backend identities. |
+| Restored review fence | Review snapshot currency, post-backup sends and every remaining blocker; individually resume. No automatic lossless stale rollback claim. |
+| Degraded/malformed/nonzero/timeout/output cap | Inspect bounded `stderrExcerpt` and `latestFailure`; correct the trusted detector/environment without resetting cursor or history. |
+
+Replacing an executable is **not** registry rollback after forward-only
+migration. Preserve old binaries and a compatible pre-upgrade registry backup
+together; any restoration of older state has the stale-snapshot hazards above.
+Do not make an older binary read schema 3 by editing its version number.
 
 ## Validation boundary
+
+The hardening hazard map supplements, rather than replaces, existing coverage:
+
+| Hazard | Evidence surface |
+| --- | --- |
+| Real process death idle, mid-attempt, staged send; interrupted closure and exact-op replay | `runtime_hardening_tests`, on SQLite and PostgreSQL routes |
+| Malformed/nonzero/hanging/oversize detector; single-flight and 100 watches/concurrency 4 | `runtime_hardening_tests` and existing `process_v2` containment/cap tests |
+| Compaction bounds, aggregate counters, pinned failure/pending/running records and compacted references | `registry_v2::tests::maintenance_*` |
+| Marked snapshot refusal, stale/current fences, preserved logical evidence and process death at every restore boundary including mid-copy | `registry_v2::tests::maintenance_*` |
+| Current snapshot with accepted-but-uncommitted and authoritative-not-recorded operations, exact receipt identity after restore | Existing SQLite/PostgreSQL runtime matrices, `backup_restore_battery` |
+| CI Windows x86_64 archive contents, genuine #222 source-built forward upgrade, and old binary refusal of marked/fenced schema-3 files | `watcher-archive.yml`, `tests/watcher_release_archive.py` |
+
+The archive proof is a CI artifact check, not a published release or a 24-hour
+clean-host soak. That release gate remains separate.
 
 `registry_v2::tests` injects acceptance, commit failure, restart, authoritative
 absence, transient/permanent rejection, retention uncertainty, identity/store

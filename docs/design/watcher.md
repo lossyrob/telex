@@ -661,9 +661,10 @@ process capture limit. Empty captured stderr is `""`; unavailable capture and
 attempts predating the additive registry migration have `null`.
 
 Registry startup adds missing nullable `stderrExcerpt` and `latestFailure`
-fields to existing v2 attempt and watch rows without changing the registry
-version. This migration is forward-only: earlier Watcher builds use
-`deny_unknown_fields` and cannot open a registry after this build has opened it.
+fields to existing v2 attempt and watch rows. The hardening build also advances
+registry metadata from 2 to 3, independently of detector schema v2. Both changes
+are forward-only: earlier builds either reject the metadata version or reject
+unknown JSON fields; replacing a binary does not restore compatibility.
 
 When the runtime host exits with `runtime-failed`, it writes a stage-labeled
 cause chain to stderr before returning exit code 1. Stages distinguish runtime
@@ -1070,8 +1071,9 @@ envelope may carry validated presentation-only selectors for existing
 list/show filters, without adding an operation or mutation authority. Required
 public refusal/recovery, revision, lifecycle, eligibility, health, and
 audit/evidence fields remain in the projected result consumed by both human
-and JSON output. The CLI never opens the registry or takes its lock, and cannot
-bypass the owner's mutation transactions.
+and JSON output. Ordinary management never opens the registry or takes its lock, and cannot
+bypass the owner's mutation transactions. Explicit offline `restore` is the
+maintenance exception below; it requires both physical-file locks.
 
 Authorization is the same local OS user only: a Unix domain socket in an
 owner-private directory with owner-only permissions, or a Windows named pipe
@@ -1112,13 +1114,16 @@ detector-stderr exception; arbitrary diagnostic text remains excluded.
 | Register | Validate and persist one v2 registration. Reject an existing or tombstoned watch ID. |
 | Show/list | Include active, paused, terminal, removed, v1-unsupported, and unresolved-tombstone records through explicit filters. |
 | Pause | Move an active eligible watch to paused/inactive. Refuse while a pending operation exists; use reconciliation or removal instead. |
-| Resume | Move paused/inactive to active/eligible, replace `activatedAt`, and retain `lastSuccessAt`. Refuse while unresolved pending evidence exists or the blocked reason has not been corrected. |
+| Resume | Move paused/inactive to active/eligible, replace `activatedAt`, and retain `lastSuccessAt`. Refuse while unresolved pending evidence exists or the blocked reason has not been corrected, except individual restore-review resume may re-enable query-required exact recovery. |
 | Update | In one registry transaction, verify no pending operation exists, apply mutable fields, optionally replace committed opaque state, and increment revision so update and event staging cannot race. Omitted state replacement preserves committed state; explicit JSON `null` replaces it with null. Refuse immutable ID/backend/route changes, removed watches, unsupported v1 rows (re-register under v2), and any watch with a pending operation. Audit old/new state hashes when state changes. |
 | Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. If a blocked unresolved outcome becomes authoritative `not-recorded` or transient rejection, record that proof and change the paused watch's blocked reason to `send-retry-exhausted` before any send budget can be granted. If it becomes permanent rejection, change the reason to `send-permanently-rejected`. |
 | Grant reconciliation budget | Only for `receipt-outcome-unresolved`: atomically add a finite receipt-query attempt/deadline budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null` and `diagnosticCategory = receipt-reconciliation-pending`. This grant authorizes reconciliation only and MUST NOT authorize a send. No separate resume is required; `activatedAt` and `lastSuccessAt` are preserved. |
 | Grant send-retry budget | Only after authoritative `not-recorded` or transient rejection is already recorded as `send-retry-exhausted`: atomically add a finite exact same-operation send-retry budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null`. No separate resume is required; `activatedAt` and `lastSuccessAt` are preserved. Refuse replacement identity or payload. |
 | Close not accepted | Only for a definitively permanently rejected pre-acceptance operation. Record the rejection as terminal evidence for that allocation, retain its sequence tombstone, clear the pending operation without advancing detector state, and permit explicit resume at the next sequence after external correction. Refuse for indeterminate outcomes. |
 | Remove | Stop future detector execution and retain identity, pending operation, tombstone, and evidence. Removal never asserts accepted or rejected. |
+| Compact | Run one versioned bounded transaction preserving aggregate counters and the permanent proof spine; audit manual no-ops too. Never change watch revision/lifecycle/eligibility/health. |
+| Backup | Through the owner, publish a private consistent marked snapshot without replacement, with provenance/high-water metadata and published-path integrity verification. |
+| Restore | Explicit offline maintenance under both physical-file locks, preserving a marked snapshot of the original before one atomic in-place SQLite destination transaction. Fail closed on identity/host/backend/schema/page-size mismatch; fence every non-terminal watch for individual explicit resume. |
 
 Late reconciliation updates a removed tombstone with accepted, rejected, or
 authoritative-not-recorded closure evidence. It never changes lifecycle away
@@ -1138,16 +1143,63 @@ For each permanent watch ID, retain:
 Historical event identity and receipt bindings are never rewritten in place.
 `watcher-runtime-core` permanently retains the identity/receipt spine listed
 above and keeps unresolved removed records discoverable until closure evidence
-arrives. `runtime-hardening` owns capacity defaults and a versioned compaction
-contract. That contract may remove completed-attempt stdout/stderr, detailed
-diagnostic payloads, and historical recurrence samples after preserving
-aggregate counters, but must preserve non-reuse, sequence high-water, unresolved
-operations, operation/payload hashes, receipt binding, and recipient dedupe
-evidence.
+arrives. The version-1 compaction contract retains the newest 100 completed attempts per
+watch, plus running/last/latest-failure and unresolved-operation references.
+It retains the newest 10 eligible non-running runtime rows and all runtime
+containment references from retained attempts. Each batch removes at most 256
+rows total; a cooperative two-second SQLite work deadline rolls back excess
+work. The [runtime runbook](../watcher-runtime.md#capacity-and-compaction)
+documents the mutex/busy-timeout and filesystem-latency caveat.
+Per-watch indexed seeks and a rotating cursor bound candidate work independently
+of total completed history. Automatic deadline expiry reports
+`maintenance-deferred` and retries after a minute without stopping the owner;
+genuine registry failures remain fatal. Automatic maintenance normally runs
+once per minute and drains full batches at one-second intervals.
+
+Deletion preserves aggregate outcome, diagnostic-category and byte counters
+transactionally. Retained operations explicitly mark `attemptCompacted` for
+removed diagnostic references. All operation statuses, registration revisions,
+receipt observations and management audits remain permanent. Compaction never
+changes non-reuse, sequence high-water, unresolved operations, operation/payload
+hashes, receipt binding, recipient dedupe evidence or watch health semantics.
 
 The runtime health surface exposes retained rows/bytes and positive warning
-thresholds. Backup, capacity defaults, and safe compaction remain operational
-hardening work.
+thresholds: 100,000 rows or 256 MiB of live JSON content by default. These are
+warnings, not hard limits. Physical SQLite pages can exceed the live-byte
+count until an operator-approved offline vacuum. Permanent evidence grows with
+events; bounded disposable history is not unlimited-duration total-size retention.
+
+The initial operating target is 100 watches with default concurrency four.
+Windows x86_64 is the initial distribution; Linux has the retained SQLite and
+PostgreSQL automated proof scope, not an implied production soak. macOS remains
+unsupported and fails closed before detector launch.
+
+### Snapshot authority and restore fencing
+
+Snapshots are owner-only before writing, durably published without replacement,
+closed without a journal/WAL/SHM, integrity-checked at the published path, and
+marked so ordinary startup refuses them. Metadata binds the host, original
+physical registry identity and responsibility, schema/revision, backend/store
+routes and sequence/pending marks. Unsupported no-replace publication fails
+closed, never falling back to replacement.
+
+Restore first publishes a marked `.pre-restore-<uuid>` snapshot of the original's
+logical contents (not free pages). It then commits a prepared fenced image to
+that same physical file in one SQLite backup write transaction while holding
+both ownership locks. The file never moves; a pre-commit crash leaves the old
+contents intact and rerunnable. The restored image's startup mark and per-watch
+review fences are distinct states. Runtime startup is permitted, but every
+active/paused watch remains fenced until individual explicit resume; grants,
+updates, receipt reconciliation and restart cannot clear that fence.
+
+Registry metadata version 3 is forward-only. Pre-hardening binaries refuse both
+marked snapshots and restored fenced registries. A provably current snapshot,
+including frozen staged operations, supports no-loss/no-duplicate continuation
+through exact recovery. Only an unchanged conservative logical digest counts
+as evidence of currency; diagnostic/audit changes can report changed safely.
+Stale restoration or rollback can reuse high-water sequences and detector state,
+so no lossless/no-duplicate claim applies without operator review of later
+sends and receiver dedupe. Automatic sequence repair is out of scope.
 
 ## Experimental v1 compatibility
 

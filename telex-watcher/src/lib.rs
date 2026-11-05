@@ -18,6 +18,8 @@ mod runtime;
 mod staging;
 pub mod transport;
 
+pub use registry_v2::backup;
+pub use registry_v2::maintenance;
 pub use registry_v2::{ManagementAudit, Mutation, Refusal};
 pub use runtime::{Runtime, RuntimeConfig};
 
@@ -26,6 +28,9 @@ mod runtime_tests;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod runtime_resilience_tests;
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod runtime_hardening_tests;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 #[path = "../../tests/support/telex_isolation.rs"]
