@@ -286,6 +286,27 @@
       ]
     },
     {
+      "id": "detector-degraded-cause",
+      "type": "task",
+      "title": "Surface detector stderr for degraded attempts",
+      "summary": "Retain a bounded, redacted stderr excerpt (last 4 KiB UTF-8, leading [truncated] marker when cut) on completed attempts whose stderr was captured, required for detector-degraded attempts; show it in attempts and the latest failing excerpt in status/show; forward-migrate the SQLite registry; document the field; test degraded, truncation and redaction. Conformance gap in the accepted diagnose-failures outcome (watcher.md assumes retained attempt stderr). Stall-detect message wording, the 256-byte limit and fail-closed group behavior are out of scope; retention/compaction of the excerpt belongs to runtime-hardening. Steward disposition https://github.com/lossyrob/telex/issues/243#issuecomment-6664537088.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 243
+      },
+      "dependsOn": [
+        "watcher-runtime-core",
+        "watcher-cli-ux"
+      ]
+    },
+    {
       "id": "v1-compatibility-adapter",
       "type": "task",
       "title": "Optional experimental v1 compatibility adapter",
@@ -358,7 +379,7 @@
       "id": "examples-accelerate-gate",
       "type": "gate",
       "title": "Examples accelerate rather than constrain",
-      "summary": "Builder verifies agents may use an example or ignore the pack and write a detector directly, and that examples reduce setup cycles without imposing a provider framework.",
+      "summary": "Builder verifies agents may use an example or ignore the pack and write a detector directly, and that examples reduce setup cycles without imposing a provider framework. Executable protocol, paired direct-first arms, budgets, measures and pass criteria are pinned in tracker #244; accepted #232 evidence is reused only for optionality and no-framework criteria, not for comparative acceleration.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -366,13 +387,19 @@
       ],
       "dependsOn": [
         "minimal-example-pack"
-      ]
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 244
+      }
     },
     {
       "id": "runtime-hardening",
       "type": "task",
       "title": "Watcher runtime reliability and packaging hardening",
-      "summary": "Exercise restart/crash, malformed or hung scripts, output caps, many watches, SQLite/Postgres routes, diagnostics retention, packaging, upgrade, and operational recovery after the minimal UX and examples are accepted.",
+      "summary": "Exercise restart/crash, malformed or hung scripts, output caps, many watches, SQLite/Postgres routes, diagnostics retention, packaging, upgrade, and operational recovery after the minimal UX and examples are accepted. Seven completion criteria (coverage map, many watches at capacity defaults, versioned compaction, backup/restore, Windows/Linux release archives with upgrade, recovery runbook, no weakening of #239 coverage), reuse of #234/#239/#225/#233/#222 evidence, and out-of-scope items (macOS, #242 fixture cost, v1 adapter, recipes, #201, #243 capture) are pinned in tracker #245. Tracker creation does not authorize launch.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
@@ -381,8 +408,15 @@
       "dependsOn": [
         "five-minute-custom-watch-gate",
         "examples-accelerate-gate",
-        "watcher-installation-bootstrap"
-      ]
+        "watcher-installation-bootstrap",
+        "detector-degraded-cause"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 245
+      }
     },
     {
       "id": "closure-gate",
@@ -629,7 +663,8 @@
         "examples-accelerate-gate",
         "watcher-macos-containment-runtime",
         "watcher-macos-sqlite-registry-open",
-        "watcher-runtime-backend-resilience"
+        "watcher-runtime-backend-resilience",
+        "detector-degraded-cause"
       ]
     },
     {
