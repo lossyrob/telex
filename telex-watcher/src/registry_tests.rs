@@ -101,6 +101,485 @@ fn stderr_excerpts_migrate_reopen_and_stay_associated_with_the_latest_failure() 
     assert!(attempts[2].stderr_excerpt.is_none());
 }
 
+#[test]
+fn maintenance_compaction_is_bounded_counted_and_keeps_proof_and_failure_references() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let event = fixture.staged(&mut registry, "history", false);
+    registry
+        .evidence(
+            &event.operation_id,
+            SendEvidence::send(Ok(accepted(&event))),
+            2200,
+        )
+        .unwrap();
+    let (_, failure) = registry
+        .begin_attempt("history", "runtime-original", 3000)
+        .unwrap();
+    registry
+        .fail_attempt(
+            &failure.id,
+            DiagnosticCategory::ProcessFailure,
+            "historical failure",
+            3100,
+        )
+        .unwrap();
+    for i in 0..380 {
+        let now = 4000 + i * 1000;
+        let (_, attempt) = registry
+            .begin_attempt("history", "runtime-original", now)
+            .unwrap();
+        registry
+            .finish_direct(&attempt.id, json!({"cursor":i}), false, now + 1)
+            .unwrap();
+    }
+    let pending = fixture.staged(&mut registry, "pending", false);
+    registry
+        .register(fixture.registration("running"), 1000)
+        .unwrap();
+    let (_, running) = registry
+        .begin_attempt("running", "runtime-original", 1000)
+        .unwrap();
+    let before = serde_json::to_value(registry.list().unwrap()).unwrap();
+    let revision = registry.revision().unwrap();
+    let first = registry.compact().unwrap();
+    assert_eq!(first.attempts_deleted, 256);
+    let second = registry.compact().unwrap();
+    assert_eq!(second.attempts_deleted, 25);
+    assert_eq!(second.totals.attempts, 281);
+    assert_eq!(second.totals.outcomes["accepted"], 1);
+    assert_eq!(second.totals.outcomes["idle"], 280);
+    assert_eq!(
+        before,
+        serde_json::to_value(registry.list().unwrap()).unwrap()
+    );
+    assert_eq!(revision, registry.revision().unwrap());
+    let attempts = registry.attempts("history", 1000).unwrap();
+    assert_eq!(attempts.len(), 101);
+    assert!(attempts.iter().any(|a| a.id == failure.id));
+    assert!(registry
+        .attempts("pending", 1000)
+        .unwrap()
+        .iter()
+        .any(|a| a.id == pending.attempt_id));
+    assert!(registry
+        .attempts("running", 1000)
+        .unwrap()
+        .iter()
+        .any(|a| a.id == running.id));
+    let operation = registry.operation(&event.operation_id).unwrap().unwrap();
+    assert!(operation.attempt_compacted);
+    assert_eq!(operation.envelope, event.envelope);
+    assert_eq!(operation.recovery, event.recovery);
+    assert_eq!(operation.receipt.unwrap().message_id, 7);
+    let audits = || {
+        registry
+            .connection
+            .query_row(
+                "SELECT count(*) FROM watcher_v2_audits WHERE action='compact'",
+                [],
+                |r| r.get::<_, u64>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(audits(), 2);
+    assert_eq!(registry.compact_automatic().unwrap().attempts_deleted, 0);
+    assert_eq!(registry.compact().unwrap().totals.attempts, 281);
+    let audits: u64 = registry
+        .connection
+        .query_row(
+            "SELECT count(*) FROM watcher_v2_audits WHERE action='compact'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audits, 3);
+    drop(registry);
+    assert_eq!(
+        fixture
+            .open()
+            .compaction_stats(Some("history"))
+            .unwrap()
+            .attempts,
+        281
+    );
+}
+
+#[test]
+fn maintenance_marked_backup_stale_restore_preserves_original_and_requires_individual_resume() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    registry
+        .register(fixture.registration("watch"), 1000)
+        .unwrap();
+    registry.bind_store("watch", "store-1").unwrap();
+    registry
+        .register(fixture.registration("second"), 1000)
+        .unwrap();
+    let backup = fixture.root.join("snapshot.sqlite");
+    registry.backup(&backup).unwrap();
+    telex::platform_fs::stat_owner_only_file(&backup, u64::MAX).unwrap();
+    assert_eq!(
+        crate::maintenance::failure_code(&registry.backup(&backup).unwrap_err()),
+        Some("backup-destination-exists")
+    );
+    for suffix in ["-wal", "-shm", "-journal"] {
+        assert!(!std::path::PathBuf::from(format!("{}{suffix}", backup.display())).exists());
+    }
+    assert_eq!(
+        Registry::open(&backup, 1, 1).err().unwrap().to_string(),
+        "backup-restore-required"
+    );
+    assert_eq!(
+        crate::maintenance::failure_code(
+            &crate::backup::restore(&fixture.path(), &backup).unwrap_err()
+        ),
+        Some("registry-already-owned")
+    );
+    let later = fixture.staged(&mut registry, "watch", false);
+    registry
+        .evidence(
+            &later.operation_id,
+            SendEvidence::send(Ok(accepted(&later))),
+            2300,
+        )
+        .unwrap();
+    let physical = crate::ownership::physical_identity(&fixture.path()).unwrap();
+    drop(registry);
+    let report = crate::backup::restore(&fixture.path(), &backup).unwrap();
+    assert!(!report.source_matches_snapshot);
+    assert_eq!(report.fenced_watches, 2);
+    assert_eq!(
+        crate::ownership::physical_identity(&fixture.path()).unwrap(),
+        physical
+    );
+    assert_eq!(
+        Registry::open(&report.original_evidence, 1, 1)
+            .err()
+            .unwrap()
+            .to_string(),
+        "backup-restore-required"
+    );
+    let evidence = Connection::open(&report.original_evidence).unwrap();
+    let metadata: String = evidence
+        .query_row(
+            "SELECT data FROM watcher_v2_backup_meta WHERE singleton=1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&metadata).unwrap()["highWater"]["watch"]["allocated"],
+        1
+    );
+    drop(evidence);
+    let mut registry = fixture.open();
+    for watch in registry.list().unwrap() {
+        assert!(watch.restore_review_required);
+        assert_eq!(watch.lifecycle, Lifecycle::Paused);
+        assert_eq!(
+            watch.blocked_reason,
+            Some(BlockedReason::RestoredBackupReview)
+        );
+    }
+    registry.start_runtime("restored", 3000, |_| true).unwrap();
+    assert!(registry.begin_attempt("watch", "restored", 3000).is_err());
+    assert!(registry
+        .change("watch", Change::Resume, 3000)
+        .unwrap()
+        .refusal
+        .is_none());
+    assert!(
+        !registry
+            .get("watch")
+            .unwrap()
+            .unwrap()
+            .restore_review_required
+    );
+    assert!(
+        registry
+            .get("second")
+            .unwrap()
+            .unwrap()
+            .restore_review_required
+    );
+    assert_eq!(
+        registry
+            .get("watch")
+            .unwrap()
+            .unwrap()
+            .last_allocated_event_sequence,
+        0
+    );
+}
+
+#[test]
+fn maintenance_current_staged_snapshot_reconciles_exact_operation_without_clearing_fence() {
+    let fixture = Fixture::new();
+    let mut registry = fixture.open();
+    let operation = fixture.staged(&mut registry, "watch", false);
+    let backup = fixture.root.join("current.sqlite");
+    registry.backup(&backup).unwrap();
+    drop(registry);
+    let report = crate::backup::restore(&fixture.path(), &backup).unwrap();
+    assert!(report.source_matches_snapshot);
+    let mut registry = fixture.open();
+    let restored = registry
+        .operation(&operation.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.status, OperationStatus::QueryRequired);
+    assert_eq!(restored.envelope, operation.envelope);
+    assert_eq!(restored.recovery, operation.recovery);
+    assert!(!registry
+        .reserve_recovery(&operation.operation_id, true, true, 2500)
+        .unwrap());
+    assert!(registry
+        .reserve_recovery(&operation.operation_id, false, true, 2500)
+        .unwrap());
+    registry
+        .evidence(
+            &operation.operation_id,
+            SendEvidence::send(Ok(accepted(&operation))),
+            2600,
+        )
+        .unwrap();
+    let watch = registry.get("watch").unwrap().unwrap();
+    assert_eq!(watch.state, operation.proposed_state);
+    assert_eq!(watch.last_committed_event_sequence, 1);
+    assert!(watch.restore_review_required);
+    assert_eq!(watch.lifecycle, Lifecycle::Paused);
+    assert!(registry
+        .change("watch", Change::Resume, 2700)
+        .unwrap()
+        .refusal
+        .is_none());
+    assert!(
+        !registry
+            .get("watch")
+            .unwrap()
+            .unwrap()
+            .restore_review_required
+    );
+}
+
+#[test]
+fn maintenance_restore_crash_child() {
+    let Some(root) = std::env::var_os("TELEX_TEST_RESTORE_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let phase = std::env::var("TELEX_TEST_RESTORE_PHASE").unwrap();
+    crate::backup::restore_with_progress(
+        &root.join("registry.sqlite"),
+        &root.join("snapshot.sqlite"),
+        |stage| {
+            if stage == phase {
+                std::fs::write(root.join("reached"), stage).unwrap();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        },
+    )
+    .unwrap();
+    panic!("requested restore crash boundary was not reached");
+}
+
+#[test]
+fn maintenance_restore_refuses_mismatches_before_publishing_or_changing_original() {
+    for (field, replacement, expected) in [
+        ("hostId", json!("other-host"), "restore-host-mismatch"),
+        (
+            "sourcePhysicalIdentity",
+            json!("other-file"),
+            "restore-source-identity-mismatch",
+        ),
+        (
+            "sourceResponsibility",
+            json!("other-owner"),
+            "restore-responsibility-mismatch",
+        ),
+        ("registrySchema", json!(99), "restore-schema-mismatch"),
+        (
+            "contentHash",
+            json!("sha256:incorrect"),
+            "restore-content-mismatch",
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let mut registry = fixture.open();
+        registry
+            .register(fixture.registration("watch"), 1000)
+            .unwrap();
+        let snapshot = fixture.root.join("snapshot.sqlite");
+        registry.backup(&snapshot).unwrap();
+        drop(registry);
+        let source = Connection::open(&snapshot).unwrap();
+        let data: String = source
+            .query_row("SELECT data FROM watcher_v2_backup_meta", [], |r| r.get(0))
+            .unwrap();
+        let mut metadata: Value = serde_json::from_str(&data).unwrap();
+        metadata[field] = replacement;
+        source
+            .execute(
+                "UPDATE watcher_v2_backup_meta SET data=?1",
+                [metadata.to_string()],
+            )
+            .unwrap();
+        drop(source);
+        let before = std::fs::read(fixture.path()).unwrap();
+        let error = crate::backup::restore(&fixture.path(), &snapshot).unwrap_err();
+        assert_eq!(
+            crate::maintenance::failure_code(&error),
+            Some(expected),
+            "{field}: {error:#}"
+        );
+        assert_eq!(std::fs::read(fixture.path()).unwrap(), before);
+        assert!(!std::fs::read_dir(&fixture.root).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".pre-restore-")));
+    }
+}
+
+#[test]
+fn maintenance_snapshot_rejects_stale_sidecars_and_never_replaces_destination() {
+    let fixture = Fixture::new();
+    let registry = fixture.open();
+    let destination = fixture.root.join("snapshot.sqlite");
+    let sidecar = fixture.root.join("snapshot.sqlite-wal");
+    std::fs::write(&sidecar, "stale").unwrap();
+    assert_eq!(
+        crate::maintenance::failure_code(&registry.backup(&destination).unwrap_err()),
+        Some("backup-sidecar-present")
+    );
+    assert!(!destination.exists());
+    std::fs::remove_file(sidecar).unwrap();
+    std::fs::write(&destination, "original evidence").unwrap();
+    assert_eq!(
+        crate::maintenance::failure_code(&registry.backup(&destination).unwrap_err()),
+        Some("backup-destination-exists")
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination).unwrap(),
+        "original evidence"
+    );
+}
+
+#[test]
+fn maintenance_restore_refuses_backend_page_size_and_original_schema_mismatch() {
+    for (mutation, expected) in [
+        ("UPDATE watcher_v2_watches SET data=json_set(data,'$.registration.backendProfile','another-profile')",
+            "restore-backend-route-mismatch"),
+        ("PRAGMA page_size=8192; VACUUM", "restore-page-size-mismatch"),
+        ("UPDATE watcher_v2_meta SET version=4", "restore-schema-mismatch"),
+    ] {
+        let fixture = Fixture::new();
+        let mut registry = fixture.open();
+        registry.register(fixture.registration("watch"), 1000).unwrap();
+        let snapshot = fixture.root.join("snapshot.sqlite");
+        registry.backup(&snapshot).unwrap();
+        drop(registry);
+        let original = Connection::open(fixture.path()).unwrap();
+        original.execute_batch(mutation).unwrap();
+        drop(original);
+        let before = std::fs::read(fixture.path()).unwrap();
+        let error = crate::backup::restore(&fixture.path(), &snapshot).unwrap_err();
+        assert_eq!(crate::maintenance::failure_code(&error), Some(expected), "{error:#}");
+        assert_eq!(std::fs::read(fixture.path()).unwrap(), before);
+    }
+}
+
+#[test]
+fn maintenance_restore_kill_at_each_boundary_is_atomic_and_rerunnable() {
+    use std::time::{Duration, Instant};
+    for phase in [
+        "before-evidence",
+        "evidence-published",
+        "image-prepared",
+        "copying",
+        "committed",
+    ] {
+        let fixture = Fixture::new();
+        let mut registry = fixture.open();
+        registry
+            .register(fixture.registration("watch"), 1000)
+            .unwrap();
+        for i in 0..140 {
+            let (_, attempt) = registry
+                .begin_attempt("watch", "runtime", 2000 + i * 10)
+                .unwrap();
+            registry
+                .record_stderr(&attempt.id, &"x".repeat(4096))
+                .unwrap();
+            registry
+                .finish_direct(&attempt.id, json!({"cursor":1}), false, 2001 + i * 10)
+                .unwrap();
+        }
+        registry
+            .backup(&fixture.root.join("snapshot.sqlite"))
+            .unwrap();
+        let (_, attempt) = registry.begin_attempt("watch", "runtime", 4000).unwrap();
+        registry
+            .finish_direct(&attempt.id, json!({"cursor":9999}), false, 4001)
+            .unwrap();
+        drop(registry);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "registry_v2::tests::maintenance_restore_crash_child",
+                "--nocapture",
+            ])
+            .env("TELEX_TEST_RESTORE_ROOT", &fixture.root)
+            .env("TELEX_TEST_RESTORE_PHASE", phase)
+            .env("TELEX_HOME", fixture.root.join("home"))
+            .env("TELEX_DB", fixture.root.join("telex.sqlite"))
+            .env("TELEX_INSTALL_ROOT", fixture.root.join("install"))
+            .env("LOCALAPPDATA", fixture.root.join("localappdata"))
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !fixture.root.join("reached").exists() && Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let reached = fixture.root.join("reached").exists();
+        let _ = child.kill();
+        child.wait().unwrap();
+        assert!(reached, "restore did not reach {phase}");
+        let registry = fixture.open();
+        let watch = registry.get("watch").unwrap().unwrap();
+        assert_eq!(
+            watch.state["cursor"],
+            if phase == "committed" { 1 } else { 9999 },
+            "{phase}"
+        );
+        assert_eq!(
+            watch.restore_review_required,
+            phase == "committed",
+            "{phase}"
+        );
+        let integrity: String = registry
+            .connection
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok", "{phase}");
+        drop(registry);
+        let report =
+            crate::backup::restore(&fixture.path(), &fixture.root.join("snapshot.sqlite")).unwrap();
+        assert!(report.original_evidence.exists());
+        assert_eq!(
+            fixture.open().get("watch").unwrap().unwrap().state["cursor"],
+            1
+        );
+    }
+}
+
 struct Fixture {
     root: std::path::PathBuf,
 }
@@ -182,6 +661,7 @@ impl Fixture {
             retention_generation: Some(0),
         };
         let op = Operation {
+            attempt_compacted: false,
             schema_version: 2,
             watch_id: id.into(),
             event_sequence: sequence,
@@ -1529,7 +2009,7 @@ fn a_future_registry_version_is_refused_before_schema_mutation() {
     connection
         .execute_batch(
             "CREATE TABLE watcher_v2_meta(singleton INTEGER PRIMARY KEY, version INTEGER);
-        INSERT INTO watcher_v2_meta VALUES(1,3);",
+        INSERT INTO watcher_v2_meta VALUES(1,4);",
         )
         .unwrap();
     drop(connection);

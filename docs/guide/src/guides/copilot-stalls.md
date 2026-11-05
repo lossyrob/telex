@@ -253,8 +253,12 @@ interval can restart grace once per unchanged episode.
 ## Recover degraded monitoring without losing history
 
 An observation failure leaves the watch active/degraded, with no event or state
-advance. Default safe management output shows `detector-degraded` but omits the
-detector's diagnostic text. Check membership limits/format, local session ids,
+advance. Inspect `attempts` and `latestFailure` for the bounded, redacted
+stderr tail: at most 4096 UTF-8 bytes including `[truncated]`. Unavailable or
+historical capture is `null`; captured empty stderr is `""`. Redaction covers
+configured sensitive environment values, not arbitrary provider text or
+unconfigured credentials; review excerpts before sharing.
+Check membership limits/format, local session ids,
 backend/environment access and the running Watcher management endpoint. An
 unchanged already-advised unknown episode can also remain degraded.
 

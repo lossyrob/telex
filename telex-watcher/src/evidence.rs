@@ -44,6 +44,7 @@ pub enum BlockedReason {
     LogicalStoreMismatch,
     UnsupportedRegistrationVersion,
     OrphanContainmentUnproven,
+    RestoredBackupReview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +105,8 @@ pub struct Watch {
     pub diagnostic_category: Option<DiagnosticCategory>,
     #[serde(default)]
     pub latest_failure: Option<AttemptFailure>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restore_review_required: bool,
     pub recurrence: Recurrence,
 }
 
@@ -217,6 +220,8 @@ pub struct Operation {
     pub event_id: String,
     pub operation_id: String,
     pub attempt_id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub attempt_compacted: bool,
     pub attempt_now: String,
     pub runtime_id: String,
     pub registration_revision: u64,
@@ -295,6 +300,8 @@ pub struct Retention {
     pub warning_rows: u64,
     pub warning_bytes: u64,
     pub warning: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction: Option<crate::maintenance::CompactionStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,6 +383,8 @@ pub struct WatchHealth {
     pub diagnostic_category: Option<DiagnosticCategory>,
     #[serde(default)]
     pub latest_failure: Option<AttemptFailure>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restore_review_required: bool,
     pub recurrence: Recurrence,
     pub sender_ready: bool,
     pub logical_store_id: Option<String>,

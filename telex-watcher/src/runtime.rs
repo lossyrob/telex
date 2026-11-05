@@ -253,6 +253,7 @@ impl Runtime {
         let mut tick = tokio::time::interval(Duration::from_millis(200));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut next_membership = 0_i64;
+        let mut next_compaction = 0_i64;
         while !self.stopping {
             tokio::select! {
                 error = heartbeat_failure.recv() => {
@@ -300,6 +301,10 @@ impl Runtime {
                         }
                     }
                     self.launch_due()?;
+                    if now >= next_compaction {
+                        lock(&self.registry)?.compact_automatic()?;
+                        next_compaction = now_ms().saturating_add(1000);
+                    }
                     self.refresh_health()?;
                 }
             }
@@ -843,6 +848,16 @@ impl Runtime {
                 limit,
             } => Ok(Response::ReceiptEvidence(
                 lock(&self.registry)?.receipt_evidence(&operation_id, limit)?,
+            )),
+            Command::Compact => Ok(Response::Compaction(
+                lock(&self.registry)?
+                    .compact()
+                    .context("compaction-failed")?,
+            )),
+            Command::Backup { path } => Ok(Response::Backup(
+                lock(&self.registry)?
+                    .backup(&path)
+                    .context("backup-failed")?,
             )),
             Command::Shutdown => {
                 self.stopping = true;

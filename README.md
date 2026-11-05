@@ -134,6 +134,18 @@ under `copilot/plugin`). See the
 for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
 compatibility notes.
 
+## Watcher runtime
+
+`telex-watcher` runs trusted local detectors and sends receipt-gated events.
+**Windows x86_64 is the initial supported Watcher distribution**: its release
+archive includes the separate executable. The single-binary Telex installer
+does not install or supervise Watcher. Linux has automated SQLite/PostgreSQL
+runtime coverage and requires a same-build `watcher_process_guard`; that test
+scope is not a clean-host production-soak claim. macOS Watcher is unsupported
+and refuses detector launch; macOS/Windows ARM archives do not include it.
+See [installation](docs/guide/src/guides/watcher-installation.md) and the
+[recovery, capacity and backup runbook](docs/watcher-runtime.md).
+
 ## Watch the line (TUI)
 
 `telex-console` is a separate, read-only terminal UI for *watching* the fabric live — a

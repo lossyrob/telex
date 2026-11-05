@@ -315,6 +315,12 @@ where
                 Ok(Err(error)) if error.to_string() == "watcher-owner-outcome-unknown" => {
                     Err(TransportError::outcome_unknown())
                 }
+                Ok(Err(error)) if crate::maintenance::failure_code(&error).is_some() => {
+                    Ok(Envelope::error(
+                        name, crate::maintenance::failure_code(&error).expect("matched maintenance error"),
+                        "registry maintenance refused or failed; no automatic recovery was attempted",
+                    ))
+                }
                 Ok(Err(_)) => Err(TransportError::new(
                     TransportErrorCode::RuntimeError,
                     "The registry owner could not complete the command.",

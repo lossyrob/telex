@@ -519,7 +519,11 @@ still needs message-id deduplication.
 A failed observation emits no stall event and does not advance detector state.
 Use the same Watcher registry's `health $watchId` and `attempts $watchId`:
 `diagnosticCategory: "detector-degraded"` needs inspection, not an assumption that
-someone is busy. Default management output hides detector diagnostic text.
+someone is busy. Inspect `attempts` and `latestFailure` for the bounded,
+redacted stderr tail: at most 4096 UTF-8 bytes including `[truncated]`.
+Unavailable or historical capture is `null`; captured empty stderr is `""`.
+Redaction covers configured sensitive environment values, not arbitrary
+provider text or unconfigured credentials. Review excerpts before sharing.
 
 Check membership limits/format, local session ids, backend/environment access
 and the running Watcher management endpoint. Inspect the member's inbox using
