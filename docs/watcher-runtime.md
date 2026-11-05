@@ -294,6 +294,8 @@ or succeeds; current health and `diagnosticCategory` remain independent.
 stderr capture is null; captured empty stderr is an empty string. Registry
 startup atomically adds missing nullable JSON fields to existing v2 records,
 without changing registry version, identities, outcomes or opaque state.
+This migration is forward-only: earlier Watcher builds use `deny_unknown_fields`
+and cannot open a registry after this build has opened it.
 Historical attempts have null excerpts; the migration cannot recover discarded
 stderr or reconstruct historical failure summaries.
 

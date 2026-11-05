@@ -660,6 +660,11 @@ partial configured secret. This persisted bound is independent of the 64 KiB
 process capture limit. Empty captured stderr is `""`; unavailable capture and
 attempts predating the additive registry migration have `null`.
 
+Registry startup adds missing nullable `stderrExcerpt` and `latestFailure`
+fields to existing v2 attempt and watch rows without changing the registry
+version. This migration is forward-only: earlier Watcher builds use
+`deny_unknown_fields` and cannot open a registry after this build has opened it.
+
 When the runtime host exits with `runtime-failed`, it writes a stage-labeled
 cause chain to stderr before returning exit code 1. Stages distinguish runtime
 and registry open, endpoint bind, runtime start, runtime run, heartbeat and
