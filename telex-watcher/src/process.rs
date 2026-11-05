@@ -187,7 +187,7 @@ where
                 biased;
                 _ = &mut cancellation => Err(ProcessFailure::new(ProcessFailureKind::Cancelled, "runtime shutdown")),
                 _ = tokio::time::sleep_until(deadline) => Err(ProcessFailure::new(ProcessFailureKind::Timeout, "detector timed out")),
-                result = child.complete() => result,
+                result = child.complete(&sensitive) => result,
             },
         },
     };
@@ -197,10 +197,10 @@ where
         return Err(ProcessFailure {
             kind: ProcessFailureKind::ContainmentUnproven,
             message: "could not prove the detector containment ended".into(),
-            stderr_excerpt: result
-                .as_ref()
-                .ok()
-                .map(|(_, stderr, _)| stderr_excerpt(stderr, &sensitive)),
+            stderr_excerpt: match &result {
+                Ok((_, stderr, _)) => Some(stderr_excerpt(stderr, &sensitive)),
+                Err(error) => error.stderr_excerpt.clone(),
+            },
             containment: Some(Box::new(identity)),
         });
     }
@@ -342,6 +342,25 @@ fn redact(bytes: &[u8], sensitive: &[String]) -> String {
 }
 
 type Completion = (Vec<u8>, Vec<u8>, Option<i32>);
+
+#[cfg(any(target_os = "linux", windows))]
+async fn finish_stdin(
+    writer: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+    stderr: &[u8],
+    sensitive: &[String],
+) -> Result<(), ProcessFailure> {
+    if let Some(writer) = writer {
+        writer
+            .await
+            .map_err(ProcessFailure::io)
+            .and_then(|result| result.map_err(ProcessFailure::io))
+            .map_err(|mut error| {
+                error.stderr_excerpt = Some(stderr_excerpt(stderr, sensitive));
+                error
+            })?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod excerpt_tests {
@@ -809,7 +828,10 @@ mod platform {
             Ok(())
         }
 
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            sensitive: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             let stdout = self
                 .stdout
                 .take()
@@ -847,12 +869,7 @@ mod platform {
                 async { stderr.await.map_err(ProcessFailure::io)? },
                 wait,
             )?;
-            if let Some(writer) = self.writer.take() {
-                writer
-                    .await
-                    .map_err(ProcessFailure::io)?
-                    .map_err(ProcessFailure::io)?;
-            }
+            finish_stdin(self.writer.take(), &stderr, sensitive).await?;
             Ok((stdout, stderr, code))
         }
 
@@ -1104,7 +1121,10 @@ mod platform {
             Ok(())
         }
 
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            sensitive: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             let stdout = self
                 .child
                 .stdout
@@ -1139,12 +1159,7 @@ mod platform {
                 read_capped(stderr, MAX_STDERR_BYTES, ProcessFailureKind::StderrLimit),
                 wait,
             )?;
-            if let Some(writer) = self.writer.take() {
-                writer
-                    .await
-                    .map_err(ProcessFailure::io)?
-                    .map_err(ProcessFailure::io)?;
-            }
+            finish_stdin(self.writer.take(), &stderr, sensitive).await?;
             Ok((stdout, stderr, code))
         }
 
@@ -1407,7 +1422,10 @@ mod platform {
         pub(super) async fn start(&mut self, _: Vec<u8>) -> Result<(), ProcessFailure> {
             unreachable!()
         }
-        pub(super) async fn complete(&mut self) -> Result<Completion, ProcessFailure> {
+        pub(super) async fn complete(
+            &mut self,
+            _: &[String],
+        ) -> Result<Completion, ProcessFailure> {
             unreachable!()
         }
         pub(super) async fn cleanup(&mut self) -> ContainmentStatus {

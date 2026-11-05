@@ -422,6 +422,12 @@ async fn stderr_excerpt_battery(iso: &isolation::Isolation) {
             0,
             AttemptOutcome::Failed,
         ),
+        (
+            "stdin-write-failed",
+            r#"{"schemaVersion":2,"outcome":"degraded"}"#,
+            0,
+            AttemptOutcome::Failed,
+        ),
         ("malformed", "not-json", 0, AttemptOutcome::Failed),
         ("nonzero", "", 7, AttemptOutcome::Failed),
         (
@@ -442,7 +448,8 @@ async fn stderr_excerpt_battery(iso: &isolation::Isolation) {
         std::fs::write(
             &input,
             serde_json::to_vec(&json!({
-                "stdout":stdout, "stderr":stderr, "exitCode":exit_code
+                "stdout":stdout, "stderr":stderr, "exitCode":exit_code,
+                "readStdin":id != &"stdin-write-failed"
             }))
             .unwrap(),
         )
@@ -452,6 +459,11 @@ async fn stderr_excerpt_battery(iso: &isolation::Isolation) {
                 "schemaVersion":2,"id":id,"command":[detector,input],
                 "backendProfile":"watcher-test","sender":"service:stderr-suite","target":"agent:watcher-recipient",
                 "intervalSeconds":3600,"timeoutSeconds":10,
+                "parameters":if id == &"stdin-write-failed" {
+                    json!({"padding":"x".repeat(128 * 1024)})
+                } else {
+                    json!({})
+                },
                 "environmentAllowlist":["TELEX_HOME","TELEX_DB","TELEX_INSTALL_ROOT","WATCHER_EXCERPT_TOKEN"]
             })).unwrap(),
             working_directory:iso.root.clone(),
