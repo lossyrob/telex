@@ -60,6 +60,51 @@ def migrated_snapshot():
 
 
 class WatcherArchiveTests(unittest.TestCase):
+    def test_private_directory_refuses_existing_paths_without_changing_permissions(self):
+        with workspace() as root, patch.object(proof.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "must be a new absolute path"):
+                proof.create_private_directory(root)
+            run.assert_not_called()
+            self.assertTrue(root.is_dir())
+
+    @unittest.skipUnless(os.name == "nt" and shutil.which("pwsh"), "native Windows authority")
+    def test_private_directory_grants_only_inheritable_owner_authority(self):
+        root = Path(Path(os.environ["LOCALAPPDATA"]).anchor) / (
+            ".watcher-archive-unit-" + uuid.uuid4().hex)
+        created = False
+        try:
+            proof.create_private_directory(root)
+            created = True
+            child = root / "child"
+            child.mkdir()
+            binary = child / "fixture.txt"
+            binary.write_text("fixture", encoding="ascii")
+            result = subprocess.run([
+                shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+                "$ErrorActionPreference='Stop'; "
+                "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+                "$root=$env:TELEX_ARCHIVE_PRIVATE_ROOT; "
+                "foreach ($path in @($root,(Join-Path $root 'child'),"
+                "(Join-Path $root 'child\\fixture.txt'))) { "
+                "$acl=Get-Acl -LiteralPath $path; "
+                "if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) "
+                "{ throw 'foreign fixture owner' }; "
+                "$rules=@($acl.GetAccessRules($true,$true,"
+                "[Security.Principal.SecurityIdentifier])); "
+                "if ($rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $sid "
+                "-or $rules[0].AccessControlType -ne 'Allow' "
+                "-or $rules[0].FileSystemRights -ne 'FullControl') "
+                "{ throw 'non-owner fixture authority' } }; "
+                "if (-not (Get-Acl -LiteralPath $root).AreAccessRulesProtected) "
+                "{ throw 'fixture root still inherits foreign authority' }",
+            ], env={**proof.clean_environment(root),
+                    "TELEX_ARCHIVE_PRIVATE_ROOT": str(root)},
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        finally:
+            if created:
+                shutil.rmtree(root)
+
     @unittest.skipUnless(os.name == "nt" and shutil.which("pwsh"), "native Windows packaging")
     def test_release_packaging_block_includes_x64_watcher_but_excludes_arm_even_if_stale(self):
         workflow = (proof.ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
@@ -194,6 +239,51 @@ class WatcherArchiveTests(unittest.TestCase):
                 self.assertTrue(Path(env[name]).is_relative_to(root), name)
             for name in ("TELEX_WATCHER_REGISTRY", "PGPASSWORD", "AZURE_CLIENT_SECRET"):
                 self.assertNotIn(name, env)
+
+    def test_only_admitted_daemon_publication_can_become_a_cleanup_handle(self):
+        fixture = proof.WatcherArchiveProof.__new__(proof.WatcherArchiveProof)
+        fixture.report = {"daemons": []}
+        fixture.cli = SimpleNamespace(daemons=[])
+        fixture.until = lambda probe, _label: probe()
+        identity = {"server_pid": 42, "server_start_time": 123, "instance_id": "owned",
+                    "bootstrap_admission_version": 1}
+        fixture.telex = Mock(return_value=SimpleNamespace(stdout=json.dumps({
+            "instance_id": "owned", "protocol_version": {"major": 1, "minor": 5},
+        })))
+        with workspace() as root:
+            binary, env = root / "telex.exe", {"TELEX_RUN_DIR": str(root)}
+            with patch.object(proof, "read_fixture_identity", return_value=identity), \
+                    patch.object(proof, "OwnedDaemon") as owned:
+                process = fixture.admitted_daemon(binary, env, 5)
+                owned.assert_called_once_with(identity, binary)
+                self.assertEqual(fixture.cli.daemons, [(process, binary, env, process)])
+            for admission in (None, 0, 2):
+                with patch.object(proof, "read_fixture_identity", return_value={
+                        **identity, "server_pid": 43, "bootstrap_admission_version": admission}), \
+                        patch.object(proof, "OwnedDaemon") as owned:
+                    with self.assertRaisesRegex(RuntimeError, "InstalledCurrent admission"):
+                        fixture.admitted_daemon(binary, env, 5)
+                    owned.assert_not_called()
+            fixture.report["daemons"].clear()
+            sharing = OSError("capability publication sharing violation")
+            sharing.operation, sharing.winerror = "CreateFileW", 32
+
+            def retry_once(probe, _label):
+                self.assertIsNone(probe())
+                return probe()
+
+            fixture.until = retry_once
+            with patch.object(proof, "read_fixture_identity", side_effect=[sharing, identity]), \
+                    patch.object(proof, "OwnedDaemon") as owned:
+                fixture.admitted_daemon(binary, env, 5)
+                owned.assert_called_once_with(identity, binary)
+            denied = OSError("permission denied")
+            denied.operation, denied.winerror = "CreateFileW", 5
+            with patch.object(proof, "read_fixture_identity", side_effect=denied), \
+                    patch.object(proof, "OwnedDaemon") as owned:
+                with self.assertRaisesRegex(OSError, "permission denied"):
+                    fixture.admitted_daemon(binary, env, 5)
+                owned.assert_not_called()
 
     def test_duplicate_operation_and_missing_receipt_are_rejected(self):
         fixture = proof.WatcherArchiveProof.__new__(proof.WatcherArchiveProof)

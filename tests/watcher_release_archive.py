@@ -24,7 +24,11 @@ from types import SimpleNamespace
 import uuid
 import zipfile
 
-from release_candidate import Proof, clean_environment, require
+from release_candidate import Proof, clean_environment, read_fixture_identity, require
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +41,92 @@ RECIPIENT = "project:archive-proof/inbox"
 
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def create_private_directory(path):
+    require(path.is_absolute() and not os.path.lexists(path),
+            f"private fixture directory must be a new absolute path: {path}")
+    pwsh = Path(shutil.which("pwsh") or "").resolve()
+    require(pwsh.is_file(), "PowerShell 7.4+ is required")
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"}}
+    env["TELEX_ARCHIVE_PRIVATE_ROOT"] = str(path)
+    result = subprocess.run([
+        pwsh, "-NoProfile", "-NonInteractive", "-Command",
+        "$ErrorActionPreference='Stop'; "
+        "$path=$env:TELEX_ARCHIVE_PRIVATE_ROOT; "
+        "if (Test-Path -LiteralPath $path) { throw 'fixture path already exists' }; "
+        "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
+        "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
+        "$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); "
+        "$rule=[Security.AccessControl.FileSystemAccessRule]::new("
+        "$sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'); "
+        "$acl.AddAccessRule($rule); "
+        "[IO.FileSystemAclExtensions]::CreateDirectory($acl,$path) | Out-Null",
+    ], env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    require(result.returncode == 0,
+            f"create owner-private fixture directory {path}: {result.stdout}{result.stderr}")
+
+
+class OwnedDaemon:
+    """Retain a handle to the exact daemon bootstrapped by this fixture's Watcher."""
+
+    def __init__(self, identity, binary):
+        self.pid = identity["server_pid"]
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        signatures = {
+            "OpenProcess": ([wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
+            "GetProcessTimes": ([wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4,
+                                wintypes.BOOL),
+            "QueryFullProcessImageNameW": ([wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                           ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
+            "WaitForSingleObject": ([wintypes.HANDLE, wintypes.DWORD], wintypes.DWORD),
+            "GetExitCodeProcess": ([wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
+            "TerminateProcess": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
+            "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
+        }
+        for name, (arguments, result) in signatures.items():
+            function = getattr(self.kernel, name)
+            function.argtypes, function.restype = arguments, result
+        self.handle = self.kernel.OpenProcess(0x00100000 | 0x1000 | 0x1, False, self.pid)
+        require(self.handle, f"open owned daemon handle: {ctypes.WinError(ctypes.get_last_error())}")
+        try:
+            times = [wintypes.FILETIME() for _ in range(4)]
+            require(self.kernel.GetProcessTimes(self.handle, *(ctypes.byref(t) for t in times)),
+                    "read owned daemon creation time")
+            creation = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+            require(creation == identity["server_start_time"], "owned daemon creation time mismatch")
+            image, length = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+            require(self.kernel.QueryFullProcessImageNameW(self.handle, 0, image,
+                                                           ctypes.byref(length)),
+                    "read owned daemon image")
+            require(Path(image.value).resolve() == binary.resolve(), "owned daemon image mismatch")
+        except Exception:
+            self.close()
+            raise
+
+    def poll(self):
+        status = self.kernel.WaitForSingleObject(self.handle, 0)
+        if status == 258:  # WAIT_TIMEOUT
+            return None
+        require(status == 0, "query owned daemon exit")
+        code = wintypes.DWORD()
+        require(self.kernel.GetExitCodeProcess(self.handle, ctypes.byref(code)),
+                "read owned daemon exit code")
+        return code.value
+
+    def wait(self, timeout):
+        require(self.kernel.WaitForSingleObject(self.handle, int(timeout * 1000)) == 0,
+                "owned daemon exit deadline")
+        return self.poll()
+
+    def kill(self):
+        require(self.kernel.TerminateProcess(self.handle, 1), "terminate exact owned daemon handle")
+
+    def close(self):
+        if self.handle:
+            require(self.kernel.CloseHandle(self.handle), "close owned daemon handle")
+            self.handle = None
 
 
 def unpack_archive(archive, destination, target):
@@ -139,6 +229,43 @@ class WatcherArchiveProof:
                 "Telex must be built with sqlite, postgres and entra")
         self.telex(installed, env, "init")
         return installed, metadata["daemon_metadata"]["protocol_version"]["minor"]
+
+    def admitted_daemon(self, binary, env, minor):
+        previous = {
+            (row["pid"], row["start_time"]) for row in self.report["daemons"]
+        }
+
+        def published():
+            try:
+                identity = read_fixture_identity(Path(env["TELEX_RUN_DIR"]))
+            except OSError as error:
+                if (getattr(error, "operation", None) == "CreateFileW"
+                        and getattr(error, "winerror", None) == 32):
+                    return None
+                raise
+            if identity is None or (
+                    identity.get("server_pid"), identity.get("server_start_time")) in previous:
+                return None
+            require(identity.get("bootstrap_admission_version") == 1,
+                    "Watcher must bootstrap the daemon through InstalledCurrent admission")
+            require(identity.get("instance_id"), "owned daemon lacks instance identity")
+            return identity
+
+        identity = self.until(published, "Watcher-bootstrapped daemon publication")
+        process = OwnedDaemon(identity, binary)
+        # Reuse the existing handle-based stop/kill/wait cleanup, not PID searches.
+        self.cli.daemons.append((process, binary, env, process))
+        status = json.loads(self.telex(binary, env, "daemon", "status").stdout)
+        require(status["protocol_version"] == {"major": 1, "minor": minor},
+                "live admitted daemon protocol mismatch")
+        require(status["instance_id"] == identity["instance_id"],
+                "authenticated status differs from admitted daemon publication")
+        self.report["daemons"].append({
+            "pid": process.pid, "binary": str(binary), "protocol_minor": minor,
+            "start_time": identity["server_start_time"], "instance_id": identity["instance_id"],
+            "bootstrap_admission_version": identity["bootstrap_admission_version"],
+        })
+        return process
 
     def bootstrap(self, helper, telex, watcher, env):
         parameters = {
@@ -276,9 +403,9 @@ class WatcherArchiveProof:
         env = self.environment("fresh")
         installed, minor = self.install(telex, env, "archive-candidate", source_sha)
         self.bootstrap(ROOT / "telex-watcher" / "installation.ps1", installed, watcher, env)
-        daemon = self.cli.start_daemon(installed, env, minor)
         host = self.start(watcher, env)
         self.register(watcher, env, EVENT_WATCH, "event")
+        daemon = self.admitted_daemon(installed, env, minor)
         self.until(lambda: self.committed_event(watcher, env), "fresh archive receipt-gated send")
         evidence = self.evidence(watcher, env)
         require(len(self.messages(installed, env)) == 1, "fresh archive send was duplicated")
@@ -292,9 +419,9 @@ class WatcherArchiveProof:
         old, old_minor = self.install(baseline_telex, env, "source-222", BASELINE_SHA)
         self.bootstrap(baseline_root / "telex-watcher" / "installation.ps1",
                        old, baseline_watcher, env)
-        daemon = self.cli.start_daemon(old, env, old_minor)
         host = self.start(baseline_watcher, env)
         self.register(baseline_watcher, env, EVENT_WATCH, "event")
+        daemon = self.admitted_daemon(old, env, old_minor)
         self.until(lambda: self.committed_event(baseline_watcher, env), "source baseline send")
         self.watcher(baseline_watcher, env, "pause", EVENT_WATCH)
         self.register(baseline_watcher, env, FAILURE_WATCH, "failure")
@@ -317,7 +444,6 @@ class WatcherArchiveProof:
             "registry_sha256_before_migration": sha256(registry),
         }
         new, new_minor = self.install(candidate_telex, env, "archive-candidate", source_sha)
-        daemon = self.cli.start_daemon(new, env, new_minor)
         host = self.start(candidate_watcher, env)
         after = registry_snapshot(registry)
         check_migration(before, after)
@@ -330,6 +456,7 @@ class WatcherArchiveProof:
                                       and item["stderrExcerpt"] is None for item in historical),
                     "public historical stderr excerpts must be null")
         self.watcher(candidate_watcher, env, "resume", EVENT_WATCH)
+        daemon = self.admitted_daemon(new, env, new_minor)
 
         def resumed_idle():
             return next((item for item in self.watcher(
@@ -340,6 +467,11 @@ class WatcherArchiveProof:
         request = json.loads((registry.parent / f'{resumed["id"]}.json').read_text(encoding="utf-8"))
         require(request["state"] == {"cursor": 1}, "archive detector did not receive committed state")
         self.watcher(candidate_watcher, env, "pause", EVENT_WATCH)
+        # The old projection predates this additive flag; its attempt is retained.
+        original_evidence = {
+            **original_evidence,
+            "event": {**original_evidence["event"], "attemptCompacted": False},
+        }
         require(self.evidence(candidate_watcher, env) == original_evidence,
                 "upgrade changed exact operation or receipt evidence")
         require(self.messages(new, env) == original_messages,
@@ -497,7 +629,10 @@ def main(argv=None):
         require(len(args.source_sha) == 40
                 and all(char in "0123456789abcdef" for char in args.source_sha),
                 "candidate source SHA must be a full Git object ID")
-        root.mkdir()
+        # Match the native Rust isolation harness: hosted workspace/profile
+        # ancestors can grant foreign mutation rights. Never repair their ACLs.
+        root = Path(Path(os.environ["LOCALAPPDATA"]).anchor) / root.name
+        create_private_directory(root)
         fixture = WatcherArchiveProof(root, report)
         archive = args.archive.resolve()
         telex, watcher = unpack_archive(archive, root / "archive", args.target)

@@ -206,6 +206,7 @@ async fn wait_for(
 
 async fn ready(process: &mut RuntimeProcess, registry: &Path) -> Value {
     let deadline = Instant::now() + DEADLINE;
+    let mut last_response = Value::Null;
     loop {
         process.assert_alive();
         if let Ok(Ok(response)) = timeout(
@@ -214,6 +215,7 @@ async fn ready(process: &mut RuntimeProcess, registry: &Path) -> Value {
         )
         .await
         {
+            last_response = serde_json::to_value(&response).unwrap();
             if let Some(result) = response.result {
                 if result.value["productionReady"] == true {
                     assert_eq!(result.value["pid"], process.child.id());
@@ -224,7 +226,7 @@ async fn ready(process: &mut RuntimeProcess, registry: &Path) -> Value {
         }
         assert!(
             Instant::now() < deadline,
-            "runtime not ready: {}",
+            "runtime not ready: {last_response}; host log: {}",
             std::fs::read_to_string(&process.log).unwrap_or_default()
         );
         sleep(Duration::from_millis(30)).await;
@@ -619,14 +621,25 @@ async fn bad_detectors(iso: &Isolation, receiver: &ApplicationClient) {
         ("stdout-cap", DiagnosticCategory::OutputLimit),
         ("stderr-cap", DiagnosticCategory::OutputLimit),
     ];
-    let registrations = cases
+    let registrations: Vec<_> = cases
         .iter()
         .map(|(id, _)| registration(iso, id, "bad", id))
         .collect();
-    let path = seed(iso, "bad", registrations);
+    let path = seed(iso, "bad", vec![]);
+    std::fs::create_dir_all(iso.root.join("bad")).unwrap();
     let before = recipient_history(receiver).await.len();
     let mut process = RuntimeProcess::spawn(iso, &path, None);
     ready(&mut process, &path).await;
+    for registration in registrations {
+        request(
+            &path,
+            Command::Register {
+                json: serde_json::to_vec(&registration).unwrap(),
+                working_directory: iso.root.clone(),
+            },
+        )
+        .await;
+    }
     for (id, category) in cases {
         let category = serde_json::to_value(category).unwrap();
         let attempts = wait_for(
