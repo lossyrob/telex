@@ -13,7 +13,17 @@ a message through an already-loaded, live bridge in Copilot CLI or Copilot App a
 `telex wait` waiter and no `--ui-server` flag.
 
 First-time loading uses a supported live bridge loader or startup extension
-discovery. For App setup without an advertised live loader, provision with
+discovery. App's `install_extension` is also supported: install this folder
+from the published commit matching the installed binary **before**
+`copilot attach --copilot-bridge`, with `scope: "session"` and
+`name: "telex-bridge"`. `telex copilot skill` prints pinned tool arguments.
+The installer reloads extensions but refuses an existing extension name.
+Never use floating `main` or a second bridge name. Keep an already-live bridge;
+for an unloaded existing copy, use supported reload/startup discovery or the
+[explicit binding teardown procedure](../COPILOT.md#app-session-installer).
+Do not delete shared bridge files to force installation.
+
+For App setup without a usable installer or advertised live loader, provision with
 `telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
 then run `telex --address <addr> copilot resume`. Verify
 `telex --address <addr> --json status` reports `station_health: attended_push` and

@@ -626,6 +626,46 @@ fn copilot_delivery_overviews_keep_host_capabilities_and_evidence_distinct() {
 }
 
 #[test]
+fn copilot_installer_guidance_preserves_scope_source_and_name_restrictions() {
+    for (name, text) in [
+        ("skill", include_str!("../copilot/COPILOT.md")),
+        (
+            "guide",
+            include_str!("../docs/guide/src/guides/copilot-push.md"),
+        ),
+        (
+            "design",
+            include_str!("../docs/design/copilot-bridge-push.md"),
+        ),
+        (
+            "bridge overview",
+            include_str!("../copilot/bridge/README.md"),
+        ),
+        ("README", include_str!("../README.md")),
+        (
+            "troubleshooting",
+            include_str!("../docs/guide/src/guides/troubleshooting.md"),
+        ),
+    ] {
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for required in [
+            "install_extension",
+            "scope: \"session\"",
+            "name: \"telex-bridge\"",
+            "floating `main`",
+            "existing",
+            "before",
+        ] {
+            assert!(
+                normalized.contains(required),
+                "{name} must preserve installer guidance {required:?}"
+            );
+        }
+        assert!(!text.contains("/tree/main/copilot/bridge"));
+    }
+}
+
+#[test]
 fn pending_push_recovery_text_offers_startup_discovery_before_fallback() {
     for (name, source) in [
         ("send", include_str!("../src/commands/send.rs")),
@@ -640,6 +680,7 @@ fn pending_push_recovery_text_offers_startup_discovery_before_fallback() {
             .0;
         for required in [
             "telex copilot skill",
+            "installer-first",
             "live reload or startup-discovery recovery",
             "and verify liveness",
             "copilot fallback prepare",
