@@ -274,7 +274,7 @@ async fn wait_loop<C: WaitConnector>(
                 if needs_attach_reason == Some(NeedsAttachReason::PushIntentPending) {
                     return Err(anyhow!(
                         "{code}: {message}. A push attach for this station is still finalizing; \
-                         use `telex copilot skill` to choose live reload or startup-discovery recovery \
+                         use `telex copilot skill` to choose installer-first, live reload or startup-discovery recovery \
                          and verify liveness; use `telex --address <station> copilot fallback prepare` \
                          if restarting is unacceptable or liveness does not verify"
                     ));
