@@ -422,9 +422,9 @@
       "id": "windows-initial-release-gate",
       "type": "gate",
       "title": "Windows initial Watcher release ready",
-      "summary": "Operator decision 2026-11-05: Windows is the initial Watcher release platform and macOS is not a prerequisite. The gate runner exercises one exact main commit on a clean Windows x86_64 host with the CI-built archive: install, first five-minute watch, upgrade from the #222 source-built registry, crash recovery, degraded-cause diagnosis, 24-hour soak, truthful platform statement (macOS unsupported and fail-closed), and green Windows/Linux CI without weakened coverage; the Builder rules. Readiness only: no tag, release or Operator Station launch is authorized. Protocol pinned in tracker #246.",
-      "status": "planned",
-      "attention": "watch",
+      "summary": "Retired 2026-11-10 by operator decision (https://github.com/lossyrob/telex/issues/246#issuecomment-6779458560; #246 closed not planned): the dedicated clean-host exercise and 24-hour soak are withdrawn in favor of the operator's actual Windows usage, with existing automated checks retained. This is a withdrawal, not a protocol pass; no clean-host, soak or actual-usage acceptance evidence is recorded by this disposition, and no tag, release or Operator Station launch is authorized. Earlier summary retained: Operator decision 2026-11-05: Windows is the initial Watcher release platform and macOS is not a prerequisite. The gate runner exercises one exact main commit on a clean Windows x86_64 host with the CI-built archive: install, first five-minute watch, upgrade from the #222 source-built registry, crash recovery, degraded-cause diagnosis, 24-hour soak, truthful platform statement (macOS unsupported and fail-closed), and green Windows/Linux CI without weakened coverage; the Builder rules. Readiness only: no tag, release or Operator Station launch is authorized. Protocol pinned in tracker #246.",
+      "status": "retired",
+      "attention": "parked",
       "repoIds": [
         "telex"
       ],
@@ -442,7 +442,7 @@
       "id": "closure-gate",
       "type": "gate",
       "title": "External watch loops reliably deliver Telex attention",
-      "summary": "Builder validates several real long-duration watches, confirms session queues remain free of background waiters, accepts the minimal authoring UX and diagnostics, reviews hardening evidence, and accepts campaign integration with Operator Station. Full cross-platform closure after the initial Windows release (windows-initial-release-gate); macOS acceptance (#172) is required here, not for the initial release.",
+      "summary": "windows-initial-release-gate was retired 2026-11-10 by operator decision; the retained edge is satisfied by retirement, not by a pass. Closure scope, including macOS (#172) and Operator Station integration, is unchanged. Earlier summary retained: Builder validates several real long-duration watches, confirms session queues remain free of background waiters, accepts the minimal authoring UX and diagnostics, reviews hardening evidence, and accepts campaign integration with Operator Station. Full cross-platform closure after the initial Windows release (windows-initial-release-gate); macOS acceptance (#172) is required here, not for the initial release.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -689,7 +689,7 @@
     {
       "id": "windows-initial-release",
       "title": "Initial Windows Watcher release ready",
-      "summary": "Windows is the initial release platform (operator decision 2026-11-05). Released Windows archives install, upgrade, recover and deliver exactly once with visible degraded causes; existing Linux behavior is kept; macOS is stated unsupported and fails closed and is not a prerequisite. Readiness does not authorize tag, release or Operator Station launch.",
+      "summary": "Operator decision 2026-11-10 (https://github.com/lossyrob/telex/issues/246#issuecomment-6779458560): the formal gate is retired, not passed; Windows release readiness now rests on the operator's actual Windows usage with existing automated checks retained. This checkpoint stays planned and completes only when the operator records actual-usage acceptance; node retirement alone does not complete it, and the replacement usage path is not a new formal gate. Earlier summary retained: Windows is the initial release platform (operator decision 2026-11-05). Released Windows archives install, upgrade, recover and deliver exactly once with visible degraded causes; existing Linux behavior is kept; macOS is stated unsupported and fails closed and is not a prerequisite. Readiness does not authorize tag, release or Operator Station launch.",
       "status": "planned",
       "nodeIds": [
         "detector-degraded-cause",

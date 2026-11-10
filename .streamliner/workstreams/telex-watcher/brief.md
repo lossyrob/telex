@@ -3375,3 +3375,42 @@ Registry schema 2 to 3 is forward-only: older binaries refuse the upgraded regis
 Automated main proofs do not discharge [#246](https://github.com/lossyrob/telex/issues/246). The windows-initial-release-gate stays planned/watch with its exact summary and its exact-CI released archive, clean Windows x86_64 host and 24 continuous-hour soak. Its dependency is satisfied for coordinator readiness checks only; launch remains a separate fresh adapter-governed action after actual publication, full closure and independent post-closure. Both Windows/closure checkpoints stay planned with their exact members. No Windows release readiness, tag, release, shared-install change, runtime-state change or Operator Station launch is authorized.
 
 Conservation: all eight #245 criteria and [criterion 6 guidance 6667403255](https://github.com/lossyrob/telex/issues/245#issuecomment-6667403255), including unavailable/historical null capture without reconstruction, remain unchanged. #246 remains pending. #193 stays completed with all six debts intact and archived owner 519693a5 is not contacted or reactivated. #194/#209 inventory is context only; #209 stays closed. Local retains root routing and #208 has no assigned implementation owner; owner 284ff1ee has completed #245 follow-through, not station-intent repair. No repair, staffing, observer, retry request, deadline or assertion weakening follows. The entire previous brief and graph summary remain exact history; all other nodes, edges/order, checkpoints, workstream state/attention, accepted #232 and both caveats, accepted #243/#244, #172 safety boundary, Windows geometry, design, tasks, Local ledger, other workstreams, tracker bodies, debts and bindings stay unchanged. No Campaign relay or binding release follows; the coordinator is rung only after actual publication, full closure and independent post-closure. PR249 and ready product merges retain precedence without a metadata hold.
+
+
+## Formal Windows gate withdrawn by operator decision (2026-11-10)
+
+The operator withdrew the dedicated clean-host exercise and timed 24-hour soak in
+[#246 decision 6779458560](https://github.com/lossyrob/telex/issues/246#issuecomment-6779458560), authorizing the replacement with
+"yes, proceed with dropping it". Issue #246 closed as not_planned at
+2026-11-10T21:15:34Z. Actual Windows usage is the replacement acceptance path;
+it is not already accepted usage and is not a new formal gate. Existing automated
+checks and coverage remain unchanged.
+
+The [design steward ruling 6779534929](https://github.com/lossyrob/telex/issues/246#issuecomment-6779534929) records
+windows-initial-release-gate as retired/parked: intentionally not pursued, not
+completed or passed validation. Its tracker, dependency on runtime-hardening and
+entire previous summary remain. The closure-gate edge is retained for history
+and is satisfied by retirement, not by a protocol pass. Closure-gate remains
+planned/focus with its exact dependencies. The windows-initial-release checkpoint
+stays planned with its exact title and members; it completes only when the
+operator records actual-usage acceptance, never from retirement alone.
+
+The owner reports that only orientation and planning occurred: no archive was
+installed, no registry was upgraded, no runtime or daemon was started or stopped,
+and no clean-host or 24-hour soak evidence was collected. This disposition records
+no completed actual-usage acceptance. The original eight-step protocol remains
+explicitly superseded history in #246, and the full earlier graph summaries and
+brief remain history.
+
+In particular, the earlier #245 carry-forward paragraph beginning "Automated main
+proofs do not discharge #246" and its exact-CI released-archive, clean-host and
+24-hour-soak obligation are now historical. That obligation was withdrawn, not
+discharged by automated proof or credited as a pass. This does not undo #245's
+accepted completion, eight criteria, debts, qualifications or operational limits.
+
+The broader closure scope, macOS #172 implementation and final-authorization HOLD,
+Operator Station integration, every other node and checkpoint, the discovered-work
+ledger, tasks and design documents remain unchanged. No new node, owner, observer,
+staffing, question, runtime, installation, CI, archive, host exercise, readiness
+ring, tag, release publication or Operator Station launch is authorized. No native
+session/App identity mapping, binding change, debt retirement or repair is inferred.
