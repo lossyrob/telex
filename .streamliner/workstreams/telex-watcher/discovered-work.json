@@ -170,10 +170,11 @@
       "id": "watcher-ci-local-daemon-signatures",
       "sourceNodeId": "watcher-macos-containment",
       "additionalSourceNodeIds": [
-        "watcher-runtime-core"
+        "watcher-runtime-core",
+        "runtime-hardening"
       ],
       "requiredness": "not-required-for-source-items",
-      "description": "CI failures on Watcher PRs and merges carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #168 run 39911899397 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, main run 39916429612 attempt 1 at the PR #173 merge 55cb6b11, and PR #164 CI. Neither source item's changes are implicated.",
+      "description": "At the PR #248 merge f17bab00, main CI run 42762574006 attempt 1 failed Windows station-intent job 129651517669 at two Live-fixture seed sites for runtime-hardening, routed externally to existing #208. The owner reports that #248 leaves the station-intent source unchanged, so runtime-hardening is not implicated. Earlier routed history retained: CI failures on Watcher PRs and merges carry Local Daemon test signatures, including its Copilot plugin hook harness and root fallback process harness: PR #168 run 39902791837 attempt 1, PR #168 run 39911899397 attempt 1, PR #170 run 39902271641 attempt 1, PR #173 run 39910906688 attempt 1, main run 39916429612 attempt 1 at the PR #173 merge 55cb6b11, and PR #164 CI. Neither source item's changes are implicated.",
       "disposition": "external",
       "target": {
         "workstream": "local-daemon",
@@ -187,7 +188,8 @@
           "https://github.com/lossyrob/telex/issues/171",
           "https://github.com/lossyrob/telex/issues/174",
           "https://github.com/lossyrob/telex/issues/175",
-          "https://github.com/lossyrob/telex/issues/176"
+          "https://github.com/lossyrob/telex/issues/176",
+          "https://github.com/lossyrob/telex/issues/208"
         ],
         "ledgerCommit": "8b4b393c966fa91738389254fb1f22d1aa3cf3c5",
         "ledgerItems": [
@@ -197,9 +199,9 @@
       },
       "status": "routed",
       "decisionState": "accepted",
-      "rationale": "The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. #174 is root fallback and process-harness work in the Local Daemon domain, distinct from #166, #167, and #171. #175 and #176 are Windows PageHeap deadline and waiter-refusal failures in unchanged root daemon_process_sqlite process-suite assertions; #176 is distinct from #174. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
-      "terminalPath": "Local Daemon owns triage and disposition in its own ledger and trackers. This entry closes no Watcher item and adds no Watcher dependency.",
-      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as external, owned by Local Daemon, under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23.",
+      "rationale": "This is one run/job occurrence with two additional Live-setup site observations, not a recurrence of #208's named scoped-scan test or an expansion of its implementation scope. Frozen scoped-scan incidence, cohorts and denominators are unchanged. The cause remains unknown; no flake is established and no holder, native-latency, scheduling or Watcher attribution is made. Earlier rationale retained: The signatures belong to Local Daemon tests and are owned there. Local Daemon also owns the Copilot plugin through its copilot-plugin and harness-skill-layout nodes, so #171 belongs in this entry. #174 is root fallback and process-harness work in the Local Daemon domain, distinct from #166, #167, and #171. #175 and #176 are Windows PageHeap deadline and waiter-refusal failures in unchanged root daemon_process_sqlite process-suite assertions; #176 is distinct from #174. The coordinator found that neither watcher-macos-containment nor watcher-runtime-core is implicated, so neither item takes this work.",
+      "terminalPath": "Local retains root-component routing and #208 has no assigned implementation owner. Owner 284ff1ee's #245 post-merge log custody, single unchanged-SHA retry and delivery follow-through are complete; that ownership is not station-intent repair. No Watcher item is closed or reopened and no dependency is added. Earlier terminal path retained: Local Daemon owns triage and disposition in its own ledger and trackers. This entry closes no Watcher item and adds no Watcher dependency.",
+      "dispositionAuthority": "Watcher coordinator session fe2e883c-debc-4573-a855-2cf1e0f89407 dispositioned this discovery as external, owned by Local Daemon, under the revised Discovered work rule in planning repository prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md (commit 267eca6), relayed with Campaign authority at 02:13 on 2026-10-23. Watcher coordinator call_IHxs6Hf1CouGdO9VJQ78xiOp routed the #248 merge occurrence externally to existing #208; Local accepted the association (call_vp9tTVGuGNpV49s5r4BUtSd7) and separately accepted the successful retry as a separate outcome on the same association (call_mSsC7r497sy45waQ1xAHXcXE), both coordinator-attributed.",
       "evidence": [
         {
           "source": "ci-run",
@@ -382,6 +384,40 @@
             }
           ],
           "archiveLimits": "IDs/digests and timing association are Watcher-reported API metadata. Local did not download or inspect archives, verify their digests against downloaded bytes, or establish dump presence. Use immutable IDs, not same-name selection."
+        },
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/issues/245#issuecomment-6759931624",
+          "createdAt": "2026-11-10T05:35:40Z",
+          "run": "https://github.com/lossyrob/telex/actions/runs/42762574006",
+          "job": "129651517669",
+          "workflowAttempt": 1,
+          "head": "f17bab00a95f29551ad95a155e3d4258fb9d1eb8",
+          "issue": "https://github.com/lossyrob/telex/issues/208",
+          "occurrenceKey": "42762574006/1/129651517669",
+          "sites": [
+            {
+              "test": "station_intent::tests::discovery_stops_at_the_deadline_and_resumes_instead_of_re_reading_its_head",
+              "location": "src/station_intent.rs:4152",
+              "message": "late successful acquisition on attempt 1; guard released"
+            },
+            {
+              "test": "station_intent::tests::scope_cursors_are_independent_and_a_legacy_global_cursor_still_migrates",
+              "location": "src/station_intent.rs:4293",
+              "message": "late successful acquisition on attempt 1; guard released"
+            }
+          ],
+          "details": "The public owner report records 64 passed / 2 failed while seeding Live fixtures and reports the station-intent source unchanged by #248, the attempt-1 log retained, and no assertion, lock budget or selector change. These counts, sites, signatures, source-unchanged assertion and log custody are owner-reported, not reconciler log or source replay. This is one occurrence with two additional sites, not a recurrence of #208's named scoped-scan test, implementation-scope expansion or an incidence/cohort/denominator change. The cause is unknown; no flake, holder, native-latency, scheduling or Watcher attribution is established."
+        },
+        {
+          "source": "ci-job",
+          "url": "https://github.com/lossyrob/telex/actions/runs/42762574006/job/129662442612",
+          "run": "https://github.com/lossyrob/telex/actions/runs/42762574006",
+          "job": "129662442612",
+          "workflowAttempt": 2,
+          "head": "f17bab00a95f29551ad95a155e3d4258fb9d1eb8",
+          "issue": "https://github.com/lossyrob/telex/issues/208",
+          "details": "Owner field report 6760392701 records that the single failed-job retry at the unchanged merge SHA succeeded. The coordinator reports that Windows station job 129662442612 alone re-executed at 06:03:42-06:05:29Z, while the other 21 attempt-2 success records retain attempt-1 timestamps: one fresh execution plus 21 reused successes, not 22 fresh executions. Watcher call_yukjtp6EaB08MrMLGnyhwf97 relays Local's same-association acceptance call_mSsC7r497sy45waQ1xAHXcXE, provider verification 2026-11-10T06:10:29.344Z and full job/ordered-step timestamp comparison establishing that distinction. Local re-read the field report, but broader 27-check/archive/Docs verification remains Watcher credit. All Local/provider assertions are coordinator-attributed, not direct Local-origin traversal or reconciler CI, log or source replay. This is a separate successful outcome and CI evidence only, not an occurrence, recurrence, cause, flake finding or repair. No incidence, cohort or denominator changes; attempt 1 stands and #208 remains unresolved."
         }
       ]
     },
@@ -5511,6 +5547,48 @@
           }
         }
       }
+    },
+    {
+      "id": "runtime-hardening-focused-pruning-coverage",
+      "sourceNodeId": "runtime-hardening",
+      "requiredness": "not-required-for-item-outcome",
+      "description": "The owner reports that the independent App review of PR #248 at b11df35dbc1a4fb915d88b93211d724900950563, reviewer session bc0966ba-4001-4603-aa99-f1cb0ce78466, returned APPROVE WITH NON-BLOCKING SUGGESTIONS and zero active blockers. Suggestion S1 was focused runtime-history pruning coverage for running/containment-pinned survivors, the shared deletion limit, counters and repeat compaction.",
+      "disposition": "reject",
+      "status": "rejected",
+      "decisionState": "accepted",
+      "rationale": "Owner merit reason: no faulty pruning case was demonstrated, and the reviewed implementation and passing integration proofs establish the accepted outcome; the owner declines another coverage-only fixture in this PR. Neither disposition weakens an existing assertion. These are owner merit reasons, not reconciler or steward code-review findings or a formal GitHub approval; the full private App report was not read.",
+      "terminalPath": "Terminal when recorded. The suggestion is not pursued, no follow-up item is created or promised, and no graph or status change follows.",
+      "dispositionAuthority": "Owner session 284ff1ee-e7d3-473f-8fa8-ab46432137e5 declined the suggestion on PR #248; Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 requested recording as a terminal targetless rejection (call_WYE8yrk2PbSsWflOw4eX8Tdh, reaffirmed in call_BhrIIupmm3IS4OSb04k4PtwN) under the Discovered work rule in the planning prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md; the steward has no design objection and makes no merit review.",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/pull/248#issuecomment-6671992160",
+          "commit": "b11df35dbc1a4fb915d88b93211d724900950563",
+          "createdAt": "2026-11-05T23:13:46Z",
+          "details": "Owner disposition S1 declines the additional focused pruning fixture for the stated owner merit reason. The App verdict is owner-reported, the full private report was not read, and no formal GitHub approval was submitted."
+        }
+      ]
+    },
+    {
+      "id": "runtime-hardening-offline-event-shape-fixture",
+      "sourceNodeId": "runtime-hardening",
+      "requiredness": "not-required-for-item-outcome",
+      "description": "The same owner-reported independent App review of PR #248 at b11df35dbc1a4fb915d88b93211d724900950563, reviewer session bc0966ba-4001-4603-aa99-f1cb0ce78466, returned APPROVE WITH NON-BLOCKING SUGGESTIONS and zero active blockers. Suggestion S2 was a small offline historical/current event-shape fixture through the real upgrade adaptation and forwarded restore expectation, preserving raw evidence and full identity/hash/receipt equality.",
+      "disposition": "reject",
+      "status": "rejected",
+      "decisionState": "accepted",
+      "rationale": "Owner merit reason: genuine old-binary archive upgrade and restore already exercise the complete identity/hash/receipt comparisons end to end; another fixture would localize a future failure earlier rather than address a current comparison defect, so the owner declines it in this PR. Neither disposition weakens an existing assertion. These are owner merit reasons, not reconciler or steward code-review findings or a formal GitHub approval; the full private App report was not read.",
+      "terminalPath": "Terminal when recorded. The suggestion is not pursued, no follow-up item is created or promised, and no graph or status change follows.",
+      "dispositionAuthority": "Owner session 284ff1ee-e7d3-473f-8fa8-ab46432137e5 declined the suggestion on PR #248; Watcher coordinator fe2e883c-debc-4573-a855-2cf1e0f89407 requested recording as a terminal targetless rejection (call_WYE8yrk2PbSsWflOw4eX8Tdh, reaffirmed in call_BhrIIupmm3IS4OSb04k4PtwN) under the Discovered work rule in the planning prompt streamliner/telex/prompts/v2/telex-v2-coordination-messages.md; the steward has no design objection and makes no merit review.",
+      "evidence": [
+        {
+          "source": "issue-comment",
+          "url": "https://github.com/lossyrob/telex/pull/248#issuecomment-6671992160",
+          "commit": "b11df35dbc1a4fb915d88b93211d724900950563",
+          "createdAt": "2026-11-05T23:13:46Z",
+          "details": "Owner disposition S2 declines the extra historical/current event-shape fixture for the stated owner merit reason. The App verdict is owner-reported, the full private report was not read, and no formal GitHub approval was submitted."
+        }
+      ]
     }
   ]
 }
