@@ -84,6 +84,7 @@ pub(crate) async fn prepare(
         }
     }))?;
     Ok(Operation {
+        attempt_compacted: false,
         schema_version: 2,
         watch_id: watch.id.clone(),
         event_sequence,

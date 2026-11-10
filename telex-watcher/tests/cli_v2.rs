@@ -14,6 +14,42 @@ use telex_watcher::{ManagementAudit, Mutation, Refusal};
 
 const SECRET: &str = "opaque-password=do-not-print-793183";
 
+#[test]
+fn maintenance_commands_report_typed_failures_and_offline_restore_uses_same_file() {
+    let fixture = Fixture::new();
+    let mut host = fixture.start_host();
+    let snapshot = fixture.root.join("snapshot.sqlite");
+    let (_, compact) = fixture.execute(&["compact"]);
+    assert_eq!(compact["ok"], true);
+    assert_eq!(compact["result"]["value"]["version"], 1);
+    let (_, backup) = fixture.execute(&["backup", snapshot.to_str().unwrap()]);
+    assert_eq!(backup["ok"], true);
+    let (_, duplicate) = fixture.execute(&["backup", snapshot.to_str().unwrap()]);
+    assert_eq!(duplicate["error"]["code"], "backup-destination-exists");
+    let (_, locked) = fixture.execute(&["restore", snapshot.to_str().unwrap()]);
+    assert_eq!(locked["error"]["code"], "registry-already-owned");
+    fixture.stop_host(&mut host);
+    let (_, restored) = fixture.execute(&["restore", snapshot.to_str().unwrap()]);
+    assert_eq!(restored["ok"], true, "{restored}");
+    assert_eq!(restored["result"]["type"], "restore");
+    let evidence = PathBuf::from(
+        restored["result"]["value"]["originalEvidence"]
+            .as_str()
+            .unwrap(),
+    );
+    assert!(evidence.exists());
+    let mut host = fixture.start_host();
+    fixture.stop_host(&mut host);
+    let output = fixture
+        .process()
+        .args(["--registry", snapshot.to_str().unwrap(), "--json", "run"])
+        .output()
+        .unwrap();
+    let marked: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!output.status.success());
+    assert_eq!(marked["error"]["code"], "backup-restore-required");
+}
+
 struct Fixture {
     root: PathBuf,
     user_home: Option<PathBuf>,
@@ -26,6 +62,7 @@ impl Fixture {
             .join(format!(".cli-v2-fixture-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join("home")).unwrap();
         std::fs::create_dir_all(root.join("install")).unwrap();
+        std::fs::create_dir_all(root.join("localappdata")).unwrap();
         Self {
             root: std::fs::canonicalize(root).unwrap(),
             user_home: None,
@@ -73,6 +110,7 @@ impl Fixture {
             .env("TELEX_HOME", self.root.join("home"))
             .env("TELEX_DB", self.root.join("telex.sqlite"))
             .env("TELEX_INSTALL_ROOT", self.root.join("install"))
+            .env("LOCALAPPDATA", self.root.join("localappdata"))
             .env("TELEX_WATCHER_REGISTRY", self.root.join("registry.sqlite"))
             .env("CLI_FIXTURE_TOKEN", SECRET)
             .current_dir(&self.root);
@@ -800,6 +838,7 @@ fn watch() -> Watch {
         latest_attempt_duration_ms: Some(2),
         diagnostic_category: None,
         latest_failure: None,
+        restore_review_required: false,
         recurrence: Recurrence::default(),
     }
 }
@@ -837,6 +876,7 @@ fn operation() -> Operation {
         retention_generation: Some(1),
     };
     Operation {
+        attempt_compacted: false,
         schema_version: 2,
         watch_id: "watch".into(),
         event_sequence: 2,

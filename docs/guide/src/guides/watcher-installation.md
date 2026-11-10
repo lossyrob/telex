@@ -1,6 +1,8 @@
 # Install and launch Watcher
 
-Watcher is a separate per-user process on **Windows and Linux**. This procedure
+Watcher is a separate per-user process with **Windows x86_64 initial support**.
+Linux has automated SQLite/PostgreSQL runtime coverage, not a clean-host
+production-soak claim; macOS fails closed before detector launch. This procedure
 creates a discoverable installation record, then starts the ordinary runtime.
 It requires **PowerShell 7.4 or newer on either platform**. It does not install a
 service or restart supervisor. macOS bootstrap remains unsupported.
@@ -33,9 +35,11 @@ Choose and record the exact trusted binaries before running bootstrap:
   the exact selected versioned executable from `telex --json version --root
   <root>` (`version.install.current_binary`), not the mutable `bin` launcher.
   `copilot stall-detect --help` must succeed for session-group monitoring.
-- Build **Watcher** from a trusted pinned checkout and retain its executable
+- Obtain **Watcher** from the Windows x86_64 release archive, or build it
+  from a trusted pinned checkout, and retain its executable
   outside `target` so subsequent builds cannot replace a running binary. Watcher
-  is not included in the single-binary Telex release install. Record the source
+  is included in that Windows archive, but not installed by the single-binary
+  Telex installer. ARM/macOS archives omit Watcher. Record the source/archive
   commit and build command with your operational evidence.
 - On **Linux**, also retain the executable `watcher_process_guard` from that
   same build in the **same directory** as the retained Watcher. This existing
@@ -289,16 +293,31 @@ runtime identity and launch environment. If no record exists, those are operator
 inputs; do not adopt the installation by guessing. Preserve its records and
 registry. Initial bootstrap deliberately refuses an existing registry.
 
-Create a candidate with an explicit new record path, a retained candidate
+For an independently provisioned candidate, create an explicit new record path, a retained candidate
 Watcher (and its same-build Linux guard) and a new registry. Stop the old owner
 only with explicit operator approval. Decide how permanent watch IDs and opaque
 state move before registering on the candidate; never copy a live registry or discard unresolved sends. This
-procedure does not automate registry/state migration. A new empty registry does
+procedure does not infer a registry/state migration. A new empty registry does
 not preserve an old watch's recurrence history.
 
 At upgrade or rollback, retain, copy, verify and swap Watcher and its Linux guard
 as one same-build pair in a separate directory. Preserve the previous pair for
 reversal; never leave a new Watcher beside an old guard or replace a running pair.
+
+For a forward upgrade that preserves the existing registry, stop its exact owner
+and preserve an owner-only compatible registry snapshot, the old executable(s),
+installation record and logs before first candidate startup. Start the new binary
+against that same registry only after the approved cutover; verify the retained
+watch IDs, state/sequence marks, receipts and pending operation identities.
+This build migrates Watcher registry metadata from 2 to **3**, independently of
+Telex backend schema and detector schema v2. Earlier binaries refuse schema 3,
+including marked backups and restored fenced registries. A binary swap alone is
+not rollback. Restoring any older registry may lose post-snapshot detector state
+and reuse event sequences: inspect post-backup sends and receiver dedupe history
+before individually resuming watches. Use the
+[backup/restore and recovery runbook](https://github.com/lossyrob/telex/blob/main/docs/watcher-runtime.md#backup-and-restore);
+never remove version checks, copy a live SQLite main file without its journal
+state, or silently start an empty replacement registry.
 
 Telex upgrade/rollback stays on the existing binary surface, with approval and
 backend backup where required. An older CLI may be the required invoker for a

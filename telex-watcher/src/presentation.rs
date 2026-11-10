@@ -129,6 +129,8 @@ impl Envelope {
                     })
                     .collect(),
             ),
+            Response::Compaction(report) => ("compaction", json!(report)),
+            Response::Backup(report) => ("backup", json!(report)),
             Response::Stopping => ("stopping", json!({"stopping":true})),
         };
         Self {
@@ -277,6 +279,7 @@ fn watch(item: &Watch) -> Value {
         "latestAttemptDurationMs":item.latest_attempt_duration_ms,
         "diagnosticCategory":item.diagnostic_category,
         "latestFailure":item.latest_failure,
+        "restoreReviewRequired":item.restore_review_required,
         "recurrence":item.recurrence,
         "stateHashStatus":if supported { "canonical-v2" } else { "not-applicable" },
     });
@@ -322,6 +325,7 @@ fn operation(item: &Operation) -> Value {
         "eventId":item.event_id,
         "operationId":item.operation_id,
         "attemptId":item.attempt_id,
+        "attemptCompacted":item.attempt_compacted,
         "attemptNow":item.attempt_now,
         "runtimeId":item.runtime_id,
         "registrationRevision":item.registration_revision,

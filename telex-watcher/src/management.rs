@@ -1,6 +1,7 @@
 //! In-process local administration. All mutations run through the registry owner.
 
 use crate::evidence::{Attempt, Operation, ReceiptEvidence, RuntimeHealth, Watch, WatchHealth};
+use crate::maintenance::{BackupReport, CompactionReport};
 use crate::registry_v2::Mutation;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
@@ -85,6 +86,10 @@ pub enum Command {
         id: String,
         limit: u32,
     },
+    Compact,
+    Backup {
+        path: PathBuf,
+    },
     Shutdown,
 }
 
@@ -108,6 +113,8 @@ impl Command {
             Self::Pending { .. } => "pending",
             Self::ReceiptEvidence { .. } => "receipt-evidence",
             Self::RemovedEvidence { .. } => "removed-evidence",
+            Self::Compact => "compact",
+            Self::Backup { .. } => "backup",
             Self::Shutdown => "shutdown",
         }
     }
@@ -130,6 +137,8 @@ pub enum Response {
     Events(Vec<Operation>),
     Pending(Option<Box<Operation>>),
     ReceiptEvidence(Vec<ReceiptEvidence>),
+    Compaction(CompactionReport),
+    Backup(BackupReport),
     Stopping,
 }
 

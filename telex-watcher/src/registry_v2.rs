@@ -10,6 +10,11 @@ use std::path::Path;
 use telex::application_client::OperationReconciliation;
 use uuid::Uuid;
 
+#[path = "backup.rs"]
+pub mod backup;
+#[path = "maintenance.rs"]
+pub mod maintenance;
+
 pub(crate) const MAX_GRANT: u32 = 100;
 pub(crate) const MAX_GRANT_SECONDS: u64 = 86400;
 pub(crate) const MAX_QUERY: u32 = 1000;
@@ -102,6 +107,11 @@ pub(crate) struct Registry {
     warning_bytes: u64,
     #[cfg(test)]
     pub fail_next_accept_commit: bool,
+    #[cfg(test)]
+    pub fail_next_compaction_deadline: bool,
+    #[cfg(test)]
+    pub last_compaction_vm_checks: u64,
+    compaction_cursor: Option<String>,
 }
 
 impl Registry {
@@ -121,8 +131,12 @@ impl Registry {
                 [],
                 |row| row.get(0),
             )?;
-            anyhow::ensure!(version == 2, "unsupported-registry-version: {version}");
+            anyhow::ensure!(
+                (2..=3).contains(&version),
+                "unsupported-registry-version: {version}"
+            );
         }
+        backup::check_startup(&connection)?;
         connection.execute_batch(
             "PRAGMA foreign_keys=ON;
              PRAGMA synchronous=FULL;
@@ -151,7 +165,7 @@ impl Registry {
                id TEXT PRIMARY KEY, data TEXT NOT NULL);",
         )?;
         connection.execute(
-            "INSERT OR IGNORE INTO watcher_v2_meta VALUES(1,2,0,?1)",
+            "INSERT OR IGNORE INTO watcher_v2_meta VALUES(1,3,0,?1)",
             [format!("watcher:{}", Uuid::new_v4())],
         )?;
         let (version, responsibility): (u32, String) = connection.query_row(
@@ -159,10 +173,11 @@ impl Registry {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        if version != 2 {
+        if !(2..=3).contains(&version) {
             bail!("unsupported-registry-version: {version}");
         }
         let tx = connection.transaction()?;
+        tx.execute("UPDATE watcher_v2_meta SET version=3 WHERE singleton=1", [])?;
         tx.execute(
             "UPDATE watcher_v2_attempts SET data=json_set(data,'$.stderrExcerpt',NULL)
              WHERE json_type(data,'$.stderrExcerpt') IS NULL",
@@ -182,7 +197,13 @@ impl Registry {
             warning_bytes,
             #[cfg(test)]
             fail_next_accept_commit: false,
+            #[cfg(test)]
+            fail_next_compaction_deadline: false,
+            #[cfg(test)]
+            last_compaction_vm_checks: 0,
+            compaction_cursor: None,
         };
+        registry.initialize_maintenance()?;
         registry.isolate_v1()?;
         Ok(registry)
     }
@@ -325,6 +346,7 @@ impl Registry {
                 watch.blocked_reason = None;
             }
             Change::Resume => {
+                watch.restore_review_required = false;
                 watch.lifecycle = Lifecycle::Active;
                 watch.eligibility = Eligibility::Eligible;
                 watch.health = Health::Ready;
@@ -334,6 +356,9 @@ impl Registry {
                 watch.next_attempt_ms = now;
                 watch.consecutive_failures = 0;
                 watch.diagnostic_category = None;
+                if watch.pending_operation_id.is_some() {
+                    watch.pending();
+                }
             }
             Change::Update {
                 registration,
@@ -387,6 +412,7 @@ impl Registry {
         if let Some(operation) = pending {
             save_operation(&tx, &operation)?;
         }
+        restore_fence(&mut watch);
         if watch.lifecycle == Lifecycle::Paused
             && watch.blocked_reason.is_none()
             && !watch.store_verified()
@@ -526,6 +552,7 @@ impl Registry {
         {
             watch.block(BlockedReason::LogicalStoreMismatch);
         }
+        restore_fence(&mut watch);
         save_watch(&tx, &watch)?;
         if previous_observation != watch.observed_logical_store_id
             || previous_reason != watch.blocked_reason
@@ -1105,6 +1132,7 @@ impl Registry {
                 if !watch.store_verified() {
                     watch.block(BlockedReason::LogicalStoreMismatch);
                 }
+                restore_fence(&mut watch);
                 audit(
                     &tx,
                     Some(id),
@@ -1140,6 +1168,7 @@ impl Registry {
             ("watcher_v2_revisions", "watch_id"),
             ("watcher_v2_audits", "watch_id"),
             ("watcher_v2_operation_evidence", "watch_id"),
+            ("watcher_v2_compaction", "watch_id"),
         ] {
             let query = format!("SELECT count(*),coalesce(sum(length(CAST(data AS BLOB))),0) FROM {table} WHERE ?1 IS NULL OR {key}=?1");
             let (count, size): (u64, u64) =
@@ -1161,6 +1190,7 @@ impl Registry {
             warning_rows: self.warning_rows,
             warning_bytes: self.warning_bytes,
             warning: rows >= self.warning_rows || bytes >= self.warning_bytes,
+            compaction: Some(self.compaction_stats(watch_id)?),
         })
     }
 
@@ -1194,6 +1224,7 @@ impl Registry {
             consecutive_failures: watch.consecutive_failures,
             diagnostic_category: watch.diagnostic_category,
             latest_failure: watch.latest_failure,
+            restore_review_required: watch.restore_review_required,
             recurrence: watch.recurrence,
             sender_ready,
             logical_store_id: watch.logical_store_id,
@@ -1233,6 +1264,7 @@ fn new_watch(id: String, registration: Option<Registration>, state: Value, now: 
         latest_attempt_duration_ms: None,
         diagnostic_category: None,
         latest_failure: None,
+        restore_review_required: false,
         recurrence: Recurrence::default(),
     }
 }
@@ -1245,12 +1277,21 @@ fn check_change(watch: &Watch, pending: Option<&Operation>, change: &Change) -> 
         return Some(Refusal::UnsupportedRegistrationVersion);
     }
     match change {
-        Change::Pause | Change::Resume | Change::Update { .. } if pending.is_some() => {
+        Change::Pause | Change::Resume | Change::Update { .. }
+            if pending.is_some()
+                && !(matches!(change, Change::Resume) && watch.restore_review_required) =>
+        {
             Some(Refusal::PendingOperation)
         }
         Change::Pause if watch.lifecycle != Lifecycle::Active => Some(Refusal::InvalidLifecycle),
         Change::Resume if watch.lifecycle != Lifecycle::Paused => Some(Refusal::InvalidLifecycle),
-        Change::Resume if watch.blocked_reason.is_some() => Some(Refusal::BlockedReasonUncorrected),
+        Change::Resume
+            if watch.blocked_reason.is_some()
+                && !(watch.restore_review_required
+                    && watch.blocked_reason == Some(BlockedReason::RestoredBackupReview)) =>
+        {
+            Some(Refusal::BlockedReasonUncorrected)
+        }
         Change::Resume if !watch.store_verified() => Some(Refusal::BlockedReasonUncorrected),
         Change::Update { registration, .. } => {
             let old = watch.registration.as_ref()?;
@@ -1348,6 +1389,20 @@ fn success(watch: &mut Watch, attempt_now: &str, terminal: bool) {
         if !watch.store_verified() {
             watch.block(BlockedReason::LogicalStoreMismatch);
         }
+        restore_fence(watch);
+    }
+}
+
+fn restore_fence(watch: &mut Watch) {
+    if watch.restore_review_required
+        && matches!(watch.lifecycle, Lifecycle::Active | Lifecycle::Paused)
+    {
+        watch.lifecycle = Lifecycle::Paused;
+        watch.eligibility = Eligibility::Inactive;
+        watch.health = Health::Blocked;
+        watch
+            .blocked_reason
+            .get_or_insert(BlockedReason::RestoredBackupReview);
     }
 }
 

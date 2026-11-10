@@ -144,6 +144,16 @@ pub enum Action {
         #[command(flatten)]
         query: Query,
     },
+    /// Compact disposable history in one bounded, versioned batch.
+    Compact,
+    /// Back up the live registry to a new absolute file.
+    Backup {
+        file: PathBuf,
+    },
+    /// Offline restore under the original registry's ownership lock.
+    Restore {
+        file: PathBuf,
+    },
     /// Stop the owner, including a runtime started as a detached process.
     #[command(alias = "stop")]
     Shutdown,
@@ -271,6 +281,9 @@ impl Cli {
             Some(Action::Pending { .. }) => "pending",
             Some(Action::ReceiptEvidence { .. }) => "receipt-evidence",
             Some(Action::RemovedEvidence { .. }) => "removed-evidence",
+            Some(Action::Compact) => "compact",
+            Some(Action::Backup { .. }) => "backup",
+            Some(Action::Restore { .. }) => "restore",
             Some(Action::Shutdown) => "shutdown",
         }
     }
@@ -352,6 +365,14 @@ impl Cli {
                 id: id_command(id),
                 limit: query.limit,
             },
+            Some(Action::Compact) => Command::Compact,
+            Some(Action::Backup { file }) => Command::Backup { path: file.clone() },
+            Some(Action::Restore { .. }) => {
+                return Err(InputError {
+                    code: "offline-restore-required",
+                    message: "restore must run offline under physical registry ownership",
+                })
+            }
             Some(Action::Shutdown) => Command::Shutdown,
         })
     }

@@ -96,6 +96,12 @@ class SchemaConformanceTests(unittest.TestCase):
         self.assertFalse(health.is_valid(invalid))
         invalid["productionReady"] = False
         self.assertTrue(health.is_valid(invalid))
+        deferred = copy.deepcopy(corpus["runtime"])
+        deferred["productionReady"] = False
+        deferred["diagnostics"] = ["maintenance-deferred"]
+        health.validate(deferred)
+        deferred["productionReady"] = True
+        self.assertFalse(health.is_valid(deferred))
         watch = copy.deepcopy(corpus["watch"])
         watch["latestFailure"] = {
             "attemptId": "attempt-failed",

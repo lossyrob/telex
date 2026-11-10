@@ -1,0 +1,99 @@
+name: Watcher Windows archive
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-tests:
+    name: Watcher archive fixture contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Test archive proof contracts without installation or network
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/watcher_release_archive_test.py
+
+  windows-archive:
+    name: Windows x64 archive install and genuine source upgrade
+    runs-on: windows-latest
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+      - name: Checkout genuine #222 source baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 7036e7103aae4416cf0a0e2030175dc901ece893
+          path: watcher-baseline-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+      - name: Build batteries-included archive binaries
+        env:
+          TELEX_BUILD_ID: ${{ github.sha }}
+        shell: pwsh
+        run: |
+          cargo build --release --locked --target x86_64-pc-windows-msvc --features entra
+          if ($LASTEXITCODE -ne 0) { throw "Telex archive build failed" }
+          cargo build --release --locked --target x86_64-pc-windows-msvc `
+            -p telex-watcher --no-default-features --features sqlite,postgres,entra --bin telex-watcher
+          if ($LASTEXITCODE -ne 0) { throw "Watcher archive build failed" }
+      - name: Package actual Windows x64 archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist, package | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\telex.exe package\telex.exe
+          Copy-Item target\x86_64-pc-windows-msvc\release\telex-watcher.exe package\telex-watcher.exe
+          Copy-Item LICENSE package\LICENSE
+          $archive = "telex-ci-x86_64-pc-windows-msvc.zip"
+          Compress-Archive -Path package\* -DestinationPath "dist\$archive"
+          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content "dist\$archive.sha256" -Encoding ascii
+      - name: Build genuine pre-diagnostics #222 baseline
+        env:
+          TELEX_BUILD_ID: 7036e7103aae4416cf0a0e2030175dc901ece893
+        run: >-
+          cargo build --release --locked
+          --manifest-path watcher-baseline-source/Cargo.toml
+          --target-dir watcher-baseline-target --target x86_64-pc-windows-msvc
+          -p telex -p telex-watcher --features telex/entra,telex-watcher/entra
+          --bin telex --bin telex-watcher
+      - name: Prove archive installation and receipt-preserving forward upgrade
+        run: >-
+          python tests/watcher_release_archive.py
+          --archive dist/telex-ci-x86_64-pc-windows-msvc.zip
+          --source-sha "${{ github.sha }}"
+          --baseline-root watcher-baseline-source
+          --baseline-bin-dir watcher-baseline-target/x86_64-pc-windows-msvc/release
+          --report evidence/watcher-archive-proof.json
+      - name: Upload archive and evidence (never publish a release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watcher-windows-x64-archive-${{ github.sha }}
+          path: |
+            dist/*
+            evidence/*
+            .watcher-archive-proof-*/watcher-*.log
+            .watcher-archive-proof-*/daemon-*.log
+          include-hidden-files: true
+          if-no-files-found: error

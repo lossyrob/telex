@@ -35,7 +35,24 @@
         "bytes": { "$ref": "#/$defs/count" },
         "warningRows": { "type": "integer", "minimum": 1 },
         "warningBytes": { "type": "integer", "minimum": 1 },
-        "warning": { "type": "boolean" }
+        "warning": { "type": "boolean" },
+        "compaction": { "$ref": "#/$defs/compaction" }
+      }
+    },
+    "compaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "completedAttemptsPerWatch", "batchLimit", "runtimeHistoryLimit", "attempts", "runtimes", "bytes", "outcomes", "diagnosticCategories"],
+      "properties": {
+        "version": { "const": 1 },
+        "completedAttemptsPerWatch": { "const": 100 },
+        "batchLimit": { "const": 256 },
+        "runtimeHistoryLimit": { "const": 10 },
+        "attempts": { "$ref": "#/$defs/count" },
+        "runtimes": { "$ref": "#/$defs/count" },
+        "bytes": { "$ref": "#/$defs/count" },
+        "outcomes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/count" } },
+        "diagnosticCategories": { "type": "object", "additionalProperties": { "$ref": "#/$defs/count" } }
       }
     },
     "budget": {
@@ -126,7 +143,7 @@
         "retention": { "$ref": "#/$defs/retention" },
         "diagnostics": {
           "type": "array",
-          "items": { "enum": ["membership-reconciliation-pending", "sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "containment-unproven", "registry-failure"] }
+          "items": { "enum": ["membership-reconciliation-pending", "sender-unready", "partial-membership", "inbound-actionable-backlog", "retention-warning", "maintenance-deferred", "containment-unproven", "registry-failure"] }
         },
         "detach": { "type": "array", "items": { "type": "object" } }
       }
@@ -145,7 +162,7 @@
         "eligibility": { "enum": ["eligible", "reconciliation-pending", "inactive"] },
         "health": { "enum": ["ready", "degraded", "blocked", "inactive"] },
         "blockedReason": {
-          "enum": [null, "receipt-outcome-unresolved", "send-retry-exhausted", "send-permanently-rejected", "operation-identity-conflict", "logical-store-mismatch", "unsupported-registration-version", "orphan-containment-unproven"]
+          "enum": [null, "receipt-outcome-unresolved", "send-retry-exhausted", "send-permanently-rejected", "operation-identity-conflict", "logical-store-mismatch", "unsupported-registration-version", "orphan-containment-unproven", "restored-backup-review"]
         },
         "lastAllocatedEventSequence": { "$ref": "#/$defs/count" },
         "lastCommittedEventSequence": { "$ref": "#/$defs/count" },
@@ -161,6 +178,7 @@
           "enum": [null, "detector-degraded", "process-failure", "malformed-output", "canonicalization-failed", "output-limit", "timeout", "send-failure", "unknown-receipt", "receipt-reconciliation-pending", "runtime-interrupted"]
         },
         "latestFailure": { "oneOf": [{ "$ref": "#/$defs/attemptFailure" }, { "type": "null" }] },
+        "restoreReviewRequired": { "type": "boolean" },
         "recurrence": { "$ref": "#/$defs/recurrence" },
         "senderReady": { "type": "boolean" },
         "logicalStoreId": { "$ref": "#/$defs/optionalString" },
