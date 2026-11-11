@@ -1633,7 +1633,10 @@ async fn released_v021_writer_installs_exact_candidate() {
     candidate_version.assert_success("exact candidate version");
     let candidate_json: serde_json::Value =
         serde_json::from_str(&candidate_version.stdout).expect("candidate version JSON");
-    assert_eq!(candidate_json["version"]["package_version"], "0.3.0");
+    assert_eq!(
+        candidate_json["version"]["package_version"],
+        env!("CARGO_PKG_VERSION")
+    );
     assert_eq!(candidate_json["version"]["build_id"], expected_head);
     assert_eq!(
         candidate_json["version"]["application_bootstrap_admission_version"],
@@ -1681,7 +1684,7 @@ async fn released_v021_writer_installs_exact_candidate() {
             .is_none(),
         "the official v0.2.1 writer must produce the compatibility shape"
     );
-    assert_eq!(manifest_json["package_version"], "0.3.0");
+    assert_eq!(manifest_json["package_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(manifest_json["build_id"], expected_head);
     assert_eq!(
         std::fs::read(&installed_candidate).expect("installed candidate bytes"),

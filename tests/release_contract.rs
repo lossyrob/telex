@@ -1034,10 +1034,31 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
     // out and fail here.
     let pkg = package_version(&read("Cargo.toml"));
     assert_eq!(
-        pkg.split('.').count(),
+        pkg.split(['-', '+']).next().unwrap().split('.').count(),
         3,
-        "Cargo.toml [package].version should be X.Y.Z, got {pkg:?}"
+        "Cargo.toml [package].version should have an X.Y.Z core, got {pkg:?}"
     );
+    assert!(
+        release.contains("prerelease: ${{ steps.version.outputs.prerelease }}")
+            && release.contains("prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}")
+            && release.contains("make_latest: ${{ needs.verify-version.outputs.prerelease == 'true' && 'false' || 'true' }}"),
+        "publish must use the verified version's prerelease classification, never mark a \
+         prerelease Latest, and preserve GitHub's default Latest policy for stable releases"
+    );
+    let upload = release
+        .split("      - name: Upload all assets before publication\n")
+        .nth(1)
+        .expect("draft upload step");
+    let (stage, finalize) = upload
+        .split_once("      - name: Publish the fully uploaded prerelease draft\n")
+        .expect("separate finalization after successful uploads");
+    assert!(stage.contains("id: release"));
+    assert!(stage.contains("draft: ${{ needs.verify-version.outputs.prerelease == 'true' }}"));
+    assert!(stage.contains("softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"));
+    assert!(finalize.contains("if: needs.verify-version.outputs.prerelease == 'true'"));
+    assert!(!finalize.contains("always()") && !finalize.contains("continue-on-error"));
+    assert!(finalize.contains("RELEASE_ID: ${{ steps.release.outputs.id }}"));
+    assert!(finalize.contains("-F draft=false -F prerelease=true -f make_latest=false"));
 }
 
 #[test]

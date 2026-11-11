@@ -277,12 +277,13 @@ mod platform {
     fn zombie_start_time(pid: u32) -> Option<u64> {
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // Darwin requires a nonzero arg to include zombies in this flavor's lookup.
         // SAFETY: `info` is a correctly sized, writable `proc_bsdinfo`.
         let bytes = unsafe {
             libc::proc_pidinfo(
                 pid as libc::c_int,
                 libc::PROC_PIDTBSDINFO,
-                0,
+                1,
                 &mut info as *mut _ as *mut libc::c_void,
                 info_size,
             )

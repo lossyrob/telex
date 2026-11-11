@@ -407,8 +407,15 @@ fn release_upgrade_times_out_on_a_hanging_server() {
 
 #[test]
 fn release_upgrade_explicit_version_installs_by_tag() {
-    // `telex upgrade --version <tag>` resolves via /releases/tags and installs that release.
-    let (routes, archive_name, _kind) = happy_routes();
+    // Explicit version opts into a prerelease without consulting latest.
+    let (mut routes, archive_name, _kind) = happy_routes();
+    routes.remove(&format!("/repos/{REPO}/releases/latest"));
+    let (_, body) = routes
+        .get_mut(&format!("/repos/{REPO}/releases/tags/{TAG}"))
+        .unwrap();
+    let mut release: Value = serde_json::from_slice(body).unwrap();
+    release["prerelease"] = Value::Bool(true);
+    *body = serde_json::to_vec(&release).unwrap();
     let port = spawn_server(routes);
     let root = temp_root("explicit-version");
     let output = run_upgrade_args(port, &root, &["--version", TAG]);

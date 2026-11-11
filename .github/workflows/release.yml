@@ -18,11 +18,14 @@ jobs:
     # if pointed at a tag ref) is a build-only dry-run and never reaches publish.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Compare tag to Cargo.toml version
+        id: version
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
@@ -38,6 +41,11 @@ jobs:
             exit 1
           fi
           echo "release tag v${tag} matches Cargo.toml version ${crate}"
+          # A hyphen in build metadata alone does not make a SemVer prerelease.
+          case "${crate%%+*}" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
   build:
     name: Build ${{ matrix.target }}
@@ -199,6 +207,17 @@ jobs:
             --report evidence/release-proof.json
           if ($LASTEXITCODE -ne 0) { throw "native release proof failed" }
 
+      - name: Prove macOS exit watch without parent reaping
+        if: runner.os == 'macOS'
+        shell: pwsh
+        env:
+          TELEX_BUILD_ID: ${{ github.sha }}
+        run: |
+          cargo test --release --locked --features entra --target ${{ matrix.target }} `
+            --lib session_watch::tests::exit_watch_reports_an_unreaped_exited_child_as_exited `
+            -- --exact --nocapture 2>&1 | Tee-Object -FilePath evidence/process-exit-test.log
+          if ($LASTEXITCODE -ne 0) { throw "native unreaped-child exit proof failed" }
+
       - name: Prove native Windows observation error classification
         if: runner.os == 'Windows'
         env:
@@ -359,12 +378,43 @@ jobs:
           fi
           echo "ok: every release archive and its .sha256 sidecar are paired"
 
-      - name: Publish release with all assets
-        uses: softprops/action-gh-release@v2
+      - name: Refuse changing an already published prerelease
+        if: needs.verify-version.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${GITHUB_REF_NAME}\") | .draft")"
+          if [[ "$existing" == *false* ]]; then
+            echo "::error::prerelease is already published; refusing to mutate public assets"
+            exit 1
+          fi
+
+      - name: Upload all assets before publication
+        id: release
+        # Pin audited draft/upload/finalize semantics; v2 otherwise publishes prereleases first.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          draft: ${{ needs.verify-version.outputs.prerelease == 'true' }}
+          prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.verify-version.outputs.prerelease == 'true' && 'false' || 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
             dist/telex-${{ github.ref_name }}-*
+
+      - name: Publish the fully uploaded prerelease draft
+        if: needs.verify-version.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_ID"
+          draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .draft)"
+          test "$draft" = true
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false -F prerelease=true -f make_latest=false
