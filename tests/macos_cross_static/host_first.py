@@ -165,24 +165,28 @@ def workflow_prefix(raw):
     return list(PREFIX)
 
 
+def normalize_host_output(field, result):
+    """Malformed observations fail closed before they can earn HFR refusal credit."""
+    require(type(result["rc"]) is int and result["rc"] == 0 and result["stderr"] == "" and
+            isinstance(result["stdout"], str) and len(result["stdout"].encode("utf-8")) <= 4096,
+            "host observation unavailable")
+    value = result["stdout"].strip()
+    require(value and all(0x20 <= ord(character) <= 0x7E for character in value),
+            "malformed host observation")
+    return str(uuid.UUID(value)).upper() if field == "kern_uuid" else value
+
+
 def observe(expected, environment, command, source_root):
     """Only these bounded identity observations are permitted before acceptance."""
     records, observed = [], {}
     commands = HOST_COMMANDS + (("source_sha", ("/usr/bin/git", "-C", str(source_root), "rev-parse", "HEAD")),)
     for name, argv in commands:
         result = command(list(argv))
-        require(set(result) == {"rc", "stdout", "stderr"} and type(result["rc"]) is int and
-                isinstance(result["stdout"], str) and isinstance(result["stderr"], str),
-                "invalid host command observation")
+        require(set(result) == {"rc", "stdout", "stderr"}, "invalid host command observation")
         records.append({"field": name, "argv": list(argv), **result})
-        require(result["rc"] == 0 and not result["stderr"] and len(result["stdout"].encode()) <= 4096,
-                "host observation unavailable")
-        value = result["stdout"].strip()
-        require(value and "\n" not in value and "\r" not in value, "malformed host observation")
-        observed[name] = value
+        observed[name] = normalize_host_output(name, result)
     require(re.fullmatch(r"[0-9a-f]{40}", observed["source_sha"]) is not None and
             observed["source_sha"] == environment["GITHUB_SHA"], "host source mismatch")
-    observed["kern_uuid"] = str(uuid.UUID(observed["kern_uuid"])).upper()
     return observed, records
 
 
@@ -261,8 +265,7 @@ def verify_evidence(files, manifest, expected_source, expected_run):
     for index, row in enumerate(record["commands"]):
         field = HOST_FIELDS[index] if index < 5 else "source_sha"
         require(set(row) == {"field", "argv", "rc", "stdout", "stderr"} and
-                row["field"] == field and row["rc"] == 0 and type(row["rc"]) is int and
-                row["stderr"] == "" and isinstance(row["stdout"], str) and len(row["stdout"].encode()) <= 4096,
+                row["field"] == field,
                 "failed/incomplete host evidence")
         if index < 5:
             require(row["argv"] == list(expected_commands[index][1]), "unexpected host command")
@@ -271,9 +274,7 @@ def verify_evidence(files, manifest, expected_source, expected_run):
             require(len(argv) == 5 and argv[:2] == ["/usr/bin/git", "-C"] and
                     argv[3:] == ["rev-parse", "HEAD"] and Path(argv[2]).is_absolute(),
                     "unexpected source observation command")
-        value = row["stdout"].strip()
-        if field == "kern_uuid":
-            value = str(uuid.UUID(value)).upper()
+        value = normalize_host_output(field, row)
         require(value == record["observed"][field], "observation does not match command result")
     matched = all(record["observed"][k] == record["expected"][k] for k in HOST_FIELDS)
     require(record["status"] == ("host-accepted" if matched else "host-first-refusal"), "false host status")

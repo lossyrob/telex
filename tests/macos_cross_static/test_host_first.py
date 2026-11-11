@@ -135,6 +135,99 @@ class HostFirstTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 h.verify_evidence(files, manifest, source, run_id)
 
+    def assert_invalid_retained_observation(self, files, record):
+        altered = {**files, "host-first.json": h.encoded(record)}
+        manifest = h.evidence_manifest(altered)
+        with self.assertRaises((RuntimeError, ValueError)):
+            h.verify_evidence(altered, manifest, self.sha, 901)
+        with self.assertRaises((RuntimeError, ValueError)):
+            self.classify(altered, manifest)
+
+    def test_control_and_nonascii_observations_never_earn_refusal_credit(self):
+        files, _ = self.bundle()
+        separators = ("\n", "\r", "\r\n", "\0", "\t", "\x1f", "\x7f",
+                      "\x85", "\u2028", "\u2029", "\u00e9")
+        for field in h.HOST_FIELDS:
+            for separator in separators:
+                # Same architecture/LF pattern as the reviewer's inert witness, extended to every host field.
+                value = self.values[field] + separator + "UNEXPECTED-SECOND-LINE"
+                with self.subTest(field=field, separator=repr(separator)):
+                    record = h.strict_json(files["host-first.json"])
+                    record["observed"][field] = value
+                    next(row for row in record["commands"] if row["field"] == field)["stdout"] = value + "\n"
+                    self.assert_invalid_retained_observation(files, record)
+                    with patch.dict(self.values, {field: value}), self.assertRaisesRegex(
+                            RuntimeError, "malformed host observation"):
+                        self.record()
+
+    def test_valid_producer_normalization_verifies_and_preserves_uuid_canonical_form(self):
+        canonical = "ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB"
+        self.expect["kern_uuid"] = canonical
+        self.values["kern_uuid"] = canonical.lower()
+        original_command = self.command
+
+        def padded_command(argv):
+            result = original_command(argv)
+            return {**result, "stdout": " \t" + result["stdout"].strip() + "\r\n"}
+
+        with patch.object(self, "command", side_effect=padded_command):
+            for refusal in (False, True):
+                with self.subTest(refusal=refusal):
+                    files, manifest = self.bundle(refusal)
+                    verified = h.verify_evidence(files, manifest, self.sha, 901)
+                    self.assertEqual(verified["observed"]["kern_uuid"], canonical)
+                    self.assertEqual(verified["status"], "host-first-refusal" if refusal else "host-accepted")
+                    for row in verified["commands"]:
+                        self.assertEqual(h.normalize_host_output(row["field"], row),
+                                         verified["observed"][row["field"]])
+                    record = copy.deepcopy(verified)
+                    record["observed"]["kern_uuid"] = canonical.lower()
+                    self.assert_invalid_retained_observation(files, record)
+
+    def test_unstripped_observed_values_do_not_match_normalizer(self):
+        files, _ = self.bundle()
+        for field in (*h.HOST_FIELDS, "source_sha"):
+            record = h.strict_json(files["host-first.json"])
+            record["observed"][field] = " " + record["observed"][field] + "\n"
+            with self.subTest(field=field):
+                self.assert_invalid_retained_observation(files, record)
+
+    def test_command_failures_empty_and_overbyte_outputs_reject_before_counting(self):
+        files, _ = self.bundle()
+        mutations = ({"rc": 1}, {"rc": True}, {"stderr": "warning"},
+                     {"stdout": ""}, {"stdout": " \r\n\t"},
+                     {"stdout": "x" * 4097},
+                     {"stdout": "\u0085" * 2048 + "x"})
+        for field in (*h.HOST_FIELDS, "source_sha"):
+            for mutation in mutations:
+                with self.subTest(field=field, mutation=repr(mutation)[:80]):
+                    record = h.strict_json(files["host-first.json"])
+                    row = next(row for row in record["commands"] if row["field"] == field)
+                    row.update(mutation)
+                    self.assert_invalid_retained_observation(files, record)
+                    original_command = self.command
+
+                    def malformed_command(argv):
+                        result = original_command(argv)
+                        return {**result, **mutation} if argv == row["argv"] else result
+
+                    with patch.object(self, "command", side_effect=malformed_command), \
+                            self.assertRaises(RuntimeError):
+                        self.record()
+
+    def test_host_output_byte_limit_is_inclusive_before_stripping(self):
+        files, _ = self.bundle()
+        record = h.strict_json(files["host-first.json"])
+        row = next(row for row in record["commands"] if row["field"] == "architecture")
+        row["stdout"] = "x" * 4095 + "\n"
+        record["observed"]["architecture"] = "x" * 4095
+        altered = {**files, "host-first.json": h.encoded(record)}
+        manifest = h.evidence_manifest(altered)
+        self.assertEqual(h.verify_evidence(altered, manifest, self.sha, 901)["status"], "host-first-refusal")
+        self.assertEqual(self.classify(altered, manifest)["refusals"], 1)
+        row["stdout"] += "\n"
+        self.assert_invalid_retained_observation(files, record)
+
     def test_attempt_two_ARM_and_nonpush_rejected_before_commands(self):
         for key, value in (("GITHUB_RUN_ATTEMPT", "2"), ("GITHUB_JOB", "ARM24"),
                            ("GITHUB_EVENT_NAME", "workflow_dispatch")):
