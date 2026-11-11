@@ -56,6 +56,12 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
   `prerelease: true` and `make_latest: false`; build metadata alone does not.
   Stable releases use `prerelease: false` and `make_latest: true`, preserving
   GitHub's default for newly published stable releases.
+- Prerelease assets upload to a draft using the pinned release action. Only a
+  later successful step publishes that exact draft ID, retaining prerelease
+  and not-Latest flags. An upload failure leaves the draft unpublished; an
+  already-public prerelease is refused before asset mutation. Stable releases
+  keep the action's existing draft/upload/finalize path. Dispatch skips the
+  entire publish job, including draft creation and finalization.
 - Telex is pre-1.0; use `0.MINOR.PATCH`.
 - Several version strings must move together with `Cargo.toml`:
   - `Cargo.toml` `version` (and refresh `Cargo.lock`)

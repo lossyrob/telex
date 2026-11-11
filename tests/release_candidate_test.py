@@ -22,13 +22,24 @@ proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 
 
+def workflow_script(name):
+    workflow = (proof.ROOT / ".github" / "workflows" / "release.yml").read_text()
+    step = workflow.split(f"      - name: {name}\n", 1)[1]
+    lines = []
+    for line in step.split("        run: |\n", 1)[1].splitlines():
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line)
+    script = textwrap.dedent("\n".join(lines)) + "\n"
+    assert script.strip(), f"workflow step has no extracted script: {name}"
+    return script
+
+
 class ReleaseProofTests(unittest.TestCase):
     def test_workflow_classifies_verified_versions_without_changing_stable_policy(self):
         bash = proof.shutil.which("bash")
         self.assertIsNotNone(bash, "workflow contract test requires bash")
-        workflow = (proof.ROOT / ".github" / "workflows" / "release.yml").read_text()
-        step = workflow.split("      - name: Compare tag to Cargo.toml version\n", 1)[1]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n  build:", 1)[0])
+        script = workflow_script("Compare tag to Cargo.toml version")
         for version, prerelease in (
             ("0.3.0", "false"), ("0.3.0-rc.1", "true"),
             ("0.3.0-rc.1+build.5", "true"), ("0.3.0+build-with-hyphen", "false"),
@@ -52,6 +63,46 @@ class ReleaseProofTests(unittest.TestCase):
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertIn("does not match Cargo.toml", rejected.stdout)
                 self.assertFalse(output.exists())
+
+    def test_prerelease_staging_and_finalization_fail_closed(self):
+        bash = proof.shutil.which("bash")
+        self.assertIsNotNone(bash, "workflow contract test requires bash")
+        stub = """
+gh() {
+  if [ "${2:-}" = --method ]; then
+    printf '%s\\n' "$@" > patch-args
+    return "$PATCH_EXIT"
+  fi
+  printf '%s\\n' "$MOCK_DRAFT"
+  return "$API_EXIT"
+}
+"""
+        for stage, draft, api_exit, patch_exit, accepted in (
+            ("preflight", "", 0, 0, True), ("preflight", "true", 0, 0, True),
+            ("preflight", "false", 0, 0, False), ("preflight", "", 7, 0, False),
+            ("finalize", "true", 0, 0, True), ("finalize", "false", 0, 0, False),
+            ("finalize", "true", 7, 0, False), ("finalize", "true", 0, 7, False),
+        ):
+            with self.subTest(stage=stage, draft=draft, api_exit=api_exit, patch_exit=patch_exit), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                name = ("Refuse changing an already published prerelease" if stage == "preflight"
+                        else "Publish the fully uploaded prerelease draft")
+                (root / "verify.sh").write_text(stub + workflow_script(name),
+                                               encoding="utf-8", newline="\n")
+                env = dict(os.environ, GITHUB_REPOSITORY="fixture/telex",
+                           GITHUB_REF_NAME="v0.3.0-rc.1", RELEASE_ID="123",
+                           MOCK_DRAFT=draft, API_EXIT=str(api_exit), PATCH_EXIT=str(patch_exit))
+                result = proof.subprocess.run([bash, "verify.sh"], cwd=root, env=env,
+                                              capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
+                if stage == "finalize" and draft == "true" and api_exit == 0:
+                    self.assertEqual((root / "patch-args").read_text().splitlines(), [
+                        "api", "--method", "PATCH", "repos/fixture/telex/releases/123",
+                        "-F", "draft=false", "-F", "prerelease=true", "-f", "make_latest=false",
+                    ])
+                else:
+                    self.assertFalse((root / "patch-args").exists())
 
     def test_candidate_server_requires_opt_in_only_for_prereleases(self):
         for tag, prerelease in (("v0.3.0", False), ("v0.3.0-rc.1", True),
