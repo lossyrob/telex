@@ -121,6 +121,41 @@ def clean_environment(root):
     return env
 
 
+def create_private_directory(path):
+    require(path.is_absolute() and not os.path.lexists(path),
+            f"private fixture directory must be a new absolute path: {path}")
+    pwsh = Path(shutil.which("pwsh") or "").resolve()
+    require(pwsh.is_file(), "PowerShell 7.4+ is required")
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"}}
+    env["TELEX_ARCHIVE_PRIVATE_ROOT"] = str(path)
+    result = subprocess.run([
+        pwsh, "-NoProfile", "-NonInteractive", "-Command",
+        "$ErrorActionPreference='Stop'; "
+        "$path=$env:TELEX_ARCHIVE_PRIVATE_ROOT; "
+        "if (Test-Path -LiteralPath $path) { throw 'fixture path already exists' }; "
+        "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
+        "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
+        "$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); "
+        "$rule=[Security.AccessControl.FileSystemAccessRule]::new("
+        "$sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'); "
+        "$acl.AddAccessRule($rule); "
+        "[IO.FileSystemAclExtensions]::CreateDirectory($acl,$path) | Out-Null",
+    ], env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    require(result.returncode == 0,
+            f"create owner-private fixture directory {path}: {result.stdout}{result.stderr}")
+
+
+def create_fixture_root():
+    if os.name == "nt":
+        # Profile/temp ancestors may grant foreign mutation rights. Never alter them.
+        root = Path(Path(os.environ["LOCALAPPDATA"]).anchor) / ("tr-" + uuid.uuid4().hex)
+        create_private_directory(root)
+        return root
+    # macOS's default temporary path can exceed the Unix socket path limit.
+    return Path(tempfile.mkdtemp(prefix="tr-", dir="/tmp")).resolve()
+
+
 def read_identity_text(path):
     if os.name != "nt":
         return path.read_text(encoding="utf-8")
@@ -717,8 +752,7 @@ def main():
               "target": args.target, "host": platform.platform(),
               "commands": [], "daemons": [], "proofs": [], "cleanup": [],
               "status": "failed"}
-    # macOS's default temporary path can exceed the Unix socket path limit.
-    root = Path(tempfile.mkdtemp(prefix="tr-", dir=None if os.name == "nt" else "/tmp")).resolve()
+    root = create_fixture_root()
     proof = None
     try:
         proof = Proof(args, root, report)

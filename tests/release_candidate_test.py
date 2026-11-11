@@ -435,6 +435,9 @@ gh() {
             self.assertIn("candidate archive checksum mismatch", report["error"])
             self.assertEqual(report["commands"], [])
             self.assertTrue(report["cleanup"][-1]["removed"])
+            if os.name == "nt":
+                actual = Path(report["cleanup"][-1]["fixture_root"])
+                self.assertEqual(actual.parent, Path(actual.anchor))
 
     def test_cleanup_failure_preserves_primary_error_logs_and_safe_root_disposition(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -464,7 +467,7 @@ gh() {
                 return fixture
 
             with patch("sys.argv", argv), \
-                    patch.object(proof.tempfile, "mkdtemp", return_value=str(fixture_root)), \
+                    patch.object(proof, "create_fixture_root", return_value=fixture_root), \
                     patch.object(proof, "Proof", side_effect=owned_fixture):
                 with self.assertRaisesRegex(RuntimeError, "candidate archive checksum mismatch"):
                     proof.main()

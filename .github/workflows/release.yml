@@ -207,6 +207,17 @@ jobs:
             --report evidence/release-proof.json
           if ($LASTEXITCODE -ne 0) { throw "native release proof failed" }
 
+      - name: Prove macOS exit watch without parent reaping
+        if: runner.os == 'macOS'
+        shell: pwsh
+        env:
+          TELEX_BUILD_ID: ${{ github.sha }}
+        run: |
+          cargo test --release --locked --features entra --target ${{ matrix.target }} `
+            --lib session_watch::tests::exit_watch_reports_an_unreaped_exited_child_as_exited `
+            -- --exact --nocapture 2>&1 | Tee-Object -FilePath evidence/process-exit-test.log
+          if ($LASTEXITCODE -ne 0) { throw "native unreaped-child exit proof failed" }
+
       - name: Prove native Windows observation error classification
         if: runner.os == 'Windows'
         env:

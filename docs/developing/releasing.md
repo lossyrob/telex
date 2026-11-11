@@ -155,6 +155,17 @@ backend selections removed. Successful cleanup includes server/thread joins,
 owned-daemon completion, exact fixture-schema removal, and fixture-root removal.
 Failed cleanup is a failed proof, not a successful run with an ignored warning.
 
+On Windows, the release and Watcher archive proofs share the owner-only
+directory constructor and use fresh volume-root children. Profile/temp
+ancestors can fail install-authority validation before the intended schema
+rollback check. The proofs never repair parent ACLs or accept that earlier
+failure as a schema-guard pass.
+
+Both macOS legs also execute the existing unreaped-child exit-watch regression.
+The release proof's parent does not reap the daemon until `stop --drain`
+returns; the daemon exit watch must recognize its exact exited child without
+extending the deadline or relying on later fixture cleanup.
+
 Download and retain `release-evidence-*` and all five `telex-*` archive artifacts
 from the exact workflow run. Evidence artifacts are separate from public assets;
 the publish job downloads only `telex-*`. Assemble one immutable readiness packet:
