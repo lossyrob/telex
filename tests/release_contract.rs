@@ -1034,9 +1034,16 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
     // out and fail here.
     let pkg = package_version(&read("Cargo.toml"));
     assert_eq!(
-        pkg.split('.').count(),
+        pkg.split(['-', '+']).next().unwrap().split('.').count(),
         3,
-        "Cargo.toml [package].version should be X.Y.Z, got {pkg:?}"
+        "Cargo.toml [package].version should have an X.Y.Z core, got {pkg:?}"
+    );
+    assert!(
+        release.contains("prerelease: ${{ steps.version.outputs.prerelease }}")
+            && release.contains("prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}")
+            && release.contains("make_latest: ${{ needs.verify-version.outputs.prerelease == 'true' && 'false' || 'true' }}"),
+        "publish must use the verified version's prerelease classification, never mark a \
+         prerelease Latest, and preserve GitHub's default Latest policy for stable releases"
     );
 }
 

@@ -18,11 +18,14 @@ jobs:
     # if pointed at a tag ref) is a build-only dry-run and never reaches publish.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Compare tag to Cargo.toml version
+        id: version
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
@@ -38,6 +41,11 @@ jobs:
             exit 1
           fi
           echo "release tag v${tag} matches Cargo.toml version ${crate}"
+          # A hyphen in build metadata alone does not make a SemVer prerelease.
+          case "${crate%%+*}" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
   build:
     name: Build ${{ matrix.target }}
@@ -364,6 +372,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.verify-version.outputs.prerelease == 'true' && 'false' || 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

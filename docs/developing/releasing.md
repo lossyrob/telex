@@ -21,7 +21,8 @@ Pushing a `v*` tag triggers `release.yml`, which:
 4. After **all** matrix legs succeed, a single `publish` job verifies that every
    archive has a paired `.sha256` sidecar (so the fail-closed in-binary
    `telex upgrade` never meets a sidecar-less release), then creates the GitHub
-   release and uploads every asset at once.
+   release and uploads every asset at once. The separate Linux/PostgreSQL proof
+   must also pass before publication.
 
 The build matrix (the supported targets), the archive grammar, and the checksum
 format are defined in `release.yml` and asserted by `tests/release_contract.rs` —
@@ -31,7 +32,9 @@ consult those rather than a copy here.
 `verify-version` and `publish` jobs require a `refs/tags/v*` **push**, so a manual
 dispatch never publishes -- even if pointed at a tag ref). Asset names are derived
 from a slash-sanitized ref, so a dispatch works against any pushed branch, including
-`release/vX.Y.Z`. Use it to validate builds before tagging.
+`release/vX.Y.Z`. Use it to validate builds before tagging. These branch-named
+archives are not published release assets, even when the binary's package
+version is a release candidate.
 
 ## Supported platforms
 
@@ -47,14 +50,19 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
 
 ## Tag and version convention
 
-- Tags are `vX.Y.Z`; the `Cargo.toml` `version` is `X.Y.Z` (no `v`). The workflow's
-  `verify-version` job enforces the match.
+- Tags are `vX.Y.Z` or a SemVer prerelease such as `v0.3.0-rc.1`; the
+  `Cargo.toml` `version` omits `v`. The workflow's `verify-version` job enforces
+  the match and classifies the verified version. A prerelease suffix sets
+  `prerelease: true` and `make_latest: false`; build metadata alone does not.
+  Stable releases use `prerelease: false` and `make_latest: true`, preserving
+  GitHub's default for newly published stable releases.
 - Telex is pre-1.0; use `0.MINOR.PATCH`.
 - Several version strings must move together with `Cargo.toml`:
   - `Cargo.toml` `version` (and refresh `Cargo.lock`)
   - `.github/plugin/marketplace.json` (`metadata.version` and the plugin `version`)
   - `copilot/plugin/plugin.json` (`version`)
   - the `--plugin-version` example in `copilot/plugin/skills/telex/SKILL.md`
+  - the explicit candidate default in `tests/release_candidate.py`
 
   `tests/release_contract.rs` checks this coupled set, including the root
   package's lockfile entry. Independent workspace packages, dependencies, minimum
@@ -77,9 +85,10 @@ check both exact identity transitions and unchanged-build freshness.
 
 ## Immutable candidate proof
 
-For the [v0.2.1 corrective schema-3 candidate](../releases/v0.2.1.md), preparation and
-publication have separate authority. Do not push a tag or publish merely because
-a preparation PR, CI, or build-only Release run succeeds.
+Preparation and publication have separate authority, including for the
+[v0.3.0-rc.1 opt-in candidate](../releases/v0.3.0-rc.1.md).
+Do not push a tag or publish merely because a preparation branch or PR, CI,
+or build-only Release run succeeds.
 
 Each native Release job packages its actual binary, records checkout SHA/tree,
 toolchain, target, features, and executable metadata, then runs
@@ -107,6 +116,14 @@ archive/sidecar/target/tag rejection plus downgrade guards. Release has a
 separate Linux/PostgreSQL 16 service leg; do not infer PostgreSQL or credential
 provider runtime coverage from the native platform count.
 
+For a prerelease, the fixture advertises `prerelease: true`; the genuine old
+upgrader uses `--version <candidate-tag>` and fresh installers use
+`TELEX_VERSION=<candidate-tag>`. Both old and candidate binaries must refuse a
+prerelease advertised as latest without opt-in. Stable candidates retain their
+default latest-discovery proof. Installer checksum handling is unchanged: the
+fresh-install proof checks a present sidecar and rejects a mismatch; it does not
+claim the scripts reject a missing sidecar.
+
 Build-only archives retain the slash-sanitized branch/ref name. The loopback
 server serves those *identical bytes* under the candidate version's asset name;
 the report records that alias and its hashes. No tag or GitHub release is
@@ -119,7 +136,7 @@ For a local isolated proof on Windows, use an absolute candidate archive path:
 python tests\release_candidate.py `
   --archive C:\candidate\telex-candidate-x86_64-pc-windows-msvc.zip `
   --target x86_64-pc-windows-msvc --source-sha <exact-build-source-sha> `
-  --tag v0.2.1 --report C:\candidate\release-proof.json
+  --tag v0.3.0-rc.1 --report C:\candidate\release-proof.json
 ```
 
 The archive needs its real `.sha256` sidecar. On Unix use the corresponding
@@ -183,11 +200,12 @@ Run through this before pushing a tag:
 - [ ] Bump the plugin/marketplace version strings listed above to match.
 - [ ] `cargo test --workspace` is green (includes `tests/release_contract.rs`).
 - [ ] Trigger a `workflow_dispatch` run of **Release** and confirm all matrix legs
-      build/package/checksum/upload artifacts — pay attention to the
+      build/package/checksum/prove/upload artifacts — pay attention to the
       `aarch64-pc-windows-msvc` leg (`--features entra` on ARM Windows).
       `workflow_dispatch` runs against a **pushed ref**, so push the release commit
       to `main` (or a `release/vX.Y.Z` branch) first, then dispatch against it. A
-      dispatch run exercises **build + package + checksum + upload only** — the
+      dispatch run exercises **build + package + checksum + native/Watcher/PostgreSQL
+      proofs + upload**, without publication — the
       `verify-version` and `publish` jobs are tag-gated and run only on the real
       `git push origin vX.Y.Z`, so nothing is published by a dispatch run.
 - [ ] Prepare release notes (see below); skim `git log --oneline` for the range

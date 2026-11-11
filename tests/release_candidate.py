@@ -178,12 +178,16 @@ def successor_identity(identity, pid, predecessor):
 
 class CandidateServer:
     def __init__(self, archive, tag, target):
+        self.prerelease = "-" in tag.split("+", 1)[0]
+        self.discovery_path = f"/repos/{REPO}/releases/" + (
+            f"tags/{tag}" if self.prerelease else "latest")
+        self.upgrade_args = ("upgrade", "--version", tag) if self.prerelease else ("upgrade",)
         extension = "zip" if target.endswith("windows-msvc") else "tar.gz"
         self.asset = f"telex-{tag}-{target}.{extension}"
         data = archive.read_bytes()
         prefix = f"/{REPO}/releases/download/{tag}/"
         release = json.dumps({
-            "tag_name": tag, "draft": False, "prerelease": False,
+            "tag_name": tag, "draft": False, "prerelease": self.prerelease,
             "assets": [{"name": self.asset}, {"name": self.asset + ".sha256"}],
         }).encode()
         self.routes = {
@@ -221,13 +225,18 @@ class CandidateServer:
         self.thread.join(timeout=10)
         require(not self.thread.is_alive(), "candidate HTTP server did not join")
 
-    def verify_requests(self, start, tag):
+    def verify_requests(self, start, tag, discovery=True):
         observed = self.requests[start:]
-        for path in (
-            f"/repos/{REPO}/releases/latest",
+        expected = [
             f"/{REPO}/releases/download/{tag}/{self.asset}",
             f"/{REPO}/releases/download/{tag}/{self.asset}.sha256",
-        ):
+        ]
+        if discovery:
+            expected.append(self.discovery_path)
+        if self.prerelease:
+            require(f"/repos/{REPO}/releases/latest" not in observed,
+                    "prerelease install must not discover latest")
+        for path in expected:
             require(path in observed, f"release proof never requested {path}")
 
 
@@ -407,7 +416,7 @@ class Proof:
 
     def negative_upgrades(self, old, env, server, predecessor):
         original = dict(server.routes)
-        release_path = f"/repos/{REPO}/releases/latest"
+        release_path = server.discovery_path
         asset_path = f"/{REPO}/releases/download/{self.args.tag}/{server.asset}"
         release = json.loads(original[release_path])
         cases = {
@@ -422,10 +431,23 @@ class Proof:
             asset_path: old_archive,
             asset_path + ".sha256": f"{digest(old_archive)}  {server.asset}\n".encode(),
         }
+        if server.prerelease:
+            # Deliberately lying latest endpoint: default upgrade must still refuse it.
+            cases["implicit-prerelease"] = {}
+        expected_errors = {
+            "wrong-checksum": "checksum mismatch",
+            "missing-sidecar": "missing checksum sidecar",
+            "missing-target": "no asset for this platform",
+            "tag-binary-mismatch": "mismatch",
+            "implicit-prerelease": "prerelease",
+        }
         for name, routes in cases.items():
             try:
                 server.routes.update(routes)
-                self.telex(old, env, "upgrade", expected=1)
+                args = ("upgrade",) if name == "implicit-prerelease" else server.upgrade_args
+                rejected = self.telex(old, env, *args, expected=1)
+                require(expected_errors[name] in rejected.stderr,
+                        f"{name} failed for an unrelated reason: {rejected.stderr}")
                 require(predecessor.poll() is None, f"{name} drained the predecessor")
                 status = json.loads(self.telex(old, env, "daemon", "status").stdout)
                 require(status["protocol_version"]["minor"] == 4, f"{name} changed daemon")
@@ -464,7 +486,7 @@ class Proof:
         if not postgres:
             self.negative_upgrades(old_installed, env, server, predecessor)
         request_start = len(server.requests)
-        result = json.loads(self.telex(old_installed, env, "upgrade").stdout)
+        result = json.loads(self.telex(old_installed, env, *server.upgrade_args).stdout)
         server.verify_requests(request_start, self.args.tag)
         require(result["release"]["verified"] is True, "old binary did not verify candidate")
         require(result["drain"]["drained"] is True, "old binary did not drain owning daemon")
@@ -522,7 +544,9 @@ class Proof:
         rejected = self.telex(old, env, "init", expected=1)
         require("newer than supported" in rejected.stderr, "baseline did not reject schema3")
         env.update(TELEX_UPGRADE_API_BASE=server.url, TELEX_UPGRADE_DOWNLOAD_BASE=server.url)
-        result = json.loads(self.telex(old, env, "upgrade").stdout)
+        request_start = len(server.requests)
+        result = json.loads(self.telex(old, env, *server.upgrade_args).stdout)
+        server.verify_requests(request_start, self.args.tag)
         require(result["release"]["verified"] is True, "baseline upgrade did not verify archive")
         current = Path(env["TELEX_INSTALL_ROOT"]) / "versions" / self.args.tag / candidate.name
         self.metadata(current, env, self.args.tag[1:], self.args.source_sha, 5, 3)
@@ -544,6 +568,15 @@ class Proof:
     def fresh_install(self, candidate, server):
         env, _ = self.environment("fresh-install")
         env.update(TELEX_UPGRADE_API_BASE=server.url, TELEX_UPGRADE_DOWNLOAD_BASE=server.url)
+        if server.prerelease:
+            rejected = self.telex(candidate, env, "upgrade", expected=1)
+            require("prerelease" in rejected.stderr, "candidate accepted a prerelease as latest")
+            require(not (Path(env["TELEX_INSTALL_ROOT"]) / "current").exists(),
+                    "implicit prerelease activated a binary")
+            self.report["proofs"].append({
+                "scenario": "candidate-implicit-prerelease", "rejected_before_activation": True,
+            })
+            env["TELEX_VERSION"] = self.args.tag
         before_requests = len(server.requests)
         if self.windows:
             # Observe the persistent PATH before/after; the installer opt-out must not touch it.
@@ -559,7 +592,7 @@ class Proof:
         else:
             result = self.run(["sh", ROOT / "install.sh"], env)
         require("Checksum OK." in result.stdout, "fresh installer did not check the sidecar")
-        server.verify_requests(before_requests, self.args.tag)
+        server.verify_requests(before_requests, self.args.tag, discovery=not server.prerelease)
         installed = Path(env["TELEX_INSTALL_ROOT"]) / "versions" / self.args.tag / candidate.name
         self.metadata(installed, env, self.args.tag[1:], self.args.source_sha, 5, 3)
         launcher_env = dict(env)
@@ -575,6 +608,8 @@ class Proof:
         # checksum mismatch is asserted fail-closed here.
         bad_env, _ = self.environment("fresh-tampered")
         bad_env.update(TELEX_UPGRADE_API_BASE=server.url, TELEX_UPGRADE_DOWNLOAD_BASE=server.url)
+        if server.prerelease:
+            bad_env["TELEX_VERSION"] = self.args.tag
         sidecar = f"/{REPO}/releases/download/{self.args.tag}/{server.asset}.sha256"
         original = server.routes[sidecar]
         try:
@@ -671,7 +706,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--tag", default="v0.3.0")
+    parser.add_argument("--tag", default="v0.3.0-rc.1")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--postgres-url")
     parser.add_argument("--disposable-postgres", action="store_true")

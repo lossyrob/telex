@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import textwrap
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -22,6 +23,59 @@ spec.loader.exec_module(proof)
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_workflow_classifies_verified_versions_without_changing_stable_policy(self):
+        bash = proof.shutil.which("bash")
+        self.assertIsNotNone(bash, "workflow contract test requires bash")
+        workflow = (proof.ROOT / ".github" / "workflows" / "release.yml").read_text()
+        step = workflow.split("      - name: Compare tag to Cargo.toml version\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n  build:", 1)[0])
+        for version, prerelease in (
+            ("0.3.0", "false"), ("0.3.0-rc.1", "true"),
+            ("0.3.0-rc.1+build.5", "true"), ("0.3.0+build-with-hyphen", "false"),
+        ):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "Cargo.toml").write_text(
+                    f'[workspace.package]\nversion = "9.9.9"\n'
+                    f'[package]\nname = "fixture"\nversion = "{version}"\n')
+                (root / "verify.sh").write_text(script, encoding="utf-8", newline="\n")
+                output = root / "output"
+                env = dict(os.environ, GITHUB_REF_NAME=f"v{version}", GITHUB_OUTPUT=output.as_posix())
+                result = proof.subprocess.run([bash, "verify.sh"], cwd=root, env=env,
+                                              capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(output.read_text().strip(), f"prerelease={prerelease}")
+                output.unlink()
+                env["GITHUB_REF_NAME"] = "v9.9.9"
+                rejected = proof.subprocess.run([bash, "verify.sh"], cwd=root, env=env,
+                                                capture_output=True, text=True)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("does not match Cargo.toml", rejected.stdout)
+                self.assertFalse(output.exists())
+
+    def test_candidate_server_requires_opt_in_only_for_prereleases(self):
+        for tag, prerelease in (("v0.3.0", False), ("v0.3.0-rc.1", True),
+                                ("v0.3.0+build-with-hyphen", False)):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as directory:
+                archive = Path(directory) / "candidate.zip"
+                archive.write_bytes(b"fixture archive")
+                with proof.CandidateServer(archive, tag, "x86_64-pc-windows-msvc") as server:
+                    metadata = json.loads(proof.download(server.url + server.discovery_path))
+                    self.assertEqual(metadata["prerelease"], prerelease)
+                    self.assertEqual(server.upgrade_args,
+                                     ("upgrade", "--version", tag) if prerelease else ("upgrade",))
+                    prefix = f"/{proof.REPO}/releases/download/{tag}/{server.asset}"
+                    self.assertEqual(proof.download(server.url + prefix), archive.read_bytes())
+                    proof.download(server.url + prefix + ".sha256")
+                    server.verify_requests(0, tag)
+                    if prerelease:
+                        # Explicit installer path downloads directly, without discovery.
+                        server.verify_requests(1, tag, discovery=False)
+                        latest = f"/repos/{proof.REPO}/releases/latest"
+                        self.assertTrue(json.loads(proof.download(server.url + latest))["prerelease"])
+                        with self.assertRaisesRegex(RuntimeError, "must not discover latest"):
+                            server.verify_requests(0, tag)
+
     def test_native_sharing_retry_is_exact_owned_bounded_and_fail_closed(self):
         for code, operation, result in (
             (32, "CreateFileW", "recover"), (32, "CreateFileW", "expire"),

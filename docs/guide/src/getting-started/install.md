@@ -72,6 +72,39 @@ particular, schema-3 migration is not reversed by rollback: v0.1.2 supports only
 schema 2 and refuses schema-3 stores. Back up before upgrading and reattach
 wanted addresses after ordered daemon replacement.
 
+### Opt into a prerelease
+
+The default installers and `telex upgrade` select GitHub's latest stable release.
+They do not opt you into `v0.3.0-rc.1`. That candidate is preparation-only until
+separately tagged and published; the following commands require its published
+release assets.
+
+For an existing installation, use `telex upgrade --version v0.3.0-rc.1`.
+For a fresh install, pin both the installer source and the requested version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lossyrob/telex/v0.3.0-rc.1/install.sh |
+  TELEX_VERSION=v0.3.0-rc.1 sh
+```
+
+```powershell
+$previousTelexVersion = $env:TELEX_VERSION
+try {
+    $env:TELEX_VERSION = 'v0.3.0-rc.1'
+    irm https://raw.githubusercontent.com/lossyrob/telex/v0.3.0-rc.1/install.ps1 | iex
+} finally {
+    $env:TELEX_VERSION = $previousTelexVersion
+}
+```
+
+Pin the CLI plugin marketplace to the same tag:
+`copilot plugin marketplace add lossyrob/telex#v0.3.0-rc.1`, followed by
+`copilot plugin install telex@telex`. See the
+[candidate notes](https://github.com/lossyrob/telex/blob/main/docs/releases/v0.3.0-rc.1.md)
+for platform limits and rollback cautions. For Copilot App, use the separate
+[installer-first bridge procedure](../guides/copilot-push.md#app-session-installer):
+INSTALL, then ATTACH, then VERIFY; the CLI plugin command is not an App loader.
+
 ## Initialize (optional)
 
 Telex creates its local store and schema on first use, so no init step is
@@ -91,8 +124,11 @@ environment variables with `$env:` instead of `export`, for example
 
 ## Watcher runtime
 
-Watcher is a separate application, not part of the single-binary Telex release
-install. The [Watcher installation and launch guide](../guides/watcher-installation.md)
+Watcher is a separate application. The Windows x64 candidate archive also
+contains `telex-watcher.exe`; the ordinary Telex installer and updater still
+install only Telex, not a running Watcher. Other release archives are Telex-only,
+including both macOS targets. The
+[Watcher installation and launch guide](../guides/watcher-installation.md)
 provides its supported Windows/Linux bootstrap, default discovery record,
 backend/authentication prerequisites, shutdown and rollback. Session-group stall
 monitoring starts from that verified record. Both Telex and Watcher need the
