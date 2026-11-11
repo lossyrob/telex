@@ -1,0 +1,7 @@
+{
+  "schema": "host-first-preparation-v1",
+  "binding": null,
+  "documentation": null,
+  "documents": null,
+  "status": "UNBOUND: local preparation only; no decoder host, label or target selected"
+}

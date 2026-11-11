@@ -18,7 +18,9 @@ COMMENT = "https://github.com/lossyrob/telex/issues/172#issuecomment-"
 WORKFLOW = ".github/workflows/macos-cross-static.yml"
 BRANCH = "lossyrob-macos-containment-proof"
 SOURCES = ["tests/macos_cross_static/" + name for name in
-           ("bounds.json", "run.py", "cache.py", "gate.py", "native.py", "derived.py", "test_component.py", "README.md")] + [
+           ("bounds.json", "run.py", "cache.py", "gate.py", "native.py", "derived.py",
+            "host_first.py", "host_first_policy.json", "offline_tests.py", "test_host_first.py",
+            "test_component.py", "README.md", "PREPARATION.md")] + [
                "tests/macos_static_cache.py", "tests/macos_static_ridiff.py",
                "tests/macos_provenance_capture.py", WORKFLOW]
 require = derived.require

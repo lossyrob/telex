@@ -26,17 +26,35 @@ jobs:
       - name: Offline source tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python3 -m unittest discover -s tests/macos_cross_static -p test_component.py
+        run: python3 tests/macos_cross_static/offline_tests.py
+      - name: Host-first observation
+        id: host
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/macos_cross_static/host_first.py "$RUNNER_TEMP/cross-intel25-host"
       - name: Frozen Intel25 static processing
+        if: steps.host.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python3 tests/macos_cross_static/run.py Intel25 "$RUNNER_TEMP/cross-intel25-work" "$RUNNER_TEMP/cross-intel25-evidence"
-      - name: Bound evidence
-        id: bound
+        run: python3 tests/macos_cross_static/run.py Intel25 "$RUNNER_TEMP/cross-intel25-work" "$RUNNER_TEMP/cross-intel25-evidence" "$RUNNER_TEMP/cross-intel25-host"
+      - name: Bound host evidence
+        id: host_bound
         if: always()
         run: |
-          python3 -c 'from pathlib import Path; import os; p=Path(os.environ["RUNNER_TEMP"])/"cross-intel25-evidence"; f=list(p.iterdir()); assert len(f)<=600 and all(x.is_file() and not x.is_symlink() and x.stat().st_size<=2097152 for x in f); assert sum(x.stat().st_size for x in f)<=33554432; assert (p/"sha256.json").is_file()'
+          python3 -c 'from pathlib import Path; import os; p=Path(os.environ["RUNNER_TEMP"])/"cross-intel25-host"; f=list(p.iterdir()); assert len(f)<=7 and all(x.is_file() and not x.is_symlink() and x.stat().st_size<=262144 for x in f); assert sum(x.stat().st_size for x in f)<=1048576; assert (p/"sha256.json").is_file() or (p/"preparation-stop.json").is_file()'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.host_bound.outcome == 'success'
+        with:
+          name: Intel25-host-first-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cross-intel25-host
+          if-no-files-found: error
+          retention-days: 30
+      - name: Bound evidence
+        id: bound
+        if: always() && steps.host.outcome == 'success'
+        run: |
+          python3 -c 'from pathlib import Path; import os; r=Path(os.environ["RUNNER_TEMP"]); p=r/"cross-intel25-evidence"; f=list(p.iterdir())+list((r/"cross-intel25-host").iterdir()); assert len(f)<=600 and all(x.is_file() and not x.is_symlink() and x.stat().st_size<=2097152 for x in f); assert sum(x.stat().st_size for x in f)<=33554432; assert (p/"sha256.json").is_file()'
       - uses: actions/upload-artifact@v4
         if: always() && steps.bound.outcome == 'success'
         with:

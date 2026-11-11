@@ -2073,6 +2073,7 @@ class DerivedArtifactTests(unittest.TestCase):
                     patch.object(run, "NativeBinding") as binding:
                 root = Path(temp)
                 controller = run.ComponentRun(root, root, context)
+                controller.receipt["host_first"] = {"status": "host-accepted"}
                 def command(name, argv, **kwargs):
                     return {"stdout": {"host-source":"a"*40, "host-build":"25G83", "host-product":"26.6.2",
                                        "host-uname":"Darwin synthetic"}[name]}
@@ -2094,6 +2095,7 @@ class DerivedArtifactTests(unittest.TestCase):
                     patch.object(run.platform, "machine", return_value="arm64"), patch.object(run, "NativeBinding"):
                 root = Path(temp)
                 controller = run.ComponentRun(root, root, "Intel25")
+                controller.receipt["host_first"] = {"status": "host-accepted"}
                 def command(name, argv, **kwargs):
                     if name == "7zip-version":
                         raise LookupError("version accepted; stop before input")
@@ -2161,7 +2163,7 @@ class DerivedGateTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             gate.validate(fixture.records,dict(fixture.context,source_manifest_sha256="e"*64))
         rows,digest=gate.closure(HERE.parents[1])
-        self.assertEqual(len(rows),12)
+        self.assertEqual(len(rows),17)
         self.assertEqual(digest,hashlib.sha256((json.dumps(rows,sort_keys=True,indent=2)+"\n").encode()).hexdigest())
 
     def test_check_orders_fresh_authorities_rejects_second_run_and_does_not_accept_retry(self):

@@ -1,4 +1,4 @@
-"""Frozen two-job static component. Importing this module performs no network or image work."""
+"""Intel25 static component. Importing this module performs no network or image work."""
 
 import collections
 import hashlib
@@ -21,10 +21,13 @@ from macos_static_ridiff import Run, ridiff_output_bound
 from cache import Output, DomainBudget, DomainOutput, choose_family, collect, intel_domains
 import gate
 import derived
+import host_first
 from native import NativeBinding, bind_hash
 
 BOUNDS = json.loads((HERE / "bounds.json").read_text())
-NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "native.py", "derived.py", "test_component.py", "README.md"]
+NEW_SOURCES = ["bounds.json", "run.py", "cache.py", "gate.py", "native.py", "derived.py",
+               "host_first.py", "host_first_policy.json", "offline_tests.py", "test_host_first.py",
+               "test_component.py", "README.md", "PREPARATION.md"]
 DEPENDENCIES = ["macos_static_cache.py", "macos_static_ridiff.py", "macos_provenance_capture.py"]
 
 
@@ -257,6 +260,8 @@ def collect_intel_domains(run, mount):
 
 def execute(run):
     c = run.config
+    require(run.receipt.get("host_first", {}).get("status") == "host-accepted",
+            "same-job host observation must precede all component effects")
     run.native_binding = NativeBinding(run)
     host = {name: run.command("host-" + name, args) for name, args in (
         ("uname", ["/usr/bin/uname", "-a"]), ("build", ["/usr/bin/sw_vers", "-buildVersion"]),
@@ -358,13 +363,17 @@ def execute(run):
 
 
 def main():
-    require(len(sys.argv) == 4 and sys.argv[1] in gate.ATTEMPT_JOBS, "usage: run.py Intel25 ABS_WORK ABS_EVIDENCE")
+    require(len(sys.argv) == 5 and sys.argv[1] in gate.ATTEMPT_JOBS,
+            "usage: run.py Intel25 ABS_WORK ABS_EVIDENCE ABS_HOST_EVIDENCE")
     require(sys.platform == "darwin" and os.getuid() != 0, "ordinary-user macOS decoder required")
-    job, work, evidence = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
-    require(work.is_absolute() and evidence.is_absolute() and work != evidence, "private paths required")
+    job, work, evidence, host_path = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])
+    require(work.is_absolute() and evidence.is_absolute() and host_path.is_absolute() and
+            len({work, evidence, host_path}) == 3, "private paths required")
+    host = host_first.accepted_host(host_path, os.environ["GITHUB_SHA"], int(os.environ["GITHUB_RUN_ID"]), BOUNDS)
     work.mkdir(parents=True, exist_ok=False)
     evidence.mkdir(parents=True, exist_ok=False)
     run = ComponentRun(work, evidence, job)
+    run.receipt["host_first"] = host
     result = 1
     try:
         run.output.json("freeze-check.json", gate.check(job))
@@ -396,8 +405,10 @@ def main():
                     run.delete(file)
         save(evidence / "receipt.json", run.receipt)
         files = list(evidence.iterdir())
-        require(len(files) < BOUNDS["limits"]["artifact_files_per_job"] and
-                sum(p.stat().st_size for p in files) < BOUNDS["limits"]["artifact_bytes_per_job"] - 128 * 1024,
+        host_files = list(host_path.iterdir())
+        require(len(files) + len(host_files) < BOUNDS["limits"]["artifact_files_per_job"] and
+                sum(p.stat().st_size for p in files + host_files) <
+                BOUNDS["limits"]["artifact_bytes_per_job"] - 128 * 1024,
                 "output gate failure; no artifact upload")
         save(evidence / "sha256.json", {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                         for p in sorted(files)})

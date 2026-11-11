@@ -1,5 +1,13 @@
 # Derived-tool offline component: local preparation only
 
+**R2 local preparation:** [PREPARATION.md](PREPARATION.md) is the operative
+supersession index and host-first refusal specification. The host policy is
+unbound: no new decoder host, label or target is selected. No push or run is
+authorized. The source closure now includes the five R2 preparation/test files
+(17 files total); the 12-file references below describe historical3a evidence,
+not authority for this new source. All consumed attempts and zero retries stand.
+Only guarded offline tests are permitted locally.
+
 This component prepares **Intel25 only** on a native ARM64 decoder host.
 Intel25 describes an offline Intel image, not native x86 execution evidence.
 The job uses explicit `macos-26` and fails unless architecture is arm64,
