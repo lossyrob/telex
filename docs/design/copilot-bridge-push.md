@@ -17,7 +17,7 @@ A telex-aware Copilot session with a live bridge receives pushed messages as rea
 running, re-arming, or babysitting a `telex wait` waiter. The transport is an
 **in-session extension bridge** (Namra's mechanism), but **provisioned on bind**
 rather than auto-loaded everywhere, **provisioned and addressed by telex**
-rather than by a separate install, and fed by a **generic, Copilot-agnostic
+(optionally first loaded by App's session installer), and fed by a **generic, Copilot-agnostic
 on-deliver exec primitive** in the daemon. The daemon never learns what Copilot,
 a session, or a port is; all Copilot specifics stay in the existing `copilot.rs`
 harness-boundary module plus a small embedded bridge script.
@@ -44,7 +44,24 @@ provisioning. Copilot CLI can expose `extensions_reload` when Copilot Extensions
 is enabled under `/experimental`; that setting and tool are not universal
 Copilot App capabilities.
 
-For first-time App setup without an advertised live loader, provision with
+App's `install_extension` provides another first-time live-loading path:
+install the published `copilot/bridge` folder at the commit matching the installed
+binary, with `scope: "session"` and `name: "telex-bridge"`, **before**
+`copilot attach --copilot-bridge`. The binary-owned skill prints pinned arguments
+for a full Git build id; unknown or unmatched source requires another loader.
+Never use floating `main`. The installer downloads files and reloads extensions;
+it refuses an existing extension name, so it cannot replace reload after
+provisioning. Do not use another name and load competing bridges for one socket.
+Keep an already-live bridge; otherwise prefer supported reload/startup discovery,
+or intentionally detach every affected binding before installing and reattaching
+with the original backend/options. Do not delete shared files to bypass refusal.
+
+A macOS App 1.1.35 experiment verified installer-first loading in a fresh child
+session and an acknowledged pushed-message round trip over local SQLite with no
+pull waiters. It does not establish support in every App build or OS. Installer
+success, liveness and end-to-end delivery remain separate evidence.
+
+For first-time App setup without a usable installer or advertised live loader, provision with
 `telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
 then run `telex --address <addr> copilot resume`. Verify
 `telex --address <addr> --json status` reports `station_health: attended_push` and
@@ -85,12 +102,15 @@ wakeup; wait-setup/backend failures remain failures requiring separate repair.
    (a) materializes the bridge `extension.mjs` into this session's extension
    discovery dir, and (b) registers an on-deliver handler command with the
    daemon for this address: `telex copilot push --session <id>`. Neither step
-   needs the bridge to be running yet. `--wake-on-cc` is an additional per-bind opt-in:
+   needs the bridge to be running yet. On the App installer path, install first,
+   then bind; the installer-loaded bytes must match the binary's embedded bridge.
+   `--wake-on-cc` is an additional per-bind opt-in:
    the daemon records a CC lower bound and pushes only live CC observer messages after
    that point.
 2. **Load (once, on a host supporting live reload or startup discovery).** The agent
    uses the supported live loader, such as `extensions_reload` when exposed, or
    restarts the App session after provisioning and runs `copilot resume`.
+   The App installer path already loaded the bridge before step 1.
    Copilot forks the bridge as a child
    process; it calls `joinSession()` to attach to the live foreground session,
    opens a private local endpoint, and writes a registry entry keyed by the

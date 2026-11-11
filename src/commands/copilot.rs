@@ -28,7 +28,7 @@ pub mod session_state;
 pub mod stall_detect;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
-const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "Bridge files and push registration do not prove the bridge loaded. Keep an already-loaded, live bridge in push mode. If this host exposes a supported live bridge loader, re-provision with `telex --address <station> copilot resume` and use that loader (`extensions_reload` where available). On Copilot CLI only, enabling Copilot Extensions under `/experimental` may expose that tool. In App without an advertised live loader, startup extension discovery can load the provisioned bridge: if a restart is acceptable, provision with `telex --address <station> copilot attach --copilot-bridge`, restart the App session, then run `telex --address <station> copilot resume`. After either loading path, verify bridge liveness with `telex --address <station> --json status`: require `station_health: attended_push` and `push_registered: true`; where available, call `telex_bridge_info` for supporting bridge evidence. A restart is not proof by itself. Startup loading was reported on one Windows App build, not every App build or a plain conversation clear. Liveness is not end-to-end delivery proof. If a live bridge is unavailable and a restart is unacceptable or liveness does not verify, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill` for completion artifacts, ack/deduplication, re-arming and stopping. Preparation is not wakeup proof; report setup/backend failures. Do not use --force unless intentionally downgrading. Or detach with `telex --address <station> copilot detach`.";
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "Bridge files and push registration do not prove the bridge loaded. Keep an already-loaded, live bridge in push mode. App `install_extension` can load a version-matched bridge with scope `session` and name `telex-bridge`, but installation must precede provisioning: it refuses an existing extension name. Follow `telex copilot skill` for pinned installer arguments and safe existing-binding recovery; do not install a second bridge under another name. If this host exposes a supported live bridge loader, re-provision with `telex --address <station> copilot resume` and use that loader (`extensions_reload` where available). On Copilot CLI only, enabling Copilot Extensions under `/experimental` may expose that tool. In App without a usable installer or live loader, startup extension discovery can load the provisioned bridge: if a restart is acceptable, provision with `telex --address <station> copilot attach --copilot-bridge`, restart the App session, then run `telex --address <station> copilot resume`. After loading, verify bridge liveness with `telex --address <station> --json status`: require `station_health: attended_push` and `push_registered: true`; where available, call `telex_bridge_info` for supporting bridge evidence. A restart is not proof by itself. Startup loading was reported on one Windows App build, not every App build or a plain conversation clear. Liveness is not end-to-end delivery proof. If a live bridge is unavailable and a restart is unacceptable or liveness does not verify, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch exactly one returned command as a detached task; follow `telex copilot skill` for completion artifacts, ack/deduplication, re-arming and stopping. Preparation is not wakeup proof; report setup/backend failures. Do not use --force unless intentionally downgrading. Or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
@@ -2867,6 +2867,24 @@ fn plugin_compat_warning(plugin_version: Option<&str>) -> Option<String> {
     }
 }
 
+fn render_bridge_installer(build_id: &str) -> String {
+    if build_id.len() != 40 || !build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return "No pinned App installer URL is available: this binary's build identifier is \
+                not a full Git commit. Do not guess a URL; use supported live reload or \
+                startup discovery instead."
+            .to_string();
+    }
+    let args = serde_json::json!({
+        "url": format!("https://github.com/lossyrob/telex/tree/{build_id}/copilot/bridge"),
+        "scope": "session",
+        "name": BRIDGE_EXTENSION_NAME,
+    });
+    format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&args).expect("installer arguments serialize")
+    )
+}
+
 /// Render the full `telex copilot skill` stdout: a version/compat header, an optional
 /// inline compatibility warning, then the embedded Copilot workflow.
 fn render_copilot_skill(plugin_version: Option<&str>) -> String {
@@ -2896,7 +2914,10 @@ fn render_copilot_skill(plugin_version: Option<&str>) -> String {
         out.push_str(&format!("> {warn}\n"));
     }
     out.push('\n');
-    out.push_str(COPILOT_SKILL_MD);
+    out.push_str(&COPILOT_SKILL_MD.replace(
+        "<!-- APP_BRIDGE_INSTALLER -->",
+        &render_bridge_installer(crate::install::BUILD_ID),
+    ));
     out
 }
 
@@ -4368,6 +4389,48 @@ mod tests {
     }
 
     #[test]
+    fn app_bridge_installer_pins_source_and_session_scope() {
+        let build_id = "0123456789abcdef0123456789abcdef01234567";
+        let rendered = render_bridge_installer(build_id);
+        let args: serde_json::Value = serde_json::from_str(
+            rendered
+                .strip_prefix("```json\n")
+                .unwrap()
+                .strip_suffix("\n```")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            serde_json::json!({
+                "url": format!("https://github.com/lossyrob/telex/tree/{build_id}/copilot/bridge"),
+                "scope": "session",
+                "name": "telex-bridge",
+            })
+        );
+    }
+
+    #[test]
+    fn app_bridge_installer_does_not_guess_unknown_or_non_commit_source() {
+        for build_id in [
+            "",
+            "unknown",
+            "v0.3.0",
+            "3102b7f",
+            "main",
+            "0123456789abcdef0123456789abcdef012345678",
+            "0123456789abcdef0123456789abcdef01234567890",
+            "0123456789abcdef0123456789abcdef0123456/../",
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        ] {
+            let rendered = render_bridge_installer(build_id);
+            assert!(rendered.contains("No pinned App installer URL is available"));
+            assert!(rendered.contains("Do not guess a URL"));
+            assert!(!rendered.contains("https://"));
+        }
+    }
+
+    #[test]
     fn copilot_skill_render_is_version_headed_and_workflow_complete() {
         let doc = render_copilot_skill(None);
         assert!(doc.contains(&format!("telex v{DAEMON_VERSION}")));
@@ -4379,6 +4442,9 @@ mod tests {
         // The workflow and --help source of truth are shipped with the binary.
         assert!(doc.contains("copilot attach --copilot-bridge"));
         assert!(doc.contains("extensions_reload"));
+        assert!(doc.contains("install_extension"));
+        assert!(doc.contains(&render_bridge_installer(crate::install::BUILD_ID)));
+        assert!(!doc.contains("<!-- APP_BRIDGE_INSTALLER -->"));
         assert!(doc.contains("copilot resume"));
         assert!(doc.contains("supported pull"));
         assert!(doc.contains("fallback below"));
@@ -4433,6 +4499,9 @@ mod tests {
                 "**Supported live bridge loader available:** use the bridge path below",
                 "On Copilot CLI",
                 "That CLI setting is not an App prerequisite",
+                "**App `install_extension` available:**",
+                "before the first `copilot attach --copilot-bridge`",
+                "refuses an existing extension name",
                 "**App startup discovery without a live loader:**",
                 "copilot attach --copilot-bridge",
                 "restart the App session",
@@ -4501,6 +4570,45 @@ mod tests {
             ],
         );
         assert!(transition.contains("unavailable live loader or an unacceptable restart"));
+    }
+
+    #[test]
+    fn copilot_skill_app_installer_precedes_bind_and_preserves_existing_bindings() {
+        let doc = render_copilot_skill(None);
+        let installer = doc
+            .split_once("## App session installer")
+            .unwrap()
+            .1
+            .split_once("## The bridge path")
+            .unwrap()
+            .0
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for required in [
+            "**before provisioning**",
+            "scope: \"session\"",
+            "name: \"telex-bridge\"",
+            "never floating `main`",
+            "including any local source changes",
+            "installer refuses an existing name",
+            "do not retry under another name",
+            "all affected bindings",
+            "original backend and options",
+            "--wake-on-cc",
+            "only after the last binding",
+            "Do not delete shared files",
+            "not a drop-in replacement for reload",
+            "not end-to-end delivery proof",
+        ] {
+            assert!(
+                installer.contains(required),
+                "missing installer safeguard {required:?}"
+            );
+        }
+        assert!(PUSH_BRIDGE_RECOVERY_GUIDANCE.contains("installation must precede provisioning"));
+        assert!(PUSH_BRIDGE_RECOVERY_GUIDANCE.contains("refuses an existing extension name"));
+        assert!(PUSH_BRIDGE_RECOVERY_GUIDANCE.contains("do not install a second bridge"));
     }
 
     #[test]
@@ -5447,11 +5555,15 @@ mod tests {
                             "push bridge is not live",
                             "Bridge files and push registration do not prove",
                             "Keep an already-loaded, live bridge in push mode",
+                            "App `install_extension`",
+                            "installation must precede provisioning",
+                            "refuses an existing extension name",
+                            "do not install a second bridge under another name",
                             "If this host exposes a supported live bridge loader",
                             "copilot resume",
                             "extensions_reload` where available",
                             "On Copilot CLI only",
-                            "In App without an advertised live loader",
+                            "In App without a usable installer or live loader",
                             "startup extension discovery",
                             "if a restart is acceptable",
                             "copilot attach --copilot-bridge",

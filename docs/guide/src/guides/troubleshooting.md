@@ -37,11 +37,20 @@ the owner can attend it again.
 ## Copilot: messages do not arrive as turns
 
 The push bridge may not be loaded; provisioning files and registering push do not
-prove it is live. On a host with a supported live loader, re-provision with
+prove it is live. App's `install_extension` can load a session bridge, but it must
+run **before** provisioning: it refuses an existing extension name. See the
+[session installer](copilot-push.md#app-session-installer) and `telex copilot skill`
+for pinned source arguments with `scope: "session"` and `name: "telex-bridge"`.
+Never use floating `main` or another bridge name. Keep an already-live bridge;
+otherwise prefer reload/startup discovery. Only intentionally detaching every
+affected binding makes an existing-name reinstall safe; restore the original
+backend/options afterward. Do not delete shared files to force installation.
+
+On a host with a supported live loader, re-provision with
 `telex --address <addr> copilot resume` and load the bridge (`extensions_reload`
 where available). On Copilot CLI only, enabling Copilot Extensions under
-`/experimental` may expose that tool. For an App session without a supported live
-loader, startup extension discovery is another loading path: provision with
+`/experimental` may expose that tool. For an App session without a usable installer
+or supported live loader, startup extension discovery is another loading path: provision with
 `telex --address <addr> copilot attach --copilot-bridge`, restart the App session,
 then run `telex --address <addr> copilot resume`. Verify
 `telex --address <addr> --json status` reports `station_health: attended_push` and
@@ -136,7 +145,9 @@ Either restore push with an already-live bridge or a supported live loader:
 telex --address <addr> copilot resume   # use the supported loader if needed
 ```
 
-or follow the [attach/restart/resume startup-discovery path](#copilot-messages-do-not-arrive-as-turns)
+or follow the [session installer](copilot-push.md#app-session-installer), respecting
+its existing-name and binding restrictions. Otherwise use the
+[attach/restart/resume startup-discovery path](#copilot-messages-do-not-arrive-as-turns)
 and verify liveness. When a restart is unacceptable or liveness does not verify,
 use the [prepared pull fallback](copilot-push.md#fallback). To give up attendance explicitly:
 

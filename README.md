@@ -102,7 +102,15 @@ telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge -
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
 
-For first-time App setup without a supported live loader, hosts with startup
+For first-time App setup with `install_extension`, install the version-matched
+bridge **before** `copilot attach --copilot-bridge`. Run `telex copilot skill`
+for pinned tool arguments: use `scope: "session"` and `name: "telex-bridge"`,
+never floating `main`. The installer reloads extensions but refuses an existing
+name; do not install a duplicate bridge under another name. Keep a live bridge,
+or follow the [existing-extension recovery guidance](https://lossyrob.github.io/telex/guides/copilot-push.html#app-session-installer).
+Verify live push and actual delivery after binding.
+
+Without a usable installer or supported live loader, hosts with startup
 extension discovery can load the bridge after provisioning and restart:
 
 ```sh
