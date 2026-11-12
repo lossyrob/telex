@@ -13,7 +13,7 @@ release or Local prerelease preparation.
 
 ## Status and sequencing
 
-Status: in progress, with focus attention. The [operator decision of
+Status: blocked on the separate Local #259 prerequisite for full product acceptance, with focus attention. Independent containment work and reviews continue. The [operator decision of
 2026-11-12](https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292)
 authorizes the version-range design below and supersedes the exact-build proof
 HOLD, twenty-D obligations, and pending A/B/C question through explicit accepted
@@ -71,6 +71,17 @@ Silicon Mac running macOS 26.7.1 / 25G241 and coordinated publicly through #172.
 This task update does not transfer the canonical owner or launch a parallel
 Windows implementation. Campaign runs the merge gate and merges at the exact
 cleared SHA.
+
+Current upstream prerequisite: [Local #259](https://github.com/lossyrob/telex/issues/259),
+`macos-daemon-bootstrap-identity`, supplies supported shared macOS daemon/peer
+image identity. Full #172 acceptance is blocked on accepted upstream delivery;
+the four completed prerequisites above, full acceptance/safety requirements and
+existing product owner remain unchanged. Independent containment development,
+reviews and App consumer preparation continue. Local aeae coordinates #259;
+actual implementation assignment is PENDING external MacBook routing, not a new
+Windows/App launch or an implicit assignment to the #257 writer. App readiness
+integration and this node's SQLite/Postgres lifecycle/health parity remain
+separate after #259 acceptance. No Local RC2/next-release dependency follows.
 
 ## Outcome
 
