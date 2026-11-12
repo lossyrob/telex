@@ -183,7 +183,7 @@ under issue #172 and `tasks/watcher-macos-containment-runtime.md` in this
 workstream. On 2026-10-23, under the operator's one-item, one-PR rule, the
 design steward approved splitting the former #165 scope: #165 owns only the
 normative macOS contract delivered by PR #168 in `docs/design/watcher.md` and
-ADR 0054, and #172 owns macOS runtime implementation and proof. Campaign merged
+ADR 0054, and #172 owns macOS runtime implementation and validation. Campaign merged
 PR #168 on 2026-10-23 as main `bc1e02edf43490c41dbc3628b692c4cbf822c5ef` at
 exact head `151ade144795ff275eb416eed3dc5d071f85fa81`, and issue #165 closed on
 merge. Exact-merge main CI passed, the owner posted the #165 field report, and
@@ -202,10 +202,38 @@ for Phase 2 was satisfied when PR #164 merged as
 before #172 implementation. On 2026-10-23 the design steward approved the
 candidate Phase 2 proof shape, subject to corrections, and kept product
 implementation on hold. PR #168 merged the clarified ADR 0054 and normative
-Watcher text on 2026-10-23. Product implementation remains held until the
-Phase 2 plan incorporates that disposition, pinned XNU source reasoning and
-native ARM64/x64 evidence establish the fork/group-empty proof, and the owner
-returns the selected algorithm and evidence for implementation authorization.
+Watcher text on 2026-10-23. Those exact-build proof holds are historical:
+[operator decision 6830371292](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292) on
+2026-11-12 releases the kernel-proof track and adopts native arm64/x86_64
+macOS 15+ admission with runtime version, kernel/process architecture,
+translation and capability checks. Development/KASAN kernels, Rosetta,
+versions below 15 and failed checks refuse before detector release.
+[Steward adoption 6830611753](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6830611753) creates
+the docs-only upstream item `watcher-macos-containment-admission-basis` (#252),
+depending only on the completed contract item. It narrowly records ADR 0057's
+amendment to ADR 0054's former-group-observation, native-proof and
+decision-needed consequences and admission basis, matching Watcher MUST text
+and the reconciler-authored task/geometry. The docs PR says `Closes #252`;
+the #172 issue-body update follows its merge. #172 adds only this dependency;
+all other edges and its in-progress/focus state remain unchanged.
+
+The Ended basis is the documented `waitid`, `proc_listpids` and `kill`
+contracts plus native conformance. The predicate retains a fresh terminal
+WNOWAIT result, an unsaturated `int[2]` census showing only the owned unreaped
+leader, irreversible seal, exact reap and ESRCH-only observation. No signal
+authority exists after seal or is reconstructed from numbers; durable identity,
+receipt/restart rules and independent pending-operation reconciliation remain.
+An Ended receipt records that this predicate held, not kernel-proved absence of
+every transient member. A transient fork/exec/corpse member invisible to both
+census and `kill` may leave a stray trusted detector with closed output,
+overlapping the next attempt; this accepted residual cannot authorize signaling
+an unrelated process. The twenty-D and R4/R5 obligations close as accepted
+risk, not native proof. A/B/C and exact-build/per-UUID proof holds are
+superseded; no R6, decoder, KDK, mapping or finite work continues. Historical
+proof attempts and refs remain retained, and
+`lossyrob-macos-containment-proof` must never be pushed.
 At exact proof head 810bd24fe7ca3415a4b32c19b762ed32a68d952b, native ARM64 and
 x86_64 run 39904383638 rejected the one-shot SIGKILL completion candidate: a
 barrier-controlled in-group descendant survived the accepted group SIGKILL and
@@ -213,12 +241,21 @@ answered two post-seal challenges one second apart. Both post-reap observations
 reported presence, and ESRCH appeared only after private teardown. The result
 preserves the pinned-source old-group closure argument and fail-closed receipt
 rule but proves that one accepted group SIGKILL is not a completion condition.
-Product implementation remains held. Any successor must retain the destructive
-anchor and nonzero-signal authority until a separately justified completion
-transition, then seal, exactly reap, and observe under the existing proof rules;
-if no ordinary-user completion condition can be proved, return decision-needed.
-After those gates are accepted, implementation proceeds under #172;
-`watcher-runtime-core` is complete and imposes no further wait. The fail-closed
+That result remains the one-shot negative control, not a reinstated
+kernel-proof prerequisite. The single product lane is the operator's existing
+MacBook agent on physical Apple Silicon macOS 26.7.1 / 25G241, coordinated
+publicly through #172; the retained issue/docs owner is d6ee8a1d. No duplicate
+Windows product writer or canonical ownership transfer follows.
+
+The replacement product gates are conformance on the operator's Apple Silicon
+Mac and hosted `macos-15` / `macos-26` arm64 runners plus x64 where available,
+normal independent implementation and design review against the amended
+contract, and full CI plus SQLite/PostgreSQL lifecycle and health parity.
+Ordinary local native and PR CI runs require no per-run finite, freeze or
+steward launch grant. The #252 docs dependency is not a prerequisite for
+ordinary authorized investigation or parallel product development, and no
+metadata/proof reconciliation gate is added. Neither #172 nor the campaign is
+complete. `watcher-runtime-core` is complete and imposes no further wait. The fail-closed
 macOS behavior from #162 remains authoritative until the complete #172
 implementation lands. An ordinary per-attempt private guard remains within
 Watcher runtime authority only when it is unprivileged, ephemeral, shipped with
@@ -226,7 +263,7 @@ the runtime, controlled through inherited private handles, exposes no reusable
 service endpoint, and exits after identity-matched cleanup evidence. Any
 privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
 or VM-backed architecture returns to the operator. Campaign runs the merge gates
-for both macOS items and merges at the exact cleared SHA. This host-scope
+for the macOS docs/product items and merges at the exact cleared SHA. This host-scope
 decision and follow-up launch do not clear #162's accepted store-binding
 lifecycle/recovery blocker or premature `productionReady` blocker. At exact head
 `40a5c916d839dc81432738f122e03a00fd31628e`, independent source review
@@ -280,12 +317,17 @@ watch in five minutes.
 
 `watcher-macos-containment-runtime` does not enter the dependency list of the
 Windows-path `five-minute-custom-watch-gate`. It replaces
-`watcher-macos-containment` in the product-level `usable-watcher` and
-`closure-ready` checkpoints and as a dependency of `closure-gate`; the contract
-item remains its prerequisite. The operator-selected contract makes macOS
+`watcher-macos-containment` as a dependency of `closure-gate`; the contract
+item remains its prerequisite, with the separate docs-only #252 edge added.
+The [2026-11-05 initial-release disposition](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6664653921) remains:
+#172 gates closure-gate and closure-ready, not the initial Watcher release or
+Local prerelease preparation. No checkpoint membership changes here.
+The operator-selected contract makes macOS
 support achievable without claiming arbitrary detached-descendant containment,
 but fail-closed behavior remains the only accepted macOS runtime state
-until #172 supplies proven implementation.
+until #172's product implementation and replacement conformance/review/parity
+gates are accepted.
 
 ## Superseded assumptions
 
@@ -310,7 +352,9 @@ retains its guardian handshake and terminal-receipt requirement, and the
 macOS bullet states that Watcher fails closed with no macOS support claim
 until #172 is accepted. After exact-merge main CI and the field report, the
 Watcher coordinator completed #177. Its documentation prerequisite for #172
-is satisfied; #172's implementation and final authorization HOLD are unchanged.
+is satisfied. The later 2026-11-12 decision supersedes #172's kernel-proof
+and final-launch HOLD with the conformance, independent review and backend
+parity gates above; #252 records the narrow docs/decision amendment.
 The shipped runtime remains fail-closed on macOS until #172's complete
 implementation lands.
 
