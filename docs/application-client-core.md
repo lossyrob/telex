@@ -361,6 +361,16 @@ disabled; the per-profile directories keep the executable for one backend
 from overwriting the other. This reuses compilation, not test results: all
 probes and process assertions still execute.
 
+The shared process harness prefers Cargo's compile-time `CARGO_BIN_EXE_telex`
+handoff. Watcher unit tests without a usable handoff resolve the sibling branch
+binary only from the known `<profile>/deps` or
+`<profile>/build/telex-watcher/<hash>/out` test-executable layouts, including
+custom target roots and profiles. Missing or ambiguous artifacts fail setup.
+Before use, a bounded, credential-stripped `--version` probe checks the exact
+build identity against the linked Telex library with launcher dispatch disabled.
+Build the workspace binaries with the suite's features first; the harness never
+searches PATH or an installed Telex layout.
+
 ### Required coverage families
 
 The suite exercises the same ten families the `client-conformance`
