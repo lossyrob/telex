@@ -105,6 +105,7 @@ The product PR must meet these gates:
 1. The native conformance suite passes on the operator's Apple Silicon Mac
    (macOS 26.x) and on hosted CI macOS runners (`macos-15` / `macos-26` arm64,
    and x64 where available), whatever builds those runners currently serve.
+   This is coverage, not a runtime allowlist.
 2. Normal independent implementation and design review pass on the product PR
    against decision 6830371292 and ADR 0054 as amended by ADR 0057.
 3. Full CI and SQLite/PostgreSQL lifecycle and health parity pass without
@@ -323,15 +324,27 @@ R4/R5 exact-build proof standard, and A/B/C. The former physical-class targets
 (Apple Silicon and Intel on 24G830 and 25G83) and their evidence remain
 historical, not the current admission domain.
 
-Admission is native arm64 and x86_64 on macOS 15 or later. Refuse development
-and KASAN kernels, Rosetta-translated processes, and versions below 15. Before
-detector launch, check `kern.osproductversion` / `kern.osrelease` (or
-equivalent), kernel versus process architecture, `sysctl.proc_translated`, and
-capability probes for the `proc_listpids` ABI, `int` / `pid_t` sizes, and
-`waitid` WNOWAIT support. Every failed admission or capability probe fails
-closed. A newer macOS major may be added by passing the conformance suite on
-it, without kernel mapping; individual builds and kernel UUIDs do not require
-new proof classes. Admission refusal is neither a terminal receipt nor
+The subsequent [operator clarification 6835298564](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6835298564) supersedes the former
+macOS 15 floor and below-15 refusal. P1 is resolved; no version-policy
+approval hold remains. Admission retains native arm64 and x86_64,
+kernel/process architecture consistency for the runtime and authority-holding
+guard, and refusal of development/KASAN kernels and Rosetta-translated
+runtimes or guards. A translated detector descendant remains an ordinary
+assigned-group member. `sysctl.proc_translated` ENOENT is the native/Intel
+case; hosted runners and VMs are not admission failures.
+
+No macOS minimum, maximum, per-major, exact-build or UUID restriction
+applies. Do not warn solely because a version is newer, older or not
+conformance-validated. Version collection is optional diagnostic information;
+its value or absence is neither a required capability probe nor an admission
+failure. Conformance records coverage, not a runtime allowlist.
+
+Before detector launch, retain required translation and capability checks for
+the `proc_listpids` ABI, `int` / `pid_t` sizes and `waitid` WNOWAIT support,
+alongside the required identity and signal-safety checks. A failed or
+indeterminate required capability, identity or safety check fails closed with
+the concrete reason. Admission refusal is neither a terminal receipt nor
 group-absence evidence.
 
 The exclusively owned unreaped direct-child leader prevents PID/PGID reuse

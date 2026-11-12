@@ -205,10 +205,18 @@ implementation on hold. PR #168 merged the clarified ADR 0054 and normative
 Watcher text on 2026-10-23. Those exact-build proof holds are historical:
 [operator decision 6830371292](
 https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292) on
-2026-11-12 releases the kernel-proof track and adopts native arm64/x86_64
-macOS 15+ admission with runtime version, kernel/process architecture,
-translation and capability checks. Development/KASAN kernels, Rosetta,
-versions below 15 and failed checks refuse before detector release.
+2026-11-12 releases the kernel-proof track. The subsequent
+[operator clarification 6835298564](
+https://github.com/lossyrob/telex/issues/172#issuecomment-6835298564) removes the earlier
+macOS 15 floor and below-15 refusal; P1 is resolved with no version-policy
+approval hold. Retain native arm64/x86_64, architecture consistency,
+translation and capability/identity/signal-safety checks, and
+development/KASAN/Rosetta refusal. No macOS minimum, maximum, per-major,
+exact-build or UUID admission restriction or warning solely for a newer,
+older or unvalidated version applies. Version collection, value and absence
+are diagnostic only, not a required probe or admission failure. Failed or
+indeterminate required capability, identity or safety checks fail closed
+before detector release with the concrete reason.
 [Steward adoption 6830611753](
 https://github.com/lossyrob/telex/issues/172#issuecomment-6830611753) creates
 the docs-only upstream item `watcher-macos-containment-admission-basis` (#252),
@@ -248,8 +256,9 @@ publicly through #172; the retained issue/docs owner is d6ee8a1d. No duplicate
 Windows product writer or canonical ownership transfer follows.
 
 The replacement product gates are conformance on the operator's Apple Silicon
-Mac and hosted `macos-15` / `macos-26` arm64 runners plus x64 where available,
-normal independent implementation and design review against the amended
+Mac and hosted `macos-15` / `macos-26` arm64 runners plus x64 where available
+(coverage, not a runtime allowlist), normal independent implementation and
+design review against the amended
 contract, and full CI plus SQLite/PostgreSQL lifecycle and health parity.
 Ordinary local native and PR CI runs require no per-run finite, freeze or
 steward launch grant. The #252 docs dependency is not a prerequisite for
