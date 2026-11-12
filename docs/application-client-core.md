@@ -371,6 +371,16 @@ build identity against the linked Telex library with launcher dispatch disabled.
 Build the workspace binaries with the suite's features first; the harness never
 searches PATH or an installed Telex layout.
 
+Linux test preparation also reads Cargo's exact compiler-artifact records to
+stage `watcher_process_guard` at the profile root for ordinary `deps` hosts and
+beside relocated unit and integration test hosts. This reproduces the sibling
+layout the production process launcher requires without changing its lookup
+behavior. Only artifacts bound to the exact Watcher manifest are used; a missing
+or ambiguous guardian fails setup. Before running Linux workspace tests locally,
+prepare that layout with
+`cargo test --workspace --no-run --message-format=json | python3 tests/stage_watcher_test_guard.py`
+under a shell with `pipefail` enabled.
+
 ### Required coverage families
 
 The suite exercises the same ten families the `client-conformance`
