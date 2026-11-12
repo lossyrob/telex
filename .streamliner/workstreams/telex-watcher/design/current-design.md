@@ -217,7 +217,7 @@ amendment to ADR 0054's former-group-observation, native-proof and
 decision-needed consequences and admission basis, matching Watcher MUST text
 and the reconciler-authored task/geometry. The docs PR says `Closes #252`;
 the #172 issue-body update follows its merge. #172 adds only this dependency;
-all other edges and its in-progress/focus state remain unchanged.
+all other edges and its in-progress/focus state remain unchanged. The Watcher coordinator completed #252 after the exact-merge CI and [owner field report](https://github.com/lossyrob/telex/issues/252#issuecomment-6832390342); the assigned #172 body was updated at 2026-11-12T18:01:52Z, without completing the product item.
 
 The Ended basis is the documented `waitid`, `proc_listpids` and `kill`
 contracts plus native conformance. The predicate retains a fresh terminal

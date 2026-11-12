@@ -10,7 +10,12 @@ https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292) and
 https://github.com/lossyrob/telex/issues/172#issuecomment-6830611753).
 The product PR remains separate and says `Closes #172`.
 
-Status: planned, watch attention. The coordinator-assigned docs owner is
+Status: completed, with watch attention. PR #253 merged as
+`e3692247e400713d2b6c4a5dec32c986622d5983` from cleared head
+`65a8f65c20e0fe4c066e321ed6b717dac22dd43e`. The [owner field report](
+https://github.com/lossyrob/telex/issues/252#issuecomment-6832390342) records
+exact-merge CI and normal closeout; the assigned #172 body update was
+published at 2026-11-12T18:01:52Z. This completes the docs item, not #172. The coordinator-assigned docs owner is
 `d6ee8a1d-e581-4f6c-a42b-77c84bfccc8b`, using its existing managed docs branch.
 This item depends only on the completed `watcher-macos-containment` contract
 item (#165). #172 adds this docs dependency; all its other dependencies and
