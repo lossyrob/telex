@@ -453,6 +453,77 @@ jobs:
           cargo test --locked -p telex-watcher --no-default-features --features sqlite
           --lib ownership::tests:: -- --nocapture
 
+  watcher-containment-macos:
+    # Native conformance for the macOS assigned-process-group guard (#172,
+    # ADR 0054 as amended by ADR 0057). Each run is evidence for the image it
+    # ran on only; the set of images here is coverage, never a runtime
+    # allowlist. Admission has no OS-version gate.
+    name: Watcher containment conformance (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15
+          - macos-26
+          - macos-15-intel
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record the actual host this evidence covers
+        env:
+          EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_HEAD"
+          echo "source=$EXPECTED_SOURCE_HEAD runner_label=${{ matrix.os }} image=${ImageOS:-unknown}/${ImageVersion:-unknown}"
+          sw_vers
+          echo "process_arch=$(uname -m)"
+          sysctl kern.version kern.osversion
+          sysctl hw.optional.arm64 || echo "hw.optional.arm64: absent (Intel hardware)"
+          sysctl sysctl.proc_translated || echo "sysctl.proc_translated: absent (native Intel)"
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ runner.arch == 'ARM64' && 'x86_64-apple-darwin' || '' }}
+
+      - name: Build translated guard and fixture (Apple Silicon with Rosetta)
+        if: runner.arch == 'ARM64'
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            cargo build --locked -p telex-watcher --no-default-features --features sqlite \
+              --target x86_64-apple-darwin --bin watcher_process_guard --bin watcher_process_fixture
+            {
+              echo "WATCHER_TEST_X86_64_GUARD=$PWD/target/x86_64-apple-darwin/debug/watcher_process_guard"
+              echo "WATCHER_TEST_X86_64_FIXTURE=$PWD/target/x86_64-apple-darwin/debug/watcher_process_fixture"
+            } >> "$GITHUB_ENV"
+          else
+            echo "NOT COVERED on this image: Rosetta is unavailable, translated cases are skipped"
+          fi
+
+      - name: Admission, census and signal-authority unit checks
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --lib process:: -- --nocapture
+
+      - name: Process containment and native conformance
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --test process_v2 -- --nocapture
+
+      - name: Bounded PID/PGID reuse after Ended
+        run: >-
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite
+          --test process_v2 -- --nocapture --ignored
+          macos_conformance::reused_pid_and_pgid_are_never_signalled_after_ended
+
   credential-macos:
     name: Credential invocation lifecycle (macOS)
     runs-on: macos-latest

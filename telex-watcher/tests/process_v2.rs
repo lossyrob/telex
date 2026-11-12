@@ -1,4 +1,4 @@
-#![cfg(any(windows, target_os = "linux"))]
+#![cfg(any(windows, target_os = "linux", target_os = "macos"))]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -9,6 +9,10 @@ use telex_watcher::process::{
     ProcessSpec, MAX_STDIN_BYTES,
 };
 use tokio::sync::oneshot;
+
+#[cfg(target_os = "macos")]
+#[path = "macos/conformance.rs"]
+mod macos_conformance;
 
 static ENVIRONMENT: Mutex<()> = Mutex::new(());
 
@@ -298,7 +302,7 @@ async fn invalid_cwd_and_cancel_before_launch_never_reach_the_gate() {
     assert!(error.containment.is_none());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn missing_guardian_is_not_proof_without_its_cleanup_receipt() {
     let isolated = Isolated::new();
@@ -307,8 +311,12 @@ async fn missing_guardian_is_not_proof_without_its_cleanup_receipt() {
     spec.command.push(marker.to_string_lossy().into_owned());
     let (_keepalive, cancel) = oneshot::channel();
     let error = execute(&spec, Vec::new(), cancel, |identity| async move {
-        let ContainmentIdentity::LinuxGuard { pid, .. } = identity else {
-            panic!("wrong platform identity");
+        let pid = match identity {
+            #[cfg(target_os = "linux")]
+            ContainmentIdentity::LinuxGuard { pid, .. } => pid,
+            #[cfg(target_os = "macos")]
+            ContainmentIdentity::MacosGuard { guard_pid, .. } => guard_pid,
+            _ => panic!("wrong platform identity"),
         };
         // This is our own newly created, unreaped helper, still behind the
         // launch gate. No detector or unrelated process can be affected.
@@ -549,6 +557,31 @@ fn alive(pid: u32) -> bool {
         CloseHandle(handle);
         assert!(status == WAIT_OBJECT_0 || status == WAIT_TIMEOUT);
         status == WAIT_TIMEOUT
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn alive(pid: u32) -> bool {
+    // Signal zero is a read-only existence test. A zombie still exists but
+    // has ended; it disappears once its parent (or launchd) reaps it.
+    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+        let read = unsafe {
+            libc::proc_pidinfo(
+                pid as i32,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            )
+        };
+        const SZOMB: u32 = 5;
+        return !(read == size && info.pbi_status == SZOMB);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => false,
+        other => panic!("cannot prove PID ended: {other:?}"),
     }
 }
 

@@ -25,11 +25,63 @@ remain historical evidence and are not accepted by this runtime.
 Windows x86_64 is the initial supported Watcher distribution. Linux is covered
 by the automated SQLite/PostgreSQL tests described below, with the same-build
 process guard; that evidence does not substitute for a clean-host production
-soak. This runtime delivery requires process containment on Windows and Linux.
-macOS and other unclaimed hosts reject detector execution. macOS remains a
-required Watcher product capability tracked in
-[#165](https://github.com/lossyrob/telex/issues/165); this delivery does not claim
-macOS containment.
+soak. This runtime delivery requires process containment on every host that
+runs detectors. Windows and Linux contain the whole detector process tree.
+macOS contains the assigned process group of a trusted non-detaching detector
+(see [macOS detector containment](#macos-detector-containment),
+[#172](https://github.com/lossyrob/telex/issues/172)). Other hosts reject
+detector execution. macOS is not yet a shipped Watcher distribution: release
+archives do not carry the runtime or its guard, and the sender path's
+bootstrapped daemon connection is not yet supported there.
+
+## macOS detector containment
+
+macOS has no ordinary-user primitive that contains a descendant after it
+changes session or process group. Watcher therefore supports **trusted
+non-detaching detectors** on macOS (ADR 0054, amended by ADR 0057): the
+detector root and everything it starts must stay in the process group Watcher
+assigns to the attempt. A detector that daemonizes, calls `setsid`, or moves
+work to another group is nonconforming, and that work is outside the cleanup
+guarantee.
+
+Each attempt gets a private `watcher_process_guard` process, which must sit
+beside the `telex-watcher` executable. The guard runs in its own session,
+outside the detector group, and is controlled only through inherited private
+handles. It exits after writing the attempt's receipt.
+
+- **Admission.** Before launch, both the runtime and the guard require a
+  native (not Rosetta-translated) arm64 or x86_64 process on a release kernel,
+  and probe the nonreaping `waitid` and the process-group census on the actual
+  waiting leader. A failed or indeterminate check refuses the attempt with the
+  concrete reason. The OS version is never an admission input: there is no
+  minimum, maximum or tested-version allowlist.
+- **Launch gate.** The guard forks a trampoline that becomes the group leader
+  and waits. The runtime durably records the identity (boot-session UUID,
+  guard and leader PID and start time, PGID, nonce, receipt path) and only then
+  sends the one-use release. If the guard or runtime is lost before release,
+  the detector never runs.
+- **Cleanup.** The guard never reaps the leader while it may still signal, so
+  the PID and PGID cannot be reused under a signal. On exit, timeout,
+  cancellation, an output limit or runtime death it kills the group and
+  repeats until a fresh nonreaping wait plus a two-slot group census show only
+  the leader. It then gives up signal authority, reaps the leader, and requires
+  `kill(-PGID, 0)` to fail with `ESRCH` before it writes and syncs the receipt.
+- **What Ended means.** The predicate above held. `proc_listpids` is a private
+  Apple ABI, guarded by the launch probe and native conformance tests rather
+  than a documented contract. ADR 0057 accepts one residual: a member caught
+  in a brief fork, exec or exit transition could be invisible to both checks,
+  leaving a stray copy of the trusted detector after Ended. No unrelated
+  process can be signalled in that case.
+- **Unproven.** Guard loss after release, a census or wait error, or a former
+  group still visible after the reap leaves `orphan-containment-unproven`.
+  Recovery clears it only from the exact identity-matched receipt or a changed
+  boot-session UUID; a slow guard that finishes later is accepted on resume.
+  Watcher never signals a recorded PID during recovery.
+- **Escaped pipe holders.** If the assigned group has ended but something
+  outside it still holds the detector's stdout or stderr, Watcher waits two
+  seconds for end-of-file, then closes its end and fails the attempt as
+  nonconforming. Containment for that attempt is still Ended; the escaped
+  process is neither signalled nor claimed. Its later writes fail.
 
 ## Runtime failure diagnostics
 
@@ -95,7 +147,7 @@ Other native lock errors, including `EINVAL`/`ENOTSUP` on an OS or filesystem
 that rejects OFD locking, fail startup with the OS error preserved and no
 fallback. macOS 13 and earlier are not claimed for this mechanism. Linux and
 other Unix targets keep `flock`; Windows keeps its existing `LockFileEx` byte
-lock. Registry startup support does not enable macOS detector execution.
+lock. Registry startup support is separate from macOS detector containment.
 
 The returned `LocalManagement` handle sends bounded in-process requests to that
 owner. The host exposes those same typed operations over a versioned same-user
