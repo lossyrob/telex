@@ -2605,8 +2605,9 @@ work outside the group. Work that escapes the assigned group is outside the
 macOS cleanup guarantee.
 
 This is a trusted behavioral precondition, not a sandbox or a claim that
-Watcher can detect every violation. A macOS containment receipt proves only
-that the assigned process group ended. Registration remains the minimal v2
+Watcher can detect every violation. A macOS Ended receipt records that the
+completion predicate in ADR 0057 held, subject to its accepted
+transient-invisibility residual. Registration remains the minimal v2
 command contract; no platform-specific registration field or schema version is
 added.
 
@@ -2614,14 +2615,14 @@ A macOS implementation must durably record containment identity before detector
 release, retain PID- and PGID-reuse-safe destructive authority through every
 nonzero group signal, and irreversibly seal all signaling and authority
 reconstruction before releasing that anchor. It may then use a read-only
-former-group observation after exact leader reap only when pinned kernel/API
-reasoning and native race evidence prove that reuse cannot create false absence
-and no in-scope member can appear after absence. The implementation must observe
-runtime death through a private liveness channel, terminate the whole assigned
-group on every cleanup path, and write terminal evidence only after race-safe
-proof that the group is empty. Restart may clear containment automatically only
-from identity-matched durable terminal evidence or a changed boot-session
-identity. Ambiguity remains `orphan-containment-unproven`, blocks replacement
+former-group observation after exact leader reap under the public API contracts
+and native conformance basis in ADR 0057, rather than a per-build kernel proof.
+The implementation must observe runtime death through a private liveness
+channel, terminate the whole assigned
+group on every cleanup path, and write terminal evidence only after the
+unchanged completion predicate in ADR 0057 holds. Restart may clear containment
+automatically only from identity-matched durable terminal evidence or a changed
+boot-session identity. Ambiguity remains `orphan-containment-unproven`, blocks replacement
 execution, and requires authoritative cleanup/proof plus explicit resume.
 
 An ordinary per-attempt private guard may implement this contract as Watcher
@@ -2633,8 +2634,8 @@ privileged, entitled, installed, persistent, shared, launchd-managed, brokered,
 or VM-backed component.
 
 The Windows/Linux-only runtime in issue #162 continues to fail closed on macOS.
-macOS support begins only after issue #172 implements and proves this decision,
-sequenced after #162 merges.
+macOS support begins only after issue #172 implements and validates this decision
+as amended by ADR 0057, sequenced after #162 merges.
 
 ### Consequences
 
@@ -2646,12 +2647,13 @@ sequenced after #162 merges.
 - Runtime restart still marks prior runtimes interrupted, closes unfinished
   attempts as `runtime-interrupted` without event/state/send effects, and
   reconciles pending operations before eligibility.
-- The macOS implementation must prove launch gating, durable ownership,
+- The macOS implementation must validate launch gating, durable ownership,
   abrupt-runtime-death cleanup, guard-failure behavior, group-empty evidence,
-  PID/PGID reuse safety, and restart recovery on native ARM64 and x64 hosts.
-- If ordinary-user process-group machinery cannot provide race-safe terminal
-  proof, issue #172 returns `decision-needed`; the contract revision does not
-  permit an unproven success claim.
+  PID/PGID reuse safety, and restart recovery through the native ARM64 and x64
+  conformance suite and product review in ADR 0057.
+- A failed admission or completion predicate remains fail-closed or
+  `orphan-containment-unproven`, as applicable. The accepted residual in ADR 0057
+  is not a `decision-needed` gate requiring proof of impossibility.
 
 ## 0055 - Watcher CLI administers the registry owner through a same-user local endpoint
 
@@ -2746,3 +2748,139 @@ retained stop start explicitly invalidated by newer root activity or a
 lifecycle transition cannot later establish idle. This bounded hardening
 does not reconstruct pending starts outside the suffix or claim verified
 producer ordering.
+
+## 0057 - macOS containment uses version-range admission and native conformance
+
+- **Date:** 2026-11-12
+- **Status:** Accepted by the operator in
+  [#172, decision 6830371292](https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292);
+  documentation tracked by [#252](https://github.com/lossyrob/telex/issues/252)
+- **Amends:** ADR 0054's former-group observation, race-safe proof wording,
+  native-proof and `decision-needed` consequences, and admission basis.
+  Its other requirements remain unchanged.
+
+### Context
+
+The operator needs macOS containment on a physical Apple Silicon Mac running
+macOS 26.7.1 / 25G241. Exact-build, UUID and kernel-equivalence-class admission
+would exclude that machine and require new proof for future OS updates.
+
+The per-build investigation tried to exclude a transient fork, exec or corpse
+member invisible to both the process-group census and `kill`. This concerns
+the truth of Ended evidence, not the guard's authority to signal. The exclusively
+owned, unreaped direct-child leader prevents PID/PGID reuse through every
+nonzero group signal. Irreversible sealing ends that authority before the
+exact reap; a later observation cannot authorize a destructive signal.
+
+The operator accepts the transient-invisibility residual under the existing
+trusted same-user, non-detaching detector boundary. Native evidence, including
+[run 39909079250](https://github.com/lossyrob/telex/actions/runs/39909079250),
+found no counterexample; this is not proof that the residual is impossible.
+
+### Decision
+
+**Admission.** Replace exact-build, per-kernel-UUID and per-class equivalence
+admission with native arm64 and x86_64 on macOS 15 or later. Check admission at
+runtime using `kern.osproductversion` / `kern.osrelease` or equivalent version
+information, kernel versus process architecture, `sysctl.proc_translated`, and
+capability probes. Probe the `proc_listpids` ABI, `int` / `pid_t` sizes and
+`waitid` `WNOWAIT` support. Refuse development and KASAN kernels,
+Rosetta-translated processes, versions below 15, inconsistent architecture and
+failed or indeterminate checks before detector release. An admission refusal
+is neither a cleanup receipt nor absence evidence.
+
+A newer macOS major version enters supported coverage by passing the native
+conformance suite on it, not by kernel mapping. Builds and UUIDs may identify
+test environments but are not an exact-build admission allowlist. The pending
+A/B/C choice is superseded by this version-range policy; no exact ARM 24G830
+hardware requirement or x64-first scope decision remains a prerequisite.
+
+**Ended basis and unchanged predicate.** Rely on the public documented contracts
+of `waitid`, `proc_listpids` and `kill`, plus native conformance. The private,
+ephemeral, unprivileged guard remains outside the detector group; the gated
+trampoline is its leader. While the guard exclusively owns that unreaped
+direct-child anchor, completion requires:
+
+1. A fresh terminal result from
+   `waitid(P_PID, leader, WEXITED|WNOHANG|WNOWAIT)`.
+2. An unsaturated native `int[2]` `proc_listpids(PROC_PGRP_ONLY)` census
+   containing only the owned leader.
+3. An irreversible, non-cloneable seal of every nonzero group-signal path and
+   every path that could reconstruct signal authority from numeric identity.
+4. The exact leader reap, followed only by the read-only observation
+   `kill(-PGID, 0) == -1/ESRCH`. Zero or EPERM is never absence.
+
+Only after this predicate holds may the guard finalize and durably synchronize
+an identity-matched Ended receipt. The receipt means **the predicate held**,
+not kernel-proved absence of every transient member. A member still visible
+to `kill` prevents ESRCH and leaves cleanup unproven. Zero, error, saturation,
+malformation or identity mismatch in the census cannot establish completion.
+Repeating the census after group SIGKILL and before sealing is permitted as
+defense in depth, not proof.
+
+**Accepted residual.** After the leader has exited and the group has been
+SIGKILLed, a member in a transient fork, exec or corpse state may be invisible
+to both observations and produce a false Ended. A stray trusted detector may
+then remain, with stdout/stderr closed, and overlap the next attempt. This does
+not permit an unrelated process to be signaled: nonzero signaling still ends
+before the anchor is released. The 20 D items (G2-G10 and TYPE, separately on X
+and V) and the R4/R5 open obligations are **closed as accepted risk**, not as
+proven absence or binary closure. They are no longer product gates. Exercise
+residual cases cheaply where practical in conformance; do not reinstate the
+per-item exercise/unreachability/final-authorization proof gate.
+
+**Kept invariants.** ADR 0054's non-detaching trusted-code precondition and
+Windows/Linux guarantees remain unchanged. Keep anchor-held nonzero signaling,
+no destructive signaling after the seal, no signals to discovered PIDs, and no
+authority reconstructed from numbers. One-shot SIGKILL, quiet time and signal
+counts are not completion predicates.
+
+Before release, durably record boot session, guard/start identity, leader,
+PGID, anchor, nonce and receipt path. Recovery clears containment only from an
+exact identity-matched finalized receipt or changed boot-session UUID;
+otherwise it remains `orphan-containment-unproven`. Guard loss after release
+is not successful cleanup. Independent pending-operation reconciliation and
+all receipt, store and readiness fences remain intact.
+
+The runtime-machinery boundary remains unprivileged, per-attempt, shipped,
+ephemeral, nonpersistent, nonshared and non-addressable, controlled through
+inherited private handles. No privilege, entitlement, launchd installation,
+persistent/shared helper, broker, public IPC, cross-principal surface or VM is
+authorized.
+
+### Product validation and authorization
+
+Replace the former #172 gate items 3-5 with:
+
+- The native conformance suite passes on the operator's Apple Silicon Mac
+  (macOS 26.x, currently 26.7.1 / 25G241) and hosted `macos-15` / `macos-26`
+  arm64 runners, plus x86_64 where available, on the builds those runners serve.
+- Normal independent implementation and design review of the product PR.
+- Full CI and SQLite/PostgreSQL lifecycle and health parity.
+
+Ordinary local and PR native runs, including hosted macOS PR jobs, need no
+per-run finite, freeze or steward launch grant. This decision does not
+authorize a release, shared installation or a different runtime-machinery
+boundary.
+
+The minimum suite covers launch gating/setup failures; multigeneration
+fork/exec, `posix_spawn` and public `vfork`; leader exit before descendants
+including pipe holders; normal completion, timeout, cancellation, output limit,
+runtime death, guard loss before/after release and restart; receipt durability
+and mismatch, boot change and bounded PID/PGID churn; unrelated sentinel
+survival and no guarantee for nonconforming detach; the one-shot SIGKILL
+negative control; census zero/error/saturation/malformed/mismatch results and
+exec-shadow overlap stress; and a mechanical type-level proof that signal
+authority cannot exist after sealing.
+
+### Consequences
+
+Public API contracts and native conformance replace per-build XNU, KDK, DWARF,
+libsystem and decoder analysis. The kernel-proof track is finished: no R6 or
+further proof-helper round, and no inherited exact-build hold on the product
+owner. Historical evidence remains history; archived proof refs must not be
+pushed.
+
+This docs decision does not ship macOS support. The runtime remains fail-closed
+on macOS until the #172 product PR is accepted, implements this contract and
+updates the shipping documentation. The docs PR closes #252, not #172.
