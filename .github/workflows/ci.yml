@@ -279,7 +279,19 @@ jobs:
           --test installed_current_process
           -- -D warnings
 
-      - name: Record Watcher capacity and recovery sizing evidence
+      - name: Record Watcher capacity and recovery sizing evidence (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          {
+            cargo build -p telex -p telex-watcher --all-features --bins --message-format=json &&
+            cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening --no-run --message-format=json
+          } | python tests/stage_watcher_test_guard.py
+          cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening -- --test-threads=1 --nocapture
+
+      - name: Record Watcher capacity and recovery sizing evidence (Windows)
+        if: runner.os == 'Windows'
         timeout-minutes: 10
         run: >-
           cargo build -p telex -p telex-watcher --all-features --bins

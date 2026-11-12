@@ -380,6 +380,8 @@ or ambiguous guardian fails setup. Before running Linux workspace tests locally,
 prepare that layout with
 `cargo test --workspace --no-run --message-format=json | python3 tests/stage_watcher_test_guard.py`
 under a shell with `pipefail` enabled.
+Repeat the handoff with the same features and selectors whenever a later
+command emits a different test host, as in the all-features capacity battery.
 
 ### Required coverage families
 
