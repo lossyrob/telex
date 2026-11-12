@@ -2794,6 +2794,9 @@ development and KASAN kernels, incompatible architecture, and unavailable or
 indeterminate required capabilities, identity or safety properties before
 detector release, with the concrete reason. An admission refusal is neither a
 cleanup receipt nor absence evidence.
+`sysctl.proc_translated` ENOENT is the native/Intel case, not an indeterminate
+failure; hosted runners and VMs are not admission failures. A translated
+detector descendant remains an ordinary assigned-group member.
 
 There is no macOS minimum, maximum, per-major, exact-build or UUID admission
 allowlist. Collecting `kern.osproductversion` / `kern.osrelease` or equivalent

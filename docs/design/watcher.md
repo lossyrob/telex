@@ -784,6 +784,9 @@ runtime/guard execution, development/KASAN kernels, incompatible architecture
 and failed or indeterminate required capability, identity or safety checks
 MUST be refused before detector release, with the concrete reason. Refusal is
 neither a receipt nor absence evidence.
+`sysctl.proc_translated` ENOENT is the native/Intel case, not an indeterminate
+failure; hosted runners and VMs are not admission failures. A translated
+detector descendant remains an ordinary assigned-group member.
 
 Under the operator's [admission clarification](https://github.com/lossyrob/telex/issues/172#issuecomment-6835298564),
 there is no macOS minimum, maximum, per-major, exact-build or UUID admission
