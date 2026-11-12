@@ -730,8 +730,9 @@ Watcher applies an explicit host-specific containment guarantee:
   the capability is enabled, Watcher assigns one process group to the attempt,
   and the detector root plus every process it creates must remain in that group
   until the attempt ends. Work moved outside the group is outside the cleanup
-  guarantee. Until issue #172's implementation and proof are accepted, Watcher
-  fails closed before detector launch on macOS and does not claim macOS support.
+  guarantee. Until issue #172's implementation, native conformance and review
+  are accepted, Watcher fails closed before detector launch on macOS and does
+  not claim macOS support.
 - Every other host fails closed before detector launch until a documented and
   tested containment contract is accepted for that host.
 
@@ -755,16 +756,34 @@ The implementation MUST NOT infer cleanup from the detector leader exiting. It
 MUST retain a PID- and PGID-reuse-safe destructive-ownership anchor through
 every nonzero group signal. Before releasing that anchor, it MUST irreversibly
 seal every path that can signal the group or reconstruct signal authority from
-numeric identity. After exact leader reap, final proof MAY use only a read-only
-former-group observation if pinned kernel/API reasoning and native race evidence
-establish that numeric reuse can produce only conservative presence or
-uncertainty, never false absence, and that no in-scope member can appear after
-an absence result. Terminal evidence may be written and durably synchronized
-only after that proof reports the assigned group absent. The exact guard,
-anchor, signal-seal, and empty-group algorithm remain implementation choices;
-an unreaped group leader plus post-seal observation is an admissible candidate,
-not design proof. If cleanup cannot be proved, the containment owner MUST NOT
-write a successful receipt.
+numeric identity. After exact leader reap, final observation MAY use only a read-only
+former-group observation under the public documented contracts of `waitid`,
+`proc_listpids` and `kill`, plus native conformance, as specified by
+[ADR 0057](DECISIONS.md#0057---macos-containment-uses-version-range-admission-and-native-conformance).
+The completion predicate MUST retain a fresh terminal
+`waitid(P_PID, leader, WEXITED|WNOHANG|WNOWAIT)` result and an unsaturated native
+`int[2]` `PROC_PGRP_ONLY` census showing only the owned leader, followed by the
+irreversible seal, exact reap and `kill(-PGID, 0) == -1/ESRCH`.
+Zero or EPERM is never absence. Terminal evidence may be written and durably
+synchronized only after this predicate holds; a successful Ended receipt
+records that fact, not kernel-proved absence of every transient member.
+Failed or ambiguous completion MUST NOT produce a successful receipt.
+
+ADR 0057 accepts the residual of a transient fork, exec or corpse member
+invisible to both census and `kill`: a false Ended can leave a stray trusted
+detector with closed output that overlaps the next attempt. It cannot authorize
+an unrelated process to be signaled. The 20 D items and R4/R5 open obligations
+are closed as accepted risk, not proved absence. Per-build kernel, KDK, DWARF
+or libsystem equivalence is not an admission or product-validation gate.
+
+The accepted admission domain is native arm64 and x86_64 on macOS 15 or later,
+with runtime version, kernel/process architecture, `sysctl.proc_translated`
+and capability checks for the `proc_listpids` ABI, `int` / `pid_t` sizes and
+`waitid` `WNOWAIT` support. Development/KASAN kernels, Rosetta, versions below
+15 and failed or indeterminate probes MUST be refused before detector release.
+Refusal is neither a receipt nor absence evidence. New major versions enter
+support through native conformance rather than kernel mapping.
+This domain remains unshipped until the #172 product PR is accepted.
 
 An ordinary per-attempt private guard is Watcher runtime machinery, not a helper
 service, only when it is unprivileged, ephemeral, shipped with the runtime,
@@ -804,8 +823,9 @@ automatic resume, or bypass of sender, receipt, store-binding, or readiness
 fences. Existing pending operations continue to reconcile under their own
 receipt/store evidence while the watch remains ineligible; any same-operation
 retry or state commit follows those independent fences. A macOS terminal
-receipt proves only that the assigned process group ended. It does not attest to
-work that violated the non-detaching contract.
+receipt records only that the ADR 0057 completion predicate held, subject to
+the accepted transient-invisibility risk. It does not attest to work that
+violated the non-detaching contract.
 
 Runtime and hardening nodes own native mechanisms and destructive evidence. The
 default Telex coordination daemon is never used for destructive proof.
