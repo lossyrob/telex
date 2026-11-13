@@ -730,9 +730,10 @@ Watcher applies an explicit host-specific containment guarantee:
   the capability is enabled, Watcher assigns one process group to the attempt,
   and the detector root plus every process it creates must remain in that group
   until the attempt ends. Work moved outside the group is outside the cleanup
-  guarantee. Until issue #172's implementation, native conformance and review
-  are accepted, Watcher fails closed before detector launch on macOS and does
-  not claim macOS support.
+  guarantee. Issue #172 implements this capability; a failed or indeterminate
+  admission or capability check still fails closed before detector launch.
+  macOS is not a shipped Watcher distribution until its packaging and sender
+  path are accepted separately.
 - Every other host fails closed before detector launch until a documented and
   tested containment contract is accepted for that host.
 
@@ -1204,8 +1205,9 @@ events; bounded disposable history is not unlimited-duration total-size retentio
 
 The initial operating target is 100 watches with default concurrency four.
 Windows x86_64 is the initial distribution; Linux has the retained SQLite and
-PostgreSQL automated proof scope, not an implied production soak. macOS remains
-unsupported and fails closed before detector launch.
+PostgreSQL automated proof scope, not an implied production soak. macOS has
+native containment conformance for non-detaching detectors (#172) but is not
+yet a shipped Watcher distribution.
 
 ### Snapshot authority and restore fencing
 
