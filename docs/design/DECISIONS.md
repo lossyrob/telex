@@ -2766,12 +2766,17 @@ lifecycle transition cannot later establish idle. This bounded hardening
 does not reconstruct pending starts outside the suffix or claim verified
 producer ordering.
 
-## 0057 - macOS containment uses version-range admission and native conformance
+## 0057 - macOS containment uses capability-based admission and native conformance
 
 - **Date:** 2026-11-12
 - **Status:** Accepted by the operator in
   [#172, decision 6830371292](https://github.com/lossyrob/telex/issues/172#issuecomment-6830371292);
   documentation tracked by [#252](https://github.com/lossyrob/telex/issues/252)
+- **Admission clarification:** The operator's subsequent
+  [2026-11-12 decision 6835298564](https://github.com/lossyrob/telex/issues/172#issuecomment-6835298564)
+  supersedes the earlier macOS 15 minimum, below-15 refusal and new-major
+  coverage-as-admission wording. P1 is resolved; the completed #252 decision
+  and review remain historical records, not rewritten acceptance.
 - **Amends:** ADR 0054's former-group observation, race-safe proof wording,
   native-proof and `decision-needed` consequences, and admission basis.
   Its other requirements remain unchanged.
@@ -2797,20 +2802,34 @@ found no counterexample; this is not proof that the residual is impossible.
 ### Decision
 
 **Admission.** Replace exact-build, per-kernel-UUID and per-class equivalence
-admission with native arm64 and x86_64 on macOS 15 or later. Check admission at
-runtime using `kern.osproductversion` / `kern.osrelease` or equivalent version
-information, kernel versus process architecture, `sysctl.proc_translated`, and
-capability probes. Probe the `proc_listpids` ABI, `int` / `pid_t` sizes and
-`waitid` `WNOWAIT` support. Refuse development and KASAN kernels,
-Rosetta-translated processes, versions below 15, inconsistent architecture and
-failed or indeterminate checks before detector release. An admission refusal
-is neither a cleanup receipt nor absence evidence.
+admission with native arm64 and x86_64 on macOS, admitted through genuine
+runtime capability, identity and safety checks. Retain kernel versus process
+architecture, `sysctl.proc_translated`, development/KASAN exclusions and
+capability checks for the `proc_listpids` ABI, `int` / `pid_t` sizes and
+`waitid` `WNOWAIT` support. Refuse translated runtime/guard execution,
+development and KASAN kernels, incompatible architecture, and unavailable or
+indeterminate required capabilities, identity or safety properties before
+detector release, with the concrete reason. An admission refusal is neither a
+cleanup receipt nor absence evidence.
+`sysctl.proc_translated` ENOENT is the native/Intel case, not an indeterminate
+failure; hosted runners and VMs are not admission failures. A translated
+detector descendant remains an ordinary assigned-group member.
 
-A newer macOS major version enters supported coverage by passing the native
-conformance suite on it, not by kernel mapping. Builds and UUIDs may identify
-test environments but are not an exact-build admission allowlist. The pending
-A/B/C choice is superseded by this version-range policy; no exact ARM 24G830
-hardware requirement or x64-first scope decision remains a prerequisite.
+There is no macOS minimum, maximum, per-major, exact-build or UUID admission
+allowlist. Collecting `kern.osproductversion` / `kern.osrelease` or equivalent
+version information is optional and diagnostic-only: its value or absence
+MUST NOT independently reject execution or produce a warning. Do not warn
+solely because a version is older, newer or not conformance-validated.
+Conformance on available native machines and hosted images remains an
+engineering coverage duty; record actual coverage without turning it into an
+admission list. This does not establish that every macOS version works or that
+macOS 14 has been validated. No kernel mapping, allowlist update or special
+per-run authorization is required solely for a different version.
+
+The pending A/B/C choice remains superseded; no exact ARM 24G830 hardware
+requirement or x64-first scope decision remains a prerequisite. Removing
+version gating does not remove any genuine capability or signal-safety check,
+and creates no new version-policy approval hold.
 
 **Ended basis and unchanged predicate.** Rely on the public documented contracts
 of `waitid`, `proc_listpids` and `kill`, plus native conformance. The private,

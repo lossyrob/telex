@@ -47,6 +47,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_candidate_test.py
 
+      - name: Test Watcher guardian artifact staging
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/stage_watcher_test_guard_test.py
+
       - name: Test Watcher GitHub observation fixtures
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -141,6 +146,13 @@ jobs:
       - name: Prebuild workspace test symbols
         if: runner.os == 'Windows'
         run: cargo test --workspace --no-run --verbose
+
+      - name: Prepare Linux Watcher test guardians
+        if: runner.os == 'Linux'
+        shell: bash
+        run: >-
+          cargo test --workspace --no-run --verbose --message-format=json
+          | python tests/stage_watcher_test_guard.py
 
       - name: Configure Windows crash dumps
         if: runner.os == 'Windows'
@@ -285,7 +297,19 @@ jobs:
           --test installed_current_process
           -- -D warnings
 
-      - name: Record Watcher capacity and recovery sizing evidence
+      - name: Record Watcher capacity and recovery sizing evidence (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          {
+            cargo build -p telex -p telex-watcher --all-features --bins --message-format=json &&
+            cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening --no-run --message-format=json
+          } | python tests/stage_watcher_test_guard.py
+          cargo test -p telex-watcher --all-features --lib sqlite_watcher_runtime_hardening -- --test-threads=1 --nocapture
+
+      - name: Record Watcher capacity and recovery sizing evidence (Windows)
+        if: runner.os == 'Windows'
         timeout-minutes: 10
         run: >-
           cargo build -p telex -p telex-watcher --all-features --bins
@@ -728,6 +752,7 @@ jobs:
             -- --test-threads=1
 
       - name: Run Watcher runtime matrix on live Postgres
+        shell: bash
         env:
           TELEX_PG_REQUIRE: "1"
           PGHOST: 127.0.0.1
@@ -737,7 +762,10 @@ jobs:
           PGDATABASE: postgres
         run: |
           export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
-          cargo build -p telex -p telex-watcher --all-features --bins
+          {
+            cargo build -p telex -p telex-watcher --all-features --bins --message-format=json &&
+            cargo test -p telex-watcher --all-features --lib postgres_watcher_ --no-run --message-format=json
+          } | python tests/stage_watcher_test_guard.py
           cargo test -p telex-watcher --all-features --lib postgres_watcher_ -- --test-threads=1
 
       - name: Run InstalledCurrent process proofs on live Postgres

@@ -5589,6 +5589,38 @@
           "details": "Owner disposition S2 declines the extra historical/current event-shape fixture for the stated owner merit reason. The App verdict is owner-reported, the full private report was not read, and no formal GitHub approval was submitted."
         }
       ]
+    },
+    {
+      "id": "watcher-macos-shared-daemon-bootstrap-identity",
+      "sourceNodeId": "watcher-macos-containment-runtime",
+      "requiredness": "required-for-item-outcome",
+      "description": "The external #257 containment candidate reports that legitimate macOS senders cannot become ready because the shared daemon bootstrap rejects unsupported mapped executable identity. Local #259 owns this shared prerequisite, not a private Watcher daemon path.",
+      "disposition": "external",
+      "target": {
+        "workstreamId": "local-daemon",
+        "nodeId": "macos-daemon-bootstrap-identity",
+        "tracker": "https://github.com/lossyrob/telex/issues/259",
+        "owners": [
+          "Local coordinator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57; implementation owner PENDING external MacBook routing"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "accepted",
+      "rationale": "Campaign promotes the distinct upstream Local identity outcome and one pending external #172 dependency. #172 is blocked for full acceptance, not independent containment preparation/review. Its four completed prerequisites, product owner and full acceptance remain unchanged; #252 remains completed and #254/#255/#256 remain separate.",
+      "terminalPath": "Accepted #259 shared identity/bootstrap delivery enables App readiness/backend integration and Watcher full SQLite/Postgres lifecycle/health proof. The external edge remains pending until explicit owning accepted upstream delivery; issue closure, source-only classification or containment proof alone does not satisfy it. No Local RC2/next-release edge.",
+      "dispositionAuthority": "Campaign call_z0388IxGA0nikCW3cQby2UPr and pending-owner correction call_dz8v25rGilQnAmjAhkJxzxIK. Sole canonical writer prepares only; no publication/launch/native/CI/merge authority.",
+      "evidence": [
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/259",
+          "details": "The #257 author discloses unsupported macOS shared-daemon peer executable identity and no SQLite/Postgres lifecycle/health parity. Local reports source-only classification at b0 daemon.rs 2052-2063, 2372-2387, 2464-2475 and 17333-17343; no Mac reproduction. The reconciler read complete public #259/#172 bodies and attributed coordinator receipts, not source/runtime/CI proof. This is a platform-support gap, not an accepted flaky readiness timeout or a containment-only readiness substitute."
+        },
+        {
+          "source": "issue",
+          "url": "https://github.com/lossyrob/telex/issues/172",
+          "details": "Full #172 acceptance, existing product/docs ownership and four completed prerequisites are retained."
+        }
+      ]
     }
   ]
 }

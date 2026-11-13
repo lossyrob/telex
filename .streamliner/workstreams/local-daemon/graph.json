@@ -657,6 +657,24 @@
         "number": 230
       },
       "dependsOn": []
+    },
+    {
+      "id": "macos-daemon-bootstrap-identity",
+      "type": "task",
+      "title": "Identity-verified macOS daemon bootstrap",
+      "summary": "Planned upstream #259 delivers a supported macOS binding between the selected executable image and running shared daemon peer, preserving bootstrap selection, user/process identity, admission and fail-closed unsupported/indeterminate results. Local coordinator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 is accountable; actual implementation owner and external MacBook label/branch/source binding are PENDING. Campaign withdrew the conditional normal App-owner launch; no Windows/App session or assignment to the #257 containment writer is inferred. Canonical publication of this node/tracker and the #172 dependency is a real launch prerequisite. One separate closing #259 PR needs exact-head implementation/design review, native macOS identity/selection/replacement coverage, legitimate shared ApplicationClient sender readiness, unchanged Windows/Linux behavior and directly related documentation/tests. App owns downstream readiness/backend integration and Watcher retains full #172 SQLite/Postgres lifecycle/health acceptance; upstream acceptance does not satisfy consumer parity. No RC2/next-release edge or new privilege/helper/install/runtime/version-only admission authority.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 259
+      },
+      "dependsOn": []
     }
   ],
   "checkpoints": [
