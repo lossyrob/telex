@@ -468,8 +468,11 @@ jobs:
           echo "source: $(git rev-parse HEAD)"
           echo "arch: $(uname -m)"
           sw_vers
-          # Unix socket paths are length-limited; keep the test base short.
-          base="$RUNNER_TEMP/tx-${{ github.run_id }}-${{ github.run_attempt }}"
+          # Unix socket paths must fit SUN_LEN (104 bytes on macOS). Test
+          # isolation nests several directories under the base, so
+          # $RUNNER_TEMP is too long; the runner is ephemeral, so a short
+          # fixed /tmp base is unique enough.
+          base="/tmp/tx${{ github.run_attempt }}"
           mkdir -p "$base"
           echo "TELEX_TEST_BASE_DIR=$base" >> "$GITHUB_ENV"
 
