@@ -12,6 +12,9 @@ use telex_watcher::presentation::Envelope;
 use telex_watcher::protocol_v2::Registration;
 use telex_watcher::{ManagementAudit, Mutation, Refusal};
 
+#[path = "../../tests/support/telex_isolation.rs"]
+mod isolation;
+
 const SECRET: &str = "opaque-password=do-not-print-793183";
 
 #[test]
@@ -443,13 +446,7 @@ async fn binary_owned_stall_detector_reads_live_management_and_readonly_store() 
     use telex::backend::{sqlite::SqliteBackend, Backend};
     let fixture = Fixture::with_isolated_user_home();
     let home = fixture.user_home.clone().unwrap();
-    let telex = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join(if cfg!(windows) { "telex.exe" } else { "telex" });
+    let telex = isolation::branch_binary();
     assert!(
         telex.is_absolute() && telex.is_file(),
         "run this test with cargo test --workspace"
