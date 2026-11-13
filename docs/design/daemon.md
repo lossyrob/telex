@@ -2072,6 +2072,18 @@ The resulting completion is process-local and in-memory only; it MUST
 NOT rewrite the immutable manifest or act as a selection token. The
 spawned child still performs independent admission and runtime proof.
 All other absent or explicit values fail closed.
+On macOS this probe MUST start suspended in a new owned process group,
+verify the selected witness against the lowest-addressed file-backed
+offset-zero RX/nonwritable regular vnode, and pin the direct child's
+start time before resuming only that PID. The original deadline includes
+verification, collection and cleanup. Unsupported or indeterminate
+launch/identity/ownership refuses without an unsuspended fallback.
+This is the weaker mapped-vnode guarantee below: path replacement is
+detected, not prevented, and Linux exec-link equivalence is not claimed.
+Still-ineligible manifests or failed probes remain refused on every
+platform. An admission-aware updater may install/reselect into a NEW
+immutable manifest as explicit remediation; it MUST NOT rewrite an old
+manifest and does not substitute for compatibility of the eligible shape.
 
 These fields are compatibility and selection metadata. They
 do not provide an executable-content digest or hash, an executable-content
@@ -2160,6 +2172,11 @@ path from the named-pipe server process and compares the capability
 record's admission-backed startup identity to the frozen witness
 identity. The record is owner-private and atomically binds identity to
 the actual server PID, start time, instance, and singleton scope.
+macOS compares the kernel-reported mapped vnode of the peer's
+lowest-addressed file-backed image-header mapping to a held selection
+witness, bracketing the read with process start time as specified below.
+This detects replacement after path-based execution; it does not provide
+Linux exec-link identity or descriptor execution.
 Reopening the path is not file-identity proof. Missing or mismatched
 runtime evidence is a foreign daemon; the client refuses it before
 metadata leaves the client.
@@ -2224,8 +2241,8 @@ a mismatching platform file identity, or a foreign peer projects a
 typed fail-closed outcome. Durable public evidence does not expose raw
 authority paths.
 
-**Platform evidence (Windows and Linux).** The mechanism MUST have
-Windows and Linux process tests covering already-running matching
+**Platform evidence (Windows, Linux and macOS).** The mechanism MUST have
+native process tests on each supported platform covering already-running matching
 daemons, current-version spawn, upgrade, rollback, selector movement at
 each resolution and spawn admission boundary, stale prestarted images,
 selector-client death during spawn, PID reuse,
@@ -2238,6 +2255,13 @@ remain owned by [§11](#11-lease-epoch-fence-the-spine) and
 [§13](#13-delivery-and-seen-dedup). The existing daemon membership,
 epoch, and push contracts, and the daemon-replacement station-intent
 boundary tracked by PR #138, remain unchanged.
+Native macOS evidence additionally requires mapped-vnode replacement and
+unlink coverage and a public `InstalledCurrent` consumer's real send-only
+sender readiness. An attach acknowledgment alone is insufficient:
+registration and sender readiness must hold with no receive readiness,
+attended-but-deaf state, pending inbound consumption, or inbound actionable
+work. Record the exact source, architecture and OS; one host does not
+establish Intel/ARM64, other OS versions, or backend parity not executed.
 
 **Running-image identity on macOS.** macOS has no `/proc/<pid>/exe` and
 cannot execute an open descriptor, so it binds the selection to the
@@ -2287,18 +2311,25 @@ it is not an executable-content digest or signature, and it does not
 isolate against code already running as the same user, which could
 construct an address space whose lowest file-backed mapping is the
 selected file. The in-memory completion of a manifest written by the
-v0.2.1 updater without the admission field needs the bounded exact
-version probe, which is implemented for Windows and Linux only; on
-macOS such a manifest is still refused as `IncompatibleManifest`.
+v0.2.1 updater without the admission field must satisfy the bounded exact
+version-probe contract above, including a witnessed executing image;
+refusal of this reachable installation shape is not supported compatibility.
+
+Supported packaging must produce the required offset-zero executable
+header mapping. A nonzero-offset slice or another layout whose first
+file-backed mapping fails that predicate is unsupported, rather than a
+reason to skip to a later mapping or trust a path. This guarantee does not
+approve a new distribution format, code-signing policy or release.
 
 **Platform evidence (macOS).** The `InstalledCurrent` and
-`ExactExecutable` process tests run natively on macOS for both selection
+`ExactExecutable` process tests MUST run natively on macOS for both selection
 modes, covering matching prestarted reuse, current-version spawn,
 crash/restart and reconnect, upgrade and rollback, selector movement,
 stale prestarted images, replaced exact targets, foreign binders, PID
 reuse evidence, symlink escape, untrusted writability, incompatible
-manifest or build metadata, and daemon-side readiness refusal. The two
-v0.2.1 missing-admission probe tests are reported as ignored on macOS.
+manifest or build metadata, and daemon-side readiness refusal. Native gating
+must also exercise missing-admission compatibility completion and
+immutable-manifest preservation.
 Evidence from one host and architecture is evidence for that host and
 architecture only.
 

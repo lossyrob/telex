@@ -481,6 +481,9 @@ jobs:
     name: Daemon bootstrap image identity (macOS)
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+      TELEX_V021_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source head
         uses: actions/checkout@v4
@@ -492,13 +495,21 @@ jobs:
           echo "source: $(git rev-parse HEAD)"
           echo "arch: $(uname -m)"
           sw_vers
-          # Unix socket paths must fit SUN_LEN (104 bytes on macOS). Test
-          # isolation nests several directories under the base, so
-          # $RUNNER_TEMP is too long; the runner is ephemeral, so a short
-          # fixed /tmp base is unique enough.
-          base="/tmp/tx${{ github.run_attempt }}"
-          mkdir -p "$base"
+          # Keep the canonical base short, unique and owner-private. The
+          # process suite binds the fully composed longest fixture socket.
+          umask 077
+          base="$(mktemp -d /private/tmp/XXXXXX)"
           echo "TELEX_TEST_BASE_DIR=$base" >> "$GITHUB_ENV"
+          evidence="$RUNNER_TEMP/telex-macos-bootstrap"
+          mkdir -p "$evidence"
+          {
+            git rev-parse HEAD HEAD^{tree}
+            uname -a
+            sw_vers
+            xcrun --show-sdk-version
+          } | tee "$evidence/host.txt"
+          echo "TELEX_V021_PROOF_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "TELEX_V021_PROOF_REPORT=$evidence/report.json" >> "$GITHUB_ENV"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -506,19 +517,68 @@ jobs:
           toolchain: stable
 
       - name: Test mapped main-image identity primitive
-        run: >-
-          cargo test --no-default-features --features sqlite --lib
-          platform_fs::tests::macos_main_image -- --nocapture
+        run: |
+          set -o pipefail
+          cargo test --locked --no-default-features --features sqlite --lib \
+            platform_fs::tests::macos_main_image -- --nocapture \
+            2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/image-identity.log"
+
+      - name: Test suspended admission and bounded probe ownership
+        run: |
+          set -o pipefail
+          cargo test --locked --no-default-features --features sqlite --lib \
+            daemon_bootstrap::tests:: -- --nocapture \
+            2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/admission.log"
 
       - name: Test identity-verified bootstrap selection, spawn and reconnect
         # Both bootstrap selection modes against real daemons spawned from an
         # isolated installed layout: matching reuse, spawn, crash/restart,
         # upgrade/rollback, and the stale-image, replaced-target, foreign-binder
         # and selector-movement refusals.
-        run: >-
-          cargo test --no-default-features --features sqlite
-          --test installed_current_process
-          -- --test-threads=1
+        run: |
+          set -o pipefail
+          cargo test --locked --no-default-features --features sqlite \
+            --test installed_current_process -- --test-threads=1 --nocapture \
+            2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/process.log"
+
+      - name: Verify the architecture-matching official v0.2.1 archive
+        run: |
+          case "$(uname -m)" in
+            arm64)
+              target=aarch64-apple-darwin
+              expected=07ab2088645363716c1fa826aa877866e7b3195f155ac8463c973cd2c5256f0f ;;
+            x86_64)
+              target=x86_64-apple-darwin
+              expected=220c49cf3924024d733d0429f2ceaa01289ac95b5eb984c30647100c50478d34 ;;
+            *) echo "Unsupported native architecture" >&2; exit 1 ;;
+          esac
+          asset="telex-v0.2.1-$target.tar.gz"
+          archive="$TELEX_V021_PROOF_EVIDENCE/$asset"
+          url="https://github.com/lossyrob/telex/releases/download/v0.2.1/$asset"
+          curl --fail --location "$url" --output "$archive"
+          curl --fail --location "$url.sha256" --output "$archive.sha256"
+          test "$(shasum -a 256 "$archive" | awk '{print $1}')" = "$expected"
+          test "$(awk '{print $1}' "$archive.sha256")" = "$expected"
+          mkdir "$TELEX_V021_PROOF_EVIDENCE/released"
+          tar -xzf "$archive" -C "$TELEX_V021_PROOF_EVIDENCE/released"
+          echo "TELEX_RELEASED_V021_EXE=$TELEX_V021_PROOF_EVIDENCE/released/telex" >> "$GITHUB_ENV"
+          echo "TELEX_RELEASED_V021_ARCHIVE_SHA256=$expected" >> "$GITHUB_ENV"
+
+      - name: Prove genuine old-writer compatibility and public sender readiness
+        run: |
+          set -o pipefail
+          cargo test --locked --no-default-features --features sqlite \
+            --test installed_current_process released_v021_writer_installs_exact_candidate \
+            -- --ignored --exact --nocapture \
+            2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/released-writer.log"
+
+      - name: Retain native bootstrap and consumer receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-bootstrap-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/telex-macos-bootstrap
+          if-no-files-found: error
 
   credential-macos:
     name: Credential invocation lifecycle (macOS)

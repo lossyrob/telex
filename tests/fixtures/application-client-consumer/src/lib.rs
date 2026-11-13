@@ -370,7 +370,12 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
         .find(|record| record.address == watcher.address)
         .ok_or_else(|| "watcher health record is missing".to_string())?;
     require(
-        watcher_health.sender_ready
+        watcher_health.capability == ApplicationCapability::SendOnly
+            && watcher_health.logical_store_id == store_id
+            && watcher_health.runtime_id == runtime
+            && watcher_health.responsibility == *client.responsibility()
+            && watcher_health.registered
+            && watcher_health.sender_ready
             && !watcher_health.receive_ready
             && !watcher_health.attended_but_deaf
             && watcher_health.pending_unconsumed == 0
@@ -378,6 +383,22 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
         "a send-only Watcher must never present as inbound-attended",
     )?;
     report.record("attendance=send-only");
+    report.record(format!(
+        "sender-health={}",
+        serde_json::json!({
+            "responsibility": watcher_health.responsibility.0,
+            "logical_store_id": watcher_health.logical_store_id.0,
+            "runtime_id": watcher_health.runtime_id.0,
+            "address": watcher_health.address,
+            "capability": "SendOnly",
+            "registered": watcher_health.registered,
+            "sender_ready": watcher_health.sender_ready,
+            "receive_ready": watcher_health.receive_ready,
+            "attended_but_deaf": watcher_health.attended_but_deaf,
+            "pending_unconsumed": watcher_health.pending_unconsumed,
+            "inbound_actionable": watcher_health.inbound_actionable,
+        })
+    ));
 
     // Retention-boundary handling: a handle staged before a prune can no longer
     // claim authoritative absence, and a fresh handle can.
