@@ -270,8 +270,9 @@ an eligible manifest genuinely written by the official v0.2.1 updater.
 
 An unconfirmed prior compatibility-probe cleanup is instead unresolved CLIENT
 process custody, not an invalid immutable manifest. Native legacy probes remain
-blocked until an exact terminal reap, or until restarting the CLIENT process
-when ownership is indeterminate. Do not edit the manifest to clear that hold;
+blocked across roots until restarting the CLIENT process once custody is
+parked. No later numeric-PID observation/reap releases it, even for an
+apparently exited child. Do not edit the manifest to clear that hold;
 strictly admitted selections and cached same-key completion remain unaffected.
 
 ## Replacing temporary consumer seams

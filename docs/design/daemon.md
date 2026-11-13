@@ -2081,15 +2081,16 @@ reap guarantee. Before spawning, the client atomically reserves one
 process-local custody slot and duplicates the SAME opened witness with
 `F_DUPFD_CLOEXEC`. Unconfirmed cleanup MUST refuse and retain the exact child
 and witness in that bounded, non-signaling quarantine, without retaining
-selector locks, a thread, a timer, or a new cleanup service. For a parked,
-still-known generation, the next native legacy-probe admission MUST perform
-one non-consuming
-`waitid(WEXITED|WNOHANG|WNOWAIT)` observation under verified wait ownership,
-followed only for a terminal original child by one exact `waitpid` reap.
-Only that confirmed terminal reap releases the slot and witness. Running
-children refuse; `ECHILD`, indeterminate generation or poisoned custody
-remains sealed until the CLIENT process restarts, with no later signal or
-numeric-PID reap. Already-admitted manifests and cached same-key completion
+selector locks, a thread, a timer, or a new cleanup service. ANY parked
+child-bearing record MUST remain sealed until the CLIENT process restarts,
+across all roots in that process. Later admissions MUST NOT observe, signal,
+reap or release it based on a numeric PID, an old ownership flag, or matching
+start-time queries: a competing same-process waiter can consume the original
+and allow PID reuse between checks and a consuming wait. There is NO
+opportunistic parked-child reap. A confirmed terminal reap during the
+ORIGINAL ACTIVE attempt releases its slot normally; once parked, even an
+apparently exited child retains the slot and witness until CLIENT restart.
+Already-admitted manifests and cached same-key completion
 do not enter this gate. Quarantine is not successful cleanup or native proof.
 Unsupported or indeterminate
 launch/identity/ownership refuses without an unsuspended fallback.

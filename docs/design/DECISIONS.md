@@ -2512,11 +2512,14 @@ original deadline, without promising an unconditional reap. One atomic
 pre-spawn process-local slot retains original child custody and a
 `F_DUPFD_CLOEXEC` duplicate of the SAME opened witness on unconfirmed cleanup.
 It retains no selector lock and performs no background work or later signals.
-A subsequent native legacy-probe admission observes the still-owned child
-once with `WEXITED|WNOHANG|WNOWAIT` and consumes a confirmed terminal status with
-one exact `waitpid`; only that reap releases the slot and witness. Running
-refuses; `ECHILD` or indeterminate generation permanently seals the slot until
-the CLIENT process restarts, without numeric-PID reaping. Strictly admitted
+ANY parked child-bearing record permanently seals native legacy admission
+across roots until the CLIENT process restarts. There is NO opportunistic
+PID observation, signal, reap or slot/witness release: a same-process waiter
+can reap the original and a later child can reuse that PID; repeated start
+checks do not close the final consuming-wait race. Only a confirmed terminal
+reap during the ORIGINAL ACTIVE attempt clears its slot normally. Once
+parked, the original custody/witness persists until CLIENT restart regardless
+of apparent later exit or a stale owned-generation flag. Strictly admitted
 manifests and cached same-key completions are unaffected. Quarantine is not
 successful cleanup or native evidence. Path replacement is
 detected rather than prevented; this does not become Linux exec-link

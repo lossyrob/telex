@@ -1,4 +1,4 @@
-use super::{DaemonBootstrapFailure, MacosExecutableWitness, ProbeLeaderState};
+use super::{DaemonBootstrapFailure, MacosExecutableWitness};
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -21,10 +21,12 @@ thread_local! {
     static REAP_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static GROUP_SIGNALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static CONTINUES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static OBSERVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 pub(super) fn take_observe_error() -> Option<i32> {
+    OBSERVATIONS.with(|count| count.set(count.get() + 1));
     OBSERVE_ERROR.with(|error| error.take())
 }
 
@@ -46,7 +48,7 @@ pub(super) fn record_continue() {
 fn unresolved_custody() -> DaemonBootstrapFailure {
     use std::io::Write;
     // A closed diagnostic sink must not panic during exact-child Drop.
-    let _ = writeln!(std::io::stderr(), "telex: previous compatibility probe cleanup is unconfirmed; exact-child custody is retained without signals; restart the client process to retry if ownership cannot be established");
+    let _ = writeln!(std::io::stderr(), "telex: previous compatibility probe cleanup is unconfirmed; original custody and witness remain permanently quarantined without signals; restart the CLIENT process to retry native compatibility probes");
     DaemonBootstrapFailure::IncompatibleManifest
 }
 
@@ -57,7 +59,7 @@ fn reserve_custody(
         if Instant::now() >= deadline {
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
-        let mut slot = match CUSTODY.try_lock() {
+        let slot = match CUSTODY.try_lock() {
             Ok(slot) => slot,
             Err(TryLockError::WouldBlock) => {
                 std::thread::sleep(Duration::from_millis(10));
@@ -65,34 +67,11 @@ fn reserve_custody(
             }
             Err(TryLockError::Poisoned(_)) => return Err(unresolved_custody()),
         };
-        if let Some(owner) = slot.as_mut() {
-            if !owner.generation_known {
-                return Err(unresolved_custody());
-            }
-            if super::check_probe_wait_ownership().is_err() {
-                owner.generation_known = false;
-                return Err(unresolved_custody());
-            }
-            match super::observe_probe_pid(owner.pid as u32) {
-                Ok(ProbeLeaderState::Exited(_)) => {
-                    let mut status = 0;
-                    let result = unsafe { libc::waitpid(owner.pid, &mut status, libc::WNOHANG) };
-                    if result != owner.pid
-                        || !(libc::WIFEXITED(status) || libc::WIFSIGNALED(status))
-                    {
-                        owner.generation_known = false;
-                        return Err(unresolved_custody());
-                    }
-                    // WNOWAIT above observes; this exact terminal waitpid is
-                    // the sole consuming reap. Only it releases the witness.
-                    slot.take();
-                }
-                Ok(ProbeLeaderState::Running) => return Err(unresolved_custody()),
-                Err(_) => {
-                    owner.generation_known = false;
-                    return Err(unresolved_custody());
-                }
-            }
+        // A same-process waiter could have consumed the original child and
+        // recycled this numeric PID while parked. No later PID query or reap
+        // can release a child-bearing record, even if its old flag says owned.
+        if slot.is_some() {
+            return Err(unresolved_custody());
         }
         return Ok(slot);
     }
@@ -265,8 +244,9 @@ impl Drop for Child {
     fn drop(&mut self) {
         if let Some(owner) = self.custody.as_mut().and_then(|slot| slot.as_mut()) {
             owner._verified_start = self.verified_start;
-            // The slot owns the exact child and CLOEXEC witness after the guard
-            // unlocks. Drop never signals, reaps, or transfers a numeric PID.
+            owner.generation_known = false;
+            // The slot retains original custody and the CLOEXEC witness after
+            // unlocking, never future wait authority over the stored PID.
             unresolved_custody();
         }
     }
@@ -339,17 +319,34 @@ mod tests {
         let executable = std::env::current_exe().unwrap();
         let witness = super::super::open_macos_witness(&executable).unwrap();
         let identity = witness.identity;
+        let command = || {
+            let mut command = Command::new(&executable);
+            command
+                .env_clear()
+                .env("TELEX_TEST_PROBE_ENTRY_MARKER", &marker)
+                .args([
+                    "--exact",
+                    "daemon_bootstrap::tests::macos_admission_marker_fixture",
+                    "--ignored",
+                ]);
+            command
+        };
+        if case == "deadline" {
+            let output = super::super::run_bounded_probe_process(
+                command(),
+                Duration::from_secs(10),
+                4096,
+                &witness,
+            )
+            .expect("normal authenticated probe before quarantine");
+            assert!(output.success && marker.is_file());
+            assert!(CUSTODY.try_lock().unwrap().is_none());
+            std::fs::remove_file(&marker).unwrap();
+            GROUP_SIGNALS.with(|count| count.set(0));
+            CONTINUES.with(|count| count.set(0));
+        }
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut command = Command::new(&executable);
-        command
-            .env_clear()
-            .env("TELEX_TEST_PROBE_ENTRY_MARKER", &marker)
-            .args([
-                "--exact",
-                "daemon_bootstrap::tests::macos_admission_marker_fixture",
-                "--ignored",
-            ]);
-        let mut child = Child::spawn(&command, &witness, deadline).unwrap();
+        let mut child = Child::spawn(&command(), &witness, deadline).unwrap();
         let mut group = super::super::ProbeProcessGroup::attach(&child).unwrap();
         let fd = child
             .custody
@@ -386,23 +383,30 @@ mod tests {
                 assert!(result >= 0 && Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(10));
             }
-            if case == "eintr" {
-                OBSERVE_ERROR.with(|error| error.set(Some(libc::EINTR)));
+            if case == "reused" {
+                assert!(
+                    child.owns_generation(),
+                    "competing reap was not observed by the adapter"
+                );
             } else {
-                assert_eq!(case, "echild");
+                if case == "eintr" {
+                    OBSERVE_ERROR.with(|error| error.set(Some(libc::EINTR)));
+                } else {
+                    assert_eq!(case, "echild");
+                }
+                assert!(super::super::observe_probe_leader(&mut child).is_err());
+                assert!(!child.owns_generation());
+                assert!(super::super::resume_probe_process(&mut child, deadline).is_err());
+                assert_eq!(
+                    super::super::fail_probe_process(
+                        &mut child,
+                        &mut group,
+                        deadline,
+                        DaemonBootstrapFailure::ExecutableIdentityMismatch
+                    ),
+                    DaemonBootstrapFailure::IncompatibleManifest
+                );
             }
-            assert!(super::super::observe_probe_leader(&mut child).is_err());
-            assert!(!child.owns_generation());
-            assert!(super::super::resume_probe_process(&mut child, deadline).is_err());
-            assert_eq!(
-                super::super::fail_probe_process(
-                    &mut child,
-                    &mut group,
-                    deadline,
-                    DaemonBootstrapFailure::ExecutableIdentityMismatch
-                ),
-                DaemonBootstrapFailure::IncompatibleManifest
-            );
         }
         assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
         assert_eq!(CONTINUES.with(|count| count.get()), 0);
@@ -419,75 +423,74 @@ mod tests {
             );
             assert_eq!(owner.pid, pid);
         }
-        if case == "deadline" {
-            while matches!(
-                super::super::observe_probe_pid(pid as u32),
-                Ok(ProbeLeaderState::Running)
-            ) {
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(10));
+        let mut unrelated = if case == "reused" {
+            let mut command = command();
+            command
+                .env(
+                    "TELEX_TEST_PROBE_ENTRY_MARKER",
+                    root.join("unrelated-entry"),
+                )
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let other = command.spawn().expect("different real child");
+            loop {
+                match super::super::observe_probe_pid(other.id()) {
+                    Ok(super::super::ProbeLeaderState::Exited(_)) => break,
+                    Ok(super::super::ProbeLeaderState::Running) => {
+                        assert!(Instant::now() < deadline);
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("unrelated child observation: {error:?}"),
+                }
             }
-            let slot =
-                reserve_custody(deadline).expect("one exact terminal reap permits next admission");
-            assert!(slot.is_none());
-            assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, -1);
-            drop(slot);
-            let witness = super::super::open_macos_witness(&executable).unwrap();
-            let mut next = Child::spawn(&command, &witness, deadline).unwrap();
-            let mut group = super::super::ProbeProcessGroup::attach(&next).unwrap();
-            assert_eq!(
-                super::super::fail_probe_process(
-                    &mut next,
-                    &mut group,
-                    deadline,
-                    DaemonBootstrapFailure::IncompatibleManifest
-                ),
-                DaemonBootstrapFailure::IncompatibleManifest
-            );
-            assert!(!next.owns_generation());
-            assert!(CUSTODY.try_lock().unwrap().is_none());
-            assert!(
-                !marker.exists(),
-                "quarantined or cleanup-only children never entered"
-            );
-            let output = super::super::run_bounded_probe_process(
-                command,
-                Duration::from_secs(10),
-                4096,
-                &witness,
-            )
-            .expect("subsequent authenticated metadata probe");
-            assert!(output.success);
-            assert!(marker.is_file());
-            assert!(
-                CUSTODY.try_lock().unwrap().is_none(),
-                "successful probe leaves no custody slot"
-            );
-            std::fs::remove_file(&marker).unwrap();
+            // Simulate numeric-PID reuse after an UNOBSERVED competing reap.
+            // The new PID belongs to a different REAL terminal child; a stale
+            // flag/start must never authorize stealing its consuming wait.
+            let mut slot = CUSTODY.try_lock().unwrap();
+            let owner = slot.as_mut().unwrap();
+            owner.pid = other.id() as libc::pid_t;
+            owner._verified_start = Some(u64::MAX);
+            owner.generation_known = true;
+            Some(other)
         } else {
-            let witness = super::super::open_macos_witness(&executable).unwrap();
-            assert!(
-                Child::spawn(&command, &witness, deadline).is_err(),
-                "lost generation refuses a second native admission"
+            None
+        };
+        let observations = OBSERVATIONS.with(|count| count.get());
+        let witness = super::super::open_macos_witness(&executable).unwrap();
+        assert!(
+            Child::spawn(&command(), &witness, deadline).is_err(),
+            "ANY parked child-bearing record refuses admission"
+        );
+        assert_eq!(
+            OBSERVATIONS.with(|count| count.get()),
+            observations,
+            "parked admission performs no PID observation"
+        );
+        {
+            let slot = CUSTODY.try_lock().unwrap();
+            let owner = slot.as_ref().expect("no parked slot/witness release");
+            let metadata = owner._witness.metadata().unwrap();
+            assert_eq!(
+                (metadata.dev(), metadata.ino()),
+                (identity.high, identity.low)
             );
-            assert!(
-                !CUSTODY
-                    .try_lock()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .generation_known
-            );
-            assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
-            assert_eq!(CONTINUES.with(|count| count.get()), 0);
+            assert_eq!(owner._witness.as_raw_fd(), fd);
         }
+        if let Some(other) = unrelated.as_mut() {
+            assert!(other
+                .wait()
+                .expect("unrelated terminal status was NOT reaped")
+                .success());
+        }
+        assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
+        assert_eq!(CONTINUES.with(|count| count.get()), 0);
         assert!(!marker.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn native_returned_errors_retain_witness_and_gate_admission_until_exact_reap() {
-        for case in ["deadline", "echild", "eintr"] {
+    fn native_returned_errors_permanently_retain_parked_custody_without_reaping_reused_pid() {
+        for case in ["deadline", "echild", "eintr", "reused"] {
             let output = Command::new(std::env::current_exe().unwrap())
                 .env("TELEX_TEST_PROBE_CUSTODY_CASE", case)
                 .args([
