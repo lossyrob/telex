@@ -313,7 +313,7 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
     report.record("retry=replayed");
 
     // Exact-operation recovery from the prepared handle.
-    match client
+    let recorded = match client
         .reconcile_operation(&recovery)
         .await
         .map_err(|e| format!("reconcile_operation: {e}"))?
@@ -324,9 +324,28 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
                 "recovery must resolve the exact operation",
             )?;
             report.record("recovery=recorded");
+            record
         }
         other => return Err(format!("expected a recorded operation, got {other:?}")),
-    }
+    };
+    report.record(format!(
+        "sender-operation={}",
+        serde_json::json!({
+            "firstConnection": {
+                "responsibility": client.responsibility(),
+                "logical_store_id": store_id,
+                "runtime_id": runtime,
+            },
+            "reconnection": {
+                "responsibility": reconnected.responsibility(),
+                "logical_store_id": reconnected.logical_store_id(),
+                "runtime_id": reconnected.runtime_id(),
+            },
+            "send": sent,
+            "replay": replay,
+            "recovery": { "classification": "Recorded", "record": recorded },
+        })
+    ));
 
     // A peer targeting the send-only membership must observe that it is not an
     // inbound-attended destination.

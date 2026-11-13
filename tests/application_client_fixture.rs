@@ -83,6 +83,8 @@ const WATCHER_EVIDENCE: &[&str] = &[
     "retry=replayed",
     "recovery=recorded",
     "attendance=send-only",
+    "sender-health=",
+    "sender-operation=",
     "retention=boundary-crossed",
 ];
 

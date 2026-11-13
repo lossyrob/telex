@@ -484,6 +484,7 @@ jobs:
     env:
       TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
       TELEX_V021_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      TELEX_V021_ARTIFACT_NAME: macos-bootstrap-${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source head
         uses: actions/checkout@v4
@@ -510,6 +511,10 @@ jobs:
           } | tee "$evidence/host.txt"
           echo "TELEX_V021_PROOF_EVIDENCE=$evidence" >> "$GITHUB_ENV"
           echo "TELEX_V021_PROOF_REPORT=$evidence/report.json" >> "$GITHUB_ENV"
+          echo "TELEX_V021_EXPECTED_TREE=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
+          echo "TELEX_V021_HOST_OS=macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))" >> "$GITHUB_ENV"
+          echo "TELEX_V021_HOST_ARCH=$(uname -m)" >> "$GITHUB_ENV"
+          echo "TELEX_V021_HOST_SDK=$(xcrun --show-sdk-version)" >> "$GITHUB_ENV"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -527,7 +532,7 @@ jobs:
         run: |
           set -o pipefail
           cargo test --locked --no-default-features --features sqlite --lib \
-            daemon_bootstrap::tests:: -- --nocapture \
+            daemon_bootstrap:: -- --nocapture \
             2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/admission.log"
 
       - name: Test identity-verified bootstrap selection, spawn and reconnect
@@ -563,6 +568,8 @@ jobs:
           tar -xzf "$archive" -C "$TELEX_V021_PROOF_EVIDENCE/released"
           echo "TELEX_RELEASED_V021_EXE=$TELEX_V021_PROOF_EVIDENCE/released/telex" >> "$GITHUB_ENV"
           echo "TELEX_RELEASED_V021_ARCHIVE_SHA256=$expected" >> "$GITHUB_ENV"
+          echo "TELEX_RELEASED_V021_ARCHIVE_PATH=$archive" >> "$GITHUB_ENV"
+          echo "TELEX_RELEASED_V021_SIDECAR_PATH=$archive.sha256" >> "$GITHUB_ENV"
 
       - name: Prove genuine old-writer compatibility and public sender readiness
         run: |
@@ -978,6 +985,18 @@ jobs:
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TELEX_RELEASED_V021_ARCHIVE_SHA256=$archiveHash" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_RELEASED_V021_ARCHIVE_PATH=$archive" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_RELEASED_V021_SIDECAR_PATH=$sidecar" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_EXPECTED_TREE=$(git rev-parse 'HEAD^{tree}')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_HOST_OS=$([Environment]::OSVersion.VersionString)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_HOST_ARCH=$([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TELEX_V021_HOST_SDK=not-applicable-windows" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TELEX_V021_PROOF_REPORT=$(Join-Path $evidence 'report.json')" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TELEX_V021_PROOF_EVIDENCE=$evidence" |
@@ -988,6 +1007,7 @@ jobs:
         env:
           TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
           TELEX_V021_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          TELEX_V021_ARTIFACT_NAME: released-v021-upgrade-proof-${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $log = Join-Path $env:TELEX_V021_PROOF_EVIDENCE "cargo-test.log"
           cargo test --no-default-features --features sqlite `
