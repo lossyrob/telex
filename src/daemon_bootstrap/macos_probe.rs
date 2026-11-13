@@ -1,14 +1,109 @@
-use super::DaemonBootstrapFailure;
+use super::{DaemonBootstrapFailure, MacosExecutableWitness, ProbeLeaderState};
 use std::ffi::CString;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
+
+struct Custody {
+    pid: libc::pid_t,
+    _witness: std::fs::File,
+    _verified_start: Option<u64>,
+    generation_known: bool,
+}
+
+static CUSTODY: Mutex<Option<Custody>> = Mutex::new(None);
+
+#[cfg(test)]
+thread_local! {
+    static OBSERVE_ERROR: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+    static REAP_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static GROUP_SIGNALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CONTINUES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn take_observe_error() -> Option<i32> {
+    OBSERVE_ERROR.with(|error| error.take())
+}
+
+#[cfg(test)]
+pub(super) fn take_reap_pending() -> bool {
+    REAP_PENDING.with(|pending| pending.replace(false))
+}
+
+#[cfg(test)]
+pub(super) fn record_group_signal() {
+    GROUP_SIGNALS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(super) fn record_continue() {
+    CONTINUES.with(|count| count.set(count.get() + 1));
+}
+
+fn unresolved_custody() -> DaemonBootstrapFailure {
+    use std::io::Write;
+    // A closed diagnostic sink must not panic during exact-child Drop.
+    let _ = writeln!(std::io::stderr(), "telex: previous compatibility probe cleanup is unconfirmed; exact-child custody is retained without signals; restart the client process to retry if ownership cannot be established");
+    DaemonBootstrapFailure::IncompatibleManifest
+}
+
+fn reserve_custody(
+    deadline: Instant,
+) -> Result<MutexGuard<'static, Option<Custody>>, DaemonBootstrapFailure> {
+    loop {
+        if Instant::now() >= deadline {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let mut slot = match CUSTODY.try_lock() {
+            Ok(slot) => slot,
+            Err(TryLockError::WouldBlock) => {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(TryLockError::Poisoned(_)) => return Err(unresolved_custody()),
+        };
+        if let Some(owner) = slot.as_mut() {
+            if !owner.generation_known {
+                return Err(unresolved_custody());
+            }
+            if super::check_probe_wait_ownership().is_err() {
+                owner.generation_known = false;
+                return Err(unresolved_custody());
+            }
+            match super::observe_probe_pid(owner.pid as u32) {
+                Ok(ProbeLeaderState::Exited(_)) => {
+                    let mut status = 0;
+                    let result = unsafe { libc::waitpid(owner.pid, &mut status, libc::WNOHANG) };
+                    if result != owner.pid
+                        || !(libc::WIFEXITED(status) || libc::WIFSIGNALED(status))
+                    {
+                        owner.generation_known = false;
+                        return Err(unresolved_custody());
+                    }
+                    // WNOWAIT above observes; this exact terminal waitpid is
+                    // the sole consuming reap. Only it releases the witness.
+                    slot.take();
+                }
+                Ok(ProbeLeaderState::Running) => return Err(unresolved_custody()),
+                Err(_) => {
+                    owner.generation_known = false;
+                    return Err(unresolved_custody());
+                }
+            }
+        }
+        return Ok(slot);
+    }
+}
 
 pub(super) struct Child {
     pid: u32,
     pub(super) stdout: Option<std::io::PipeReader>,
     pub(super) stderr: Option<std::io::PipeReader>,
     pub(super) verified_start: Option<u64>,
+    custody: Option<MutexGuard<'static, Option<Custody>>>,
 }
 
 impl Child {
@@ -16,7 +111,30 @@ impl Child {
         self.pid
     }
 
-    pub(super) fn spawn(command: &Command) -> Result<Self, DaemonBootstrapFailure> {
+    pub(super) fn owns_generation(&self) -> bool {
+        self.custody
+            .as_ref()
+            .and_then(|slot| slot.as_ref())
+            .is_some_and(|owner| owner.generation_known)
+    }
+
+    pub(super) fn lose_generation(&mut self) {
+        if let Some(owner) = self.custody.as_mut().and_then(|slot| slot.as_mut()) {
+            owner.generation_known = false;
+        }
+    }
+
+    pub(super) fn mark_reaped(&mut self) {
+        if let Some(mut slot) = self.custody.take() {
+            slot.take();
+        }
+    }
+
+    pub(super) fn spawn(
+        command: &Command,
+        witness: &MacosExecutableWitness,
+        deadline: Instant,
+    ) -> Result<Self, DaemonBootstrapFailure> {
         let failure = || DaemonBootstrapFailure::IncompatibleManifest;
         if !std::path::Path::new(command.get_program()).is_absolute()
             || command.get_current_dir().is_some()
@@ -99,12 +217,34 @@ impl Child {
         } {
             return Err(failure());
         }
-        let mut pid = 0;
-        // All buffers and descriptor owners outlive the native call. On success
-        // ownership passes directly into Child, still suspended, with no reaper.
+        let slot = reserve_custody(deadline)?;
+        let witness_fd = unsafe { libc::fcntl(witness.file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+        if witness_fd < 0 {
+            return Err(failure());
+        }
+        let held_witness = unsafe { std::fs::File::from_raw_fd(witness_fd) };
+        let mut child = Self {
+            pid: 0,
+            stdout: Some(stdout),
+            stderr: Some(stderr),
+            verified_start: None,
+            custody: Some(slot),
+        };
+        let Some(slot) = child.custody.as_mut() else {
+            return Err(failure());
+        };
+        let owner = slot.insert(Custody {
+            pid: 0,
+            _witness: held_witness,
+            _verified_start: None,
+            generation_known: true,
+        });
+        // The global slot and witness are armed before spawn, and the kernel
+        // writes its PID directly into that custody. Nothing fallible allocates
+        // or transfers ownership after successful spawn.
         let result = unsafe {
             libc::posix_spawn(
-                &mut pid,
+                &mut owner.pid,
                 program.as_ptr(),
                 &actions.0,
                 &attributes.0,
@@ -113,14 +253,22 @@ impl Child {
             )
         };
         if result != 0 {
+            slot.take();
             return Err(failure());
         }
-        Ok(Self {
-            pid: pid as u32,
-            stdout: Some(stdout),
-            stderr: Some(stderr),
-            verified_start: None,
-        })
+        child.pid = owner.pid as u32;
+        Ok(child)
+    }
+}
+
+impl Drop for Child {
+    fn drop(&mut self) {
+        if let Some(owner) = self.custody.as_mut().and_then(|slot| slot.as_mut()) {
+            owner._verified_start = self.verified_start;
+            // The slot owns the exact child and CLOEXEC witness after the guard
+            // unlocks. Drop never signals, reaps, or transfers a numeric PID.
+            unresolved_custody();
+        }
     }
 }
 
@@ -160,6 +308,201 @@ impl Drop for Attributes {
     fn drop(&mut self) {
         unsafe {
             libc::posix_spawnattr_destroy(&mut self.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    #[test]
+    #[ignore = "subprocess role used by the real native custody-retention regression"]
+    fn custody_fixture() {
+        let Some(case) = std::env::var_os("TELEX_TEST_PROBE_CUSTODY_CASE") else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!(
+            "telex-custody-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .unwrap();
+        let marker = root.join("entry");
+        let executable = std::env::current_exe().unwrap();
+        let witness = super::super::open_macos_witness(&executable).unwrap();
+        let identity = witness.identity;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut command = Command::new(&executable);
+        command
+            .env_clear()
+            .env("TELEX_TEST_PROBE_ENTRY_MARKER", &marker)
+            .args([
+                "--exact",
+                "daemon_bootstrap::tests::macos_admission_marker_fixture",
+                "--ignored",
+            ]);
+        let mut child = Child::spawn(&command, &witness, deadline).unwrap();
+        let mut group = super::super::ProbeProcessGroup::attach(&child).unwrap();
+        let fd = child
+            .custody
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            ._witness
+            .as_raw_fd();
+        assert_ne!(
+            unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC,
+            0
+        );
+        let pid = child.id() as libc::pid_t;
+        group.signal_and_seal(&mut child).unwrap();
+        drop(witness);
+
+        if case == "deadline" {
+            REAP_PENDING.with(|pending| pending.set(true));
+            assert_eq!(
+                super::super::finalize_probe_process(&mut child, &mut group, Instant::now()),
+                Err(DaemonBootstrapFailure::IncompatibleManifest)
+            );
+            assert!(child.owns_generation());
+        } else {
+            // A real competing waiter consumes the terminal child. The
+            // production adapter must retain, never guess at a recycled PID.
+            loop {
+                let mut status = 0;
+                let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+                if result == pid {
+                    break;
+                }
+                assert!(result >= 0 && Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if case == "eintr" {
+                OBSERVE_ERROR.with(|error| error.set(Some(libc::EINTR)));
+            } else {
+                assert_eq!(case, "echild");
+            }
+            assert!(super::super::observe_probe_leader(&mut child).is_err());
+            assert!(!child.owns_generation());
+            assert!(super::super::resume_probe_process(&mut child, deadline).is_err());
+            assert_eq!(
+                super::super::fail_probe_process(
+                    &mut child,
+                    &mut group,
+                    deadline,
+                    DaemonBootstrapFailure::ExecutableIdentityMismatch
+                ),
+                DaemonBootstrapFailure::IncompatibleManifest
+            );
+        }
+        assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
+        assert_eq!(CONTINUES.with(|count| count.get()), 0);
+        drop(child);
+        {
+            let slot = CUSTODY.try_lock().unwrap();
+            let owner = slot
+                .as_ref()
+                .expect("unconfirmed cleanup retains exact custody");
+            let metadata = owner._witness.metadata().unwrap();
+            assert_eq!(
+                (metadata.dev(), metadata.ino()),
+                (identity.high, identity.low)
+            );
+            assert_eq!(owner.pid, pid);
+        }
+        if case == "deadline" {
+            while matches!(
+                super::super::observe_probe_pid(pid as u32),
+                Ok(ProbeLeaderState::Running)
+            ) {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let slot =
+                reserve_custody(deadline).expect("one exact terminal reap permits next admission");
+            assert!(slot.is_none());
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, -1);
+            drop(slot);
+            let witness = super::super::open_macos_witness(&executable).unwrap();
+            let mut next = Child::spawn(&command, &witness, deadline).unwrap();
+            let mut group = super::super::ProbeProcessGroup::attach(&next).unwrap();
+            assert_eq!(
+                super::super::fail_probe_process(
+                    &mut next,
+                    &mut group,
+                    deadline,
+                    DaemonBootstrapFailure::IncompatibleManifest
+                ),
+                DaemonBootstrapFailure::IncompatibleManifest
+            );
+            assert!(!next.owns_generation());
+            assert!(CUSTODY.try_lock().unwrap().is_none());
+            assert!(
+                !marker.exists(),
+                "quarantined or cleanup-only children never entered"
+            );
+            let output = super::super::run_bounded_probe_process(
+                command,
+                Duration::from_secs(10),
+                4096,
+                &witness,
+            )
+            .expect("subsequent authenticated metadata probe");
+            assert!(output.success);
+            assert!(marker.is_file());
+            assert!(
+                CUSTODY.try_lock().unwrap().is_none(),
+                "successful probe leaves no custody slot"
+            );
+            std::fs::remove_file(&marker).unwrap();
+        } else {
+            let witness = super::super::open_macos_witness(&executable).unwrap();
+            assert!(
+                Child::spawn(&command, &witness, deadline).is_err(),
+                "lost generation refuses a second native admission"
+            );
+            assert!(
+                !CUSTODY
+                    .try_lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .generation_known
+            );
+            assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
+            assert_eq!(CONTINUES.with(|count| count.get()), 0);
+        }
+        assert!(!marker.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_returned_errors_retain_witness_and_gate_admission_until_exact_reap() {
+        for case in ["deadline", "echild", "eintr"] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .env("TELEX_TEST_PROBE_CUSTODY_CASE", case)
+                .args([
+                    "--exact",
+                    "daemon_bootstrap::macos_probe::tests::custody_fixture",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 }

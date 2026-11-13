@@ -2507,7 +2507,18 @@ for the reachable missing-field shape or permission to edit an old manifest.
 Its metadata probe starts suspended, retains the selected witness, checks
 the lowest-addressed file-backed offset-zero RX/nonwritable vnode and
 direct-child start time before resuming only the authenticated PID, and
-includes termination/reap in the original deadline. Path replacement is
+keeps verification, collection and attempted termination/reap within the
+original deadline, without promising an unconditional reap. One atomic
+pre-spawn process-local slot retains original child custody and a
+`F_DUPFD_CLOEXEC` duplicate of the SAME opened witness on unconfirmed cleanup.
+It retains no selector lock and performs no background work or later signals.
+A subsequent native legacy-probe admission observes the still-owned child
+once with `WEXITED|WNOHANG|WNOWAIT` and consumes a confirmed terminal status with
+one exact `waitpid`; only that reap releases the slot and witness. Running
+refuses; `ECHILD` or indeterminate generation permanently seals the slot until
+the CLIENT process restarts, without numeric-PID reaping. Strictly admitted
+manifests and cached same-key completions are unaffected. Quarantine is not
+successful cleanup or native evidence. Path replacement is
 detected rather than prevented; this does not become Linux exec-link
 identity. Unavailable suspension, image identity or child ownership fails
 closed without an unsuspended fallback. Present-invalid keys, non-0.3.x

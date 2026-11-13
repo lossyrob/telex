@@ -261,6 +261,19 @@ authority paths. The client does not fall back automatically from
 typed failure surfaces to the caller so it can act on the specific
 condition.
 
+For an ineligible missing-admission selection, a present-invalid admission
+key, a non-0.3.x target or a failed compatibility probe, keep refusing the
+selection. An admission-aware updater may install/reselect a NEW immutable
+manifest as remediation; never edit the old manifest or fall back to another
+bootstrap policy. This does not replace the required compatibility proof for
+an eligible manifest genuinely written by the official v0.2.1 updater.
+
+An unconfirmed prior compatibility-probe cleanup is instead unresolved CLIENT
+process custody, not an invalid immutable manifest. Native legacy probes remain
+blocked until an exact terminal reap, or until restarting the CLIENT process
+when ownership is indeterminate. Do not edit the manifest to clear that hold;
+strictly admitted selections and cached same-key completion remain unaffected.
+
 ## Replacing temporary consumer seams
 
 Existing consumer code that reached the daemon through a private path

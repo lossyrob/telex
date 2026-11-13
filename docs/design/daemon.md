@@ -2075,8 +2075,23 @@ All other absent or explicit values fail closed.
 On macOS this probe MUST start suspended in a new owned process group,
 verify the selected witness against the lowest-addressed file-backed
 offset-zero RX/nonwritable regular vnode, and pin the direct child's
-start time before resuming only that PID. The original deadline includes
-verification, collection and cleanup. Unsupported or indeterminate
+start time before resuming only that PID. The original deadline bounds
+verification, collection and attempted cleanup; it is not an unconditional
+reap guarantee. Before spawning, the client atomically reserves one
+process-local custody slot and duplicates the SAME opened witness with
+`F_DUPFD_CLOEXEC`. Unconfirmed cleanup MUST refuse and retain the exact child
+and witness in that bounded, non-signaling quarantine, without retaining
+selector locks, a thread, a timer, or a new cleanup service. For a parked,
+still-known generation, the next native legacy-probe admission MUST perform
+one non-consuming
+`waitid(WEXITED|WNOHANG|WNOWAIT)` observation under verified wait ownership,
+followed only for a terminal original child by one exact `waitpid` reap.
+Only that confirmed terminal reap releases the slot and witness. Running
+children refuse; `ECHILD`, indeterminate generation or poisoned custody
+remains sealed until the CLIENT process restarts, with no later signal or
+numeric-PID reap. Already-admitted manifests and cached same-key completion
+do not enter this gate. Quarantine is not successful cleanup or native proof.
+Unsupported or indeterminate
 launch/identity/ownership refuses without an unsuspended fallback.
 This is the weaker mapped-vnode guarantee below: path replacement is
 detected, not prevented, and Linux exec-link equivalence is not claimed.
