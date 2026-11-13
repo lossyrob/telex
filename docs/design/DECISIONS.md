@@ -2486,7 +2486,26 @@ validates one immutable target:
   authentication; and
 - platform file and process identity (Linux process-image descriptor plus
   device/inode; Windows canonical final path plus volume/file identity held
-  through process creation with compatible sharing).
+  through process creation with compatible sharing; macOS kernel-reported
+  mapped-vnode device/inode bound to a held selected-file witness and a
+  start-time-pinned peer).
+
+On macOS the lowest-addressed file-backed mapping must be a regular file
+mapped from offset zero, readable and executable but not writable. Its
+vnode identity must equal the selection, with process start time unchanged
+across the read and through peer authentication. Path-based spawn detects
+replacement when that comparison fails; it cannot execute an open
+descriptor or provide Linux exec-link identity. The child uses the same
+mapped-image primitive before publishing readiness. The witness prevents
+inode reuse while held, not path replacement.
+
+This mapping predicate limits supported installation formats: a nonzero-
+offset executable slice or another incompatible mapping layout fails closed.
+It is not a content digest, signature or intra-user isolation. Code already
+running as the same user could construct an address space satisfying the
+mapping predicate; that remains inside the existing same-user exclusion.
+Unsupported or indeterminate identity never falls back to path, PID alone,
+or a successful handshake.
 
 One compatibility exception applies to the raw manifest shape produced
 when the published v0.2.1 updater installs a 0.3.x binary. The admission
@@ -2499,6 +2518,31 @@ client writes no manifest, releases exclusive admission, reacquires
 shared admission, and revalidates unchanged selector, manifest bytes and
 identity, target path, and target identity. The child still performs
 independent admission and runtime proof.
+The same bounded compatibility outcome is required on macOS; installing
+into a new admission-aware manifest can be remediation but is not a waiver
+for the reachable missing-field shape or permission to edit an old manifest.
+Its metadata probe starts suspended, retains the selected witness, checks
+the lowest-addressed file-backed offset-zero RX/nonwritable vnode and
+direct-child start time before resuming only the authenticated PID, and
+keeps verification, collection and attempted termination/reap within the
+original deadline, without promising an unconditional reap. One atomic
+pre-spawn process-local slot retains original child custody and a
+`F_DUPFD_CLOEXEC` duplicate of the SAME opened witness on unconfirmed cleanup.
+It retains no selector lock and performs no background work or later signals.
+ANY parked child-bearing record permanently seals native legacy admission
+across roots until the CLIENT process restarts. There is NO opportunistic
+PID observation, signal, reap or slot/witness release: a same-process waiter
+can reap the original and a later child can reuse that PID; repeated start
+checks do not close the final consuming-wait race. Only a confirmed terminal
+reap during the ORIGINAL ACTIVE attempt clears its slot normally. Once
+parked, the original custody/witness persists until CLIENT restart regardless
+of apparent later exit or a stale owned-generation flag. Strictly admitted
+manifests and cached same-key completions are unaffected. Quarantine is not
+successful cleanup or native evidence. Path replacement is
+detected rather than prevented; this does not become Linux exec-link
+identity. Unavailable suspension, image identity or child ownership fails
+closed without an unsuspended fallback. Present-invalid keys, non-0.3.x
+targets and failed probes remain ineligible on all platforms.
 
 These fields are compatibility and selection metadata. They do **not**
 provide an executable-content digest or hash, an executable-content
@@ -2576,13 +2620,19 @@ promoted contract lives in
 [application-client.md](application-client.md) and
 [daemon.md](daemon.md); the supported Rust surface is documented in
 [application-client-core.md](../application-client-core.md). The
-installed-current mechanism must have Windows and Linux process tests
+installed-current mechanism must have native Windows, Linux and macOS process tests
 covering already-running matching daemons, current-version spawn,
 upgrade, rollback, selector movement at each admission boundary, stale
 prestarted images, selector-client death during spawn, PID reuse,
 symlink or reparse escape, untrusted writability, incompatible manifest
 or build metadata, platform file identity mismatch, and readiness
-refusal. Credentialed Postgres and Linux process evidence remain
+refusal, including missing-admission completion without manifest mutation.
+macOS additionally requires mapped-image replacement/unlink negatives and
+the public InstalledCurrent real send-only sender receipt: registered and
+sender-ready, not receive-ready or attended-but-deaf, with zero inbound
+pending/actionable work. Exact source, architecture and OS accompany native
+evidence; arm64 SQLite evidence does not establish Intel or Postgres parity.
+Credentialed Postgres and Linux process evidence remain
 authoritative CI obligations for issue #152; this decision does not by
 itself pass `consumer-integration-gate`, publish a release, complete
 packaging or operational hardening, or authorize consumer launch. ADR

@@ -2072,6 +2072,53 @@ The resulting completion is process-local and in-memory only; it MUST
 NOT rewrite the immutable manifest or act as a selection token. The
 spawned child still performs independent admission and runtime proof.
 All other absent or explicit values fail closed.
+On macOS this probe MUST start suspended in a new owned process group,
+and matching-child `waitid(WEXITED|WSTOPPED|WNOHANG|WNOWAIT)` MUST show
+`CLD_STOPPED` with status zero or `SIGSTOP` both before authentication and
+freshly before `SIGCONT`. A no-event/running observation before `SIGCONT`
+MUST refuse, not substitute for the stopped precondition. Stopped-state
+evidence alone is neither executable identity nor terminal/reap proof.
+The client MUST
+verify the selected witness against the lowest-addressed file-backed
+offset-zero RX/nonwritable regular vnode, and pin the direct child's
+start time before resuming only that PID. The original deadline bounds
+verification, collection and attempted cleanup; it is not an unconditional
+reap guarantee. During the original active attempt, still-owned stopped
+state permits the single group `SIGKILL` for ordinary refusal/expiry;
+sealing that signal authority does not itself lose child generation.
+Stopped state remains pending during collection/reap. Only a terminal
+`CLD_EXITED`, `CLD_KILLED` or `CLD_DUMPED` non-consuming observation permits
+the single consuming terminal wait. Changed generation, observation error,
+trapped/continued/unsupported state or mismatched PID MUST refuse and seal
+generation without later numeric signals or reap.
+Before spawning, the client atomically reserves one
+process-local custody slot and duplicates the SAME opened witness with
+`F_DUPFD_CLOEXEC`. Unconfirmed cleanup MUST refuse and retain the exact child
+and witness in that bounded, non-signaling quarantine, without retaining
+selector locks, a thread, a timer, or a new cleanup service. ANY parked
+child-bearing record MUST remain sealed until the CLIENT process restarts,
+across all roots in that process. Later admissions MUST NOT observe, signal,
+reap or release it based on a numeric PID, an old ownership flag, or matching
+start-time queries: a competing same-process waiter can consume the original
+and allow PID reuse between checks and a consuming wait. There is NO
+opportunistic parked-child reap. A confirmed terminal reap during the
+ORIGINAL ACTIVE attempt releases its slot normally; once parked, even an
+apparently exited child retains the slot and witness until CLIENT restart.
+Already-admitted manifests and cached same-key completion
+do not enter this gate. Quarantine is not successful cleanup or native proof.
+macOS cleanup diagnostics distinguish ownership refusal, the group-signal
+return/errno and signal seal, and the consuming terminal-wait result, with
+thread labels for correlation. Finalization reports when signal failure
+skips the reap. A terminal leader observation alone does not establish group
+containment or successful cleanup; these diagnostics grant no new authority.
+Unsupported or indeterminate
+launch/identity/ownership refuses without an unsuspended fallback.
+This is the weaker mapped-vnode guarantee below: path replacement is
+detected, not prevented, and Linux exec-link equivalence is not claimed.
+Still-ineligible manifests or failed probes remain refused on every
+platform. An admission-aware updater may install/reselect into a NEW
+immutable manifest as explicit remediation; it MUST NOT rewrite an old
+manifest and does not substitute for compatibility of the eligible shape.
 
 These fields are compatibility and selection metadata. They
 do not provide an executable-content digest or hash, an executable-content
@@ -2160,6 +2207,11 @@ path from the named-pipe server process and compares the capability
 record's admission-backed startup identity to the frozen witness
 identity. The record is owner-private and atomically binds identity to
 the actual server PID, start time, instance, and singleton scope.
+macOS compares the kernel-reported mapped vnode of the peer's
+lowest-addressed file-backed image-header mapping to a held selection
+witness, bracketing the read with process start time as specified below.
+This detects replacement after path-based execution; it does not provide
+Linux exec-link identity or descriptor execution.
 Reopening the path is not file-identity proof. Missing or mismatched
 runtime evidence is a foreign daemon; the client refuses it before
 metadata leaves the client.
@@ -2224,8 +2276,8 @@ a mismatching platform file identity, or a foreign peer projects a
 typed fail-closed outcome. Durable public evidence does not expose raw
 authority paths.
 
-**Platform evidence (Windows and Linux).** The mechanism MUST have
-Windows and Linux process tests covering already-running matching
+**Platform evidence (Windows, Linux and macOS).** The mechanism MUST have
+native process tests on each supported platform covering already-running matching
 daemons, current-version spawn, upgrade, rollback, selector movement at
 each resolution and spawn admission boundary, stale prestarted images,
 selector-client death during spawn, PID reuse,
@@ -2238,6 +2290,83 @@ remain owned by [§11](#11-lease-epoch-fence-the-spine) and
 [§13](#13-delivery-and-seen-dedup). The existing daemon membership,
 epoch, and push contracts, and the daemon-replacement station-intent
 boundary tracked by PR #138, remain unchanged.
+Native macOS evidence additionally requires mapped-vnode replacement and
+unlink coverage and a public `InstalledCurrent` consumer's real send-only
+sender readiness. An attach acknowledgment alone is insufficient:
+registration and sender readiness must hold with no receive readiness,
+attended-but-deaf state, pending inbound consumption, or inbound actionable
+work. Record the exact source, architecture and OS; one host does not
+establish Intel/ARM64, other OS versions, or backend parity not executed.
+
+**Running-image identity on macOS.** macOS has no `/proc/<pid>/exe` and
+cannot execute an open descriptor, so it binds the selection to the
+running peer differently from Linux while keeping the same `(device,
+inode)` evidence and the same refusals:
+
+- The selected executable is opened without following a final symlink
+  and its `(device, inode)` must equal the frozen selection. The open
+  descriptor is held through `HelloAck`; it does not block replacement,
+  it keeps the selected inode allocated so the compared number cannot be
+  reissued to another file.
+- The daemon is spawned by its canonical path. Replacement between
+  selection and exec is therefore not prevented; it is detected, because
+  the peer that then answers is running a different file.
+- The connected peer's PID comes from the socket (`LOCAL_PEERPID`) and
+  its UID from `getpeereid`. Its image identity is read from the kernel
+  with `proc_pidinfo(PROC_PIDREGIONPATHINFO)`: the vnode behind the
+  peer's lowest-addressed file-backed mapping, which must be a regular
+  file mapped from offset zero, readable and executable and not
+  writable, i.e. the Mach-O header mapping the kernel creates at exec.
+  That `(device, inode)` must equal the selection. It is a property of
+  the mapped vnode, so renaming, replacing, or unlinking the path the
+  image was started from does not change it. `proc_pidpath` and any
+  reopened pathname are never the identity.
+- The read names the peer by PID, so it is bracketed by the peer's
+  process start time and the same start time is carried into the
+  capability-record PID/start-time pin. A PID recycled during
+  verification is refused.
+- The spawned daemon reads its own image identity the same way before
+  publishing endpoint, capability, or readiness, so its startup evidence
+  is the mapped image rather than a pathname lookup.
+
+The canonical process-image path, UID, PID/start-time, admission-backed
+capability evidence, and `HelloAck` build, version, protocol, and
+capability checks are unchanged and all still required. The read needs
+no privilege, entitlement, or helper for a same-user peer. It fails
+closed as a typed unsupported result, surfaced to bootstrap callers as
+a foreign peer, when the kernel will not report the peer's regions
+(another user's process, an exited process), when the first file-backed
+mapping is not an image header, or when no file-backed mapping is found
+within a bounded walk. Unix platforms other than Linux and macOS have no
+such primitive wired and refuse bootstrap before selection or spawn with
+`running peer executable file identity` unsupported.
+
+This is file identity, with the limits already stated for the contract:
+it is not an executable-content digest or signature, and it does not
+isolate against code already running as the same user, which could
+construct an address space whose lowest file-backed mapping is the
+selected file. The in-memory completion of a manifest written by the
+v0.2.1 updater without the admission field must satisfy the bounded exact
+version-probe contract above, including a witnessed executing image;
+refusal of this reachable installation shape is not supported compatibility.
+
+Supported packaging must produce the required offset-zero executable
+header mapping. A nonzero-offset slice or another layout whose first
+file-backed mapping fails that predicate is unsupported, rather than a
+reason to skip to a later mapping or trust a path. This guarantee does not
+approve a new distribution format, code-signing policy or release.
+
+**Platform evidence (macOS).** The `InstalledCurrent` and
+`ExactExecutable` process tests MUST run natively on macOS for both selection
+modes, covering matching prestarted reuse, current-version spawn,
+crash/restart and reconnect, upgrade and rollback, selector movement,
+stale prestarted images, replaced exact targets, foreign binders, PID
+reuse evidence, symlink escape, untrusted writability, incompatible
+manifest or build metadata, and daemon-side readiness refusal. Native gating
+must also exercise missing-admission compatibility completion and
+immutable-manifest preservation.
+Evidence from one host and architecture is evidence for that host and
+architecture only.
 
 ## 17. Gating tests + per-backend conformance matrix (daemon-core acceptance)
 

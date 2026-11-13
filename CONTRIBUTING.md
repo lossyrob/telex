@@ -130,6 +130,32 @@ discovery. Acquisition errors are observed directly instead of being reported
 as an indistinguishable readiness timeout. Deterministic error/identity seams
 supplement, rather than replace, real platform scope/termination/reap and pipe tests.
 
+## Native macOS installed-current bootstrap coverage
+
+The `daemon-bootstrap-identity-macos` job checks out the exact PR head and
+records the source tree, OS, architecture and SDK. It tests the suspended
+metadata probe, ownership/deadline cleanup and the complete installed-current
+process suite. A short, unique mode-0700 base keeps the composed fixture socket
+inside `sockaddr_un.sun_path`; the suite checks the actual length and binds it.
+For local native runs, create a private base before running those targets:
+
+```sh
+umask 077
+export TELEX_TEST_BASE_DIR="$(mktemp -d /private/tmp/XXXXXX)"
+cargo test --locked --no-default-features --features sqlite --lib daemon_bootstrap::tests::
+cargo test --locked --no-default-features --features sqlite --test installed_current_process -- --test-threads=1
+```
+
+CI separately verifies the pinned architecture-matching official v0.2.1
+archive, then invokes its updater to install the exact candidate. The explicit
+ignored `released_v021_writer_installs_exact_candidate` proof checks the
+genuinely missing raw admission field, unchanged manifest, exact candidate
+bytes/metadata and the existing public Watcher send-only probe on that same
+root. The artifact includes the raw manifest, sender-health tuple and command
+logs. The two enabled synthetic missing-field tests are additional coverage,
+not substitutes for this proof. Cross-compilation and another architecture's
+results are not native execution evidence.
+
 ## Stall-detector fixture isolation
 
 On Unix, workspace tests require `TELEX_TEST_HOME_ROOT` for the binary-owned

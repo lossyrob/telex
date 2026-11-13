@@ -842,19 +842,29 @@ fn probe_legacy_admission_candidate(
     #[cfg(target_os = "linux")]
     let probe_executable = executable_witness.exec_path().to_path_buf();
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    let executable_witness = open_macos_witness(&candidate.token.target_exe)?;
+    #[cfg(target_os = "macos")]
+    let probe_executable = candidate.token.target_exe.clone();
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = candidate;
         let _ = trusted_root;
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         if executable_witness.identity != candidate.token.file_identity {
             return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
         }
-        let metadata = run_admission_version_probe(&probe_executable, trusted_root)?;
+        let metadata = run_admission_version_probe(
+            &probe_executable,
+            trusted_root,
+            #[cfg(target_os = "macos")]
+            &executable_witness,
+        )?;
         if metadata.package_version != candidate.token.package_version
             || metadata.build_id != candidate.token.build_id
             || metadata.schema_min != candidate.token.schema_min
@@ -893,10 +903,11 @@ fn probe_legacy_admission_candidate(
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn run_admission_version_probe(
     executable: &Path,
     trusted_root: &Path,
+    #[cfg(target_os = "macos")] witness: &MacosExecutableWitness,
 ) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
     use std::process::{Command, Stdio};
 
@@ -906,6 +917,7 @@ fn run_admission_version_probe(
     let mut command = Command::new(executable);
     command
         .env_clear()
+        .stdin(Stdio::null())
         .env(install::LAUNCHER_GUARD_ENV, "1")
         .args(["--json", "version", "--root"])
         .arg(trusted_root)
@@ -916,7 +928,13 @@ fn run_admission_version_probe(
             command.env(key, value);
         }
     }
-    let output = run_bounded_probe_process(command, PROBE_TIMEOUT, PROBE_OUTPUT_LIMIT)?;
+    let output = run_bounded_probe_process(
+        command,
+        PROBE_TIMEOUT,
+        PROBE_OUTPUT_LIMIT,
+        #[cfg(target_os = "macos")]
+        witness,
+    )?;
     if !output.success {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
@@ -925,21 +943,29 @@ fn run_admission_version_probe(
     parse_probe_metadata(&value)
 }
 
+#[cfg(target_os = "macos")]
+mod macos_probe;
+
+#[cfg(target_os = "macos")]
+type ProbeChild = macos_probe::Child;
 #[cfg(any(windows, target_os = "linux"))]
+type ProbeChild = std::process::Child;
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 #[derive(Debug)]
 struct ProbeOutput {
     success: bool,
     stdout: Vec<u8>,
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 struct ProbePipe<R> {
     reader: R,
     captured: Vec<u8>,
     eof: bool,
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 impl<R> ProbePipe<R> {
     fn new(reader: R) -> Self {
         Self {
@@ -956,6 +982,9 @@ fn configure_probe_command(command: &mut std::process::Command) {
     command.process_group(0);
 }
 
+#[cfg(target_os = "macos")]
+fn configure_probe_command(_command: &mut std::process::Command) {}
+
 #[cfg(windows)]
 fn configure_probe_command(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
@@ -963,7 +992,7 @@ fn configure_probe_command(command: &mut std::process::Command) {
     command.creation_flags(CREATE_SUSPENDED);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProbeGroupOwnership {
     Anchored,
@@ -971,7 +1000,7 @@ enum ProbeGroupOwnership {
     Reaped,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl ProbeGroupOwnership {
     fn seal(&mut self) -> bool {
         if *self == Self::Anchored {
@@ -992,15 +1021,15 @@ impl ProbeGroupOwnership {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 struct ProbeProcessGroup {
     pid: i32,
     ownership: ProbeGroupOwnership,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl ProbeProcessGroup {
-    fn attach(child: &std::process::Child) -> Result<Self, DaemonBootstrapFailure> {
+    fn attach(child: &ProbeChild) -> Result<Self, DaemonBootstrapFailure> {
         Ok(Self {
             pid: i32::try_from(child.id())
                 .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?,
@@ -1008,28 +1037,64 @@ impl ProbeProcessGroup {
         })
     }
 
-    fn signal_and_seal(
-        &mut self,
-        child: &mut std::process::Child,
-    ) -> Result<(), DaemonBootstrapFailure> {
+    fn signal_and_seal(&mut self, child: &mut ProbeChild) -> Result<(), DaemonBootstrapFailure> {
+        #[cfg(target_os = "macos")]
+        let thread = std::thread::current().id();
         if self.ownership == ProbeGroupOwnership::Sealed {
+            #[cfg(target_os = "macos")]
+            eprintln!("telex: admission probe group cleanup; thread={thread:?} phase=already-sealed signal_attempted=false");
             return Ok(());
+        }
+        #[cfg(target_os = "macos")]
+        if !child.owns_generation() {
+            self.seal_without_signal();
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=generation-lost signal_attempted=false ownership={:?}",
+                self.ownership
+            );
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         // A cached exit observation is not current wait authority. Recheck
         // both process-wide SIGCHLD policy and exact unreaped-leader
         // ownership immediately before the sole nonzero group signal.
         if check_probe_wait_ownership().is_err() {
+            #[cfg(target_os = "macos")]
+            child.lose_generation();
             self.seal_without_signal();
+            #[cfg(target_os = "macos")]
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=wait-ownership-refused signal_attempted=false ownership={:?}",
+                self.ownership
+            );
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         let observed = observe_probe_leader(child);
         if !probe_signal_authorized(&observed) {
             self.seal_without_signal();
+            #[cfg(target_os = "macos")]
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=observation-refused observed={observed:?} signal_attempted=false ownership={:?}",
+                self.ownership
+            );
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
-        let signaled = unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0;
+        #[cfg(all(test, target_os = "macos"))]
+        macos_probe::record_group_signal();
+        let result = unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+        #[cfg(target_os = "macos")]
+        let errno = if result != 0 {
+            std::io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
         self.ownership.seal();
-        if signaled {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe group cleanup; thread={thread:?} phase=group-kill observed={observed:?} result={result} errno={errno:?} ownership={:?} generation_known={}",
+            self.ownership,
+            child.owns_generation()
+        );
+        if result == 0 {
             Ok(())
         } else {
             Err(DaemonBootstrapFailure::IncompatibleManifest)
@@ -1048,12 +1113,85 @@ impl ProbeProcessGroup {
 }
 
 #[cfg(target_os = "linux")]
-fn resume_probe_process(_child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+fn resume_probe_process(_child: &mut ProbeChild) -> Result<(), DaemonBootstrapFailure> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn authenticate_suspended_probe(
+    child: &mut ProbeChild,
+    expected: FileIdentity,
+) -> Result<(), DaemonBootstrapFailure> {
+    if let Err(error) = check_probe_wait_ownership() {
+        child.lose_generation();
+        return Err(error);
+    }
+    let observed = observe_probe_leader(child);
+    if !probe_suspended_state_authorized(&observed) {
+        eprintln!("telex: admission probe authentication requires owned stopped state; observed={observed:?}");
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let before = crate::session_watch::capture_process_start_time(child.id())
+        .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let (dev, ino) = crate::platform_fs::process_main_image_file_identity(child.id())
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let after = crate::session_watch::capture_process_start_time(child.id())
+        .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if before != after {
+        child.lose_generation();
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    if expected
+        != (FileIdentity {
+            kind: FileIdentityKind::UnixDevIno,
+            high: dev,
+            low: ino,
+        })
+    {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    child.verified_start = Some(after);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn resume_probe_process(
+    child: &mut ProbeChild,
+    cleanup_at: Instant,
+) -> Result<(), DaemonBootstrapFailure> {
+    if !child.owns_generation() {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    if let Err(error) = check_probe_wait_ownership() {
+        child.lose_generation();
+        return Err(error);
+    }
+    let observed = observe_probe_leader(child);
+    if !probe_suspended_state_authorized(&observed) {
+        eprintln!(
+            "telex: admission probe pre-CONT requires owned stopped state; observed={observed:?}"
+        );
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let start = crate::session_watch::capture_process_start_time(child.id())
+        .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if child.verified_start != Some(start) {
+        child.lose_generation();
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    if Instant::now() >= cleanup_at {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    #[cfg(test)]
+    macos_probe::record_continue();
+    if unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGCONT) } != 0 {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
     Ok(())
 }
 
 #[cfg(windows)]
-fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstrapFailure> {
+fn resume_probe_process(child: &mut ProbeChild) -> Result<(), DaemonBootstrapFailure> {
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
@@ -1092,7 +1230,7 @@ fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstr
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl Drop for ProbeProcessGroup {
     fn drop(&mut self) {
         if self.ownership == ProbeGroupOwnership::Anchored {
@@ -1181,21 +1319,24 @@ impl Drop for ProbeProcessGroup {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+#[derive(Debug, PartialEq, Eq)]
 enum ProbeLeaderState {
     Running,
+    #[cfg(target_os = "macos")]
+    Stopped,
     Exited(bool),
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 #[derive(Debug, PartialEq, Eq)]
 enum ProbeObserveError {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     OwnershipLost,
     Failure,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn classify_probe_observe_error(error: &std::io::Error) -> ProbeObserveError {
     if error.raw_os_error() == Some(libc::ECHILD) {
         ProbeObserveError::OwnershipLost
@@ -1204,22 +1345,46 @@ fn classify_probe_observe_error(error: &std::io::Error) -> ProbeObserveError {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn probe_signal_authorized(observed: &Result<ProbeLeaderState, ProbeObserveError>) -> bool {
+    #[cfg(target_os = "macos")]
+    if matches!(observed, Ok(ProbeLeaderState::Stopped)) {
+        return true;
+    }
     matches!(
         observed,
         Ok(ProbeLeaderState::Running | ProbeLeaderState::Exited(_))
     )
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
+fn probe_suspended_state_authorized(
+    observed: &Result<ProbeLeaderState, ProbeObserveError>,
+) -> bool {
+    matches!(observed, Ok(ProbeLeaderState::Stopped))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
     let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
     if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) } != 0 {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe SIGCHLD query failed; errno={:?} thread={:?}",
+            std::io::Error::last_os_error().raw_os_error(),
+            std::thread::current().id()
+        );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let handler = action.sa_sigaction;
     if handler == libc::SIG_IGN || action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0 {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe SIGCHLD policy unavailable; ignored={} no_child_wait={} thread={:?}",
+            handler == libc::SIG_IGN,
+            action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0,
+            std::thread::current().id()
+        );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     Ok(())
@@ -1230,34 +1395,83 @@ fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-fn observe_probe_leader(
-    child: &mut std::process::Child,
-) -> Result<ProbeLeaderState, ProbeObserveError> {
-    let pid = i32::try_from(child.id()).map_err(|_| ProbeObserveError::Failure)?;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn observe_probe_leader(child: &mut ProbeChild) -> Result<ProbeLeaderState, ProbeObserveError> {
+    #[cfg(target_os = "macos")]
+    if !child.owns_generation() {
+        return Err(ProbeObserveError::OwnershipLost);
+    }
+    let result = observe_probe_pid(child.id());
+    #[cfg(target_os = "macos")]
+    if result.is_err() {
+        child.lose_generation();
+    }
+    result
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
+    #[cfg(all(test, target_os = "macos"))]
+    if let Some(errno) = macos_probe::take_observe_error() {
+        return Err(classify_probe_observe_error(
+            &std::io::Error::from_raw_os_error(errno),
+        ));
+    }
+    let pid = i32::try_from(pid).map_err(|_| ProbeObserveError::Failure)?;
     let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
-    let result = unsafe {
-        libc::waitid(
-            libc::P_PID,
-            pid as libc::id_t,
-            &mut info,
-            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-        )
-    };
+    let options = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    #[cfg(target_os = "macos")]
+    let options = options | libc::WSTOPPED;
+    let result = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, options) };
     if result != 0 {
         let error = std::io::Error::last_os_error();
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe waitid failed; errno={:?} thread={:?}",
+            error.raw_os_error(),
+            std::thread::current().id()
+        );
         return Err(classify_probe_observe_error(&error));
     }
     let observed_pid = unsafe { info.si_pid() };
+    let code = info.si_code;
+    let status = unsafe { info.si_status() };
+    let observed = classify_probe_wait_observation(pid, observed_pid, code, status);
+    #[cfg(target_os = "macos")]
+    if observed_pid != 0 || observed.is_err() {
+        eprintln!(
+            "telex: admission probe waitid observation; pid_matches={} code={code} status={status} options=0x{options:x} classified={observed:?} thread={:?}",
+            observed_pid == pid,
+            std::thread::current().id()
+        );
+    }
+    observed
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn classify_probe_wait_observation(
+    pid: libc::pid_t,
+    observed_pid: libc::pid_t,
+    code: libc::c_int,
+    status: libc::c_int,
+) -> Result<ProbeLeaderState, ProbeObserveError> {
     if observed_pid == 0 {
+        #[cfg(target_os = "macos")]
+        if code != 0 || status != 0 {
+            return Err(ProbeObserveError::Failure);
+        }
         return Ok(ProbeLeaderState::Running);
     }
     if observed_pid != pid {
         return Err(ProbeObserveError::Failure);
     }
-    match info.si_code {
-        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(unsafe { info.si_status() } == 0)),
+    match code {
+        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(status == 0)),
         libc::CLD_KILLED | libc::CLD_DUMPED => Ok(ProbeLeaderState::Exited(false)),
+        #[cfg(target_os = "macos")]
+        libc::CLD_STOPPED if status == 0 || status == libc::SIGSTOP => {
+            Ok(ProbeLeaderState::Stopped)
+        }
         _ => Err(ProbeObserveError::Failure),
     }
 }
@@ -1272,7 +1486,7 @@ fn observe_probe_leader(
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn prepare_probe_pipe<R: std::os::fd::AsRawFd>(pipe: &R) -> Result<(), DaemonBootstrapFailure> {
     let fd = pipe.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -1287,7 +1501,7 @@ fn prepare_probe_pipe<R>(_pipe: &R) -> Result<(), DaemonBootstrapFailure> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn drain_probe_pipe<R: std::io::Read>(
     pipe: &mut ProbePipe<R>,
     cap: usize,
@@ -1311,6 +1525,7 @@ fn drain_probe_pipe<R: std::io::Read>(
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            #[cfg(target_os = "linux")]
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
         }
@@ -1367,11 +1582,12 @@ fn drain_probe_pipe<R: std::io::Read + std::os::windows::io::AsRawHandle>(
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn run_bounded_probe_process(
     mut command: std::process::Command,
     timeout: Duration,
     output_cap: usize,
+    #[cfg(target_os = "macos")] witness: &MacosExecutableWitness,
 ) -> Result<ProbeOutput, DaemonBootstrapFailure> {
     const CLEANUP_RESERVE: Duration = Duration::from_millis(500);
     configure_probe_command(&mut command);
@@ -1381,9 +1597,12 @@ fn run_bounded_probe_process(
     let cleanup_at = deadline
         .checked_sub(CLEANUP_RESERVE.min(timeout / 2))
         .unwrap_or(start);
+    #[cfg(any(windows, target_os = "linux"))]
     let mut child = command
         .spawn()
         .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    #[cfg(target_os = "macos")]
+    let mut child = ProbeChild::spawn(&command, witness, cleanup_at)?;
     let mut group = match ProbeProcessGroup::attach(&child) {
         Ok(group) => group,
         Err(error) => {
@@ -1391,9 +1610,25 @@ fn run_bounded_probe_process(
             return Err(error);
         }
     };
-    if resume_probe_process(&child).is_err() {
-        terminate_probe_process(&mut child, &mut group, deadline);
-        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    #[cfg(target_os = "macos")]
+    if Instant::now() >= cleanup_at {
+        return Err(fail_probe_process(
+            &mut child,
+            &mut group,
+            deadline,
+            DaemonBootstrapFailure::IncompatibleManifest,
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(error) = authenticate_suspended_probe(&mut child, witness.identity) {
+        return Err(fail_probe_process(&mut child, &mut group, deadline, error));
+    }
+    if let Err(error) = resume_probe_process(
+        &mut child,
+        #[cfg(target_os = "macos")]
+        cleanup_at,
+    ) {
+        return Err(fail_probe_process(&mut child, &mut group, deadline, error));
     }
     let Some(stdout) = child.stdout.take() else {
         terminate_probe_process(&mut child, &mut group, deadline);
@@ -1422,19 +1657,27 @@ fn run_bounded_probe_process(
         if leader_success.is_none() {
             leader_success = match observe_probe_leader(&mut child) {
                 Ok(ProbeLeaderState::Running) => None,
+                #[cfg(target_os = "macos")]
+                Ok(ProbeLeaderState::Stopped) => None,
                 Ok(ProbeLeaderState::Exited(success)) => Some(success),
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 Err(ProbeObserveError::OwnershipLost) => {
                     // Another waiter or automatic SIGCHLD policy destroyed
                     // the unreaped leader anchor. Seal immediately so neither
                     // this path nor Drop can signal a recycled numeric PGID.
                     group.seal_without_signal();
+                    #[cfg(target_os = "macos")]
+                    eprintln!("telex: admission probe lost child ownership; cleanup unconfirmed");
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
                 Err(ProbeObserveError::Failure) => {
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", target_os = "macos"))]
                     {
                         group.seal_without_signal();
+                        #[cfg(target_os = "macos")]
+                        eprintln!(
+                            "telex: admission probe ownership query failed; cleanup unconfirmed"
+                        );
                         return Err(DaemonBootstrapFailure::IncompatibleManifest);
                     }
                     #[cfg(windows)]
@@ -1451,6 +1694,8 @@ fn run_bounded_probe_process(
         if !timed_out && now >= cleanup_at {
             timed_out = true;
             if group.signal_and_seal(&mut child).is_err() {
+                #[cfg(target_os = "macos")]
+                eprintln!("telex: admission probe deadline cleanup unconfirmed");
                 return Err(DaemonBootstrapFailure::IncompatibleManifest);
             }
             #[cfg(windows)]
@@ -1485,57 +1730,194 @@ fn terminate_direct_probe_process(child: &mut std::process::Child, deadline: Ins
     let _ = child.try_wait();
 }
 
-#[cfg(any(windows, target_os = "linux"))]
-fn terminate_probe_process(
-    child: &mut std::process::Child,
-    group: &mut ProbeProcessGroup,
-    deadline: Instant,
-) {
-    if group.signal_and_seal(child).is_err() {
-        return;
-    }
-    #[cfg(windows)]
-    let _ = child.kill();
-    if reap_probe_leader(child, deadline).is_ok() {
-        group.mark_reaped();
+#[cfg(target_os = "macos")]
+fn terminate_direct_probe_process(child: &mut ProbeChild, deadline: Instant) {
+    if check_probe_wait_ownership().is_ok() && probe_signal_authorized(&observe_probe_leader(child))
+    {
+        unsafe {
+            libc::kill(child.id() as libc::pid_t, libc::SIGKILL);
+        }
+        if reap_probe_leader(child, deadline).is_err() {
+            eprintln!("telex: admission probe direct-child cleanup unconfirmed");
+        }
+    } else {
+        child.lose_generation();
+        eprintln!("telex: admission probe direct-child ownership unavailable; cleanup unconfirmed");
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn fail_probe_process(
+    child: &mut ProbeChild,
+    group: &mut ProbeProcessGroup,
+    deadline: Instant,
+    primary: DaemonBootstrapFailure,
+) -> DaemonBootstrapFailure {
+    #[cfg(target_os = "macos")]
+    {
+        if group.signal_and_seal(child).is_err() || reap_probe_leader(child, deadline).is_err() {
+            eprintln!("telex: admission probe failed ({primary}); cleanup unconfirmed");
+            return DaemonBootstrapFailure::IncompatibleManifest;
+        }
+        group.mark_reaped();
+    }
+    #[cfg(not(target_os = "macos"))]
+    terminate_probe_process(child, group, deadline);
+    primary
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn terminate_probe_process(
+    child: &mut ProbeChild,
+    group: &mut ProbeProcessGroup,
+    deadline: Instant,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        fail_probe_process(
+            child,
+            group,
+            deadline,
+            DaemonBootstrapFailure::IncompatibleManifest,
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if group.signal_and_seal(child).is_err() {
+            return;
+        }
+        #[cfg(windows)]
+        let _ = child.kill();
+        if reap_probe_leader(child, deadline).is_ok() {
+            group.mark_reaped();
+        }
+    }
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn finalize_probe_process(
-    child: &mut std::process::Child,
+    child: &mut ProbeChild,
     group: &mut ProbeProcessGroup,
     deadline: Instant,
 ) -> Result<(), DaemonBootstrapFailure> {
-    // Signal while the Linux leader remains an unreaped ownership anchor.
+    // Signal while the Unix leader remains an unreaped ownership anchor.
     // `signal_and_seal` makes every later Drop path incapable of signaling a
     // recycled numeric process-group id.
-    group.signal_and_seal(child)?;
-    reap_probe_leader(child, deadline)?;
+    if group.signal_and_seal(child).is_err() {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe final cleanup unconfirmed; phase=signal reap=not-attempted thread={:?}",
+            std::thread::current().id()
+        );
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    if reap_probe_leader(child, deadline).is_err() {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe final cleanup unconfirmed; phase=reap thread={:?}",
+            std::thread::current().id()
+        );
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
     group.mark_reaped();
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn reap_probe_leader(
-    child: &mut std::process::Child,
+    child: &mut ProbeChild,
     deadline: Instant,
 ) -> Result<(), DaemonBootstrapFailure> {
+    #[cfg(target_os = "macos")]
+    let thread = std::thread::current().id();
     let pid =
         i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    #[cfg(target_os = "macos")]
+    if !child.owns_generation() {
+        eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=generation-lost waitpid_attempted=false");
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
     loop {
+        #[cfg(target_os = "macos")]
+        {
+            if check_probe_wait_ownership().is_err() {
+                child.lose_generation();
+                eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=wait-ownership waitpid_attempted=false");
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            #[cfg(test)]
+            let pending = macos_probe::take_reap_pending();
+            #[cfg(not(test))]
+            let pending = false;
+            let observed = if pending {
+                Ok(ProbeLeaderState::Running)
+            } else {
+                observe_probe_leader(child)
+            };
+            match observed {
+                Ok(ProbeLeaderState::Exited(_)) => {}
+                Ok(state @ (ProbeLeaderState::Running | ProbeLeaderState::Stopped)) => {
+                    if Instant::now() >= deadline {
+                        eprintln!("telex: admission probe active reap unconfirmed; thread={thread:?} phase=pending-deadline observed={state:?} injected_pending={pending} waitpid_attempted=false");
+                        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=terminal-observation observed={error:?} waitpid_attempted=false");
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+            }
+        }
         let mut status = 0;
         let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        #[cfg(target_os = "macos")]
+        let errno = if result < 0 {
+            std::io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let observed_status = (result == pid).then_some(status);
+            let terminal =
+                (result == pid).then_some(libc::WIFEXITED(status) || libc::WIFSIGNALED(status));
+            eprintln!(
+                "telex: admission probe active reap; thread={thread:?} phase=waitpid pid_matches={} returned_zero={} returned_error={} errno={errno:?} status={observed_status:?} terminal={terminal:?}",
+                result == pid,
+                result == 0,
+                result < 0
+            );
+        }
         if result == pid {
+            #[cfg(target_os = "macos")]
+            {
+                if !(libc::WIFEXITED(status) || libc::WIFSIGNALED(status)) {
+                    child.lose_generation();
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
+                child.mark_reaped();
+                eprintln!("telex: admission probe active reap; thread={thread:?} phase=confirmed-terminal-reap");
+            }
             return Ok(());
         }
-        if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+        #[cfg(target_os = "macos")]
+        {
+            child.lose_generation();
+            eprintln!("telex: admission probe terminal exact reap unconfirmed; errno={errno:?} thread={thread:?}");
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
-        if Instant::now() >= deadline {
-            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        #[cfg(target_os = "linux")]
+        {
+            if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            if Instant::now() >= deadline {
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -1554,7 +1936,7 @@ fn reap_probe_leader(
     Err(DaemonBootstrapFailure::IncompatibleManifest)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn parse_probe_metadata(
     value: &serde_json::Value,
 ) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
@@ -2333,6 +2715,67 @@ pub(crate) fn open_linux_witness(
     })
 }
 
+/// macOS witness for a selected executable.
+///
+/// macOS cannot execute an open descriptor, so the daemon is still spawned
+/// by path. The witness therefore does not prevent replacement; it keeps the
+/// selected inode allocated for as long as it is held, so the `(dev, ino)`
+/// compared against the running peer's kernel-reported main-image identity
+/// cannot be reissued to a different file in the meantime. Replacement
+/// between selection and exec is caught afterwards, by that comparison.
+#[cfg(target_os = "macos")]
+pub(crate) struct MacosExecutableWitness {
+    file: std::fs::File,
+    pub(crate) identity: FileIdentity,
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn open_macos_witness(
+    path: &Path,
+) -> Result<MacosExecutableWitness, DaemonBootstrapFailure> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if !metadata.is_file() {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    Ok(MacosExecutableWitness {
+        file,
+        identity: FileIdentity {
+            kind: FileIdentityKind::UnixDevIno,
+            high: metadata.dev(),
+            low: metadata.ino(),
+        },
+    })
+}
+
+/// File identity of this process's own running image.
+///
+/// On macOS this is the kernel-reported identity of the mapped main image,
+/// not a lookup of the path the process was started from, so a daemon whose
+/// path was replaced after exec reports the image it is actually running.
+#[cfg(target_os = "macos")]
+fn own_image_file_identity(_own_exe: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+    let (dev, ino) = crate::platform_fs::process_main_image_file_identity(std::process::id())
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    Ok(FileIdentity {
+        kind: FileIdentityKind::UnixDevIno,
+        high: dev,
+        low: ino,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn own_image_file_identity(own_exe: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+    file_identity(own_exe).map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)
+}
+
 #[cfg(windows)]
 impl Drop for WindowsExecutableWitness {
     fn drop(&mut self) {
@@ -2581,8 +3024,7 @@ pub(crate) async fn child_validate_bootstrap_env(
     if !same_path(&own_exe, &token.target_exe) {
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }
-    let own_identity =
-        file_identity(&own_exe).map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let own_identity = own_image_file_identity(&own_exe)?;
     if own_identity != token.file_identity {
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }
@@ -3421,7 +3863,7 @@ mod tests {
         fs::remove_dir_all(root).ok();
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn probe_group_ownership_seals_before_reap_and_cannot_signal_twice() {
         let mut ownership = ProbeGroupOwnership::Anchored;
@@ -3455,7 +3897,49 @@ mod tests {
         );
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_probe_stopped_observation_requires_suspension_but_never_means_exit() {
+        let pid = 123;
+        for status in [0, libc::SIGSTOP] {
+            let observed = classify_probe_wait_observation(pid, pid, libc::CLD_STOPPED, status);
+            assert_eq!(observed, Ok(ProbeLeaderState::Stopped));
+            assert!(probe_suspended_state_authorized(&observed));
+            assert!(probe_signal_authorized(&observed));
+            assert!(!matches!(observed, Ok(ProbeLeaderState::Exited(_))));
+        }
+        let running = classify_probe_wait_observation(pid, 0, 0, 0);
+        assert_eq!(running, Ok(ProbeLeaderState::Running));
+        assert!(
+            !probe_suspended_state_authorized(&running),
+            "neither pre-auth nor pre-CONT may accept an unstopped child"
+        );
+        assert!(
+            probe_signal_authorized(&running),
+            "a still-owned ordinary refusal retains one cleanup signal"
+        );
+        for code in [libc::CLD_EXITED, libc::CLD_KILLED, libc::CLD_DUMPED] {
+            let terminal = classify_probe_wait_observation(pid, pid, code, 0);
+            assert!(matches!(terminal, Ok(ProbeLeaderState::Exited(_))));
+            assert!(!probe_suspended_state_authorized(&terminal));
+        }
+        for (observed_pid, code, status) in [
+            (pid, libc::CLD_TRAPPED, libc::SIGTRAP),
+            (pid, libc::CLD_CONTINUED, libc::SIGCONT),
+            (pid, libc::CLD_STOPPED, libc::SIGTSTP),
+            (pid + 1, libc::CLD_STOPPED, 0),
+            (0, libc::CLD_STOPPED, 0),
+            (0, 0, libc::SIGSTOP),
+            (pid, i32::MAX, 0),
+        ] {
+            let observed = classify_probe_wait_observation(pid, observed_pid, code, status);
+            assert_eq!(observed, Err(ProbeObserveError::Failure));
+            assert!(!probe_suspended_state_authorized(&observed));
+            assert!(!probe_signal_authorized(&observed));
+        }
+    }
+
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[test]
     #[ignore = "subprocess role used by the bounded admission-probe regression"]
     fn admission_probe_pipe_parent_fixture() {
@@ -3481,7 +3965,7 @@ mod tests {
         println!("{}", r#"{"parent":"complete"}"#);
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[test]
     #[ignore = "subprocess role used by the bounded admission-probe regression"]
     fn admission_probe_pipe_descendant_fixture() {
@@ -3493,7 +3977,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(12_500));
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[test]
     fn admission_probe_deadline_covers_descendant_held_pipes_and_releases_selector() {
         let root = temp_dir("probe-pipe-deadline");
@@ -3513,8 +3997,16 @@ mod tests {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         let started = Instant::now();
-        let error = run_bounded_probe_process(command, Duration::from_secs(2), 1024 * 1024)
-            .expect_err("descendant-held pipes must time out");
+        #[cfg(target_os = "macos")]
+        let witness = open_macos_witness(&std::env::current_exe().unwrap()).unwrap();
+        let error = run_bounded_probe_process(
+            command,
+            Duration::from_secs(2),
+            1024 * 1024,
+            #[cfg(target_os = "macos")]
+            &witness,
+        )
+        .expect_err("descendant-held pipes must time out");
         assert_eq!(error, DaemonBootstrapFailure::IncompatibleManifest);
         assert!(
             started.elapsed() < Duration::from_secs(3),
@@ -3543,6 +4035,212 @@ mod tests {
             "the probe's owned descendant must be terminated"
         );
         fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "subprocess role used by the suspended admission-probe regression"]
+    fn macos_admission_marker_fixture() {
+        if let Some(marker) = std::env::var_os("TELEX_TEST_PROBE_ENTRY_MARKER") {
+            fs::write(marker, b"test-entry").expect("write main-entry marker");
+            println!("authenticated-probe-entry");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_admission_probe_authenticates_suspended_image_and_refuses_replacement() {
+        let root = temp_dir("suspended-probe");
+        let image = root.join("image");
+        let marker = root.join("entry");
+        fs::copy(std::env::current_exe().unwrap(), &image).unwrap();
+        let witness = open_macos_witness(&image).unwrap();
+        let command = || {
+            let mut command = std::process::Command::new(&image);
+            command
+                .env_clear()
+                .env("TELEX_TEST_PROBE_ENTRY_MARKER", &marker)
+                .args([
+                    "--exact",
+                    "daemon_bootstrap::tests::macos_admission_marker_fixture",
+                    "--ignored",
+                    "--nocapture",
+                ]);
+            command
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut child =
+            ProbeChild::spawn(&command(), &witness, deadline).expect("native suspended spawn");
+        let mut group = ProbeProcessGroup::attach(&child).unwrap();
+        let pid = child.id();
+        let authenticated = authenticate_suspended_probe(&mut child, witness.identity);
+        if let Err(error) = authenticated {
+            let error = fail_probe_process(&mut child, &mut group, deadline, error);
+            panic!("suspended image query failed: {error}");
+        }
+        assert!(
+            !marker.exists(),
+            "suspended child has not reached test entry"
+        );
+        let displaced = root.join("displaced");
+        fs::rename(&image, &displaced).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), &image).unwrap();
+        assert_ne!(file_identity(&image).unwrap(), witness.identity);
+        assert_eq!(
+            authenticate_suspended_probe(&mut child, witness.identity),
+            Ok(()),
+            "replacing the pathname does not replace the suspended mapped vnode"
+        );
+        assert_eq!(
+            fail_probe_process(
+                &mut child,
+                &mut group,
+                deadline,
+                DaemonBootstrapFailure::ExecutableIdentityMismatch,
+            ),
+            DaemonBootstrapFailure::ExecutableIdentityMismatch
+        );
+        assert_eq!(
+            observe_probe_leader(&mut child).err(),
+            Some(ProbeObserveError::OwnershipLost),
+            "refused child must be reaped"
+        );
+        assert!(!crate::session_watch::process_alive(pid));
+        assert!(
+            !marker.exists(),
+            "cleanup did not resume the old selected image"
+        );
+
+        assert_eq!(
+            run_bounded_probe_process(command(), Duration::from_secs(10), 4096, &witness)
+                .unwrap_err(),
+            DaemonBootstrapFailure::ExecutableIdentityMismatch,
+            "a newly spawned replacement cannot use the original witness"
+        );
+        assert!(!marker.exists());
+        let replacement_witness = open_macos_witness(&image).unwrap();
+        let output = run_bounded_probe_process(
+            command(),
+            Duration::from_secs(10),
+            4096,
+            &replacement_witness,
+        )
+        .expect("authenticated suspended child completes");
+        assert!(output.success);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("authenticated-probe-entry"));
+        assert!(marker.is_file());
+        fs::remove_file(&marker).unwrap();
+        assert_eq!(
+            run_bounded_probe_process(command(), Duration::from_secs(10), 1, &replacement_witness)
+                .unwrap_err(),
+            DaemonBootstrapFailure::IncompatibleManifest,
+            "output-cap failure must clean up"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_admission_probe_setup_and_expired_resume_fail_closed() {
+        let own = std::env::current_exe().unwrap();
+        let witness = open_macos_witness(&own).unwrap();
+        let mut relative = std::process::Command::new("not-an-absolute-image");
+        relative.env_clear();
+        assert!(matches!(
+            ProbeChild::spawn(
+                &relative,
+                &witness,
+                Instant::now() + Duration::from_secs(10)
+            ),
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
+        ));
+        let mut missing = std::process::Command::new("/nonexistent/telex-admission-probe");
+        missing.env_clear();
+        assert!(matches!(
+            ProbeChild::spawn(&missing, &witness, Instant::now() + Duration::from_secs(10)),
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
+        ));
+        let root = temp_dir("expired-probe");
+        let marker = root.join("entry");
+        let mut command = std::process::Command::new(&own);
+        command
+            .env_clear()
+            .env("TELEX_TEST_PROBE_ENTRY_MARKER", &marker)
+            .args([
+                "--exact",
+                "daemon_bootstrap::tests::macos_admission_marker_fixture",
+                "--ignored",
+            ]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut child = ProbeChild::spawn(&command, &witness, deadline).unwrap();
+        let mut group = ProbeProcessGroup::attach(&child).unwrap();
+        if let Err(error) = authenticate_suspended_probe(&mut child, witness.identity) {
+            let error = fail_probe_process(&mut child, &mut group, deadline, error);
+            panic!("suspended image query failed: {error}");
+        }
+        assert_eq!(
+            resume_probe_process(&mut child, Instant::now()),
+            Err(DaemonBootstrapFailure::IncompatibleManifest),
+        );
+        assert_eq!(
+            fail_probe_process(
+                &mut child,
+                &mut group,
+                deadline,
+                DaemonBootstrapFailure::IncompatibleManifest
+            ),
+            DaemonBootstrapFailure::IncompatibleManifest,
+        );
+        assert_eq!(group.ownership, ProbeGroupOwnership::Reaped);
+        assert_eq!(
+            observe_probe_leader(&mut child).err(),
+            Some(ProbeObserveError::OwnershipLost)
+        );
+        assert!(!marker.exists());
+        assert!(crate::platform_fs::process_main_image_file_identity(child.id()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "subprocess role used by the SIGCHLD ownership regression"]
+    fn macos_admission_ignored_sigchld_fixture() {
+        if std::env::var_os("TELEX_TEST_PROBE_IGNORE_SIGCHLD").is_none() {
+            return;
+        }
+        unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
+        assert_eq!(
+            check_probe_wait_ownership(),
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
+        );
+        let own = std::env::current_exe().unwrap();
+        let witness = open_macos_witness(&own).unwrap();
+        let mut command = std::process::Command::new(&own);
+        command.env_clear();
+        assert_eq!(
+            run_bounded_probe_process(command, Duration::from_secs(1), 4096, &witness).unwrap_err(),
+            DaemonBootstrapFailure::IncompatibleManifest,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_admission_probe_refuses_automatic_reaping_without_changing_parent_policy() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .env("TELEX_TEST_PROBE_IGNORE_SIGCHLD", "1")
+            .args([
+                "--exact",
+                "daemon_bootstrap::tests::macos_admission_ignored_sigchld_fixture",
+                "--ignored",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(check_probe_wait_ownership(), Ok(()));
     }
 
     #[tokio::test]

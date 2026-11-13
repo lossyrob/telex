@@ -545,6 +545,25 @@ pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
     imp::process_exe_path(pid)
 }
 
+/// `(dev, ino)` of the executable file the kernel mapped as the main image of a live process.
+///
+/// macOS has no `/proc/<pid>/exe`. `proc_pidpath` returns a path, and re-opening a path cannot
+/// tell a running image from a file later renamed over it. This instead asks the kernel, through
+/// `proc_pidinfo(PROC_PIDREGIONPATHINFO)`, for the vnode behind the process's lowest-addressed
+/// file-backed mapping and requires that mapping to be the read-execute, offset-zero image header
+/// the kernel maps at exec. The identity is read from the mapped vnode itself, so it is unchanged
+/// by a rename, replacement, or unlink of the path the image was started from.
+///
+/// It needs no privilege or entitlement for a process of the same user, and fails closed (typed
+/// `Unsupported`) for another user's process, an exited process, or any address space whose first
+/// file-backed mapping is not an image header. The widened `dev` matches `MetadataExt::dev`.
+///
+/// Callers that name the process by PID must separately bind that PID to one process instance.
+#[cfg(target_os = "macos")]
+pub fn process_main_image_file_identity(pid: u32) -> Result<(u64, u64)> {
+    imp::process_main_image_file_identity(pid)
+}
+
 /// Stable machine identity, hashed before it is returned so no raw machine identifier is ever
 /// persisted into an intent manifest, status projection, or event log.
 pub fn host_id() -> Result<String> {
@@ -1161,6 +1180,164 @@ mod imp {
             capability: "process executable resolution",
             message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
         })
+    }
+
+    /// `struct proc_regioninfo` from `<sys/proc_info.h>`. The `libc` crate
+    /// exposes `vnode_info_path` but not the region flavors, so the fixed
+    /// prefix is declared here and size-checked against the Darwin ABI.
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct ProcRegionInfo {
+        pri_protection: u32,
+        pri_max_protection: u32,
+        pri_inheritance: u32,
+        pri_flags: u32,
+        pri_offset: u64,
+        pri_behavior: u32,
+        pri_user_wired_count: u32,
+        pri_user_tag: u32,
+        pri_pages_resident: u32,
+        pri_pages_shared_now_private: u32,
+        pri_pages_swapped_out: u32,
+        pri_pages_dirtied: u32,
+        pri_ref_count: u32,
+        pri_shadow_depth: u32,
+        pri_share_mode: u32,
+        pri_private_pages_resident: u32,
+        pri_shared_pages_resident: u32,
+        pri_obj_id: u32,
+        pri_depth: u32,
+        pri_address: u64,
+        pri_size: u64,
+    }
+
+    /// `struct proc_regionwithpathinfo` from `<sys/proc_info.h>`.
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    struct ProcRegionWithPathInfo {
+        prp_prinfo: ProcRegionInfo,
+        prp_vip: libc::vnode_info_path,
+    }
+
+    #[cfg(target_os = "macos")]
+    const _: () = {
+        assert!(std::mem::size_of::<ProcRegionInfo>() == 96);
+        assert!(std::mem::size_of::<ProcRegionWithPathInfo>() == 1272);
+    };
+
+    /// `PROC_PIDREGIONPATHINFO` from `<sys/proc_info.h>`.
+    #[cfg(target_os = "macos")]
+    const PROC_PIDREGIONPATHINFO: libc::c_int = 8;
+
+    /// Upper bound on address-space regions examined before the walk is
+    /// declared indeterminate. The main image is mapped by the kernel at exec
+    /// and is found within the first few regions of an ordinary process.
+    #[cfg(target_os = "macos")]
+    const MAIN_IMAGE_REGION_WALK_LIMIT: usize = 4096;
+
+    /// What one region of the walk contributes to the main-image decision.
+    #[cfg(target_os = "macos")]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) struct MappedFileRegion {
+        pub protection: u32,
+        pub offset: u64,
+        pub vnode_type: i32,
+        pub dev: u32,
+        pub ino: u64,
+    }
+
+    /// Decide the main-image identity from the lowest-addressed file-backed
+    /// region of a process. That region must be the Mach-O header mapping the
+    /// kernel creates at exec: a regular file, mapped from file offset zero,
+    /// readable and executable and not writable. Anything else is
+    /// indeterminate and refused rather than skipped, so a later mapping can
+    /// never stand in for the main image.
+    #[cfg(target_os = "macos")]
+    pub(super) fn main_image_identity_from_first_file_region(
+        region: MappedFileRegion,
+    ) -> std::result::Result<(u64, u64), &'static str> {
+        const VREG: i32 = 1;
+        if region.vnode_type != VREG {
+            return Err("lowest file-backed mapping is not a regular file");
+        }
+        if region.offset != 0 {
+            return Err("lowest file-backed mapping does not start at the image header");
+        }
+        let prot = region.protection as libc::c_int;
+        if prot & libc::PROT_READ == 0
+            || prot & libc::PROT_EXEC == 0
+            || prot & libc::PROT_WRITE != 0
+        {
+            return Err("lowest file-backed mapping is not a read-execute image mapping");
+        }
+        if region.ino == 0 {
+            return Err("lowest file-backed mapping has no file identity");
+        }
+        // `st_dev` is a signed 32-bit `dev_t`; widen it exactly as
+        // `MetadataExt::dev` does so both sides of a comparison agree.
+        Ok((region.dev as i32 as u64, region.ino))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn process_main_image_file_identity(pid: u32) -> Result<(u64, u64)> {
+        const CAPABILITY: &str = "running peer executable file identity";
+        let unsupported = |message: String| FsError::Unsupported {
+            capability: CAPABILITY,
+            message,
+        };
+        let pid_c = libc::c_int::try_from(pid)
+            .ok()
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| unsupported(format!("pid {pid} is not addressable")))?;
+        let size = std::mem::size_of::<ProcRegionWithPathInfo>() as libc::c_int;
+        let mut address: u64 = 0;
+        for _ in 0..MAIN_IMAGE_REGION_WALK_LIMIT {
+            let mut info: ProcRegionWithPathInfo = unsafe { std::mem::zeroed() };
+            // SAFETY: `info` is a writable buffer of exactly the size passed.
+            // The kernel fills the region at or above `address` and reports
+            // the vnode it holds for that mapping, not a path lookup.
+            let bytes = unsafe {
+                libc::proc_pidinfo(
+                    pid_c,
+                    PROC_PIDREGIONPATHINFO,
+                    address,
+                    &mut info as *mut _ as *mut libc::c_void,
+                    size,
+                )
+            };
+            if bytes != size {
+                return Err(unsupported(format!(
+                    "cannot read mapped regions of pid {pid} at {address:#x}: {}",
+                    std::io::Error::last_os_error()
+                )));
+            }
+            let region = &info.prp_prinfo;
+            let stat = &info.prp_vip.vip_vi.vi_stat;
+            let file_backed =
+                info.prp_vip.vip_vi.vi_type != 0 || stat.vst_ino != 0 || stat.vst_dev != 0;
+            if file_backed {
+                return main_image_identity_from_first_file_region(MappedFileRegion {
+                    protection: region.pri_protection,
+                    offset: region.pri_offset,
+                    vnode_type: info.prp_vip.vip_vi.vi_type,
+                    dev: stat.vst_dev,
+                    ino: stat.vst_ino,
+                })
+                .map_err(|reason| unsupported(format!("pid {pid}: {reason}")));
+            }
+            let next = region
+                .pri_address
+                .checked_add(region.pri_size)
+                .filter(|next| *next > address && region.pri_size != 0)
+                .ok_or_else(|| {
+                    unsupported(format!("mapped regions of pid {pid} do not advance"))
+                })?;
+            address = next;
+        }
+        Err(unsupported(format!(
+            "pid {pid} has no file-backed mapping in its first {MAIN_IMAGE_REGION_WALK_LIMIT} regions"
+        )))
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -3099,6 +3276,174 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    const MAIN_IMAGE_SLEEPER_ENV: &str = "TELEX_TEST_MAIN_IMAGE_SLEEPER";
+
+    /// Subprocess role for the main-image identity tests: a copy of this test
+    /// binary that stays alive so its mapped image can be inspected.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "subprocess role used by the main-image identity regression"]
+    fn macos_main_image_sleeper_fixture() {
+        if std::env::var_os(MAIN_IMAGE_SLEEPER_ENV).is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(120));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn path_dev_ino(path: &Path) -> (u64, u64) {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(path).expect("stat image path");
+        (meta.dev(), meta.ino())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_main_image_identity_is_the_mapped_file_not_the_path() {
+        struct Kill(std::process::Child);
+        impl Drop for Kill {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        let own = std::env::current_exe().expect("current exe");
+        assert_eq!(
+            process_main_image_file_identity(std::process::id()).expect("own main image"),
+            path_dev_ino(&own),
+            "a process's own main image is the file it was started from"
+        );
+
+        let dir = std::env::temp_dir().join(format!(
+            "telex-main-image-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create image dir");
+        let image = dir.join("image");
+        std::fs::copy(&own, &image).expect("stage image copy");
+        let started = path_dev_ino(&image);
+        let child = Kill(
+            std::process::Command::new(&image)
+                .args([
+                    "--exact",
+                    "platform_fs::tests::macos_main_image_sleeper_fixture",
+                    "--ignored",
+                ])
+                .env(MAIN_IMAGE_SLEEPER_ENV, "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn image copy"),
+        );
+        let pid = child.0.id();
+        assert_eq!(
+            process_main_image_file_identity(pid).expect("child main image"),
+            started
+        );
+        assert_ne!(started, path_dev_ino(&own), "the copy is a distinct file");
+
+        // Replace the path with a different file. A pathname lookup now
+        // names the replacement; the running image is still the original.
+        let displaced = dir.join("displaced");
+        std::fs::rename(&image, &displaced).expect("displace running image");
+        std::fs::copy(&own, &image).expect("install replacement at the same path");
+        let replacement = path_dev_ino(&image);
+        assert_ne!(replacement, started);
+        assert_eq!(
+            process_main_image_file_identity(pid).expect("child main image after replacement"),
+            started,
+            "replacing the path must not change the running image identity"
+        );
+
+        // Unlink the running image entirely. The path-based resolver fails,
+        // the mapped identity is unchanged.
+        std::fs::remove_file(&displaced).expect("unlink running image");
+        assert_eq!(
+            process_main_image_file_identity(pid).expect("child main image after unlink"),
+            started
+        );
+
+        drop(child);
+        assert!(
+            matches!(
+                process_main_image_file_identity(pid),
+                Err(FsError::Unsupported {
+                    capability: "running peer executable file identity",
+                    ..
+                })
+            ),
+            "an exited process must fail closed"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_main_image_identity_fails_closed_when_indeterminate() {
+        for pid in [0, 1, u32::MAX] {
+            assert!(
+                matches!(
+                    process_main_image_file_identity(pid),
+                    Err(FsError::Unsupported {
+                        capability: "running peer executable file identity",
+                        ..
+                    })
+                ),
+                "pid {pid} must not yield an identity"
+            );
+        }
+
+        let header = imp::MappedFileRegion {
+            protection: (libc::PROT_READ | libc::PROT_EXEC) as u32,
+            offset: 0,
+            vnode_type: 1,
+            dev: 0x0100_0011,
+            ino: 42,
+        };
+        assert_eq!(
+            imp::main_image_identity_from_first_file_region(header),
+            Ok((0x0100_0011, 42))
+        );
+        // A negative `dev_t` widens exactly as `MetadataExt::dev` does.
+        assert_eq!(
+            imp::main_image_identity_from_first_file_region(imp::MappedFileRegion {
+                dev: 0xffff_fff0,
+                ..header
+            }),
+            Ok((-16i32 as u64, 42))
+        );
+        for refused in [
+            imp::MappedFileRegion {
+                protection: libc::PROT_READ as u32,
+                ..header
+            },
+            imp::MappedFileRegion {
+                protection: (libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC) as u32,
+                ..header
+            },
+            imp::MappedFileRegion {
+                offset: 0x4000,
+                ..header
+            },
+            imp::MappedFileRegion {
+                vnode_type: 2,
+                ..header
+            },
+            imp::MappedFileRegion { ino: 0, ..header },
+        ] {
+            assert!(
+                imp::main_image_identity_from_first_file_region(refused).is_err(),
+                "{refused:?} must not be accepted as a main image"
+            );
+        }
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
