@@ -759,7 +759,7 @@ seal every path that can signal the group or reconstruct signal authority from
 numeric identity. After exact leader reap, final observation MAY use only a read-only
 former-group observation under the public documented contracts of `waitid`,
 `proc_listpids` and `kill`, plus native conformance, as specified by
-[ADR 0057](DECISIONS.md#0057---macos-containment-uses-version-range-admission-and-native-conformance).
+[ADR 0057](DECISIONS.md#0057---macos-containment-uses-capability-based-admission-and-native-conformance).
 The completion predicate MUST retain a fresh terminal
 `waitid(P_PID, leader, WEXITED|WNOHANG|WNOWAIT)` result and an unsaturated native
 `int[2]` `PROC_PGRP_ONLY` census showing only the owned leader, followed by the
@@ -776,13 +776,26 @@ an unrelated process to be signaled. The 20 D items and R4/R5 open obligations
 are closed as accepted risk, not proved absence. Per-build kernel, KDK, DWARF
 or libsystem equivalence is not an admission or product-validation gate.
 
-The accepted admission domain is native arm64 and x86_64 on macOS 15 or later,
-with runtime version, kernel/process architecture, `sysctl.proc_translated`
-and capability checks for the `proc_listpids` ABI, `int` / `pid_t` sizes and
-`waitid` `WNOWAIT` support. Development/KASAN kernels, Rosetta, versions below
-15 and failed or indeterminate probes MUST be refused before detector release.
-Refusal is neither a receipt nor absence evidence. New major versions enter
-support through native conformance rather than kernel mapping.
+The accepted architecture domain is native arm64 and x86_64 on macOS.
+Retain kernel/process architecture, `sysctl.proc_translated`,
+development/KASAN exclusions and capability checks for the `proc_listpids`
+ABI, `int` / `pid_t` sizes and `waitid` `WNOWAIT` support. Translated
+runtime/guard execution, development/KASAN kernels, incompatible architecture
+and failed or indeterminate required capability, identity or safety checks
+MUST be refused before detector release, with the concrete reason. Refusal is
+neither a receipt nor absence evidence.
+`sysctl.proc_translated` ENOENT is the native/Intel case, not an indeterminate
+failure; hosted runners and VMs are not admission failures. A translated
+detector descendant remains an ordinary assigned-group member.
+
+Under the operator's [admission clarification](https://github.com/lossyrob/telex/issues/172#issuecomment-6835298564),
+there is no macOS minimum, maximum, per-major, exact-build or UUID admission
+allowlist. Version collection is optional and diagnostic-only; its value or
+absence MUST NOT independently reject execution or produce a warning.
+An older, newer or conformance-unvalidated version alone MUST NOT trigger a
+warning. Native conformance remains an engineering coverage duty, not an
+admission list or a claim that every version works. The earlier macOS 15 floor
+and new-major admission wording are superseded; genuine safety checks remain.
 This domain remains unshipped until the #172 product PR is accepted.
 
 An ordinary per-attempt private guard is Watcher runtime machinery, not a helper

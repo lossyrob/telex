@@ -13,8 +13,9 @@
 //! - `TELEX_HOME`, `TELEX_RUN_DIR`, `TELEX_DB`, `TELEX_CONFIG`,
 //!   `TELEX_INSTALL_ROOT` and the platform lock-state dir all point inside it,
 //! - the installed layout is populated from the *branch* binary resolved
-//!   through `CARGO_BIN_EXE_telex` (absolute path), so the daemon `HelloAck`
-//!   `build_id` matches the strict manifest this harness writes.
+//!   through `CARGO_BIN_EXE_telex` or a known Cargo test layout, with its exact
+//!   build identity checked before use, so the daemon `HelloAck` `build_id`
+//!   matches the strict manifest this harness writes.
 
 #![allow(dead_code)]
 
@@ -39,26 +40,124 @@ pub static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Absolute path of the branch `telex` binary under test.
 pub fn branch_binary() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_telex") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return std::fs::canonicalize(&path).unwrap_or(path);
+    let exe = std::env::current_exe().expect("current test exe");
+    let binary = resolve_branch_binary(option_env!("CARGO_BIN_EXE_telex").map(Path::new), &exe)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let root = unique_root("branch-version");
+    let mut command = Command::new(&binary);
+    // --version exits during clap parsing, before config/backend resolution.
+    // Strip credentials and disable launcher dispatch even for an explicit handoff.
+    command
+        .arg("--version")
+        .env_clear()
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .env("TELEX_HOME", root.join("home"))
+        .env("TELEX_RUN_DIR", root.join("run"))
+        .env("TELEX_DB", root.join("telex.db"))
+        .env("TELEX_CONFIG", root.join("config.toml"))
+        .env(install::INSTALL_ROOT_ENV, root.join("install"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        command.env("LOCALAPPDATA", root.join("state"));
+        if let Some(system_root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", system_root);
         }
     }
-    let exe = std::env::current_exe().expect("current test exe");
-    let dir = exe.parent().expect("test exe dir");
-    let target_dir = if dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
-        dir.parent().expect("target profile dir")
-    } else {
-        dir
+    #[cfg(not(windows))]
+    command.env("XDG_STATE_HOME", root.join("state"));
+    let output = run_with_timeout(command, Duration::from_secs(30));
+    validate_branch_version(&output, install::BUILD_ID).unwrap_or_else(|error| {
+        panic!(
+            "branch telex binary {}: {error}; rebuild the workspace binaries with the same features as this suite",
+            binary.display()
+        )
+    });
+    binary
+}
+
+fn resolve_branch_binary(cargo_binary: Option<&Path>, test_exe: &Path) -> Result<PathBuf, String> {
+    let canonicalize = |path: &Path| {
+        std::fs::canonicalize(path).map_err(|error| {
+            format!(
+                "cannot canonicalize branch binary {}: {error}",
+                path.display()
+            )
+        })
     };
-    let candidate = target_dir.join(format!("telex{}", std::env::consts::EXE_SUFFIX));
-    assert!(
-        candidate.is_file(),
-        "branch telex binary not found at {}; build the workspace before running this suite",
-        candidate.display()
-    );
-    std::fs::canonicalize(&candidate).unwrap_or(candidate)
+    if let Some(path) = cargo_binary {
+        if path.is_file() {
+            return canonicalize(path);
+        }
+    }
+    let mut checked = Vec::new();
+    let mut candidates = Vec::new();
+    for dir in test_exe.parent().into_iter().flat_map(Path::ancestors) {
+        let profile = if dir.file_name().is_some_and(|name| name == "deps") {
+            dir.parent()
+        } else {
+            // Only the observed Cargo relocation, not an arbitrary `out` directory.
+            dir.parent()
+                .and_then(Path::parent)
+                .filter(|package| {
+                    dir.file_name().is_some_and(|name| name == "out")
+                        && package
+                            .file_name()
+                            .is_some_and(|name| name == "telex-watcher")
+                })
+                .and_then(Path::parent)
+                .filter(|build| build.file_name().is_some_and(|name| name == "build"))
+                .and_then(Path::parent)
+        };
+        if let Some(profile) = profile {
+            let path = profile.join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+            if path.is_file() {
+                let path = canonicalize(&path)?;
+                if !candidates.contains(&path) {
+                    candidates.push(path);
+                }
+            }
+            checked.push(path);
+        }
+    }
+    match candidates.as_slice() {
+        [binary] => Ok(binary.clone()),
+        [] => Err(format!(
+            "branch telex binary missing for test executable {}; \
+             CARGO_BIN_EXE_telex={cargo_binary:?}; checked {checked:?}; \
+             build the workspace binaries before running this suite: \
+             cargo build -p telex -p telex-watcher --all-features --bins",
+            test_exe.display()
+        )),
+        _ => Err(format!(
+            "ambiguous branch telex binaries for test executable {}: {candidates:?}; \
+             use an unambiguous Cargo target directory or a valid CARGO_BIN_EXE_telex handoff",
+            test_exe.display()
+        )),
+    }
+}
+
+fn validate_branch_version(output: &CliOutput, expected_build: &str) -> Result<(), String> {
+    if !expected_build.is_empty()
+        && expected_build != install::UNKNOWN_BUILD_ID
+        && !output.timed_out
+        && output.code == Some(0)
+        && output.stdout.trim().starts_with("telex ")
+        && output
+            .stdout
+            .trim()
+            .ends_with(&format!(" (build {expected_build})"))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "exact build identity mismatch or unusable executable; expected build {expected_build:?}, \
+             code={:?} timed_out={} stdout={:?} stderr={:?}",
+            output.code, output.timed_out, output.stdout, output.stderr
+        ))
+    }
 }
 
 /// Build the public consumer in a per-feature target shared by both harnesses.
@@ -833,6 +932,151 @@ pub fn postgres_url_or_fail_closed(context: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BinaryTree(PathBuf);
+
+    impl BinaryTree {
+        fn new() -> Self {
+            let root = unique_root("binary-resolution");
+            std::fs::create_dir_all(&root).expect("create resolver fixture");
+            Self(root)
+        }
+
+        fn binary(&self, directory: &Path) -> PathBuf {
+            std::fs::create_dir_all(directory).expect("create artifact directory");
+            let binary = directory.join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+            std::fs::write(&binary, b"resolver fixture, never executed").expect("stage artifact");
+            binary
+        }
+    }
+
+    impl Drop for BinaryTree {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).expect("remove exact resolver fixture");
+        }
+    }
+
+    #[test]
+    fn branch_binary_resolves_ordinary_and_relocated_cargo_layouts() {
+        let tree = BinaryTree::new();
+        // A custom target root, target triple and profile must remain opaque.
+        let profile = tree
+            .0
+            .join("custom-target")
+            .join("target-triple")
+            .join("custom-profile");
+        let binary = tree.binary(&profile);
+        for directory in [
+            profile.join("deps"),
+            profile
+                .join("build")
+                .join("telex-watcher")
+                .join("hash")
+                .join("out"),
+        ] {
+            let exe = directory.join(format!(
+                "telex_watcher-hash{}",
+                std::env::consts::EXE_SUFFIX
+            ));
+            assert_eq!(
+                resolve_branch_binary(None, &exe).unwrap(),
+                std::fs::canonicalize(&binary).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn branch_binary_prefers_cargo_handoff_over_ambiguous_layout() {
+        let tree = BinaryTree::new();
+        let profile = tree.0.join("debug");
+        tree.binary(&profile);
+        tree.binary(&profile.join("deps"));
+        let exe = profile
+            .join("deps")
+            .join("build")
+            .join("telex-watcher")
+            .join("hash")
+            .join("out")
+            .join("test-exe");
+        let handoff = tree.binary(&tree.0.join("cargo-artifact"));
+        assert_eq!(
+            resolve_branch_binary(Some(&handoff), &exe).unwrap(),
+            std::fs::canonicalize(handoff).unwrap()
+        );
+        let error = resolve_branch_binary(None, &exe).unwrap_err();
+        assert!(error.contains("ambiguous"), "{error}");
+        assert!(error.contains("CARGO_BIN_EXE_telex"), "{error}");
+    }
+
+    #[test]
+    fn branch_binary_missing_artifact_is_actionable_and_ignores_non_files() {
+        let tree = BinaryTree::new();
+        let profile = tree.0.join("debug");
+        let candidate = tree.binary(&profile);
+        std::fs::remove_file(&candidate).unwrap();
+        std::fs::create_dir(&candidate).unwrap();
+        let exe = profile
+            .join("build")
+            .join("telex-watcher")
+            .join("hash")
+            .join("out")
+            .join("test-exe");
+        let missing_handoff = tree.0.join("missing");
+        let error = resolve_branch_binary(Some(&missing_handoff), &exe).unwrap_err();
+        assert!(error.contains("missing"), "{error}");
+        assert!(error.contains(&format!("{candidate:?}")), "{error}");
+        assert!(error.contains(&format!("{missing_handoff:?}")), "{error}");
+        assert!(error.contains("cargo build"), "{error}");
+        let binary = tree.binary(&tree.0.join("explicit"));
+        assert_eq!(
+            resolve_branch_binary(
+                Some(&candidate),
+                &tree.0.join("explicit").join("deps").join("test-exe")
+            )
+            .unwrap(),
+            std::fs::canonicalize(binary).unwrap()
+        );
+    }
+
+    #[test]
+    fn branch_binary_does_not_search_unknown_out_or_stale_target_directories() {
+        let tree = BinaryTree::new();
+        let profile = tree.0.join("debug");
+        tree.binary(&profile);
+        let unrelated = profile
+            .join("build")
+            .join("other-package")
+            .join("hash")
+            .join("out");
+        tree.binary(&unrelated);
+        let error = resolve_branch_binary(None, &unrelated.join("test-exe")).unwrap_err();
+        assert!(error.contains("missing"), "{error}");
+    }
+
+    #[test]
+    fn branch_binary_requires_exact_usable_build_identity() {
+        let mut output = CliOutput {
+            code: Some(0),
+            stdout: "telex 0.3.0-rc.1 (build exact-head)\n".into(),
+            stderr: String::new(),
+            timed_out: false,
+        };
+        assert!(validate_branch_version(&output, "exact-head").is_ok());
+        for wrong in [
+            "",
+            install::UNKNOWN_BUILD_ID,
+            "head",
+            "exact-head-extra",
+            "stale-head",
+        ] {
+            assert!(validate_branch_version(&output, wrong).is_err());
+        }
+        output.timed_out = true;
+        assert!(validate_branch_version(&output, "exact-head").is_err());
+        output.timed_out = false;
+        output.code = Some(1);
+        assert!(validate_branch_version(&output, "exact-head").is_err());
+    }
 
     #[cfg(windows)]
     #[test]
