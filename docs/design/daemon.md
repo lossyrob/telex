@@ -2073,11 +2073,25 @@ NOT rewrite the immutable manifest or act as a selection token. The
 spawned child still performs independent admission and runtime proof.
 All other absent or explicit values fail closed.
 On macOS this probe MUST start suspended in a new owned process group,
+and matching-child `waitid(WEXITED|WSTOPPED|WNOHANG|WNOWAIT)` MUST show
+`CLD_STOPPED` with status zero or `SIGSTOP` both before authentication and
+freshly before `SIGCONT`. A no-event/running observation before `SIGCONT`
+MUST refuse, not substitute for the stopped precondition. Stopped-state
+evidence alone is neither executable identity nor terminal/reap proof.
+The client MUST
 verify the selected witness against the lowest-addressed file-backed
 offset-zero RX/nonwritable regular vnode, and pin the direct child's
 start time before resuming only that PID. The original deadline bounds
 verification, collection and attempted cleanup; it is not an unconditional
-reap guarantee. Before spawning, the client atomically reserves one
+reap guarantee. During the original active attempt, still-owned stopped
+state permits the single group `SIGKILL` for ordinary refusal/expiry;
+sealing that signal authority does not itself lose child generation.
+Stopped state remains pending during collection/reap. Only a terminal
+`CLD_EXITED`, `CLD_KILLED` or `CLD_DUMPED` non-consuming observation permits
+the single consuming terminal wait. Changed generation, observation error,
+trapped/continued/unsupported state or mismatched PID MUST refuse and seal
+generation without later numeric signals or reap.
+Before spawning, the client atomically reserves one
 process-local custody slot and duplicates the SAME opened witness with
 `F_DUPFD_CLOEXEC`. Unconfirmed cleanup MUST refuse and retain the exact child
 and witness in that bounded, non-signaling quarantine, without retaining

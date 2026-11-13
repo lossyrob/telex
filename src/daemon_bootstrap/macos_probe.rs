@@ -436,7 +436,10 @@ mod tests {
             loop {
                 match super::super::observe_probe_pid(other.id()) {
                     Ok(super::super::ProbeLeaderState::Exited(_)) => break,
-                    Ok(super::super::ProbeLeaderState::Running) => {
+                    Ok(
+                        super::super::ProbeLeaderState::Running
+                        | super::super::ProbeLeaderState::Stopped,
+                    ) => {
                         assert!(Instant::now() < deadline);
                         std::thread::sleep(Duration::from_millis(10));
                     }

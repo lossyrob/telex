@@ -1096,7 +1096,9 @@ fn authenticate_suspended_probe(
         child.lose_generation();
         return Err(error);
     }
-    if !matches!(observe_probe_leader(child), Ok(ProbeLeaderState::Running)) {
+    let observed = observe_probe_leader(child);
+    if !probe_suspended_state_authorized(&observed) {
+        eprintln!("telex: admission probe authentication requires owned stopped state; observed={observed:?}");
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let before = crate::session_watch::capture_process_start_time(child.id())
@@ -1134,7 +1136,11 @@ fn resume_probe_process(
         child.lose_generation();
         return Err(error);
     }
-    if !matches!(observe_probe_leader(child), Ok(ProbeLeaderState::Running)) {
+    let observed = observe_probe_leader(child);
+    if !probe_suspended_state_authorized(&observed) {
+        eprintln!(
+            "telex: admission probe pre-CONT requires owned stopped state; observed={observed:?}"
+        );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     let start = crate::session_watch::capture_process_start_time(child.id())
@@ -1284,8 +1290,11 @@ impl Drop for ProbeProcessGroup {
 }
 
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+#[derive(Debug, PartialEq, Eq)]
 enum ProbeLeaderState {
     Running,
+    #[cfg(target_os = "macos")]
+    Stopped,
     Exited(bool),
 }
 
@@ -1308,10 +1317,21 @@ fn classify_probe_observe_error(error: &std::io::Error) -> ProbeObserveError {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn probe_signal_authorized(observed: &Result<ProbeLeaderState, ProbeObserveError>) -> bool {
+    #[cfg(target_os = "macos")]
+    if matches!(observed, Ok(ProbeLeaderState::Stopped)) {
+        return true;
+    }
     matches!(
         observed,
         Ok(ProbeLeaderState::Running | ProbeLeaderState::Exited(_))
     )
+}
+
+#[cfg(target_os = "macos")]
+fn probe_suspended_state_authorized(
+    observed: &Result<ProbeLeaderState, ProbeObserveError>,
+) -> bool {
+    matches!(observed, Ok(ProbeLeaderState::Stopped))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1367,14 +1387,10 @@ fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
     }
     let pid = i32::try_from(pid).map_err(|_| ProbeObserveError::Failure)?;
     let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
-    let result = unsafe {
-        libc::waitid(
-            libc::P_PID,
-            pid as libc::id_t,
-            &mut info,
-            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-        )
-    };
+    let options = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    #[cfg(target_os = "macos")]
+    let options = options | libc::WSTOPPED;
+    let result = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, options) };
     if result != 0 {
         let error = std::io::Error::last_os_error();
         #[cfg(target_os = "macos")]
@@ -1385,35 +1401,44 @@ fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
         return Err(classify_probe_observe_error(&error));
     }
     let observed_pid = unsafe { info.si_pid() };
+    let code = info.si_code;
+    let status = unsafe { info.si_status() };
+    let observed = classify_probe_wait_observation(pid, observed_pid, code, status);
+    #[cfg(target_os = "macos")]
+    if observed_pid != 0 || observed.is_err() {
+        eprintln!(
+            "telex: admission probe waitid observation; pid_matches={} code={code} status={status} options=0x{options:x} classified={observed:?}",
+            observed_pid == pid
+        );
+    }
+    observed
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn classify_probe_wait_observation(
+    pid: libc::pid_t,
+    observed_pid: libc::pid_t,
+    code: libc::c_int,
+    status: libc::c_int,
+) -> Result<ProbeLeaderState, ProbeObserveError> {
     if observed_pid == 0 {
+        #[cfg(target_os = "macos")]
+        if code != 0 || status != 0 {
+            return Err(ProbeObserveError::Failure);
+        }
         return Ok(ProbeLeaderState::Running);
     }
     if observed_pid != pid {
-        #[cfg(target_os = "macos")]
-        eprintln!(
-            "telex: admission probe waitid unexpected child; pid_matches=false code={}",
-            info.si_code
-        );
         return Err(ProbeObserveError::Failure);
     }
-    #[cfg(target_os = "macos")]
-    eprintln!(
-        "telex: admission probe waitid terminal/state observation; pid_matches=true code={} status={}",
-        info.si_code,
-        unsafe { info.si_status() }
-    );
-    match info.si_code {
-        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(unsafe { info.si_status() } == 0)),
+    match code {
+        libc::CLD_EXITED => Ok(ProbeLeaderState::Exited(status == 0)),
         libc::CLD_KILLED | libc::CLD_DUMPED => Ok(ProbeLeaderState::Exited(false)),
-        _ => {
-            #[cfg(target_os = "macos")]
-            eprintln!(
-                "telex: admission probe waitid unexpected state; code={} status={}",
-                info.si_code,
-                unsafe { info.si_status() }
-            );
-            Err(ProbeObserveError::Failure)
+        #[cfg(target_os = "macos")]
+        libc::CLD_STOPPED if status == 0 || status == libc::SIGSTOP => {
+            Ok(ProbeLeaderState::Stopped)
         }
+        _ => Err(ProbeObserveError::Failure),
     }
 }
 
@@ -1598,6 +1623,8 @@ fn run_bounded_probe_process(
         if leader_success.is_none() {
             leader_success = match observe_probe_leader(&mut child) {
                 Ok(ProbeLeaderState::Running) => None,
+                #[cfg(target_os = "macos")]
+                Ok(ProbeLeaderState::Stopped) => None,
                 Ok(ProbeLeaderState::Exited(success)) => Some(success),
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
                 Err(ProbeObserveError::OwnershipLost) => {
@@ -1780,7 +1807,7 @@ fn reap_probe_leader(
             };
             match observed {
                 Ok(ProbeLeaderState::Exited(_)) => {}
-                Ok(ProbeLeaderState::Running) => {
+                Ok(ProbeLeaderState::Running | ProbeLeaderState::Stopped) => {
                     if Instant::now() >= deadline {
                         return Err(DaemonBootstrapFailure::IncompatibleManifest);
                     }
@@ -3801,6 +3828,48 @@ mod tests {
             classify_probe_observe_error(&std::io::Error::from_raw_os_error(libc::ECHILD)),
             ProbeObserveError::OwnershipLost
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_probe_stopped_observation_requires_suspension_but_never_means_exit() {
+        let pid = 123;
+        for status in [0, libc::SIGSTOP] {
+            let observed = classify_probe_wait_observation(pid, pid, libc::CLD_STOPPED, status);
+            assert_eq!(observed, Ok(ProbeLeaderState::Stopped));
+            assert!(probe_suspended_state_authorized(&observed));
+            assert!(probe_signal_authorized(&observed));
+            assert!(!matches!(observed, Ok(ProbeLeaderState::Exited(_))));
+        }
+        let running = classify_probe_wait_observation(pid, 0, 0, 0);
+        assert_eq!(running, Ok(ProbeLeaderState::Running));
+        assert!(
+            !probe_suspended_state_authorized(&running),
+            "neither pre-auth nor pre-CONT may accept an unstopped child"
+        );
+        assert!(
+            probe_signal_authorized(&running),
+            "a still-owned ordinary refusal retains one cleanup signal"
+        );
+        for code in [libc::CLD_EXITED, libc::CLD_KILLED, libc::CLD_DUMPED] {
+            let terminal = classify_probe_wait_observation(pid, pid, code, 0);
+            assert!(matches!(terminal, Ok(ProbeLeaderState::Exited(_))));
+            assert!(!probe_suspended_state_authorized(&terminal));
+        }
+        for (observed_pid, code, status) in [
+            (pid, libc::CLD_TRAPPED, libc::SIGTRAP),
+            (pid, libc::CLD_CONTINUED, libc::SIGCONT),
+            (pid, libc::CLD_STOPPED, libc::SIGTSTP),
+            (pid + 1, libc::CLD_STOPPED, 0),
+            (0, libc::CLD_STOPPED, 0),
+            (0, 0, libc::SIGSTOP),
+            (pid, i32::MAX, 0),
+        ] {
+            let observed = classify_probe_wait_observation(pid, observed_pid, code, status);
+            assert_eq!(observed, Err(ProbeObserveError::Failure));
+            assert!(!probe_suspended_state_authorized(&observed));
+            assert!(!probe_signal_authorized(&observed));
+        }
     }
 
     #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
