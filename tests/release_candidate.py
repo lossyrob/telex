@@ -686,7 +686,7 @@ class Proof:
         require(not failures, "fixture cleanup failed: " + "; ".join(failures))
 
 
-def finish_report(proof, root, report, output):
+def finish_report(proof, root, report, output, extra_processes=()):
     errors = []
     try:
         if proof is not None:
@@ -704,15 +704,17 @@ def finish_report(proof, root, report, output):
         errors.append(error)
 
     unproven = []
+    # Include owners outside Proof.daemons and processes that failed before a readiness receipt.
+    processes = list(extra_processes)
     if proof is not None:
-        # Include processes that failed before publishing a readiness receipt.
-        for process, _, _, _ in proof.daemons:
-            try:
-                if process.poll() is None:
-                    unproven.append(process.pid)
-            except OSError as error:
+        processes.extend(process for process, _, _, _ in proof.daemons)
+    for process in processes:
+        try:
+            if process.poll() is None:
                 unproven.append(process.pid)
-                errors.append(error)
+        except OSError as error:
+            unproven.append(process.pid)
+            errors.append(error)
     disposition = {"fixture_root": str(root), "removed": False}
     if unproven:
         disposition.update(retained_reason="owned process exit unproven", owned_pids=unproven)
@@ -741,7 +743,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--tag", default="v0.3.0-rc.1")
+    parser.add_argument("--tag", default="v0.3.0-rc.2")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--postgres-url")
     parser.add_argument("--disposable-postgres", action="store_true")

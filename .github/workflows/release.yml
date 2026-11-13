@@ -224,6 +224,23 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_windows_publication_test.py --report evidence/native-file-observer.json
 
+      - name: Install Node for Windows bridge proof
+        if: runner.os == 'Windows'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Prove Windows inherited-profile bridge access
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python tests/bridge_windows_smoke.py `
+            --binary "target\${{ matrix.target }}\release\telex.exe" `
+            --source-sha "${{ github.sha }}" --report evidence/bridge-windows.json
+          if ($LASTEXITCODE -ne 0) { throw "Windows bridge smoke proof failed" }
+
       - name: Checkout genuine source-built Watcher bootstrap baseline
         if: matrix.target == 'x86_64-pc-windows-msvc'
         uses: actions/checkout@v4
