@@ -2106,6 +2106,11 @@ ORIGINAL ACTIVE attempt releases its slot normally; once parked, even an
 apparently exited child retains the slot and witness until CLIENT restart.
 Already-admitted manifests and cached same-key completion
 do not enter this gate. Quarantine is not successful cleanup or native proof.
+macOS cleanup diagnostics distinguish ownership refusal, the group-signal
+return/errno and signal seal, and the consuming terminal-wait result, with
+thread labels for correlation. Finalization reports when signal failure
+skips the reap. A terminal leader observation alone does not establish group
+containment or successful cleanup; these diagnostics grant no new authority.
 Unsupported or indeterminate
 launch/identity/ownership refuses without an unsuspended fallback.
 This is the weaker mapped-vnode guarantee below: path replacement is

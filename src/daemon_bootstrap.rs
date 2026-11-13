@@ -1038,12 +1038,20 @@ impl ProbeProcessGroup {
     }
 
     fn signal_and_seal(&mut self, child: &mut ProbeChild) -> Result<(), DaemonBootstrapFailure> {
+        #[cfg(target_os = "macos")]
+        let thread = std::thread::current().id();
         if self.ownership == ProbeGroupOwnership::Sealed {
+            #[cfg(target_os = "macos")]
+            eprintln!("telex: admission probe group cleanup; thread={thread:?} phase=already-sealed signal_attempted=false");
             return Ok(());
         }
         #[cfg(target_os = "macos")]
         if !child.owns_generation() {
             self.seal_without_signal();
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=generation-lost signal_attempted=false ownership={:?}",
+                self.ownership
+            );
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         // A cached exit observation is not current wait authority. Recheck
@@ -1053,18 +1061,40 @@ impl ProbeProcessGroup {
             #[cfg(target_os = "macos")]
             child.lose_generation();
             self.seal_without_signal();
+            #[cfg(target_os = "macos")]
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=wait-ownership-refused signal_attempted=false ownership={:?}",
+                self.ownership
+            );
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         let observed = observe_probe_leader(child);
         if !probe_signal_authorized(&observed) {
             self.seal_without_signal();
+            #[cfg(target_os = "macos")]
+            eprintln!(
+                "telex: admission probe group cleanup; thread={thread:?} phase=observation-refused observed={observed:?} signal_attempted=false ownership={:?}",
+                self.ownership
+            );
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         #[cfg(all(test, target_os = "macos"))]
         macos_probe::record_group_signal();
-        let signaled = unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0;
+        let result = unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+        #[cfg(target_os = "macos")]
+        let errno = if result != 0 {
+            std::io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
         self.ownership.seal();
-        if signaled {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe group cleanup; thread={thread:?} phase=group-kill observed={observed:?} result={result} errno={errno:?} ownership={:?} generation_known={}",
+            self.ownership,
+            child.owns_generation()
+        );
+        if result == 0 {
             Ok(())
         } else {
             Err(DaemonBootstrapFailure::IncompatibleManifest)
@@ -1340,8 +1370,9 @@ fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
     if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) } != 0 {
         #[cfg(target_os = "macos")]
         eprintln!(
-            "telex: admission probe SIGCHLD query failed; errno={:?}",
-            std::io::Error::last_os_error().raw_os_error()
+            "telex: admission probe SIGCHLD query failed; errno={:?} thread={:?}",
+            std::io::Error::last_os_error().raw_os_error(),
+            std::thread::current().id()
         );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
@@ -1349,9 +1380,10 @@ fn check_probe_wait_ownership() -> Result<(), DaemonBootstrapFailure> {
     if handler == libc::SIG_IGN || action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0 {
         #[cfg(target_os = "macos")]
         eprintln!(
-            "telex: admission probe SIGCHLD policy unavailable; ignored={} no_child_wait={}",
+            "telex: admission probe SIGCHLD policy unavailable; ignored={} no_child_wait={} thread={:?}",
             handler == libc::SIG_IGN,
-            action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0
+            action.sa_flags as libc::c_int & libc::SA_NOCLDWAIT != 0,
+            std::thread::current().id()
         );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
@@ -1395,8 +1427,9 @@ fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
         let error = std::io::Error::last_os_error();
         #[cfg(target_os = "macos")]
         eprintln!(
-            "telex: admission probe waitid failed; errno={:?}",
-            error.raw_os_error()
+            "telex: admission probe waitid failed; errno={:?} thread={:?}",
+            error.raw_os_error(),
+            std::thread::current().id()
         );
         return Err(classify_probe_observe_error(&error));
     }
@@ -1407,8 +1440,9 @@ fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
     #[cfg(target_os = "macos")]
     if observed_pid != 0 || observed.is_err() {
         eprintln!(
-            "telex: admission probe waitid observation; pid_matches={} code={code} status={status} options=0x{options:x} classified={observed:?}",
-            observed_pid == pid
+            "telex: admission probe waitid observation; pid_matches={} code={code} status={status} options=0x{options:x} classified={observed:?} thread={:?}",
+            observed_pid == pid,
+            std::thread::current().id()
         );
     }
     observed
@@ -1769,9 +1803,20 @@ fn finalize_probe_process(
     // Signal while the Unix leader remains an unreaped ownership anchor.
     // `signal_and_seal` makes every later Drop path incapable of signaling a
     // recycled numeric process-group id.
-    if group.signal_and_seal(child).is_err() || reap_probe_leader(child, deadline).is_err() {
+    if group.signal_and_seal(child).is_err() {
         #[cfg(target_os = "macos")]
-        eprintln!("telex: admission probe final cleanup unconfirmed");
+        eprintln!(
+            "telex: admission probe final cleanup unconfirmed; phase=signal reap=not-attempted thread={:?}",
+            std::thread::current().id()
+        );
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    if reap_probe_leader(child, deadline).is_err() {
+        #[cfg(target_os = "macos")]
+        eprintln!(
+            "telex: admission probe final cleanup unconfirmed; phase=reap thread={:?}",
+            std::thread::current().id()
+        );
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     group.mark_reaped();
@@ -1783,10 +1828,13 @@ fn reap_probe_leader(
     child: &mut ProbeChild,
     deadline: Instant,
 ) -> Result<(), DaemonBootstrapFailure> {
+    #[cfg(target_os = "macos")]
+    let thread = std::thread::current().id();
     let pid =
         i32::try_from(child.id()).map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
     #[cfg(target_os = "macos")]
     if !child.owns_generation() {
+        eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=generation-lost waitpid_attempted=false");
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     loop {
@@ -1794,6 +1842,7 @@ fn reap_probe_leader(
         {
             if check_probe_wait_ownership().is_err() {
                 child.lose_generation();
+                eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=wait-ownership waitpid_attempted=false");
                 return Err(DaemonBootstrapFailure::IncompatibleManifest);
             }
             #[cfg(test)]
@@ -1807,18 +1856,40 @@ fn reap_probe_leader(
             };
             match observed {
                 Ok(ProbeLeaderState::Exited(_)) => {}
-                Ok(ProbeLeaderState::Running | ProbeLeaderState::Stopped) => {
+                Ok(state @ (ProbeLeaderState::Running | ProbeLeaderState::Stopped)) => {
                     if Instant::now() >= deadline {
+                        eprintln!("telex: admission probe active reap unconfirmed; thread={thread:?} phase=pending-deadline observed={state:?} injected_pending={pending} waitpid_attempted=false");
                         return Err(DaemonBootstrapFailure::IncompatibleManifest);
                     }
                     std::thread::sleep(Duration::from_millis(10));
                     continue;
                 }
-                Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+                Err(error) => {
+                    eprintln!("telex: admission probe active reap refused; thread={thread:?} phase=terminal-observation observed={error:?} waitpid_attempted=false");
+                    return Err(DaemonBootstrapFailure::IncompatibleManifest);
+                }
             }
         }
         let mut status = 0;
         let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        #[cfg(target_os = "macos")]
+        let errno = if result < 0 {
+            std::io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let observed_status = (result == pid).then_some(status);
+            let terminal =
+                (result == pid).then_some(libc::WIFEXITED(status) || libc::WIFSIGNALED(status));
+            eprintln!(
+                "telex: admission probe active reap; thread={thread:?} phase=waitpid pid_matches={} returned_zero={} returned_error={} errno={errno:?} status={observed_status:?} terminal={terminal:?}",
+                result == pid,
+                result == 0,
+                result < 0
+            );
+        }
         if result == pid {
             #[cfg(target_os = "macos")]
             {
@@ -1827,18 +1898,14 @@ fn reap_probe_leader(
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
                 child.mark_reaped();
+                eprintln!("telex: admission probe active reap; thread={thread:?} phase=confirmed-terminal-reap");
             }
             return Ok(());
         }
         #[cfg(target_os = "macos")]
         {
-            let errno = if result < 0 {
-                std::io::Error::last_os_error().raw_os_error()
-            } else {
-                None
-            };
             child.lose_generation();
-            eprintln!("telex: admission probe terminal exact reap unconfirmed; errno={errno:?}");
+            eprintln!("telex: admission probe terminal exact reap unconfirmed; errno={errno:?} thread={thread:?}");
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
         #[cfg(target_os = "linux")]
