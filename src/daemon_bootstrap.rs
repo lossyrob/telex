@@ -2333,6 +2333,68 @@ pub(crate) fn open_linux_witness(
     })
 }
 
+/// macOS witness for a selected executable.
+///
+/// macOS cannot execute an open descriptor, so the daemon is still spawned
+/// by path. The witness therefore does not prevent replacement; it keeps the
+/// selected inode allocated for as long as it is held, so the `(dev, ino)`
+/// compared against the running peer's kernel-reported main-image identity
+/// cannot be reissued to a different file in the meantime. Replacement
+/// between selection and exec is caught afterwards, by that comparison.
+#[cfg(target_os = "macos")]
+pub(crate) struct MacosExecutableWitness {
+    #[allow(dead_code)]
+    file: std::fs::File,
+    pub(crate) identity: FileIdentity,
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn open_macos_witness(
+    path: &Path,
+) -> Result<MacosExecutableWitness, DaemonBootstrapFailure> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if !metadata.is_file() {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    Ok(MacosExecutableWitness {
+        file,
+        identity: FileIdentity {
+            kind: FileIdentityKind::UnixDevIno,
+            high: metadata.dev(),
+            low: metadata.ino(),
+        },
+    })
+}
+
+/// File identity of this process's own running image.
+///
+/// On macOS this is the kernel-reported identity of the mapped main image,
+/// not a lookup of the path the process was started from, so a daemon whose
+/// path was replaced after exec reports the image it is actually running.
+#[cfg(target_os = "macos")]
+fn own_image_file_identity(_own_exe: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+    let (dev, ino) = crate::platform_fs::process_main_image_file_identity(std::process::id())
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    Ok(FileIdentity {
+        kind: FileIdentityKind::UnixDevIno,
+        high: dev,
+        low: ino,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn own_image_file_identity(own_exe: &Path) -> Result<FileIdentity, DaemonBootstrapFailure> {
+    file_identity(own_exe).map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)
+}
+
 #[cfg(windows)]
 impl Drop for WindowsExecutableWitness {
     fn drop(&mut self) {
@@ -2581,8 +2643,7 @@ pub(crate) async fn child_validate_bootstrap_env(
     if !same_path(&own_exe, &token.target_exe) {
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }
-    let own_identity =
-        file_identity(&own_exe).map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let own_identity = own_image_file_identity(&own_exe)?;
     if own_identity != token.file_identity {
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }

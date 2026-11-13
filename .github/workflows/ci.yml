@@ -453,6 +453,46 @@ jobs:
           cargo test --locked -p telex-watcher --no-default-features --features sqlite
           --lib ownership::tests:: -- --nocapture
 
+  daemon-bootstrap-identity-macos:
+    name: Daemon bootstrap image identity (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record host and isolate runtime state
+        run: |
+          echo "source: $(git rev-parse HEAD)"
+          echo "arch: $(uname -m)"
+          sw_vers
+          # Unix socket paths are length-limited; keep the test base short.
+          base="$RUNNER_TEMP/tx-${{ github.run_id }}-${{ github.run_attempt }}"
+          mkdir -p "$base"
+          echo "TELEX_TEST_BASE_DIR=$base" >> "$GITHUB_ENV"
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Test mapped main-image identity primitive
+        run: >-
+          cargo test --no-default-features --features sqlite --lib
+          platform_fs::tests::macos_main_image -- --nocapture
+
+      - name: Test identity-verified bootstrap selection, spawn and reconnect
+        # Both bootstrap selection modes against real daemons spawned from an
+        # isolated installed layout: matching reuse, spawn, crash/restart,
+        # upgrade/rollback, and the stale-image, replaced-target, foreign-binder
+        # and selector-movement refusals.
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --test installed_current_process
+          -- --test-threads=1
+
   credential-macos:
     name: Credential invocation lifecycle (macOS)
     runs-on: macos-latest

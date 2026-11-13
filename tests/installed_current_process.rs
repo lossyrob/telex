@@ -1,4 +1,7 @@
-#![cfg(all(feature = "sqlite", any(windows, target_os = "linux")))]
+#![cfg(all(
+    feature = "sqlite",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
 //! Real-process proofs for the `InstalledCurrent` Application Client bootstrap.
 //!
 //! Every test builds a unique, owner-private install root from the *branch*
@@ -1817,6 +1820,10 @@ async fn released_v021_writer_installs_exact_candidate() {
     .expect("write proof report");
 }
 
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "the v0.2.1 missing-admission version probe is implemented for Windows and Linux only; macOS refuses the manifest"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn installed_current_accepts_v021_writer_missing_admission_after_exact_probe() {
     let _env = ENV_LOCK.lock().await;
@@ -1882,6 +1889,10 @@ async fn installed_current_accepts_v021_writer_missing_admission_after_exact_pro
     );
 }
 
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "the v0.2.1 missing-admission version probe is implemented for Windows and Linux only; macOS refuses the manifest"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn installed_current_missing_admission_probe_is_cross_process_serialized() {
     let _env = ENV_LOCK.lock().await;

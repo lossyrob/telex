@@ -2079,6 +2079,15 @@ pub(crate) async fn connect_existing_with_selection(
             crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
         ));
     }
+    #[cfg(target_os = "macos")]
+    let exe_witness = crate::daemon_bootstrap::open_macos_witness(&expected_exe)
+        .map_err(DaemonError::Bootstrap)?;
+    #[cfg(target_os = "macos")]
+    if exe_witness.identity != expected_identity {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+        ));
+    }
 
     let paths = DaemonPaths::current()?;
     let conn = platform::connect(&paths.endpoint).await?;
@@ -2108,6 +2117,8 @@ pub(crate) async fn connect_existing_with_selection(
         #[cfg(windows)]
         exe_witness,
         #[cfg(target_os = "linux")]
+        exe_witness,
+        #[cfg(target_os = "macos")]
         exe_witness,
     };
     verify_cap_bootstrap_evidence(&cap, &paths, &resolved).map_err(bootstrap_error_from_peer)?;
@@ -2354,6 +2365,9 @@ struct ResolvedBootstrap {
     exe_witness: crate::daemon_bootstrap::WindowsExecutableWitness,
     #[cfg(target_os = "linux")]
     exe_witness: crate::daemon_bootstrap::LinuxExecutableWitness,
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    exe_witness: crate::daemon_bootstrap::MacosExecutableWitness,
 }
 
 impl ResolvedBootstrap {
@@ -2412,6 +2426,15 @@ async fn resolve_bootstrap_expected(
                     crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
                 ));
             }
+            #[cfg(target_os = "macos")]
+            let exe_witness = crate::daemon_bootstrap::open_macos_witness(&expected_exe)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(target_os = "macos")]
+            if exe_witness.identity != expected_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
             Ok(ResolvedBootstrap {
                 expected_exe,
                 expected_identity,
@@ -2420,6 +2443,8 @@ async fn resolve_bootstrap_expected(
                 #[cfg(windows)]
                 exe_witness,
                 #[cfg(target_os = "linux")]
+                exe_witness,
+                #[cfg(target_os = "macos")]
                 exe_witness,
             })
         }
@@ -2447,6 +2472,15 @@ async fn resolve_bootstrap_expected(
                     crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
                 ));
             }
+            #[cfg(target_os = "macos")]
+            let exe_witness = crate::daemon_bootstrap::open_macos_witness(executable)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(target_os = "macos")]
+            if exe_witness.identity != *file_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
             Ok(ResolvedBootstrap {
                 expected_exe: executable.clone(),
                 expected_identity: *file_identity,
@@ -2456,12 +2490,19 @@ async fn resolve_bootstrap_expected(
                 exe_witness,
                 #[cfg(target_os = "linux")]
                 exe_witness,
+                #[cfg(target_os = "macos")]
+                exe_witness,
             })
         }
     }
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+/// Bootstrap requires a kernel-backed way to read the file identity of the
+/// image a running peer is executing. Linux reads `/proc/<pid>/exe`, Windows
+/// holds the image open, and macOS reads the vnode of the peer's mapped main
+/// image. Any other Unix has no such primitive wired and refuses before
+/// selection, spawn, or connection.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn ensure_bootstrap_mapped_identity_supported() -> Result<()> {
     Err(DaemonError::Unsupported {
         capability: "running peer executable file identity",
@@ -2469,7 +2510,7 @@ fn ensure_bootstrap_mapped_identity_supported() -> Result<()> {
     })
 }
 
-#[cfg(any(not(unix), target_os = "linux"))]
+#[cfg(any(not(unix), target_os = "linux", target_os = "macos"))]
 fn ensure_bootstrap_mapped_identity_supported() -> Result<()> {
     Ok(())
 }
@@ -16104,15 +16145,20 @@ mod platform {
                 "server uid {uid} does not match client uid {current}"
             )));
         }
+        // Start time of the process instance the image identity was read
+        // from, where the platform reads that identity by PID.
+        let mut identity_instance: Option<u64> = None;
         if let Some(expected) = expected_identity {
             // On Linux this reads /proc/<pid>/exe which is TOCTOU-safe:
-            // the kernel captures the image inode at exec time.
-            let peer_identity = peer_process_file_identity(pid, expected_exe)?;
+            // the kernel captures the image inode at exec time. On macOS it
+            // reads the vnode behind the peer's mapped main image.
+            let (peer_identity, instance) = peer_process_file_identity(pid, expected_exe)?;
             if peer_identity != *expected {
                 return Err(DaemonError::Unauthorized(
                     "server executable file identity does not match selection".into(),
                 ));
             }
+            identity_instance = instance;
         }
         let exe = server_executable(pid)?;
         if !same_canonical_path(&exe, expected_exe) {
@@ -16123,6 +16169,11 @@ mod platform {
             )));
         }
         let start_time = server_process_start_time(pid)?;
+        if identity_instance.is_some_and(|instance| instance != start_time) {
+            return Err(DaemonError::Unauthorized(format!(
+                "server pid {pid} changed process instance during peer verification"
+            )));
+        }
         verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
         Ok(())
     }
@@ -16131,7 +16182,7 @@ mod platform {
     fn peer_process_file_identity(
         pid: u32,
         _fallback_path: &Path,
-    ) -> Result<crate::daemon_bootstrap::FileIdentity> {
+    ) -> Result<(crate::daemon_bootstrap::FileIdentity, Option<u64>)> {
         use std::os::unix::fs::MetadataExt;
         // `/proc/<pid>/exe` is a magic symlink resolved by the kernel to the
         // actual mapped image, closing the TOCTOU window that would exist if
@@ -16143,18 +16194,51 @@ mod platform {
                 std::io::Error::new(e.kind(), format!("{path}: {e}")),
             )
         })?;
-        Ok(crate::daemon_bootstrap::FileIdentity {
-            kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
-            high: meta.dev(),
-            low: meta.ino(),
-        })
+        Ok((
+            crate::daemon_bootstrap::FileIdentity {
+                kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+                high: meta.dev(),
+                low: meta.ino(),
+            },
+            None,
+        ))
     }
 
-    #[cfg(not(target_os = "linux"))]
+    /// macOS has no `/proc/<pid>/exe`. The identity is the `(dev, ino)` of the
+    /// vnode the kernel reports behind the peer's mapped main image, which a
+    /// rename, replacement, or unlink of the image path does not change. The
+    /// read names the peer by PID, so it is bracketed by the peer's start
+    /// time: a PID that was recycled during the read is refused, and the
+    /// returned start time lets the caller hold the rest of peer
+    /// verification, including the capability-record pin, to that instance.
+    #[cfg(target_os = "macos")]
+    fn peer_process_file_identity(
+        pid: u32,
+        _fallback_path: &Path,
+    ) -> Result<(crate::daemon_bootstrap::FileIdentity, Option<u64>)> {
+        let before = server_process_start_time(pid)?;
+        let (dev, ino) = crate::platform_fs::process_main_image_file_identity(pid)?;
+        let after = server_process_start_time(pid)?;
+        if before != after {
+            return Err(DaemonError::Unauthorized(format!(
+                "server pid {pid} changed process instance during image identity read"
+            )));
+        }
+        Ok((
+            crate::daemon_bootstrap::FileIdentity {
+                kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+                high: dev,
+                low: ino,
+            },
+            Some(after),
+        ))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn peer_process_file_identity(
         _pid: u32,
         _fallback_path: &Path,
-    ) -> Result<crate::daemon_bootstrap::FileIdentity> {
+    ) -> Result<(crate::daemon_bootstrap::FileIdentity, Option<u64>)> {
         Err(DaemonError::Unsupported {
             capability: "running peer executable file identity",
             message: "this Unix platform cannot prove the mapped executable file identity".into(),
@@ -17330,7 +17414,7 @@ mod tests {
     use crate::daemon_ipc::{ERROR_UNAUTHORIZED, REDACTED_SECRET};
     use crate::ipc::test_support::short_runtime_root;
 
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
     #[test]
     fn bootstrap_refuses_before_spawn_without_mapped_image_identity() {
         assert!(matches!(

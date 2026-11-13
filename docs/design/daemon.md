@@ -2239,6 +2239,69 @@ remain owned by [§11](#11-lease-epoch-fence-the-spine) and
 epoch, and push contracts, and the daemon-replacement station-intent
 boundary tracked by PR #138, remain unchanged.
 
+**Running-image identity on macOS.** macOS has no `/proc/<pid>/exe` and
+cannot execute an open descriptor, so it binds the selection to the
+running peer differently from Linux while keeping the same `(device,
+inode)` evidence and the same refusals:
+
+- The selected executable is opened without following a final symlink
+  and its `(device, inode)` must equal the frozen selection. The open
+  descriptor is held through `HelloAck`; it does not block replacement,
+  it keeps the selected inode allocated so the compared number cannot be
+  reissued to another file.
+- The daemon is spawned by its canonical path. Replacement between
+  selection and exec is therefore not prevented; it is detected, because
+  the peer that then answers is running a different file.
+- The connected peer's PID comes from the socket (`LOCAL_PEERPID`) and
+  its UID from `getpeereid`. Its image identity is read from the kernel
+  with `proc_pidinfo(PROC_PIDREGIONPATHINFO)`: the vnode behind the
+  peer's lowest-addressed file-backed mapping, which must be a regular
+  file mapped from offset zero, readable and executable and not
+  writable, i.e. the Mach-O header mapping the kernel creates at exec.
+  That `(device, inode)` must equal the selection. It is a property of
+  the mapped vnode, so renaming, replacing, or unlinking the path the
+  image was started from does not change it. `proc_pidpath` and any
+  reopened pathname are never the identity.
+- The read names the peer by PID, so it is bracketed by the peer's
+  process start time and the same start time is carried into the
+  capability-record PID/start-time pin. A PID recycled during
+  verification is refused.
+- The spawned daemon reads its own image identity the same way before
+  publishing endpoint, capability, or readiness, so its startup evidence
+  is the mapped image rather than a pathname lookup.
+
+The canonical process-image path, UID, PID/start-time, admission-backed
+capability evidence, and `HelloAck` build, version, protocol, and
+capability checks are unchanged and all still required. The read needs
+no privilege, entitlement, or helper for a same-user peer. It fails
+closed as a typed unsupported result, surfaced to bootstrap callers as
+a foreign peer, when the kernel will not report the peer's regions
+(another user's process, an exited process), when the first file-backed
+mapping is not an image header, or when no file-backed mapping is found
+within a bounded walk. Unix platforms other than Linux and macOS have no
+such primitive wired and refuse bootstrap before selection or spawn with
+`running peer executable file identity` unsupported.
+
+This is file identity, with the limits already stated for the contract:
+it is not an executable-content digest or signature, and it does not
+isolate against code already running as the same user, which could
+construct an address space whose lowest file-backed mapping is the
+selected file. The in-memory completion of a manifest written by the
+v0.2.1 updater without the admission field needs the bounded exact
+version probe, which is implemented for Windows and Linux only; on
+macOS such a manifest is still refused as `IncompatibleManifest`.
+
+**Platform evidence (macOS).** The `InstalledCurrent` and
+`ExactExecutable` process tests run natively on macOS for both selection
+modes, covering matching prestarted reuse, current-version spawn,
+crash/restart and reconnect, upgrade and rollback, selector movement,
+stale prestarted images, replaced exact targets, foreign binders, PID
+reuse evidence, symlink escape, untrusted writability, incompatible
+manifest or build metadata, and daemon-side readiness refusal. The two
+v0.2.1 missing-admission probe tests are reported as ignored on macOS.
+Evidence from one host and architecture is evidence for that host and
+architecture only.
+
 ## 17. Gating tests + per-backend conformance matrix (daemon-core acceptance)
 
 The executable gating tests below are **frozen as `daemon-core` acceptance**, each with the
