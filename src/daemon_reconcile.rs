@@ -1399,18 +1399,16 @@ fn resolve_credential(intent: &StationIntentV1) -> std::result::Result<String, I
 
     // One open handle for the age gate *and* the read: Plan decision 2 requires that the age or
     // size decision can never be made against a different inode than the bytes that were used.
-    // The size, owner, DACL, and reparse checks all run on that handle before any byte is copied.
+    // Shape/size and platform producer-policy checks run on that handle before bytes are copied.
     // The trade-off this makes explicit: a stale file's bytes do reach memory, but the age gate
     // below runs before the secret is ever extracted from them, connected to, or sent.
-    let (bytes, meta) =
-        platform_fs::read_owner_only_file_with_meta(&resolved, CREDENTIAL_MAX_BYTES).map_err(
-            |e| match e {
-                platform_fs::FsError::Unsupported { .. } => {
-                    IntentOutcome::terminal(IntentRecoveryState::Insecure, "credential_insecure")
-                }
-                platform_fs::FsError::Io { .. } => IntentOutcome::failed("credential_unreadable"),
-            },
-        )?;
+    let (bytes, meta) = platform_fs::read_producer_file_with_meta(&resolved, CREDENTIAL_MAX_BYTES)
+        .map_err(|e| match e {
+            platform_fs::FsError::Unsupported { .. } => {
+                IntentOutcome::terminal(IntentRecoveryState::Insecure, "credential_insecure")
+            }
+            platform_fs::FsError::Io { .. } => IntentOutcome::failed("credential_unreadable"),
+        })?;
     let max_age_ms = credential.clamped_max_age_ms();
     let now = now_ms();
     match meta.modified_ms {

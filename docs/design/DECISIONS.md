@@ -2396,16 +2396,33 @@ recoverable intents.
   #138 hardening. This change does not alter schema, manifest layout, file naming, indexes, or the
   authority work reserved for #153.
 
-**Deviation from the plan, recorded.** The plan specified `ensure_owner_private_dir` for the producer
-root. On Windows that rewrites the directory to a *protected* DACL, which re-propagates inheritance
-and leaves pre-existing children with an empty DACL — unreadable even to the process that wrote
-them, which would break the bridge itself. The producer root is therefore **created** strictly (with
-the owner-only descriptor, when telex creates it) and **validated, never rewritten**, when it
-already exists: owner must be the current user and every ACE must name the current user, `SYSTEM`,
-local `Administrators`, or the logon-session SID. AppContainer SIDs are not accepted for producer
-roots. The posture is unchanged — a broadly-ACLed root still fails closed — and per-file credential
-checks still apply independently, so containment in this directory is never the only thing being
-trusted.
+**Windows producer-policy supersession (#251, RC2).** The original create-strict,
+validate-existing rule for external producer paths is superseded by the operator-approved
+same-user workstation model. The earlier helper-based protected-creation and exact-descriptor
+preservation design was discarded before publication; its approvals and fixture passes do not
+establish this design's acceptance. It is not part of RC2.
+
+Windows producer roots use ordinary inherited permissions and support directory redirects.
+Producer readers omit owner/DACL inspection, but retain bounded same-handle metadata/content
+reads and regular non-reparse file checks. Daemon recovery retains credential containment.
+The unchanged RC1 Node bundle needs no helper, compilation or staged module activation.
+Daemon-owned capabilities/intents and Unix producer policy retain their existing strict APIs.
+
+This deliberately relinquishes credential confidentiality from principals permitted to read the
+Windows registry. The secret authorizes prompt submission to that session's pipe for anyone who
+also has pipe-write access. Rust's derived endpoint and verified peer user/PID/start/executable
+checks remain; they authenticate the server before sending, not clients that submit prompts.
+Foreign-writable producer state can cause denial of service; with a controlled same-user server
+at the derived endpoint it can support impersonation. No sandbox or remote-client isolation
+guarantee is implied. This is a tradeoff for profile compatibility, not a claim that foreign
+read/write access is harmless.
+
+Failed attach rolls back only its binding and pending-intent generation and never tears down
+producer files. Empty binding records may remain for GC discovery. Binding mutations use
+bounded OS-released locks; unrelated turn-guard/fallback locks keep their previous protocol.
+Windows uses the existing binding lock name plus exclusive sharing to exclude an RC1 holder
+and its stale-file deletion. Retained lock files can make RC1 refuse later operations; matching
+CLI versions are required for writes. Mixed-version Unix writers are not supported.
 
 ## 0053 — Application Client selects the daemon through an explicitly trusted installed-current bootstrap
 

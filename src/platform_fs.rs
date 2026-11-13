@@ -6,7 +6,7 @@
 //! rather than growing a parallel, weaker implementation. `daemon::platform` re-exports every
 //! promoted function, so daemon behavior is byte-for-byte unchanged.
 //!
-//! Three rules hold everywhere in this module:
+//! The strict owner-private APIs retain three rules:
 //!
 //! 1. **Fail closed.** Anything that cannot be positively verified is an error, never a silent
 //!    "assume fine". There are no broad catches and no permissive fallbacks.
@@ -14,6 +14,9 @@
 //!    read will use, so no path can be swapped between the check and the read.
 //! 3. **Both platforms, same posture.** Windows gets a real DACL/owner/reparse-point check
 //!    (`validate_owner_private_file_security`), not just "the file lives in a directory we trust".
+//!
+//! External producer APIs are separate: Windows trusts profile access policy instead of imposing
+//! Telex's private-state policy on another application's files. Unix producer checks stay strict.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
@@ -157,6 +160,49 @@ pub fn read_owner_only_file_with_meta(
 /// brought into memory: a stale credential must produce no read, no connection, and no probe.
 pub fn stat_owner_only_file(path: &Path, max_bytes: u64) -> Result<OwnerOnlyFileMeta> {
     imp::open_owner_only_file(path, max_bytes).map(|(_, meta)| meta)
+}
+
+/// Read external producer state using one handle for shape, size, age and contents.
+///
+/// Windows producer files inherit the host profile's policy without owner/DACL inspection.
+/// Unix retains owner-private checks. Callers still prove containment and verify the endpoint
+/// peer before sending credentials; this API does not authenticate a producer by itself.
+pub fn read_producer_file_with_meta(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(Vec<u8>, OwnerOnlyFileMeta)> {
+    let (file, meta) = open_producer_file(path, max_bytes)?;
+    use std::io::Read;
+    let mut bytes = Vec::with_capacity(meta.len as usize);
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| io_err("reading producer file", error))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(FsError::Unsupported {
+            capability: "producer file read",
+            message: format!("{} grew past the {max_bytes} byte cap", path.display()),
+        });
+    }
+    Ok((bytes, meta))
+}
+
+pub fn read_producer_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    read_producer_file_with_meta(path, max_bytes).map(|(bytes, _)| bytes)
+}
+
+pub fn stat_producer_file(path: &Path, max_bytes: u64) -> Result<OwnerOnlyFileMeta> {
+    open_producer_file(path, max_bytes).map(|(_, meta)| meta)
+}
+
+fn open_producer_file(path: &Path, max_bytes: u64) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+    #[cfg(windows)]
+    {
+        imp::open_checked_file(path, max_bytes, false)
+    }
+    #[cfg(not(windows))]
+    {
+        imp::open_owner_only_file(path, max_bytes)
+    }
 }
 
 /// Write `bytes` to a fresh owner-only file and atomically move it into place.
@@ -464,34 +510,21 @@ pub(crate) fn windows_self_owner_sid_strings() -> Result<Vec<String>> {
     imp::self_owner_sids().map(<[String]>::to_vec)
 }
 
-/// Ensure a **producer root** — a directory telex shares with an external same-user producer — is
-/// owner-private, and return its canonical path.
+/// Ensure an external producer directory exists and return its canonical path.
 ///
-/// This is deliberately *not* `ensure_owner_private_dir`. That function rewrites the directory's
-/// DACL to the daemon's protected, non-inheritable owner-only descriptor, which is correct for a
-/// directory telex owns outright but destructive for one it shares: on Windows, protecting a
-/// directory's DACL re-propagates inheritance to its children, and any file whose access came
-/// purely from inherited ACEs — every file the producer wrote before telex touched the directory —
-/// is left with an empty DACL and becomes unreadable *to everyone, including its own author*.
-/// Hardening the bridge root that way would break the very producer this feature exists to keep
-/// alive.
-///
-/// So the rule here is create-strict, validate-existing:
-/// * A directory that does not exist yet is created with the owner-only descriptor, so it is
-///   owner-private from birth and has no children to strip.
-/// * A directory that already exists is **validated, never rewritten**: its owner must be a SID
-///   this process may own objects as (see `imp::self_owner_sids` — the token user, the token's
-///   default owner, and any `SE_GROUP_OWNER` group; on an elevated token that includes
-///   `Administrators`, which is what Windows actually stamps on the directories such a process
-///   creates), a DACL must be present, and every allowed ACE must name the current user, `SYSTEM`,
-///   or local `Administrators`. `Everyone`, `Authenticated Users`, `Users`, or any foreign SID
-///   fails closed.
-///
-/// The posture is therefore unchanged — a non-owner-private root is still refused — while the
-/// producer's own files keep working. Per-file checks (`read_owner_only_file`) still apply to the
-/// credential itself, so containment in this directory is never the only thing being trusted.
-pub fn ensure_owner_private_producer_root(path: &Path) -> Result<PathBuf> {
-    imp::ensure_owner_private_producer_root(path)
+/// Windows inherits the surrounding profile's policy without owner/ACL checks or repair.
+/// Redirected producer roots are supported; credential containment is checked separately.
+/// Unix continues to require the existing owner-private directory policy.
+pub fn ensure_producer_root(path: &Path) -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::fs::create_dir_all(path).map_err(|error| io_err("creating producer root", error))?;
+        std::fs::canonicalize(path).map_err(|error| io_err("canonicalizing producer root", error))
+    }
+    #[cfg(not(windows))]
+    {
+        imp::ensure_owner_private_producer_root(path)
+    }
 }
 
 /// Create a brand-new owner-only file containing `bytes` followed by a newline.
@@ -1326,12 +1359,8 @@ mod imp {
     /// (`S-1-15-2-2`) — is refused, so a broadened DACL fails closed rather than being quietly
     /// accepted.
     ///
-    /// The `S-1-15-*` prefixes are deliberately **not** here. They existed only in a `#[cfg(test)]`
-    /// SDDL helper before this module was promoted, never in the enforced path, and the two
-    /// validate-only callers this feature added (`validate_owner_private_file_security` for the
-    /// producer credential, and `ensure_owner_private_producer_root` for an existing bridge root)
-    /// are exactly the places where a load-bearing allowlist must not include a group with the
-    /// reach of `Users`.
+    /// External producer files use a separate reader; this allowlist remains strict for files
+    /// and directories owned by Telex itself.
     fn ace_trustee_is_allowlisted(
         sid: PSID,
         self_sids: &[String],
@@ -1566,30 +1595,6 @@ mod imp {
         Ok(canonical)
     }
 
-    /// Create-strict, validate-existing. See the doc comment on
-    /// `platform_fs::ensure_owner_private_producer_root` for why an existing shared directory is
-    /// validated rather than rewritten.
-    pub(super) fn ensure_owner_private_producer_root(path: &Path) -> Result<PathBuf> {
-        let created = if path.exists() {
-            false
-        } else {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| io_err("creating producer root parent", e))?;
-            }
-            create_owner_only_dir(path)?;
-            true
-        };
-        validate_owner_private_dir_shape(path)?;
-        let canonical =
-            std::fs::canonicalize(path).map_err(|e| io_err("canonicalizing producer root", e))?;
-        validate_owner_private_dir_shape(&canonical)?;
-        // A directory telex just created carries the protected owner-only descriptor and must
-        // still look like one; an existing directory only has to be *safe*, not telex-shaped.
-        validate_owner_private_dir_security(&canonical, created)?;
-        Ok(canonical)
-    }
-
     pub(super) fn write_owner_only_file(
         path: &Path,
         bytes: &[u8],
@@ -1631,6 +1636,19 @@ mod imp {
         path: &Path,
         max_bytes: u64,
     ) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+        open_checked_file(path, max_bytes, true)
+    }
+
+    pub(super) fn open_checked_file(
+        path: &Path,
+        max_bytes: u64,
+        owner_private: bool,
+    ) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+        let capability = if owner_private {
+            "owner-only file read"
+        } else {
+            "producer file read"
+        };
         let wide = wide_null(path.as_os_str());
         // FILE_FLAG_OPEN_REPARSE_POINT: open the link itself rather than its target, so a reparse
         // point is *detected* below instead of silently followed.
@@ -1641,8 +1659,8 @@ mod imp {
         // cross-process — the daemon scans every manifest in the scope while a CLI `attach` or
         // `finalize` rewrites one, and vice versa — so the missing share flag turned an ordinary
         // race into a hard error on the attach path and a dropped evidence write on the daemon
-        // path. Sharing does not weaken the security check: ownership, DACL, size, and reparse
-        // status are all validated on this handle.
+        // path. Shape/size are validated on this handle; strict callers additionally validate
+        // ownership/DACL, while producer callers use the host profile's policy.
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
@@ -1666,19 +1684,19 @@ mod imp {
             .map_err(|e| io_err("inspecting owner-only file", e))?;
         if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(FsError::Unsupported {
-                capability: "owner-only file read",
+                capability,
                 message: format!("{} is a reparse point", path.display()),
             });
         }
         if !meta.is_file() {
             return Err(FsError::Unsupported {
-                capability: "owner-only file read",
+                capability,
                 message: format!("{} is not a regular file", path.display()),
             });
         }
         if meta.len() > max_bytes {
             return Err(FsError::Unsupported {
-                capability: "owner-only file read",
+                capability,
                 message: format!(
                     "{} is {} bytes, over the {max_bytes} byte cap",
                     path.display(),
@@ -1686,7 +1704,9 @@ mod imp {
                 ),
             });
         }
-        validate_owner_private_file_security(file.as_raw_handle() as HANDLE, path)?;
+        if owner_private {
+            validate_owner_private_file_security(file.as_raw_handle() as HANDLE, path)?;
+        }
         let modified_ms = meta.modified().ok().and_then(system_time_to_ms);
         Ok((
             file,
@@ -3408,42 +3428,67 @@ mod tests {
     }
 
     #[test]
-    fn producer_root_hardening_never_strips_an_existing_producer_file() {
-        // Regression guard for the hazard that made `ensure_owner_private_dir` unusable on a
-        // shared directory: on Windows, protecting a directory's DACL re-propagates inheritance and
-        // leaves pre-existing children with an empty DACL — unreadable even to their own author.
-        // The producer-root rule must validate an existing directory, never rewrite it.
+    fn producer_root_never_strips_an_existing_producer_file() {
         let dir = temp_dir("producer-root");
         let existing = dir.join("registry.json");
         write_producer_file(&existing, b"{\"secret\":\"x\"}");
-        let root = ensure_owner_private_producer_root(&dir).expect("harden producer root");
+        let root = ensure_producer_root(&dir).expect("prepare producer root");
         assert!(root.is_absolute());
         assert_eq!(
             std::fs::read_to_string(&existing).expect("the producer's own file stays readable"),
             "{\"secret\":\"x\"}"
         );
-        // Files the producer writes afterwards are still readable and still pass the per-file
-        // owner-private check, which is what the credential read actually relies on.
         let later = dir.join("later.json");
         write_producer_file(&later, b"{}");
-        assert!(read_owner_only_file(&later, 4096).is_ok());
+        assert!(read_producer_file(&later, 4096).is_ok());
         // Idempotent.
-        assert!(ensure_owner_private_producer_root(&dir).is_ok());
+        assert!(ensure_producer_root(&dir).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_freshly_created_producer_root_is_owner_private_from_birth() {
+    fn producer_root_creation_supports_normal_producer_writes() {
         let base = temp_dir("producer-root-fresh");
         let root = base.join("nested").join("telex-bridge");
         assert!(!root.exists());
-        let secured = ensure_owner_private_producer_root(&root).expect("create producer root");
+        let secured = ensure_producer_root(&root).expect("create producer root");
         assert!(secured.exists());
-        // A file written into a freshly created root is readable and owner-private.
         let file = secured.join("registry.json");
         write_producer_file(&file, b"{}");
-        assert!(read_owner_only_file(&file, 4096).is_ok());
+        assert!(read_producer_file(&file, 4096).is_ok());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_producer_reads_inherited_profile_access_without_relaxing_private_reads() {
+        let parent = temp_dir("producer-inheritance");
+        let sid = &windows_self_owner_sid_strings().unwrap()[0];
+        let grant = std::process::Command::new("icacls")
+            .arg(&parent)
+            .arg("/grant")
+            .arg(format!("*{sid}:(OI)(CI)(F)"))
+            .arg("*S-1-1-0:(OI)(CI)(RX)")
+            .output()
+            .expect("grant fixture inheritance");
+        assert!(
+            grant.status.success(),
+            "fixture ACL setup failed: {:?}",
+            grant
+        );
+        let root = ensure_producer_root(&parent.join("bridge")).unwrap();
+        let path = root.join("registry.json");
+        std::fs::write(&path, b"{\"secret\":\"fixture\"}").unwrap();
+        let (bytes, meta) = read_producer_file_with_meta(&path, 64 * 1024).unwrap();
+        assert_eq!(bytes, b"{\"secret\":\"fixture\"}");
+        assert_eq!(stat_producer_file(&path, 64 * 1024).unwrap().len, meta.len);
+        assert!(
+            read_owner_only_file(&path, 64 * 1024).is_err(),
+            "daemon-owned reader must still reject foreign-readable files"
+        );
+        assert!(read_producer_file(&path, 2).is_err());
+        assert!(read_producer_file(&root, 64 * 1024).is_err());
+        std::fs::remove_dir_all(parent).unwrap();
     }
 
     #[test]
