@@ -1,6 +1,6 @@
 #![cfg(all(
     any(feature = "sqlite", feature = "postgres"),
-    any(windows, target_os = "linux")
+    any(windows, target_os = "linux", target_os = "macos")
 ))]
 //! Executes the external, defaults-disabled consumer fixture against a
 //! production `InstalledCurrent` daemon.
@@ -83,6 +83,8 @@ const WATCHER_EVIDENCE: &[&str] = &[
     "retry=replayed",
     "recovery=recorded",
     "attendance=send-only",
+    "sender-health=",
+    "sender-operation=",
     "retention=boundary-crossed",
 ];
 

@@ -263,11 +263,11 @@ impl Isolation {
     }
 
     fn with_root(label: &str, root: PathBuf, install_current: bool) -> Self {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             create_owner_private_dir(&root);
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         std::fs::create_dir_all(&root).expect("create isolated harness root");
         let home = root.join("home");
         let run_dir = root.join("run");
