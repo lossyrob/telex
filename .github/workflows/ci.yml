@@ -529,6 +529,12 @@ jobs:
           sysctl kern.version kern.osversion
           sysctl hw.optional.arm64 || echo "hw.optional.arm64: absent (Intel hardware)"
           sysctl sysctl.proc_translated || echo "sysctl.proc_translated: absent (native Intel)"
+          umask 077
+          echo "TELEX_TEST_BASE_DIR=$(mktemp -d /private/tmp/XXXXXX)" >> "$GITHUB_ENV"
+          home_root="$(sudo mktemp -d /Users/XXXXXX)"
+          sudo chown "$(id -u):$(id -g)" "$home_root"
+          chmod 0700 "$home_root"
+          echo "TELEX_TEST_HOME_ROOT=$home_root" >> "$GITHUB_ENV"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -565,6 +571,38 @@ jobs:
           cargo test --locked -p telex-watcher --no-default-features --features sqlite
           --test process_v2 -- --nocapture --ignored
           macos_conformance::reused_pid_and_pgid_are_never_signalled_after_ended
+
+      - name: Start isolated PostgreSQL for native sender parity
+        run: |
+          brew list postgresql@17 >/dev/null 2>&1 || brew install postgresql@17
+          pg_bin="$(brew --prefix postgresql@17)/bin"
+          pg_data="$RUNNER_TEMP/watcher-postgres"
+          "$pg_bin/initdb" -D "$pg_data" -U postgres --auth=trust --no-locale
+          "$pg_bin/pg_ctl" -D "$pg_data" -l "$RUNNER_TEMP/watcher-postgres.log" \
+            -o "-h 127.0.0.1 -p 55472 -k $TELEX_TEST_BASE_DIR" -w start
+          echo "WATCHER_PG_BIN=$pg_bin" >> "$GITHUB_ENV"
+          echo "WATCHER_PG_DATA=$pg_data" >> "$GITHUB_ENV"
+          echo "TELEX_PG_URL=host=127.0.0.1 port=55472 user=postgres dbname=postgres sslmode=disable" >> "$GITHUB_ENV"
+          echo "TELEX_PG_REQUIRE=1" >> "$GITHUB_ENV"
+          echo "TELEX_PG_PASSWORD=watcher-local-test-only" >> "$GITHUB_ENV"
+
+      - name: Build matching native daemon, Watcher and test guardians
+        run: |
+          cargo build --locked -p telex -p telex-watcher --no-default-features \
+            --features sqlite,postgres --bins
+          set -o pipefail
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite,postgres \
+            --no-run --message-format=json | python3 tests/stage_watcher_test_guard.py
+
+      - name: Prove native SQLite and PostgreSQL lifecycle, sender readiness and health
+        run: |
+          cargo test --locked -p telex-watcher --no-default-features --features sqlite,postgres \
+            --lib --test installation --test runtime_diagnostics --test cli_v2 \
+            -- --test-threads=1 --nocapture
+
+      - name: Stop isolated PostgreSQL
+        if: always() && env.WATCHER_PG_DATA != ''
+        run: '"$WATCHER_PG_BIN/pg_ctl" -D "$WATCHER_PG_DATA" -m immediate -w stop'
 
   daemon-bootstrap-identity-macos:
     name: Daemon bootstrap image identity (macOS)

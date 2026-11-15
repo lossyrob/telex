@@ -19,7 +19,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-if (-not ($IsWindows -or $IsLinux)) { throw 'Watcher bootstrap supports Windows and Linux only.' }
+if (-not ($IsWindows -or $IsLinux -or $IsMacOS)) { throw 'Watcher bootstrap supports Windows, Linux and macOS only.' }
 
 function Assert-Absolute([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathFullyQualified($Path)) {
@@ -55,7 +55,7 @@ function Assert-AuthorityAncestors([IO.DirectoryInfo]$Directory) {
         } else {
             $uid = & id -u
             if ($LASTEXITCODE -ne 0) { throw 'Cannot determine current uid.' }
-            $owner = & stat -c '%u' -- $Directory.FullName
+            $owner = if ($IsMacOS) { & stat -f '%u' $Directory.FullName } else { & stat -c '%u' -- $Directory.FullName }
             if ($LASTEXITCODE -ne 0 -or $owner -notin @('0', $uid)) {
                 throw "Installation authority has an untrusted ancestor: $Directory"
             }
@@ -96,7 +96,7 @@ function Assert-Private([string]$Path) {
     } else {
         $uid = & id -u
         if ($LASTEXITCODE -ne 0) { throw 'Cannot determine current uid.' }
-        $owner = & stat -c '%u' -- $Path
+        $owner = if ($IsMacOS) { & stat -f '%u' $Path } else { & stat -c '%u' -- $Path }
         if ($LASTEXITCODE -ne 0 -or $owner -ne $uid) { throw "Installation authority has a different owner: $Path" }
         $mode = [IO.File]::GetUnixFileMode($Path)
         if (([int]$mode -band 63) -ne 0) { throw "Installation authority must be owner-only: $Path" }
@@ -169,13 +169,13 @@ function Assert-LaunchEnvironment($Record) {
 }
 
 function Get-ProcessGuardHash([string]$Watcher) {
-    if (-not $IsLinux) { return $null }
+    if (-not ($IsLinux -or $IsMacOS)) { return $null }
     $guard = Join-Path (Split-Path -Parent $Watcher) 'watcher_process_guard'
     if (-not (Test-Path -LiteralPath $guard -PathType Leaf)) {
-        throw 'Linux Watcher requires watcher_process_guard beside its retained executable.'
+        throw 'Unix Watcher requires watcher_process_guard beside its retained executable.'
     }
     if (([int][IO.File]::GetUnixFileMode($guard) -band 64) -eq 0) {
-        throw 'Linux watcher_process_guard must be executable by its owner.'
+        throw 'Unix watcher_process_guard must be executable by its owner.'
     }
     (Get-FileHash -LiteralPath $guard -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -238,9 +238,9 @@ function Assert-Record($Record, [switch]$Installed) {
     if ($Record.watcherSha256 -ne (Get-FileHash -LiteralPath $Record.watcherExecutable -Algorithm SHA256).Hash.ToLowerInvariant()) {
         throw 'Watcher executable changed; create a new reviewed installation record.'
     }
-    if ($IsLinux) {
+    if ($IsLinux -or $IsMacOS) {
         if ($Record.processGuardSha256 -isnot [string] -or $Record.processGuardSha256 -cnotmatch '^[0-9a-f]{64}$') {
-            throw 'Invalid Linux process guard hash in installation record.'
+            throw 'Invalid Unix process guard hash in installation record.'
         }
         if ($Record.processGuardSha256 -cne (Get-ProcessGuardHash $Record.watcherExecutable)) {
             throw 'Watcher process guard changed; create a new reviewed installation record.'

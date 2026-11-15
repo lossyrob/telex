@@ -82,25 +82,21 @@ class GuardianHandoffTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "successful fixture builds"):
             stage_guard(self.messages[1:], self.manifest)
 
-    def test_probe_confirms_missing_guard_but_rejects_other_process_failures(self):
+    def test_staged_probe_accepts_cargo_handoff_and_rejects_process_failures(self):
         self.artifact("debug/watcher_process_guard", "watcher_process_guard", False)
         host = self.artifact(
             "debug/build/telex-watcher/hash/out/process-test", "process_v2", True
         )
-        result = SimpleNamespace(
-            returncode=101,
-            stdout="",
-            stderr="start process guard: No such file or directory (os error 2)",
-        )
+        result = SimpleNamespace(returncode=0, stdout="", stderr="")
         with patch("stage_watcher_test_guard.subprocess.run", return_value=result) as run:
             stage_guard(self.messages, self.manifest, diagnose=True)
         self.assertEqual(run.call_args.args[0][0], str(host.resolve()))
-        (host.parent / "watcher_process_guard").unlink()
+        self.assertTrue((host.parent / "watcher_process_guard").is_file())
+        result.returncode = 101
         result.stderr = "a detector assertion failed"
         with patch("stage_watcher_test_guard.subprocess.run", return_value=result):
-            with self.assertRaisesRegex(ValueError, "unexpected pre-staging"):
+            with self.assertRaisesRegex(ValueError, "staged process fixture failed"):
                 stage_guard(self.messages, self.manifest, diagnose=True)
-        self.assertFalse((host.parent / "watcher_process_guard").exists())
 
 
 if __name__ == "__main__":

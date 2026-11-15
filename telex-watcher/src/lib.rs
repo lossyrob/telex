@@ -23,15 +23,15 @@ pub use registry_v2::maintenance;
 pub use registry_v2::{ManagementAudit, Mutation, Refusal};
 pub use runtime::{Runtime, RuntimeConfig};
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
 mod runtime_tests;
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
 mod runtime_resilience_tests;
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
 mod runtime_hardening_tests;
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
 #[path = "../../tests/support/telex_isolation.rs"]
 mod isolation;

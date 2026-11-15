@@ -50,7 +50,7 @@ pub struct Runtime {
     reconciled_registry_revision: Option<u64>,
     stopping: bool,
     maintenance_deferred: bool,
-    #[cfg(all(test, any(windows, target_os = "linux")))]
+    #[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
     pub(crate) send_barrier: Option<crate::runtime_resilience_tests::SendBarrier>,
 }
 
@@ -114,7 +114,7 @@ impl Runtime {
                 reconciled_registry_revision: None,
                 stopping: false,
                 maintenance_deferred: false,
-                #[cfg(all(test, any(windows, target_os = "linux")))]
+                #[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
                 send_barrier: None,
             },
             management,
@@ -125,7 +125,7 @@ impl Runtime {
         &self.id
     }
 
-    #[cfg(all(test, any(windows, target_os = "linux")))]
+    #[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
     pub(crate) fn interrupt_next_compaction(&self) -> Result<()> {
         lock(&self.registry)?.fail_next_compaction_deadline = true;
         Ok(())
@@ -544,7 +544,7 @@ impl Runtime {
         if !lock(&self.registry)?.reserve_recovery(id, send, manual, now_ms())? {
             return Ok(());
         }
-        #[cfg(all(test, any(windows, target_os = "linux")))]
+        #[cfg(all(test, any(windows, target_os = "linux", target_os = "macos")))]
         if send
             && self
                 .send_barrier

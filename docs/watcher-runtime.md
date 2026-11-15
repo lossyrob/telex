@@ -30,13 +30,13 @@ runs detectors. Windows and Linux contain the whole detector process tree.
 macOS contains the assigned process group of a trusted non-detaching detector
 (see [macOS detector containment](#macos-detector-containment),
 [#172](https://github.com/lossyrob/telex/issues/172)). Other hosts reject
-detector execution. macOS is not yet supported: the containment below is
-implemented and conformance-tested, but issue #172 also requires sender
-readiness and SQLite/PostgreSQL lifecycle and health parity on macOS, which
-depend on the daemon's macOS bootstrap identity
-([#259](https://github.com/lossyrob/telex/issues/259)). Until all of that
-lands together, no macOS sender becomes ready, so Watcher launches no detector
-there. Release archives do not carry the macOS runtime or its guard.
+detector execution. On macOS, the identity-verified `InstalledCurrent` Rust
+client establishes send-only membership before detectors can launch. The same
+SQLite/PostgreSQL lifecycle, recovery and health checks run on macOS, alongside
+native containment conformance. Source builds require a matching
+`watcher_process_guard` beside the runtime; the installation tool pins its
+hash and verifies the pair. Release-archive packaging and distribution remain
+separate from this source-build support.
 
 ## macOS detector containment
 
