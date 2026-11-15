@@ -1,4 +1,7 @@
-#![cfg(all(feature = "sqlite", any(windows, target_os = "linux")))]
+#![cfg(all(
+    feature = "sqlite",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
 //! Real-process proofs for the `InstalledCurrent` Application Client bootstrap.
 //!
 //! Every test builds a unique, owner-private install root from the *branch*
@@ -36,11 +39,11 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use sha2::{Digest, Sha256};
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::process::Command;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::time::Instant;
 use telex::application_client::{
     AddressSpec, ApplicationCapability, ApplicationClient, ApplicationClientConfig,
@@ -58,6 +61,44 @@ use isolation::{Isolation, ENV_LOCK};
 /// production constant stays crate-private.
 const BOOTSTRAP_TOKEN_ENV: &str = "TELEX_DAEMON_SELECTION_TOKEN";
 static PROCESS_PROFILE_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_fixture_socket_budget_retains_private_unique_roots() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::net::UnixListener;
+
+    let _env = ENV_LOCK.lock().await;
+    // The longest label in this process suite, including its real namespace.
+    let first = Isolation::new_empty("ic-child-build-mismatch");
+    let second = Isolation::new_empty("ic-child-build-mismatch");
+    assert_ne!(first.root, second.root);
+    for iso in [&first, &second] {
+        let _restore = iso.apply_env();
+        for path in [&iso.root, &iso.home, &iso.run_dir, &iso.install_root] {
+            let metadata = std::fs::symlink_metadata(path).expect("fixture authority");
+            assert!(!metadata.file_type().is_symlink());
+            assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
+            assert_eq!(metadata.mode() & 0o777, 0o700);
+        }
+        let paths = telex::daemon::DaemonPaths::current().expect("actual daemon paths");
+        let telex::daemon::Endpoint::UnixSocket(endpoint) = paths.endpoint;
+        let capacity = unsafe { std::mem::zeroed::<libc::sockaddr_un>() }
+            .sun_path
+            .len();
+        let bytes = endpoint.as_os_str().as_bytes().len();
+        assert!(
+            bytes < capacity,
+            "composed daemon socket is {bytes} bytes, capacity {capacity}: {}",
+            endpoint.display()
+        );
+        let listener = UnixListener::bind(&endpoint).expect("bind fully composed fixture socket");
+        println!("macos-fixture-socket bytes={bytes} capacity={capacity}");
+        drop(listener);
+        std::fs::remove_file(endpoint).expect("remove bound fixture socket");
+    }
+}
 
 fn config(responsibility: &str, db: &Path) -> ApplicationClientConfig {
     if let Ok(url) = std::env::var("TELEX_PROCESS_PG_URL") {
@@ -199,8 +240,8 @@ fn platform_file_identity(path: &Path) -> (u64, u64) {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_SHARE_READ,
-        OPEN_EXISTING,
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, OPEN_EXISTING,
     };
     let wide: Vec<u16> = path
         .as_os_str()
@@ -214,11 +255,16 @@ fn platform_file_identity(path: &Path) -> (u64, u64) {
             FILE_SHARE_READ,
             std::ptr::null(),
             OPEN_EXISTING,
-            0,
+            FILE_FLAG_BACKUP_SEMANTICS,
             0,
         )
     };
-    assert_ne!(handle, INVALID_HANDLE_VALUE, "open manifest identity");
+    assert_ne!(
+        handle,
+        INVALID_HANDLE_VALUE,
+        "open proof file/directory identity: {}",
+        std::io::Error::last_os_error()
+    );
     let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
     assert_ne!(
         unsafe { GetFileInformationByHandle(handle, &mut info) },
@@ -246,7 +292,7 @@ fn process_postgres_enabled() -> bool {
     std::env::var("TELEX_PROCESS_PG_URL").is_ok_and(|url| !url.trim().is_empty())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn proof_sha256(path: &Path) -> String {
     Sha256::digest(std::fs::read(path).expect("read proof input"))
         .iter()
@@ -254,13 +300,44 @@ fn proof_sha256(path: &Path) -> String {
         .collect()
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn run_released_proof_command(
     mut command: Command,
     evidence_dir: &Path,
     name: &str,
     timeout: Duration,
 ) -> isolation::CliOutput {
+    let program = command
+        .get_program()
+        .to_str()
+        .expect("UTF-8 proof program")
+        .to_string();
+    let argv: Vec<_> = std::iter::once(command.get_program())
+        .chain(command.get_args())
+        .map(|arg| arg.to_str().expect("UTF-8 proof argument").to_string())
+        .collect();
+    let mut environment: BTreeMap<_, _> = std::env::vars_os().collect();
+    for (key, value) in command.get_envs() {
+        if let Some(value) = value {
+            environment.insert(key.to_os_string(), value.to_os_string());
+        } else {
+            environment.remove(key);
+        }
+    }
+    command.env_clear().envs(&environment);
+    let environment_keys: Vec<_> = command
+        .get_envs()
+        .filter_map(|(key, value)| {
+            value.map(|_| key.to_str().expect("UTF-8 environment key").to_string())
+        })
+        .collect();
+    let executed_command = serde_json::json!({
+        "program": program,
+        "argv": argv,
+        "environmentKeys": environment_keys,
+        "environmentValuesRecorded": false,
+        "workingDirectory": std::env::current_dir().expect("proof working directory"),
+    });
     let stdout_path = evidence_dir.join(format!("{name}.stdout.txt"));
     let stderr_path = evidence_dir.join(format!("{name}.stderr.txt"));
     let metadata_path = evidence_dir.join(format!("{name}.metadata.json"));
@@ -291,10 +368,12 @@ fn run_released_proof_command(
                 metadata_path,
                 serde_json::to_vec_pretty(&serde_json::json!({
                     "name": name,
+                    "command": executed_command,
                     "spawned": false,
                     "timedOut": false,
                     "directTerminationConfirmed": false,
                     "error": output.stderr,
+                    "elapsedMilliseconds": started.elapsed().as_millis(),
                 }))
                 .expect("serialize spawn failure"),
             )
@@ -325,24 +404,27 @@ fn run_released_proof_command(
         }
     }
 
-    let stdout = String::from_utf8_lossy(&std::fs::read(&stdout_path).unwrap_or_default())
-        .trim()
-        .to_string();
-    let stderr = String::from_utf8_lossy(&std::fs::read(&stderr_path).unwrap_or_default())
-        .trim()
-        .to_string();
+    let stdout_bytes = std::fs::read(&stdout_path).expect("read proof stdout");
+    let stderr_bytes = std::fs::read(&stderr_path).expect("read proof stderr");
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
     std::fs::write(
         metadata_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "name": name,
+            "command": executed_command,
             "spawned": true,
             "timedOut": timed_out,
             "killRequested": kill_requested,
             "directTerminationConfirmed": status.is_some(),
             "exitCode": status.and_then(|status| status.code()),
             "elapsedMilliseconds": started.elapsed().as_millis(),
-            "stdoutBytes": stdout.len(),
-            "stderrBytes": stderr.len(),
+            "stdoutBytes": stdout_bytes.len(),
+            "stderrBytes": stderr_bytes.len(),
+            "stdoutFile": stdout_path.file_name().unwrap(),
+            "stdoutSha256": proof_sha256(&stdout_path),
+            "stderrFile": stderr_path.file_name().unwrap(),
+            "stderrSha256": proof_sha256(&stderr_path),
             "rootDisposition": "retained for ephemeral runner teardown",
         }))
         .expect("serialize command metadata"),
@@ -355,6 +437,53 @@ fn run_released_proof_command(
         stderr,
         timed_out,
     }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn released_proof_command_receipt_preserves_argv_and_hash_without_environment_values() {
+    let iso = Isolation::new_empty("ic-proof-command");
+    let executable = std::env::current_exe().unwrap();
+    let mut command = Command::new(&executable);
+    command.arg("--list").env(
+        "TELEX_TEST_REPORT_SECRET",
+        "synthetic-value-not-for-receipts",
+    );
+    let output = run_released_proof_command(command, &iso.root, "list", Duration::from_secs(10));
+    output.assert_success("proof receipt fixture");
+    let raw = std::fs::read_to_string(iso.root.join("list.metadata.json")).unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(metadata["command"]["program"], executable.to_str().unwrap());
+    assert_eq!(
+        metadata["command"]["argv"],
+        serde_json::json!([executable, "--list"])
+    );
+    assert!(metadata["command"]["environmentKeys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|key| key == "TELEX_TEST_REPORT_SECRET"));
+    assert!(!raw.contains("synthetic-value-not-for-receipts"));
+    assert_eq!(
+        metadata["stdoutSha256"],
+        proof_sha256(&iso.root.join("list.stdout.txt"))
+    );
+    assert_eq!(
+        metadata["stdoutBytes"],
+        std::fs::metadata(iso.root.join("list.stdout.txt"))
+            .unwrap()
+            .len()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn released_proof_identity_observes_directories_as_well_as_files() {
+    let iso = Isolation::new_empty("ic-proof-directory");
+    let directory = platform_file_identity(&iso.root);
+    let file = iso.root.join("identity");
+    std::fs::write(&file, b"proof").unwrap();
+    assert_ne!(platform_file_identity(&file), directory);
 }
 
 fn write_fixture_profile(iso: &Isolation, profile_name: &str) {
@@ -1565,9 +1694,28 @@ fn incomplete_installed_current_isolation_drops_without_a_second_panic() {
     drop(iso);
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
+fn released_v021_asset() -> (&'static str, &'static str) {
+    #[cfg(windows)]
+    return (
+        "telex-v0.2.1-x86_64-pc-windows-msvc.zip",
+        "f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0",
+    );
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return (
+        "telex-v0.2.1-aarch64-apple-darwin.tar.gz",
+        "07ab2088645363716c1fa826aa877866e7b3195f155ac8463c973cd2c5256f0f",
+    );
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return (
+        "telex-v0.2.1-x86_64-apple-darwin.tar.gz",
+        "220c49cf3924024d733d0429f2ceaa01289ac95b5eb984c30647100c50478d34",
+    );
+}
+
+#[cfg(any(windows, target_os = "macos"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "required hosted proof using the official released v0.2.1 Windows asset"]
+#[ignore = "required hosted proof using the architecture-matching official v0.2.1 asset"]
 async fn released_v021_writer_installs_exact_candidate() {
     let _env = ENV_LOCK.lock().await;
     let released = PathBuf::from(
@@ -1575,6 +1723,7 @@ async fn released_v021_writer_installs_exact_candidate() {
             .expect("TELEX_RELEASED_V021_EXE must name the verified release asset"),
     );
     let expected_head = std::env::var("TELEX_V021_EXPECTED_HEAD").expect("exact candidate head");
+    let expected_tree = std::env::var("TELEX_V021_EXPECTED_TREE").expect("exact candidate tree");
     let archive_sha = std::env::var("TELEX_RELEASED_V021_ARCHIVE_SHA256")
         .expect("verified release archive digest");
     let report_path =
@@ -1582,10 +1731,22 @@ async fn released_v021_writer_installs_exact_candidate() {
     let evidence_dir = report_path.parent().expect("proof evidence directory");
     std::fs::create_dir_all(evidence_dir).expect("create proof evidence directory");
     assert!(released.is_absolute() && released.is_file());
-    assert_eq!(
-        archive_sha,
-        "f5ffdaaa252d21edeb10d086a34bdcc67327b96db541e422ea725458d33090d0"
+    let (release_asset, expected_archive_sha) = released_v021_asset();
+    assert_eq!(archive_sha, expected_archive_sha);
+    let archive_path = PathBuf::from(
+        std::env::var_os("TELEX_RELEASED_V021_ARCHIVE_PATH").expect("official archive path"),
     );
+    let sidecar_path = PathBuf::from(
+        std::env::var_os("TELEX_RELEASED_V021_SIDECAR_PATH").expect("official checksum path"),
+    );
+    let archive_observed_sha = proof_sha256(&archive_path);
+    let sidecar_text = std::fs::read_to_string(&sidecar_path).expect("official checksum bytes");
+    let sidecar_observed_sha = sidecar_text
+        .split_whitespace()
+        .next()
+        .expect("official checksum value");
+    assert_eq!(archive_observed_sha, expected_archive_sha);
+    assert_eq!(sidecar_observed_sha, expected_archive_sha);
 
     let iso = Isolation::new_empty("ic-released-v021");
     let mut restore = iso.apply_env();
@@ -1678,6 +1839,11 @@ async fn released_v021_writer_installs_exact_candidate() {
     let manifest_sha_before = proof_sha256(&manifest_path);
     let manifest_json: serde_json::Value =
         serde_json::from_slice(&manifest_before).expect("old-writer manifest JSON");
+    std::fs::write(
+        evidence_dir.join("old-writer-manifest.json"),
+        &manifest_before,
+    )
+    .expect("retain the genuine old-writer manifest");
     assert!(
         manifest_json
             .get("application_bootstrap_admission_version")
@@ -1686,6 +1852,41 @@ async fn released_v021_writer_installs_exact_candidate() {
     );
     assert_eq!(manifest_json["package_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(manifest_json["build_id"], expected_head);
+    for (manifest_key, candidate_key) in [
+        ("schema_min", "supported_schema_min"),
+        ("schema_max", "supported_schema_max"),
+    ] {
+        assert_eq!(
+            manifest_json[manifest_key],
+            candidate_json["version"][candidate_key]
+        );
+    }
+    assert_eq!(
+        manifest_json["protocol_major"],
+        candidate_json["daemon_metadata"]["protocol_version"]["major"]
+    );
+    assert_eq!(
+        manifest_json["protocol_minor"],
+        candidate_json["daemon_metadata"]["protocol_version"]["minor"]
+    );
+    assert_eq!(
+        manifest_json["required_capabilities"],
+        candidate_json["daemon_metadata"]["required_capabilities"]
+    );
+    assert_eq!(
+        std::fs::canonicalize(manifest_json["binary"].as_str().expect("manifest target")).unwrap(),
+        std::fs::canonicalize(&installed_candidate).unwrap()
+    );
+    let current_path = iso.layout().current_path;
+    let selector_content_before = std::fs::read_to_string(&current_path).expect("selector bytes");
+    assert_eq!(selector_content_before.trim(), tag);
+    let selector_identity = platform_file_identity(&current_path);
+    let frozen_root = std::fs::canonicalize(&iso.install_root).expect("frozen absolute root");
+    let frozen_root_identity = platform_file_identity(&frozen_root);
+    let installed_identity_before = platform_file_identity(&installed_candidate);
+    let installed_canonical_before =
+        std::fs::canonicalize(&installed_candidate).expect("canonical installed target");
+    let installed_sha_before = proof_sha256(&installed_candidate);
     assert_eq!(
         std::fs::read(&installed_candidate).expect("installed candidate bytes"),
         std::fs::read(&candidate).expect("exact candidate bytes")
@@ -1694,9 +1895,17 @@ async fn released_v021_writer_installs_exact_candidate() {
     let fixture = build_public_fixture();
     let mut attach = iso.command_for(&fixture);
     attach
-        .env("TELEX_FIXTURE_TRUSTED_ROOT", &iso.install_root)
-        .env("TELEX_FIXTURE_RUN_ID", "released-v021-ci")
-        .arg("attach");
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", &frozen_root)
+        .env("TELEX_FIXTURE_RUN_ID", "released-v021-ci");
+    #[cfg(windows)]
+    attach.arg("attach");
+    #[cfg(target_os = "macos")]
+    {
+        write_fixture_profile(&iso, "released_v021");
+        attach
+            .env("TELEX_FIXTURE_BACKEND", "released_v021")
+            .arg("watcher");
+    }
     let attach = run_released_proof_command(
         attach,
         evidence_dir,
@@ -1704,24 +1913,92 @@ async fn released_v021_writer_installs_exact_candidate() {
         Duration::from_secs(180),
     );
     attach.assert_success("public Application Client attach through released writer");
+    #[cfg(windows)]
     assert!(attach.stdout.contains("attach=ready"));
+    #[cfg(target_os = "macos")]
+    assert!(attach.stdout.contains("attendance=send-only"));
     assert!(attach.stdout.contains("probe-result=ok"));
+    #[cfg(target_os = "macos")]
+    let structured_receipt = |prefix: &str| -> serde_json::Value {
+        serde_json::from_str(
+            attach
+                .stdout
+                .lines()
+                .find_map(|line| line.strip_prefix(prefix))
+                .expect("public structured sender receipt"),
+        )
+        .expect("parse public structured sender receipt")
+    };
+    #[cfg(target_os = "macos")]
+    let sender_health = structured_receipt("sender-health=");
+    #[cfg(target_os = "macos")]
+    let sender_operation = structured_receipt("sender-operation=");
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(sender_health["registered"], true);
+        assert_eq!(sender_health["sender_ready"], true);
+        assert_eq!(sender_health["receive_ready"], false);
+        assert_eq!(sender_health["attended_but_deaf"], false);
+        assert_eq!(sender_health["pending_unconsumed"], 0);
+        assert_eq!(sender_health["inbound_actionable"], 0);
+        assert_eq!(
+            sender_operation["send"]["axes"]["durable_acceptance"],
+            "Accepted"
+        );
+        assert!(sender_operation["send"]["message_id"]
+            .as_i64()
+            .is_some_and(|id| id > 0));
+        assert_eq!(sender_operation["replay"]["replayed"], true);
+        assert_eq!(
+            sender_operation["send"]["message_id"],
+            sender_operation["replay"]["message_id"]
+        );
+        assert_eq!(sender_operation["recovery"]["classification"], "Recorded");
+        assert!(sender_operation["send"]["axes"]["occupied_at_acceptance"].is_boolean());
+        for connection in ["firstConnection", "reconnection"] {
+            for field in ["logical_store_id", "runtime_id"] {
+                assert!(sender_operation[connection][field]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty()));
+            }
+        }
+        assert_eq!(
+            sender_operation["firstConnection"]["logical_store_id"],
+            sender_operation["reconnection"]["logical_store_id"]
+        );
+        assert_ne!(
+            sender_operation["firstConnection"]["runtime_id"],
+            sender_operation["reconnection"]["runtime_id"]
+        );
+    }
+    let frozen_root_identity_after = platform_file_identity(&frozen_root);
+    let selector_identity_after = platform_file_identity(&current_path);
+    let selector_content_after =
+        std::fs::read_to_string(&current_path).expect("selector after admission");
+    let installed_identity_after = platform_file_identity(&installed_candidate);
+    let installed_sha_after = proof_sha256(&installed_candidate);
+    let installed_canonical_after =
+        std::fs::canonicalize(&installed_candidate).expect("canonical target after admission");
+    assert_eq!(frozen_root_identity_after, frozen_root_identity);
+    assert_eq!(selector_identity_after, selector_identity);
+    assert_eq!(selector_content_after, selector_content_before);
+    assert_eq!(installed_identity_after, installed_identity_before);
+    assert_eq!(installed_sha_after, installed_sha_before);
+    assert_eq!(installed_sha_after, proof_sha256(&candidate));
+    assert_eq!(installed_canonical_after, installed_canonical_before);
 
     assert_eq!(
         std::fs::read(&manifest_path).expect("manifest bytes after admission"),
         manifest_before
     );
-    assert_eq!(
-        std::fs::metadata(&manifest_path)
-            .expect("manifest metadata after admission")
-            .modified()
-            .expect("manifest mtime after admission"),
-        manifest_mtime_before
-    );
-    assert_eq!(
-        platform_file_identity(&manifest_path),
-        manifest_identity_before
-    );
+    let manifest_mtime_after = std::fs::metadata(&manifest_path)
+        .expect("manifest metadata after admission")
+        .modified()
+        .expect("manifest mtime after admission");
+    let manifest_identity_after = platform_file_identity(&manifest_path);
+    let manifest_sha_after = proof_sha256(&manifest_path);
+    assert_eq!(manifest_mtime_after, manifest_mtime_before);
+    assert_eq!(manifest_identity_after, manifest_identity_before);
     assert_eq!(
         std::fs::read_to_string(&probe_counter)
             .expect("admission probe counter")
@@ -1742,16 +2019,48 @@ async fn released_v021_writer_installs_exact_candidate() {
         .expect("daemon start time");
     iso.stop_daemon_with_executable(&installed_candidate);
 
+    #[cfg(windows)]
     let volume_root = iso
         .root
         .ancestors()
         .last()
         .expect("proof volume root")
         .to_path_buf();
+    #[cfg(windows)]
     assert_eq!(iso.root.parent(), Some(volume_root.as_path()));
+    let commands: BTreeMap<_, serde_json::Value> = [
+        "released-version",
+        "candidate-version",
+        "released-upgrade",
+        "public-attach",
+    ]
+    .into_iter()
+    .map(|name| {
+        let bytes = std::fs::read(evidence_dir.join(format!("{name}.metadata.json")))
+            .expect("command metadata bytes");
+        (
+            name,
+            serde_json::from_slice(&bytes).expect("command metadata JSON"),
+        )
+    })
+    .collect();
     let report = serde_json::json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "result": "pass",
+        "source": { "commit": expected_head, "tree": expected_tree },
+        "host": {
+            "os": std::env::var("TELEX_V021_HOST_OS").expect("host OS receipt"),
+            "architecture": std::env::var("TELEX_V021_HOST_ARCH").expect("host architecture receipt"),
+            "sdk": std::env::var("TELEX_V021_HOST_SDK").expect("host SDK receipt"),
+        },
+        "artifact": {
+            "name": std::env::var("TELEX_V021_ARTIFACT_NAME").expect("artifact name"),
+            "runId": std::env::var("GITHUB_RUN_ID").ok(),
+            "attempt": std::env::var("GITHUB_RUN_ATTEMPT").ok(),
+            "job": std::env::var("GITHUB_JOB").ok(),
+            "report": "report.json",
+        },
+        "commands": commands,
         "candidate": {
             "commit": expected_head,
             "packageVersion": candidate_json["version"]["package_version"],
@@ -1760,24 +2069,35 @@ async fn released_v021_writer_installs_exact_candidate() {
             "sha256": proof_sha256(&candidate),
             "installedExecutable": installed_candidate.display().to_string(),
             "installedSha256": proof_sha256(&installed_candidate),
+            "installedFileIdentity": installed_identity_before,
         },
         "releasedWriter": {
             "release": "https://github.com/lossyrob/telex/releases/tag/v0.2.1",
             "tag": "v0.2.1",
             "commit": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
-            "asset": "telex-v0.2.1-x86_64-pc-windows-msvc.zip",
+            "asset": release_asset,
             "assetSha256": archive_sha,
+            "archiveFileSha256": archive_observed_sha,
+            "sidecarObservedSha256": sidecar_observed_sha,
+            "sidecarFileSha256": proof_sha256(&sidecar_path),
+            "reportedBuildId": released_json["version"]["build_id"],
             "executable": released.display().to_string(),
             "executableSha256": proof_sha256(&released),
         },
         "isolation": {
             "executionRoot": iso.root.display().to_string(),
-            "executionRootParentIsVolumeRoot": true,
+            "executionRootParentIsVolumeRoot": cfg!(windows),
+            "platform": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+            "frozenCanonicalTrustedRoot": frozen_root,
+            "frozenRootIdentity": frozen_root_identity,
+            "selectorIdentity": selector_identity,
             "telexHome": iso.home.display().to_string(),
             "runDir": iso.run_dir.display().to_string(),
             "db": iso.db_path.display().to_string(),
             "installRoot": iso.install_root.display().to_string(),
-            "localAppData": iso.state_dir.display().to_string(),
+            "stateDirectory": iso.state_dir.display().to_string(),
+            "localAppData": cfg!(windows).then(|| iso.state_dir.display().to_string()),
             "parentAclMutation": false,
             "workstationState": false,
             "sharedDb": false,
@@ -1791,11 +2111,37 @@ async fn released_v021_writer_installs_exact_candidate() {
             "buildId": manifest_json["build_id"],
             "admissionFieldPresent": false,
             "sha256Before": manifest_sha_before,
-            "sha256After": proof_sha256(&manifest_path),
+            "sha256After": manifest_sha_after,
             "mtimeUnchanged": true,
             "fileIdentityBefore": manifest_identity_before,
-            "fileIdentityAfter": platform_file_identity(&manifest_path),
+            "fileIdentityAfter": manifest_identity_after,
+            "mtimeBeforeUnixNanoseconds": manifest_mtime_before.duration_since(std::time::UNIX_EPOCH).expect("manifest mtime after epoch").as_nanos().to_string(),
+            "mtimeAfterUnixNanoseconds": manifest_mtime_after.duration_since(std::time::UNIX_EPOCH).expect("manifest mtime after epoch").as_nanos().to_string(),
             "bytesUnchanged": true,
+            "rawManifestEvidence": "old-writer-manifest.json",
+            "manifest": manifest_json,
+        },
+        "bindings": {
+            "root": {
+                "canonicalPath": frozen_root,
+                "identityBefore": frozen_root_identity,
+                "identityAfter": frozen_root_identity_after,
+            },
+            "selector": {
+                "tag": tag,
+                "contentBefore": selector_content_before,
+                "contentAfter": selector_content_after,
+                "identityBefore": selector_identity,
+                "identityAfter": selector_identity_after,
+            },
+            "target": {
+                "canonicalPathBefore": installed_canonical_before,
+                "canonicalPathAfter": installed_canonical_after,
+                "identityBefore": installed_identity_before,
+                "identityAfter": installed_identity_after,
+                "sha256Before": installed_sha_before,
+                "sha256After": installed_sha_after,
+            },
         },
         "runtimeProof": {
             "preSpawnProbeCount": 1,
@@ -1806,10 +2152,20 @@ async fn released_v021_writer_installs_exact_candidate() {
             "capStartupExecutableFileIdentity": cap["startup_executable_file_identity"],
             "capServerPid": daemon_pid,
             "capServerStartTime": daemon_start_time,
-            "publicAttachReady": true,
+            "publicAttachReady": cfg!(windows),
+            "publicWatcherProbeReady": cfg!(target_os = "macos"),
+            "publicStdoutFile": "public-attach.stdout.txt",
+            "publicStdoutSha256": proof_sha256(&evidence_dir.join("public-attach.stdout.txt")),
             "daemonExited": true,
         },
     });
+    #[cfg(target_os = "macos")]
+    let report = {
+        let mut report = report;
+        report["runtimeProof"]["senderHealth"] = sender_health;
+        report["runtimeProof"]["senderOperation"] = sender_operation;
+        report
+    };
     std::fs::write(
         report_path,
         serde_json::to_vec_pretty(&report).expect("serialize proof report"),

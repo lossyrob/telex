@@ -163,6 +163,16 @@ variants:
 current-executable behavior for legacy and internal callers. It is
 never an automatic fallback from `InstalledCurrent`.
 
+Both explicit bootstrap policies support macOS. Native macOS applications
+can use the Rust client directly, including bidirectional Operator Station
+membership, replies, acknowledgments, and durable ingest recovery. Build
+the application against a Telex library containing macOS bootstrap support
+and select a matching daemon executable or installed version; changing only
+the CLI binary does not update an application's linked client library.
+macOS verifies the running image's mapped vnode as described in the
+[daemon contract](design/daemon.md#16-minimal-upgrade-floor); unsupported or
+indeterminate image identity still refuses before application data is sent.
+
 ### Installed layout expectations
 
 `InstalledCurrent { trusted_root }` reads a strict versioned layout
@@ -260,6 +270,20 @@ authority paths. The client does not fall back automatically from
 `InstalledCurrent` to `ExactExecutable` or to `connect(config)`; a
 typed failure surfaces to the caller so it can act on the specific
 condition.
+
+For an ineligible missing-admission selection, a present-invalid admission
+key, a non-0.3.x target or a failed compatibility probe, keep refusing the
+selection. An admission-aware updater may install/reselect a NEW immutable
+manifest as remediation; never edit the old manifest or fall back to another
+bootstrap policy. This does not replace the required compatibility proof for
+an eligible manifest genuinely written by the official v0.2.1 updater.
+
+An unconfirmed prior compatibility-probe cleanup is instead unresolved CLIENT
+process custody, not an invalid immutable manifest. Native legacy probes remain
+blocked across roots until restarting the CLIENT process once custody is
+parked. No later numeric-PID observation/reap releases it, even for an
+apparently exited child. Do not edit the manifest to clear that hold;
+strictly admitted selections and cached same-key completion remain unaffected.
 
 ## Replacing temporary consumer seams
 

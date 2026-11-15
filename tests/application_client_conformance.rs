@@ -1,6 +1,6 @@
 #![cfg(all(
     any(feature = "sqlite", feature = "postgres"),
-    any(windows, target_os = "linux")
+    any(windows, target_os = "linux", target_os = "macos")
 ))]
 //! One backend-neutral Application Client conformance battery.
 //!
