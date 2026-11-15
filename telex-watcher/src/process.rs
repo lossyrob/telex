@@ -1031,12 +1031,7 @@ mod platform {
             .set_write_timeout(Some(CLEANUP_TIMEOUT))
             .map_err(ProcessFailure::io)?;
         let fd = guard_control.as_raw_fd();
-        let mut executable = std::env::current_exe().map_err(ProcessFailure::io)?;
-        executable.pop();
-        if executable.file_name() == Some(OsStr::new("deps")) {
-            executable.pop();
-        }
-        executable.push("watcher_process_guard");
+        let executable = super::guard_executable().map_err(ProcessFailure::io)?;
         let mut command = Command::new(executable);
         command
             .arg(fd.to_string())
@@ -1408,6 +1403,34 @@ mod platform {
         }
         Ok(())
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static TEST_GUARD_EXECUTABLE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Test-only. Cargo does not promise that a test binary sits beside the
+/// package's binaries, so integration tests name the guard Cargo built for
+/// them. Nothing in the shipped runtime calls this, and no environment
+/// variable or configuration reaches it: an installed Watcher always uses the
+/// guard beside its own executable.
+#[doc(hidden)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn set_guard_executable_for_tests(path: PathBuf) {
+    let _ = TEST_GUARD_EXECUTABLE.set(path);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn guard_executable() -> std::io::Result<PathBuf> {
+    if let Some(path) = TEST_GUARD_EXECUTABLE.get() {
+        return Ok(path.clone());
+    }
+    let mut executable = std::env::current_exe()?;
+    executable.pop();
+    if executable.file_name() == Some(OsStr::new("deps")) {
+        executable.pop();
+    }
+    executable.push("watcher_process_guard");
+    Ok(executable)
 }
 
 /// Entrypoint for the private helper binary; not a Telex client.

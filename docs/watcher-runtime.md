@@ -30,9 +30,13 @@ runs detectors. Windows and Linux contain the whole detector process tree.
 macOS contains the assigned process group of a trusted non-detaching detector
 (see [macOS detector containment](#macos-detector-containment),
 [#172](https://github.com/lossyrob/telex/issues/172)). Other hosts reject
-detector execution. macOS is not yet a shipped Watcher distribution: release
-archives do not carry the runtime or its guard, and the sender path's
-bootstrapped daemon connection is not yet supported there.
+detector execution. macOS is not yet supported: the containment below is
+implemented and conformance-tested, but issue #172 also requires sender
+readiness and SQLite/PostgreSQL lifecycle and health parity on macOS, which
+depend on the daemon's macOS bootstrap identity
+([#259](https://github.com/lossyrob/telex/issues/259)). Until all of that
+lands together, no macOS sender becomes ready, so Watcher launches no detector
+there. Release archives do not carry the macOS runtime or its guard.
 
 ## macOS detector containment
 
@@ -47,7 +51,10 @@ guarantee.
 Each attempt gets a private `watcher_process_guard` process, which must sit
 beside the `telex-watcher` executable. The guard runs in its own session,
 outside the detector group, and is controlled only through inherited private
-handles. It exits after writing the attempt's receipt.
+handles. It also watches the runtime process itself through a kernel exit
+notification, so runtime death ends the attempt even when another process
+holds a copy of the runtime's control handle. It exits after writing the
+attempt's receipt.
 
 - **Admission.** Before launch, both the runtime and the guard require a
   native (not Rosetta-translated) arm64 or x86_64 process on a release kernel,
@@ -82,6 +89,14 @@ handles. It exits after writing the attempt's receipt.
   seconds for end-of-file, then closes its end and fails the attempt as
   nonconforming. Containment for that attempt is still Ended; the escaped
   process is neither signalled nor claimed. Its later writes fail.
+- **Known limitation: leaked pipe ends.** macOS has no atomic close-on-exec
+  for pipes and sockets, so an unrelated program that the runtime starts at
+  the same moment can inherit a copy of an attempt's pipe ends. If it holds
+  the stdout or stderr write end, a conforming detector is reported as
+  nonconforming after the two-second wait (containment is still Ended). If it
+  holds the stdin write end, a detector that reads stdin to end-of-file waits
+  until its timeout. Neither case changes which processes are signalled or
+  what Ended means.
 
 ## Runtime failure diagnostics
 

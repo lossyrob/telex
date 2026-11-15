@@ -473,15 +473,13 @@ pub(super) async fn prepare(
         .set_write_timeout(Some(CLEANUP_TIMEOUT))
         .map_err(ProcessFailure::io)?;
     let fd = guard_control.as_raw_fd();
-    let mut executable = std::env::current_exe().map_err(ProcessFailure::io)?;
-    executable.pop();
-    if executable.file_name() == Some(OsStr::new("deps")) {
-        executable.pop();
-    }
-    executable.push("watcher_process_guard");
+    let executable = super::guard_executable().map_err(ProcessFailure::io)?;
     let mut command = Command::new(executable);
     command
         .arg(fd.to_string())
+        // The guard watches this process directly, so a leaked copy of the
+        // control endpoint cannot hide the runtime's death.
+        .arg(std::process::id().to_string())
         .current_dir(cwd)
         .env_clear()
         .envs(environment)
@@ -796,8 +794,145 @@ fn pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
     Ok((fds[0], fds[1]))
 }
 
-fn descriptor_limit() -> libc::c_int {
-    unsafe { libc::getdtablesize() }.clamp(256, 65_536)
+/// Every descriptor this process has open, from the kernel's own table.
+/// A numeric sweep would miss descriptors above its bound.
+fn open_descriptors() -> std::io::Result<Vec<libc::c_int>> {
+    let entry = std::mem::size_of::<libc::proc_fdinfo>();
+    let mut capacity = 64usize;
+    loop {
+        let mut table: Vec<libc::proc_fdinfo> = Vec::with_capacity(capacity);
+        let bytes = libc::c_int::try_from(capacity * entry)
+            .map_err(|_| std::io::Error::other("descriptor table too large"))?;
+        let read = unsafe {
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                table.as_mut_ptr().cast(),
+                bytes,
+            )
+        };
+        let Ok(read) = usize::try_from(read) else {
+            return Err(std::io::Error::other("cannot list open descriptors"));
+        };
+        if read == 0 || read % entry != 0 || read > bytes as usize {
+            return Err(std::io::Error::other("cannot list open descriptors"));
+        }
+        if read < bytes as usize {
+            // SAFETY: the kernel initialized exactly `read` bytes of entries.
+            unsafe { table.set_len(read / entry) };
+            return Ok(table.iter().map(|info| info.proc_fd).collect());
+        }
+        // A full buffer may be truncated: ask again with more room.
+        capacity *= 4;
+    }
+}
+
+/// Runtime liveness that does not depend on descriptor EOF. A process that
+/// inherited a copy of the runtime's control endpoint keeps that endpoint
+/// open after the runtime dies; the kernel's exit notification does not.
+struct RuntimeWatch {
+    queue: std::os::fd::OwnedFd,
+}
+
+impl RuntimeWatch {
+    /// `None` when the runtime has already exited.
+    fn new(runtime: libc::pid_t) -> std::io::Result<Option<Self>> {
+        if runtime <= 1 || unsafe { libc::getppid() } != runtime {
+            return Ok(None);
+        }
+        let queue = unsafe { libc::kqueue() };
+        if queue < 0 {
+            return Err(last_error());
+        }
+        // SAFETY: kqueue returned a new descriptor that nothing else owns.
+        let queue = unsafe { std::os::fd::OwnedFd::from_raw_fd(queue) };
+        close_on_exec(queue.as_raw_fd())?;
+        let mut change: libc::kevent = unsafe { std::mem::zeroed() };
+        change.ident = runtime as libc::uintptr_t;
+        change.filter = libc::EVFILT_PROC;
+        change.flags = libc::EV_ADD | libc::EV_CLEAR;
+        change.fflags = libc::NOTE_EXIT;
+        let registered = unsafe {
+            libc::kevent(
+                queue.as_raw_fd(),
+                &change,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+        if registered < 0 {
+            let error = last_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+        // The registration names a PID; it is the runtime's only if the
+        // runtime was still our parent after it was made.
+        if unsafe { libc::getppid() } != runtime {
+            return Ok(None);
+        }
+        Ok(Some(Self { queue }))
+    }
+
+    /// True once the runtime exited. A failed query counts as exited, so
+    /// the attempt is cleaned up rather than left running.
+    fn exited(&self) -> bool {
+        let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+        let none = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe {
+            libc::kevent(
+                self.queue.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                &mut event,
+                1,
+                &none,
+            ) != 0
+        }
+    }
+
+    /// Wait for one control byte. `None` means EOF, an error or runtime exit.
+    fn read_byte(&self, control: &mut UnixStream) -> Option<u8> {
+        loop {
+            let mut ready = [
+                libc::pollfd {
+                    fd: control.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.queue.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            let polled = unsafe { libc::poll(ready.as_mut_ptr(), 2, -1) };
+            if polled < 0 {
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return None;
+            }
+            if ready[1].revents != 0 && self.exited() {
+                return None;
+            }
+            if ready[0].revents != 0 {
+                let mut byte = [0];
+                return match control.read(&mut byte) {
+                    Ok(1) => Some(byte[0]),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    _ => None,
+                };
+            }
+        }
+    }
 }
 
 /// Fork the gated trampoline. Only async-signal-safe calls run in the child.
@@ -814,7 +949,8 @@ fn spawn_trampoline(
     let mut pointers: Vec<*const libc::c_char> =
         arguments.iter().map(|argument| argument.as_ptr()).collect();
     pointers.push(std::ptr::null());
-    let limit = descriptor_limit();
+    // Listed before fork: the child may only make async-signal-safe calls.
+    let inherited = open_descriptors()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         return Err(last_error());
@@ -824,8 +960,8 @@ fn spawn_trampoline(
             if libc::setpgid(0, 0) != 0 {
                 libc::_exit(125);
             }
-            for fd in 3..limit {
-                if fd != release_read && fd != status_write {
+            for &fd in &inherited {
+                if fd > 2 && fd != release_read && fd != status_write {
                     libc::close(fd);
                 }
             }
@@ -922,6 +1058,11 @@ pub(super) fn guard_main() -> std::io::Result<()> {
     if fd < 3 {
         return Err(std::io::Error::other("invalid control descriptor"));
     }
+    let runtime: libc::pid_t = std::env::args()
+        .nth(2)
+        .ok_or_else(|| std::io::Error::other("missing runtime process"))?
+        .parse()
+        .map_err(std::io::Error::other)?;
     close_on_exec(fd)?;
     // An inherited SIGCHLD=SIG_IGN (or SA_NOCLDWAIT) would auto-reap the
     // leader and destroy the anchor. Restore the default before any child.
@@ -935,25 +1076,35 @@ pub(super) fn guard_main() -> std::io::Result<()> {
         let mut mask: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut mask);
         libc::sigprocmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut());
-        // Another attempt's liveness or control handle must not survive here.
-        for other in 3..descriptor_limit() {
-            if other != fd {
-                libc::close(other);
-            }
+    }
+    // Another attempt's liveness or control handle must not survive here.
+    for other in open_descriptors()? {
+        if other > 2 && other != fd {
+            unsafe { libc::close(other) };
         }
     }
+    if open_descriptors()?
+        .iter()
+        .any(|&other| other > 2 && other != fd)
+    {
+        return Err(std::io::Error::other("an inherited descriptor survived"));
+    }
     let mut control = unsafe { UnixStream::from_raw_fd(fd) };
+    // Before anything is launched: if the runtime is already gone there is
+    // nothing to contain.
+    let Some(watch) = RuntimeWatch::new(runtime)? else {
+        return Ok(());
+    };
     let mut wire = Vec::new();
     // Do not buffer beyond the newline: the next byte is the launch gate.
     loop {
-        let mut byte = [0];
-        if control.read(&mut byte)? == 0 {
+        let Some(byte) = watch.read_byte(&mut control) else {
             return Ok(());
-        }
-        if byte[0] == b'\n' {
+        };
+        if byte == b'\n' {
             break;
         }
-        wire.push(byte[0]);
+        wire.push(byte);
         if wire.len() > MAX_STDIN_BYTES {
             return Err(std::io::Error::other("launch limit"));
         }
@@ -1033,8 +1184,8 @@ pub(super) fn guard_main() -> std::io::Result<()> {
     let mut gate = [0];
     // No detector runs before both this handshake and the durable gate.
     let released = control.write_all(&ready).is_ok()
-        && control.read(&mut gate).unwrap_or(0) == 1
-        && gate[0] == b'S'
+        && watch.read_byte(&mut control) == Some(b'S')
+        && !watch.exited()
         && unsafe { libc::write(release_write, b"S".as_ptr().cast(), 1) } == 1;
     // Closing the gate unreleased makes the trampoline exit without exec.
     unsafe { libc::close(release_write) };
@@ -1055,6 +1206,11 @@ pub(super) fn guard_main() -> std::io::Result<()> {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                     ) => {}
                 Err(_) => break,
+            }
+            // Runtime death ends the attempt even while another process
+            // still holds a copy of the runtime's control endpoint.
+            if watch.exited() {
+                break;
             }
             match anchor.terminal() {
                 Ok(Some(terminal)) => {

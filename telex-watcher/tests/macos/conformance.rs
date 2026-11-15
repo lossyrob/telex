@@ -346,6 +346,7 @@ fn drive_guard(
     let mut spawn = Command::new(executable);
     spawn
         .arg(fd.to_string())
+        .arg(std::process::id().to_string())
         .current_dir(&isolated.root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -553,9 +554,79 @@ fn concurrent_attempts_all_end_after_abrupt_runtime_death() {
     sentinel.assert_alive();
 }
 
+/// Stand-in for an unrelated program the runtime starts while an attempt is
+/// live (macOS sets close-on-exec in a separate step, so such a child can
+/// inherit the runtime's end of the guard control socket). It keeps the
+/// runtime's socket descriptors (the control endpoint) open, in its own
+/// group, for a finite time. Pipes are not leaked: a held stdin write end is
+/// a separate, documented limitation.
+// The holder must outlive this runtime, which the test SIGKILLs; it exits on
+// its own after 30 seconds and is reaped by its new parent.
+#[allow(clippy::zombie_processes)]
+pub(super) fn leak_runtime_descriptors(root: &Path) {
+    let mut command = Command::new("/bin/sleep");
+    command
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            for fd in 3..4096 {
+                let mut status: libc::stat = std::mem::zeroed();
+                if libc::fstat(fd, &mut status) == 0
+                    && status.st_mode & libc::S_IFMT == libc::S_IFSOCK
+                {
+                    libc::fcntl(fd, libc::F_SETFD, 0);
+                }
+            }
+            Ok(())
+        });
+    }
+    let holder = command.spawn().unwrap();
+    std::fs::write(root.join("holder.pid"), holder.id().to_string()).unwrap();
+}
+
+#[test]
+fn runtime_death_ends_the_group_while_another_process_holds_its_control_endpoint() {
+    let isolated = Isolated::new();
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", "fixture_runtime", "--ignored", "--nocapture"])
+        .env("WATCHER_FIXTURE_ROOT", &isolated.root)
+        .env("WATCHER_FIXTURE_BIN", fixture())
+        .env("WATCHER_FIXTURE_HOLD_GATE", "0")
+        .env("WATCHER_FIXTURE_LEAK_CONTROL", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+    let mut runtime = RuntimeChild(command.spawn().unwrap());
+    wait_file(&isolated.root.join("leaf.pid"));
+    let holder = pid_of(&isolated.root, "holder");
+    let identity = read_identity(&isolated.root);
+    runtime.kill().unwrap();
+    runtime.wait().unwrap();
+    // No control EOF reaches the guard: the holder still has the runtime's
+    // endpoint. Only the guard's own watch on the runtime can end the tree.
+    assert_tree_ended(&isolated.root);
+    assert!(
+        alive(holder),
+        "the descriptor holder exited, so the case did not hold"
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    assert_eq!(
+        runtime.block_on(probe_previous(&identity)),
+        ContainmentStatus::Ended
+    );
+}
+
 #[test]
 #[ignore = "invoked only as an isolated subprocess by destructive containment tests"]
 fn fixture_runtime_concurrent() {
+    use_cargo_guard();
     let base = PathBuf::from(std::env::var_os("WATCHER_FIXTURE_ROOT").unwrap());
     let binary = PathBuf::from(std::env::var_os("WATCHER_FIXTURE_BIN").unwrap());
     assert!(base.is_absolute() && binary.is_absolute());

@@ -16,6 +16,15 @@ mod macos_conformance;
 
 static ENVIRONMENT: Mutex<()> = Mutex::new(());
 
+/// Cargo may run test binaries from a directory that does not hold the
+/// package's binaries, so name the guard Cargo built for this test.
+fn use_cargo_guard() {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    telex_watcher::process::set_guard_executable_for_tests(PathBuf::from(env!(
+        "CARGO_BIN_EXE_watcher_process_guard"
+    )));
+}
+
 struct Isolated {
     root: PathBuf,
     previous: Vec<(String, Option<std::ffi::OsString>)>,
@@ -27,6 +36,7 @@ impl Isolated {
         let lock = ENVIRONMENT
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        use_cargo_guard();
         let root = std::env::current_dir()
             .unwrap()
             .join(".watcher-process-tests")
@@ -459,6 +469,7 @@ fn spawn_runtime(root: &Path, hold_gate: bool) -> RuntimeChild {
 #[test]
 #[ignore = "invoked only as an isolated subprocess by destructive containment tests"]
 fn fixture_runtime() {
+    use_cargo_guard();
     let root = PathBuf::from(std::env::var_os("WATCHER_FIXTURE_ROOT").unwrap());
     let binary = PathBuf::from(std::env::var_os("WATCHER_FIXTURE_BIN").unwrap());
     assert!(root.is_absolute() && binary.is_absolute());
@@ -485,6 +496,10 @@ fn fixture_runtime() {
             file.write_all(&serde_json::to_vec(&identity).unwrap())
                 .unwrap();
             file.sync_all().unwrap();
+            #[cfg(target_os = "macos")]
+            if std::env::var("WATCHER_FIXTURE_LEAK_CONTROL").as_deref() == Ok("1") {
+                macos_conformance::leak_runtime_descriptors(&root);
+            }
             if std::env::var("WATCHER_FIXTURE_HOLD_GATE").as_deref() == Ok("1") {
                 std::future::pending::<()>().await;
             }
