@@ -726,13 +726,12 @@ Watcher applies an explicit host-specific containment guarantee:
   subreaper guardian, including descendants that change groups or sessions.
   The guardian's startup handshake and its terminal-receipt path/nonce identity
   are host-required before detector release.
-- The accepted macOS contract is for conforming non-detaching detectors. When
-  the capability is enabled, Watcher assigns one process group to the attempt,
+- macOS contains conforming non-detaching detectors. Watcher assigns one
+  process group to the attempt,
   and the detector root plus every process it creates must remain in that group
   until the attempt ends. Work moved outside the group is outside the cleanup
-  guarantee. Until issue #172's implementation, native conformance and review
-  are accepted, Watcher fails closed before detector launch on macOS and does
-  not claim macOS support.
+  guarantee. The runtime requires identity-verified sender readiness and
+  capability admission before releasing the detector.
 - Every other host fails closed before detector launch until a documented and
   tested containment contract is accepted for that host.
 
@@ -796,7 +795,8 @@ An older, newer or conformance-unvalidated version alone MUST NOT trigger a
 warning. Native conformance remains an engineering coverage duty, not an
 admission list or a claim that every version works. The earlier macOS 15 floor
 and new-major admission wording are superseded; genuine safety checks remain.
-This domain remains unshipped until the #172 product PR is accepted.
+Source builds support this domain through the private per-attempt guard;
+release-archive packaging and distribution remain separate.
 
 An ordinary per-attempt private guard is Watcher runtime machinery, not a helper
 service, only when it is unprivileged, ephemeral, shipped with the runtime,
@@ -1203,9 +1203,10 @@ count until an operator-approved offline vacuum. Permanent evidence grows with
 events; bounded disposable history is not unlimited-duration total-size retention.
 
 The initial operating target is 100 watches with default concurrency four.
-Windows x86_64 is the initial distribution; Linux has the retained SQLite and
-PostgreSQL automated proof scope, not an implied production soak. macOS remains
-unsupported and fails closed before detector launch.
+Windows x86_64 is the initial distribution. Linux and macOS have automated
+SQLite/PostgreSQL lifecycle and health coverage; this is not a production
+soak. macOS uses the non-detaching detector contract and a matching adjacent
+guard in source builds; release-archive packaging remains separate.
 
 ### Snapshot authority and restore fencing
 

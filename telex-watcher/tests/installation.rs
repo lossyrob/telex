@@ -1,4 +1,7 @@
-#![cfg(all(feature = "sqlite", any(windows, target_os = "linux")))]
+#![cfg(all(
+    feature = "sqlite",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
 
 #[path = "../../tests/support/telex_isolation.rs"]
 mod isolation;
@@ -32,7 +35,7 @@ impl Fixture {
             .root
             .join(format!("telex-watcher{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(env!("CARGO_BIN_EXE_telex-watcher"), &watcher).unwrap();
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         std::fs::copy(
             env!("CARGO_BIN_EXE_watcher_process_guard"),
             isolation.root.join("watcher_process_guard"),
@@ -358,9 +361,9 @@ fn record_creation_discovery_verification_and_refusals() {
         .assert_failure("changed retained executable is refused");
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn linux_process_guard_is_required_and_pinned_beside_the_retained_watcher() {
+fn unix_process_guard_is_required_and_pinned_beside_the_retained_watcher() {
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = Fixture::new();

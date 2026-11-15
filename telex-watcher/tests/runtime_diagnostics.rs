@@ -23,6 +23,15 @@ impl Fixture {
         let binary = PathBuf::from(env!("CARGO_BIN_EXE_telex-watcher"));
         assert!(binary.is_absolute());
         let mut command = Command::new(binary);
+        // Keep the diagnostic oracle independent of the runner's credentials.
+        // A one-character secret is correctly redacted even inside an OS or
+        // SQLite error code; only the fixture's explicit secrets belong here.
+        command.env_clear();
+        for name in ["SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
         command
             .env("TELEX_HOME", self.root.join("home"))
             .env("TELEX_DB", self.root.join("telex.sqlite"))

@@ -1,14 +1,15 @@
 //! Bounded execution of trusted, same-user commands, not a sandbox.
 //!
 //! Windows assigns the suspended process to a kill-on-close job *at creation*.
-//! Linux uses a separately executable, pipe-owned subreaper. The launch gate is
-//! released only after the caller durably records the containment identity.
-//! Unsupported platforms fail closed rather than substituting process groups
-//! (which do not provide runtime-death containment).
+//! Linux uses a separately executable, pipe-owned subreaper. macOS uses a
+//! private guard that owns an unreaped process-group leader for trusted
+//! non-detaching detectors (`process_macos.rs`). The launch gate is released
+//! only after the caller durably records the containment identity. Every
+//! other platform fails closed.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::future::Future;
@@ -20,7 +21,7 @@ pub const MAX_STDIN_BYTES: usize = 1024 * 1024;
 pub const MAX_STDOUT_BYTES: usize = 256 * 1024;
 pub const MAX_STDERR_BYTES: usize = 64 * 1024;
 pub const MAX_STDERR_EXCERPT_BYTES: usize = 4 * 1024;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
@@ -46,6 +47,25 @@ pub enum ContainmentIdentity {
         pid: u32,
         start_ticks: u64,
         boot_id: String,
+        receipt: PathBuf,
+        nonce: String,
+    },
+    /// macOS assigned-process-group containment for trusted non-detaching
+    /// detectors. The numbers describe ownership; they can never recreate
+    /// signal authority.
+    MacosGuard {
+        version: u32,
+        /// Always `assigned-process-group`.
+        scope: String,
+        /// Always `unreaped-direct-child-leader`.
+        anchor: String,
+        /// `kern.bootsessionuuid`, never a clock-derived boot time.
+        boot_session: String,
+        guard_pid: u32,
+        guard_started_us: u64,
+        leader_pid: u32,
+        leader_started_us: u64,
+        pgid: u32,
         receipt: PathBuf,
         nonce: String,
     },
@@ -114,7 +134,7 @@ impl ProcessFailure {
         }
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     fn io(error: impl std::fmt::Display) -> Self {
         Self::new(ProcessFailureKind::Io, error.to_string())
     }
@@ -343,7 +363,7 @@ fn redact(bytes: &[u8], sensitive: &[String]) -> String {
 
 type Completion = (Vec<u8>, Vec<u8>, Option<i32>);
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn finish_stdin(
     writer: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
     stderr: &[u8],
@@ -405,7 +425,7 @@ mod excerpt_tests {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn read_capped<R: tokio::io::AsyncRead + Unpin>(
     mut reader: R,
     limit: usize,
@@ -1011,12 +1031,7 @@ mod platform {
             .set_write_timeout(Some(CLEANUP_TIMEOUT))
             .map_err(ProcessFailure::io)?;
         let fd = guard_control.as_raw_fd();
-        let mut executable = std::env::current_exe().map_err(ProcessFailure::io)?;
-        executable.pop();
-        if executable.file_name() == Some(OsStr::new("deps")) {
-            executable.pop();
-        }
-        executable.push("watcher_process_guard");
+        let executable = super::guard_executable().map_err(ProcessFailure::io)?;
         let mut command = Command::new(executable);
         command
             .arg(fd.to_string())
@@ -1390,18 +1405,58 @@ mod platform {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static TEST_GUARD_EXECUTABLE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Test-only. Cargo does not promise that a test binary sits beside the
+/// package's binaries, so integration tests name the guard Cargo built for
+/// them. Nothing in the shipped runtime calls this, and no environment
+/// variable or configuration reaches it: an installed Watcher always uses the
+/// guard beside its own executable.
+#[doc(hidden)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn set_guard_executable_for_tests(path: PathBuf) {
+    let _ = TEST_GUARD_EXECUTABLE.set(path);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn guard_executable() -> std::io::Result<PathBuf> {
+    if let Some(path) = TEST_GUARD_EXECUTABLE.get() {
+        return Ok(path.clone());
+    }
+    let mut executable = std::env::current_exe()?;
+    executable.pop();
+    if executable.file_name() == Some(OsStr::new("deps")) {
+        executable.pop();
+    }
+    executable.push("watcher_process_guard");
+    Ok(executable)
+}
+
 /// Entrypoint for the private helper binary; not a Telex client.
 #[cfg(target_os = "linux")]
 pub fn guard_main() -> std::io::Result<()> {
     platform::guard_main()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+#[path = "process_macos.rs"]
+mod platform;
+
+/// Entrypoint for the private helper binary; not a Telex client.
+#[cfg(target_os = "macos")]
 pub fn guard_main() -> std::io::Result<()> {
-    Err(std::io::Error::other("the process guardian is Linux-only"))
+    platform::guard_main()
 }
 
-#[cfg(all(not(target_os = "linux"), not(windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn guard_main() -> std::io::Result<()> {
+    Err(std::io::Error::other(
+        "the process guardian exists only on Linux and macOS",
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod platform {
     use super::*;
     pub(super) struct Prepared;
@@ -1412,7 +1467,7 @@ mod platform {
     ) -> Result<Prepared, ProcessFailure> {
         Err(ProcessFailure::new(
             ProcessFailureKind::UnsupportedPlatform,
-            "verified containment requires Windows jobs or a Linux subreaper",
+            "verified containment requires Windows jobs, a Linux subreaper or the macOS guard",
         ))
     }
     impl Prepared {

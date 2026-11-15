@@ -43,6 +43,14 @@ def stage_guard(messages, manifest, diagnose=False):
     }
     if not hosts or any(not host.is_file() for host in hosts):
         raise ValueError("Cargo did not report usable Watcher test executables")
+    for directory in sorted({guard_directory(host) for host in hosts}):
+        target = directory / "watcher_process_guard"
+        if target.is_symlink():
+            raise ValueError(f"refusing to overwrite guardian symlink: {target}")
+        if target != guard:
+            shutil.copy2(guard, target)
+        print(f"Watcher test guardian: {guard} -> {target}", flush=True)
+
     if diagnose:
         for artifact in artifacts:
             if (
@@ -65,31 +73,8 @@ def stage_guard(messages, manifest, diagnose=False):
                 )
                 output = result.stdout + result.stderr
                 if result.returncode:
-                    missing = "start process guard: No such file or directory (os error 2)"
-                    if expected.exists() or missing not in output:
-                        raise ValueError(
-                            f"unexpected pre-staging process fixture failure:\n{output}"
-                        )
-                    print(
-                        f"Confirmed missing test-host guardian {expected}:\n{output}",
-                        flush=True,
-                    )
-                else:
-                    if not expected.is_file():
-                        raise ValueError(
-                            f"process fixture passed without expected guardian {expected}"
-                        )
-                    print(
-                        f"Pre-staging process fixture passed with guardian {expected}",
-                        flush=True,
-                    )
-    for directory in sorted({guard_directory(host) for host in hosts}):
-        target = directory / "watcher_process_guard"
-        if target.is_symlink():
-            raise ValueError(f"refusing to overwrite guardian symlink: {target}")
-        if target != guard:
-            shutil.copy2(guard, target)
-        print(f"Watcher test guardian: {guard} -> {target}", flush=True)
+                    raise ValueError(f"staged process fixture failed:\n{output}")
+                print(f"Staged process fixture passed with guardian {expected}", flush=True)
 
 
 def main():
