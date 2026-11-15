@@ -199,11 +199,20 @@ fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
 fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("extension.mjs"), BRIDGE_EXTENSION_MJS)?;
-    // The busy/idle state machine `extension.mjs` imports as `./busy-state.mjs`.
-    std::fs::write(dir.join("busy-state.mjs"), BRIDGE_BUSY_STATE_MJS)?;
-    // The probe protocol `extension.mjs` imports as `./probe-protocol.mjs`.
-    std::fs::write(dir.join("probe-protocol.mjs"), BRIDGE_PROBE_PROTOCOL_MJS)?;
+    for (name, contents) in [
+        ("busy-state.mjs", BRIDGE_BUSY_STATE_MJS),
+        ("probe-protocol.mjs", BRIDGE_PROBE_PROTOCOL_MJS),
+        ("extension.mjs", BRIDGE_EXTENSION_MJS),
+    ] {
+        let path = dir.join(name);
+        match std::fs::read(&path) {
+            Ok(bytes) if bytes == contents.as_bytes() => continue,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        std::fs::write(path, contents)?;
+    }
     Ok(())
 }
 
@@ -226,44 +235,65 @@ fn read_bridge_bindings(session_id: &str) -> Result<Vec<String>> {
 /// Atomically write the bindings via temp-file + rename (the same discipline the turn-guard
 /// state uses), so a torn write cannot leave a partial/corrupt ref-count behind.
 fn write_bridge_bindings(path: &Path, addrs: &[String]) -> Result<()> {
+    write_bridge_binding_bytes(path, &serde_json::to_vec(addrs)?)
+}
+
+fn write_bridge_binding_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec(addrs)?)?;
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            std::fs::remove_file(path)?;
-            std::fs::rename(&tmp, path)?;
-            Ok(())
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let write = file.write_all(bytes).and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(error) = write.and_then(|_| std::fs::rename(&tmp, path)) {
+        if let Err(cleanup) = std::fs::remove_file(&tmp) {
+            return Err(anyhow!(
+                "binding write failed ({error}); cleaning owned temp {} also failed ({cleanup})",
+                tmp.display()
+            ));
         }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e.into())
-        }
+        return Err(error.into());
     }
+    Ok(())
 }
 
 /// Record `address` as a bridge binding for the session (ref-count of addresses sharing the
 /// one per-session bridge), so teardown only removes the bridge when the last one detaches.
 /// Serialized by a lock + atomic write so a concurrent bind/detach cannot lose an update.
 ///
-/// Returns whether this call actually *added* the address. Rollback needs that distinction: a
+/// Records whether this call added the address, with the prior bytes for rollback. A
 /// re-attach or `copilot resume` for an already-bound address adds nothing, and removing the
 /// binding anyway silently decrements a ref-count this invocation never incremented — which later
 /// lets a detach of an unrelated address tear down a bridge (and registry) a live push station
 /// still depends on.
-fn add_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
+fn add_bridge_binding(
+    session_id: &str,
+    address: &str,
+    _lock: &BindingLock,
+) -> Result<BridgeBindingWrite> {
     let path = bridge_bindings_path(session_id)?;
-    let _lock = StateLock::acquire(&path)?;
-    let mut addrs = read_bridge_bindings(session_id)?;
+    let prior = match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let mut addrs: Vec<String> = match prior.as_ref() {
+        Some(bytes) => serde_json::from_slice(bytes)?,
+        None => Vec::new(),
+    };
     if addrs.iter().any(|a| a == address) {
-        return Ok(false);
+        return Ok(BridgeBindingWrite::KeptExisting);
     }
     addrs.push(address.to_string());
     write_bridge_bindings(&path, &addrs)?;
-    Ok(true)
+    Ok(BridgeBindingWrite::Created { prior })
 }
 
 /// Drop `address` from the session's bridge bindings; return true if none remain (so the
@@ -271,7 +301,7 @@ fn add_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
 /// empty list, so teardown never tears down a bridge another address still shares.
 fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
     let path = bridge_bindings_path(session_id)?;
-    let _lock = StateLock::acquire(&path)?;
+    let _lock = BindingLock::acquire(&path)?;
     let mut addrs = read_bridge_bindings(session_id)?;
     addrs.retain(|a| a != address);
     if addrs.is_empty() {
@@ -284,8 +314,8 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
 }
 
 /// Remove the session's bridge extension, registry, and bindings (best effort). Called on
-/// deliberately destructive transitions: last-binding detach, fallback downgrade, failed
-/// provisioning rollback, and GC.
+/// deliberately destructive transitions: last-binding detach, fallback downgrade and GC.
+/// Never called by failed-attach rollback.
 fn remove_bridge_extension(session_id: &str) {
     if let Ok(dir) = bridge_extension_dir(session_id) {
         let _ = std::fs::remove_dir_all(dir);
@@ -396,40 +426,46 @@ fn store_selector_flags(cfg: &crate::config::Config) -> String {
 ///
 /// The second element of the result records whether this invocation *created* the bridge binding,
 /// so a rollback removes only what it added (mirroring `PendingIntentWrite`).
-async fn provision_bridge(ctx: &Ctx, session_id: &str) -> Result<BridgeProvision> {
+async fn provision_bridge(
+    ctx: &Ctx,
+    session_id: &str,
+    lock: &BindingLock,
+) -> Result<BridgeProvision> {
     let address = ctx
         .cfg
         .require_address(&ctx.address)
         .map_err(|e| anyhow::anyhow!("--copilot-bridge needs an address: {e}"))?;
+    crate::platform_fs::ensure_producer_root(&bridge_root_dir()?)?;
+    let registry = bridge_registry_path(session_id)?;
+    if crate::platform_fs::path_present(&registry)? {
+        crate::platform_fs::stat_producer_file(
+            &registry,
+            crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "invalid existing bridge registry {}: {error}",
+                registry.display()
+            )
+        })?;
+    }
+    let (argv, fence_instance_id) = bridge_handler_argv(ctx, session_id).await?;
     if let Err(e) = write_bridge_extension(session_id) {
         return Err(anyhow::anyhow!("failed to write bridge extension: {e}"));
     }
-    let binding_write = match add_bridge_binding(session_id, &address) {
-        Ok(true) => BridgeBindingWrite::Created,
-        Ok(false) => BridgeBindingWrite::KeptExisting,
+    let binding_write = match add_bridge_binding(session_id, &address, lock) {
+        Ok(write) => write,
         Err(e) => {
-            if read_bridge_bindings(session_id)
-                .map(|bindings| bindings.is_empty())
-                .unwrap_or(false)
-            {
-                remove_bridge_extension(session_id);
-            }
             return Err(anyhow::anyhow!(
-                "failed to record bridge binding: {e}; not registering push with a broken ref-count"
+                "failed to record bridge binding: {e}; existing bridge files retained, not registering push"
             ));
         }
     };
-    match bridge_handler_argv(ctx, session_id).await {
-        Ok((argv, fence_instance_id)) => Ok(BridgeProvision {
-            argv,
-            binding_write,
-            fence_instance_id,
-        }),
-        Err(e) => {
-            rollback_bridge_binding(session_id, &address, binding_write);
-            Err(e)
-        }
-    }
+    Ok(BridgeProvision {
+        argv,
+        binding_write,
+        fence_instance_id,
+    })
 }
 
 /// What `provision_bridge` produced, including the epoch-fence instance id baked into the argv so
@@ -441,21 +477,45 @@ struct BridgeProvision {
 }
 
 /// Whether an invocation created a bridge binding or found one already recorded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum BridgeBindingWrite {
-    Created,
+    Created { prior: Option<Vec<u8>> },
     KeptExisting,
 }
 
 /// Undo only a binding this invocation added. A `KeptExisting` binding predates the invocation and
 /// belongs to whatever attach recorded it, so removing it here would corrupt the ref-count.
-fn rollback_bridge_binding(session_id: &str, address: &str, write: BridgeBindingWrite) {
-    if write != BridgeBindingWrite::Created {
+fn rollback_bridge_binding(
+    session_id: &str,
+    address: &str,
+    write: &BridgeBindingWrite,
+    _lock: &BindingLock,
+) {
+    let BridgeBindingWrite::Created { prior } = write else {
         return;
+    };
+    let restore = || -> Result<()> {
+        let path = bridge_bindings_path(session_id)?;
+        let mut current = read_bridge_bindings(session_id)?;
+        if !current.iter().any(|value| value == address) {
+            return Ok(());
+        }
+        current.retain(|value| value != address);
+        let original: Vec<String> = match prior {
+            Some(bytes) => serde_json::from_slice(bytes)?,
+            None => Vec::new(),
+        };
+        if current == original {
+            // Retain an attempt-created empty file too; its existence is not teardown authority.
+            write_bridge_binding_bytes(&path, prior.as_deref().unwrap_or(b"[]"))
+        } else {
+            write_bridge_bindings(&path, &current)
+        }
+    };
+    if let Err(error) = restore() {
+        eprintln!("telex: could not roll back this attach's bridge binding: {error}");
     }
-    if let Ok(true) = remove_bridge_binding(session_id, address) {
-        remove_bridge_extension(session_id);
-    }
+    eprintln!("telex: failed attach retained bridge files and any producer registry; retained files do not establish attended push");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -567,7 +627,7 @@ fn capture_producer_peer(pid: u32) -> Result<(u64, PathBuf)> {
 /// really *is* it all read the same fields from the same struct.
 fn capture_producer_identity(session: &str) -> Result<(ProducerIdentity, String)> {
     let registry_path = bridge_registry_path(session)?;
-    let raw = crate::platform_fs::read_owner_only_file(
+    let raw = crate::platform_fs::read_producer_file(
         &registry_path,
         crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
     )
@@ -808,12 +868,9 @@ fn write_pending_intent(
     args: &CopilotAttachArgs,
     wake_on_cc: bool,
 ) -> Result<PendingIntentWrite> {
-    // The Windows DACL on the bridge root has to actually exist before a credential path under it
-    // is recorded: Node's `mkdir(..., { mode: 0o700 })` and `chmod` are no-ops on Windows, so the
-    // directory the bridge created would otherwise inherit whatever the profile grants.
     let root = bridge_root_dir()?;
-    crate::platform_fs::ensure_owner_private_producer_root(&root)
-        .map_err(|e| anyhow!("securing the bridge producer root {}: {e}", root.display()))?;
+    crate::platform_fs::ensure_producer_root(&root)
+        .map_err(|e| anyhow!("preparing the bridge producer root {}: {e}", root.display()))?;
 
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()
@@ -1171,12 +1228,23 @@ fn live_bridge_lifecycle_pid(session_id: &str) -> Option<u32> {
         Ok(path) => path,
         Err(_) => return None,
     };
-    let (raw, meta) = match crate::platform_fs::read_owner_only_file_with_meta(
+    let (raw, meta) = match crate::platform_fs::read_producer_file_with_meta(
         &path,
         crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
     ) {
         Ok(read) => read,
-        Err(_) => return None,
+        Err(crate::platform_fs::FsError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            return None
+        }
+        Err(error) => {
+            eprintln!(
+                "telex: cannot inspect bridge registry {}: {error}",
+                path.display()
+            );
+            return None;
+        }
     };
     let heartbeat_fresh = meta.modified_ms.is_some_and(|modified_ms| {
         crate::model::now_ms().saturating_sub(modified_ms)
@@ -1437,19 +1505,23 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         }
     }
 
-    let registry: BridgeRegistry = match crate::platform_fs::read_owner_only_file(
+    let raw = match crate::platform_fs::read_producer_file(
         &registry_path,
         crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
-    )
-    .ok()
-    .and_then(|raw| serde_json::from_slice(&raw).ok())
-    {
-        Some(registry) => registry,
-        None => {
+    ) {
+        Ok(raw) => raw,
+        Err(error) => {
             eprintln!(
-                "telex copilot push: no live bridge for session {session} at {}",
-                registry_path.display()
+                "telex copilot push: cannot read bridge registry for session {session} at {}: {error}",
+                registry_path.display(),
             );
+            return Ok(2);
+        }
+    };
+    let registry: BridgeRegistry = match serde_json::from_slice(&raw) {
+        Ok(registry) => registry,
+        Err(_) => {
+            eprintln!("telex copilot push: malformed bridge registry for session {session}");
             return Ok(2);
         }
     };
@@ -2092,8 +2164,20 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     }
     let mut binding_write = BridgeBindingWrite::KeptExisting;
     let mut fence_instance_id = String::new();
-    let on_deliver = if args.copilot_bridge {
-        match provision_bridge(ctx, &session).await {
+    // Keep adoption and rollback in the same serialized lifecycle, not just individual writes.
+    let binding_lock = if args.copilot_bridge {
+        match BindingLock::acquire(&bridge_bindings_path(&session)?) {
+            Ok(lock) => Some(lock),
+            Err(error) => {
+                eprintln!("telex copilot attach: {error}");
+                return Ok(1);
+            }
+        }
+    } else {
+        None
+    };
+    let on_deliver = if let Some(lock) = binding_lock.as_ref() {
+        match provision_bridge(ctx, &session, lock).await {
             Ok(provision) => {
                 binding_write = provision.binding_write;
                 fence_instance_id = provision.fence_instance_id;
@@ -2131,7 +2215,9 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                     Ok(written) => intent_write = Some(written),
                     Err(e) => {
                         eprintln!("telex copilot attach: {e}");
-                        rollback_bridge_binding(&session, &address, binding_write);
+                        if let Some(lock) = binding_lock.as_ref() {
+                            rollback_bridge_binding(&session, &address, &binding_write, lock);
+                        }
                         return Ok(1);
                     }
                 }
@@ -2242,8 +2328,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
             }
         }
     }
-    // Roll back a provisioned bridge if registration did not succeed (or push was not armed),
-    // so a failed bind never leaves an orphaned bridge that reloads on a later resume.
+    // Undo this attempt's binding/intent only; retained modules may load an unbound producer later.
     if bridge_provisioned && !matches!(result, Ok(0)) {
         if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
             // Only remove an intent *this invocation created*, and only if nothing has touched it
@@ -2256,7 +2341,9 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
             // Same rule for the bridge binding ref-count: removing a binding this invocation did
             // not add lets a later detach of an unrelated address delete the shared bridge (and
             // its registry) out from under a still-live push station.
-            rollback_bridge_binding(&session, &address, binding_write);
+            if let Some(lock) = binding_lock.as_ref() {
+                rollback_bridge_binding(&session, &address, &binding_write, lock);
+            }
         }
     }
     result
@@ -4104,6 +4191,45 @@ fn write_guard_state(path: &Path, state: &GuardState) -> Result<()> {
     }
 }
 
+struct BindingLock {
+    _file: File,
+}
+
+impl BindingLock {
+    fn acquire(path: &Path) -> Result<Self> {
+        let path = path.with_extension("lock");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut options = OpenOptions::new();
+            options.read(true).write(true).create(true).truncate(false);
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                // Exclude a legacy RC1 CREATE_NEW holder and prevent its stale-file unlink.
+                options.share_mode(0);
+            }
+            match options.open(&path) {
+                Ok(file) => match file.try_lock() {
+                    Ok(()) => return Ok(Self { _file: file }),
+                    Err(std::fs::TryLockError::WouldBlock) => {}
+                    Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+                },
+                #[cfg(windows)]
+                Err(error) if error.raw_os_error() == Some(32) => {}
+                Err(error) => return Err(error.into()),
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(anyhow!("bridge bindings lock {} remained busy for 5 seconds; retry after the other operation finishes",
+                    path.display()));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 struct StateLock {
     path: PathBuf,
     _file: File,
@@ -4975,6 +5101,181 @@ mod tests {
             Some(value) => std::env::set_var(key, value),
             None => std::env::remove_var(key),
         }
+    }
+
+    #[test]
+    fn bridge_bindings_rollback_preserves_producer_files_and_concurrent_addresses() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "telex-simple-bindings-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let prior_home = std::env::var_os("HOME");
+        let prior_profile = std::env::var_os("USERPROFILE");
+        let outcome = std::panic::catch_unwind(|| {
+            std::env::set_var("HOME", &root);
+            std::env::set_var("USERPROFILE", &root);
+            let add = |session: &str, address: &str| {
+                let lock = BindingLock::acquire(&bridge_bindings_path(session).unwrap()).unwrap();
+                add_bridge_binding(session, address, &lock).unwrap()
+            };
+            let rollback = |session: &str, address: &str, write: &BridgeBindingWrite| {
+                let lock = BindingLock::acquire(&bridge_bindings_path(session).unwrap()).unwrap();
+                rollback_bridge_binding(session, address, write, &lock);
+            };
+            for (session, original) in [
+                ("absent", None),
+                ("empty", Some(b" []\n".as_slice())),
+                ("existing", Some(b"[\"fixture:other\"]\n".as_slice())),
+            ] {
+                write_bridge_extension(session).unwrap();
+                let extension = bridge_extension_dir(session).unwrap();
+                let marker = extension.join("installer-marker");
+                std::fs::write(&marker, b"keep").unwrap();
+                let module = extension.join("extension.mjs");
+                let fixed_time = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+                OpenOptions::new()
+                    .write(true)
+                    .open(&module)
+                    .unwrap()
+                    .set_times(std::fs::FileTimes::new().set_modified(fixed_time))
+                    .unwrap();
+                write_bridge_extension(session).unwrap();
+                assert_eq!(
+                    std::fs::metadata(&module).unwrap().modified().unwrap(),
+                    fixed_time,
+                    "matching modules were rewritten"
+                );
+                let path = bridge_bindings_path(session).unwrap();
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let registry = bridge_registry_path(session).unwrap();
+                std::fs::write(&registry, b"retained registry").unwrap();
+                if let Some(original) = original {
+                    std::fs::write(&path, original).unwrap();
+                }
+                let write = add(session, "fixture:new");
+                rollback(session, "fixture:new", &write);
+                assert_eq!(std::fs::read(&path).unwrap(), original.unwrap_or(b"[]"));
+                assert_eq!(std::fs::read(&registry).unwrap(), b"retained registry");
+                assert_eq!(std::fs::read(&marker).unwrap(), b"keep");
+                assert_eq!(
+                    std::fs::read(&module).unwrap(),
+                    BRIDGE_EXTENSION_MJS.as_bytes()
+                );
+            }
+            let (first, second) = std::thread::scope(|scope| {
+                let first = scope.spawn(|| add("concurrent", "fixture:first"));
+                let second = scope.spawn(|| add("concurrent", "fixture:second"));
+                (first.join().unwrap(), second.join().unwrap())
+            });
+            let mut bindings = read_bridge_bindings("concurrent").unwrap();
+            bindings.sort();
+            assert_eq!(bindings, ["fixture:first", "fixture:second"]);
+            rollback("concurrent", "fixture:first", &first);
+            assert_eq!(
+                read_bridge_bindings("concurrent").unwrap(),
+                ["fixture:second"]
+            );
+            rollback("concurrent", "fixture:second", &second);
+            assert!(read_bridge_bindings("concurrent").unwrap().is_empty());
+            // B cannot adopt A's address successfully until A has either committed or rolled back.
+            let state = bridge_bindings_path("adoption").unwrap();
+            let failed_lock = BindingLock::acquire(&state).unwrap();
+            let failed_write =
+                add_bridge_binding("adoption", "fixture:shared", &failed_lock).unwrap();
+            std::thread::scope(|scope| {
+                let (started, waiting) = std::sync::mpsc::channel();
+                let (success, committed) = std::sync::mpsc::channel();
+                let adopter = scope.spawn(move || {
+                    started.send(()).unwrap();
+                    let lock = BindingLock::acquire(&state).unwrap();
+                    add_bridge_binding("adoption", "fixture:shared", &lock).unwrap();
+                    success.send(()).unwrap();
+                });
+                waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+                assert!(
+                    committed.recv_timeout(Duration::from_millis(100)).is_err(),
+                    "same-address adoption escaped the attach lifecycle lock"
+                );
+                rollback_bridge_binding("adoption", "fixture:shared", &failed_write, &failed_lock);
+                drop(failed_lock);
+                committed.recv_timeout(Duration::from_secs(2)).unwrap();
+                adopter.join().unwrap();
+            });
+            assert_eq!(
+                read_bridge_bindings("adoption").unwrap(),
+                ["fixture:shared"]
+            );
+            assert!(std::fs::read_dir(bridge_root_dir().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")));
+        });
+        restore_env("HOME", prior_home);
+        restore_env("USERPROFILE", prior_profile);
+        std::fs::remove_dir_all(&root).unwrap();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn binding_lock_excludes_a_live_rc1_holder_and_recovers_its_abandoned_file() {
+        let root = std::env::temp_dir().join(format!(
+            "telex-binding-lock-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state = root.join("session.bindings.json");
+        let lock_path = state.with_extension("lock");
+        let legacy = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .unwrap();
+        legacy
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000)),
+            )
+            .unwrap();
+        std::thread::scope(|scope| {
+            let (send, receive) = std::sync::mpsc::channel();
+            let contender_state = state.clone();
+            let contender = scope.spawn(move || {
+                let lock = BindingLock::acquire(&contender_state).unwrap();
+                send.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(100));
+                lock
+            });
+            assert!(
+                receive.recv_timeout(Duration::from_millis(100)).is_err(),
+                "RC2 entered while the RC1 CREATE_NEW handle was live"
+            );
+            drop(legacy);
+            receive.recv_timeout(Duration::from_secs(2)).unwrap();
+            let lock = contender.join().unwrap();
+            assert!(
+                std::fs::remove_file(&lock_path).is_err(),
+                "legacy stale-file deletion replaced a live OS lock"
+            );
+            assert!(OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+                .is_err());
+            drop(lock);
+        });
+        // The persistent file is no longer a stale-age gate.
+        drop(BindingLock::acquire(&state).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

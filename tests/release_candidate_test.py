@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import textwrap
 from types import SimpleNamespace
@@ -36,6 +37,36 @@ def workflow_script(name):
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_bridge_cleanup_keeps_primary_error_attempts_other_owners_and_retains_unproven_root(self):
+        smoke_spec = importlib.util.spec_from_file_location(
+            "bridge_windows_smoke", Path(__file__).with_name("bridge_windows_smoke.py"))
+        smoke = importlib.util.module_from_spec(smoke_spec)
+        with patch.dict(sys.modules, {"release_candidate": proof}):
+            smoke_spec.loader.exec_module(smoke)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "fixture"
+            root.mkdir()
+            output = Path(directory) / "report.json"
+            broken = Mock(pid=101)
+            broken.poll.return_value = None
+            broken.terminate.side_effect = OSError("injected termination failure")
+            other = Mock(pid=102)
+            other.poll.return_value = 0
+            log = Mock()
+            log.close.side_effect = OSError("injected log-close failure")
+            fixture = SimpleNamespace(daemons=[], cleanup=Mock())
+            report = {"status": "failed", "error": "original fixture failure", "cleanup": []}
+            smoke.finish_smoke_report(fixture, root, report, output, [broken, other], [log])
+            saved = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(saved["error"], "original fixture failure")
+            self.assertEqual(saved["status"], "failed")
+            self.assertTrue(root.exists())
+            self.assertEqual(saved["cleanup"][-1]["owned_pids"], [101])
+            self.assertIn("injected termination failure", " ".join(saved["owned_cleanup_errors"]))
+            self.assertIn("injected log-close failure", " ".join(saved["owned_cleanup_errors"]))
+            other.communicate.assert_called_once_with(timeout=10)
+            fixture.cleanup.assert_called_once()
+
     def test_workflow_classifies_verified_versions_without_changing_stable_policy(self):
         bash = proof.shutil.which("bash")
         self.assertIsNotNone(bash, "workflow contract test requires bash")

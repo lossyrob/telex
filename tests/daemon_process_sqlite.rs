@@ -4516,7 +4516,7 @@ async fn seed_station_intent_in_store(
     // The producer root is the one the daemon registers at composition time, resolved from the
     // same HOME the daemon process was spawned with.
     let home = copilot_runtime_home(env);
-    let root = telex::platform_fs::ensure_owner_private_producer_root(&copilot_bridge_root(&home))
+    let root = telex::platform_fs::ensure_producer_root(&copilot_bridge_root(&home))
         .expect("secure the bridge producer root");
     telex::handler_kinds::register_producer_root(
         telex::handler_kinds::COPILOT_BRIDGE_ROOT_ID,
@@ -5327,7 +5327,7 @@ async fn seed_station_intent_for_external_producer(
         .expect("cap file records the singleton hash")
         .to_string();
     let home = copilot_runtime_home(env);
-    let root = telex::platform_fs::ensure_owner_private_producer_root(&copilot_bridge_root(&home))
+    let root = telex::platform_fs::ensure_producer_root(&copilot_bridge_root(&home))
         .expect("secure the bridge producer root");
     telex::handler_kinds::register_producer_root(
         telex::handler_kinds::COPILOT_BRIDGE_ROOT_ID,

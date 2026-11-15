@@ -421,9 +421,11 @@ A second review pass and builder-directed follow-ups added:
 - **Atomic bridge bindings.** The per-session bridge ref-count uses a lock + temp-file-rename and
   distinguishes an absent bindings file (empty) from a corrupt one (error), so teardown never
   removes a bridge another address still shares; a failed bind rolls back.
-- **Per-session pipe secret.** The bridge mints a secret into its owner-only registry and rejects
-  any push whose secret does not match (the default Windows named-pipe DACL grants Everyone READ,
-  so the OS ACL alone does not restrict the pipe to the owner).
+- **Per-session pipe secret.** The bridge mints a registry secret and rejects pushes whose
+  secret does not match. Unix keeps that registry owner-private. RC2 Windows uses the inherited
+  profile permissions, without an owner/DACL privacy check: a reader with pipe-write permission
+  can inject prompts. Server peer verification does not authenticate incoming prompt senders.
+  See [Windows delivery limits](../guide/src/guides/copilot-push.md#windows-inherited-permissions-and-rc1-upgrades).
 - **Store-correct disposition hints.** The on-deliver handler argv carries the session's
   `--backend` / `--db` selection, so the `ack` / `handle` hints in the pushed turn target the exact
   store even for named-backend / profile users.

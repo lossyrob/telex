@@ -10782,6 +10782,32 @@
         "fallbackBoundary": "Preserve prepared pull fallback, deliberate push/pull mode exclusion, one generated detached wait, completion artifacts, exits0-7/legacy1, acknowledgment/deduplication/disposition, explicit rearming/stopping and intentional --force. Surface setup/backend failures; fallback preparation is not delivery success.",
         "exclusions": "No host API, transport/backend/runtime mechanism, real installation/restart/bridge/waiter/detector/backend/ACL experiment, #224/#190 recurrence or common cause, #201 validation, #231 absorption, owner/observer launch, hold release or debt credit."
       }
+    },
+    {
+      "id": "local-daemon-macos-daemon-bootstrap-identity",
+      "sourceNode": null,
+      "source": "Public #259 and #172; Local call_Z1FqHU9fb1ja6DTwuiOuvwh5; Watcher call_ZFk3itIpITYOPuTL48ALOSUm and call_UdQHczdEkZoKjXNOqUzBnbXF.",
+      "crossReference": "telex-watcher / watcher-macos-containment-runtime / #172 / PR #257",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/259",
+        "consumerIssue": "https://github.com/lossyrob/telex/issues/172",
+        "consumerPullRequest": "https://github.com/lossyrob/telex/pull/257",
+        "consumerHead": "df1437a47aae5a309e594951c77426ec2b349aed",
+        "sourceBase": "b0d63dbb794e40e1f130f50b2243db9fcb1a7aed",
+        "classification": "The #257 author discloses unsupported macOS shared-daemon peer executable identity and no SQLite/Postgres lifecycle/health parity. Local reports source-only classification at b0 daemon.rs 2052-2063, 2372-2387, 2464-2475 and 17333-17343; no Mac reproduction. The reconciler read complete public #259/#172 bodies and attributed coordinator receipts, not source/runtime/CI proof. This is a platform-support gap, not an accepted flaky readiness timeout or a containment-only readiness substitute."
+      },
+      "description": "Promote one bounded shared macOS daemon/bootstrap image-peer identity outcome into Local #259; preserve both supported bootstrap selection modes, existing-peer and spawn/reconnect identity/admission guarantees and concrete fail-closed unsupported or indeterminate results.",
+      "affectedOutcome": "Required upstream of full #172 acceptance; a legitimate shared ApplicationClient sender must become ready without weakening identity, receipt, store-binding or readiness fences. Not a Local RC2/next-release dependency.",
+      "requiredness": "Required for the existing #172 product outcome; not a new consumer gate or a containment-only acceptance shortcut.",
+      "sequencing": "Verified canonical main node/tracker/consumer dependency precedes any #259 implementation launch. Local prepares external MacBook handoff, but actual assignment/label/branch/source remain pending and require actual operator routing. Existing #257 development/review, #255 and #256 work do not wait on metadata. After accepted upstream delivery, App/Watcher still perform their own readiness and SQLite/Postgres lifecycle/health acceptance.",
+      "recommendedDisposition": "One separate Local task/closing #259 PR with a pending external MacBook implementation owner and one real Watcher #172 upstream dependency.",
+      "selectedDisposition": "Campaign promotes macos-daemon-bootstrap-identity under Local aeae; actual implementation owner PENDING. No new Windows/App owner or implicit #257 reassignment.",
+      "target": "local-daemon/macos-daemon-bootstrap-identity / issue #259; consumer telex-watcher/watcher-macos-containment-runtime / #172",
+      "owner": "Accountable Local coordinator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57; actual external MacBook implementation assignment PENDING.",
+      "terminalPath": "One closing #259 PR establishes equivalent selected-image/running-peer identity under independent exact-head implementation/design review and native macOS positive/negative evidence, preserves Windows/Linux guarantees and reports actual merged source-bound delivery to App/Watcher. Unsupported guarantees return a concrete narrow design decision, not a bypass. Upstream acceptance is not consumer parity or #172 completion.",
+      "status": "planned",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign call_z0388IxGA0nikCW3cQby2UPr authorizes private Tier B promotion preparation; call_dz8v25rGilQnAmjAhkJxzxIK withdraws the earlier conditional normal App-owner launch and confirms pending external routing. No publication/FINAL/slot/merge/native/release/install authority. Actual fresh owning Local/Watcher reviews remain required."
     }
   ]
 }

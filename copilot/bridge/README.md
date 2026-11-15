@@ -66,9 +66,37 @@ newline-terminated.
 <- {"ok":true,"sessionId":"...","messageId":"...","mode":"enqueue"}
 ```
 
-Trust boundary is the same-user OS pipe/socket ACL (no bearer token at rest).
+Access uses the OS pipe/socket permissions and a bearer secret stored in the
+registry. Unix protects that file; Windows uses the profile policy described below.
 The endpoint is derived from the session id, so it is stable across `/clear`
 reloads.
+
+### Windows trust boundary
+
+The bridge is a same-user integration, not a sandbox boundary. On Windows,
+Node inherits the surrounding profile's permissions for the bridge directory,
+registry secret and binding metadata. Telex does not inspect or repair their
+owner/DACL. Directory redirects are allowed; credential readers still enforce
+regular non-reparse files, a size cap and same-handle metadata, with containment
+checked during daemon recovery. Daemon-owned capabilities/intents and Unix
+producer permissions retain their strict checks.
+
+A principal that can read the registry learns its bearer secret. If that
+principal can also write to the session's named pipe, it can inject prompts into
+that Copilot session. Profile ACLs and Windows pipe access control determine who
+can do that; this release does not promise credential secrecy from foreign
+readers, isolation from a compromised same-user process, or explicit rejection of
+remote pipe clients. Rust verifies the endpoint's user, PID, start time and
+executable before sending. Those checks prevent a different-user server from
+receiving a credential, but are not authentication of incoming prompt senders.
+A writer that can replace the registry can disrupt service; combined with control
+of a same-user server at the session-derived endpoint it can impersonate the
+producer. Containment and shape checks do not prevent that.
+
+The three bridge modules are byte-identical to RC1: there is no additional helper
+process, native compilation, ACL pinning or module-staging/reload requirement.
+An already-loaded RC1 bridge can remain loaded. Upgrade/restart the owning
+daemon as well: an old daemon retains its old reader policy.
 
 ## Reproduce the proofs
 

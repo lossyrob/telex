@@ -51,10 +51,7 @@ impl Scenario {
         // session attached to it, so open it here rather than weakening that rule.
         let _ = daemon.open_backend(&store_key).await;
         let producer_dir = daemon.root().join("producer");
-        // Deliberately NOT pre-created: `ensure_owner_private_producer_root` creates a fresh root
-        // with the owner-only descriptor, and *validates* (never rewrites) one that already exists.
-        // A root created by an ordinary `mkdir` under a broadly-ACLed tree fails closed, which is
-        // the intended posture.
+        // Producer paths follow the host profile on Windows; daemon-owned intent files stay private.
         let root_id = format!("test_root_{label}_{}", std::process::id());
         let root = register_test_producer_root(&root_id, &producer_dir);
         let secret = "s".repeat(64);
@@ -736,10 +733,7 @@ async fn station_intent_restores_each_binding_exactly() {
     let _ = daemon.open_backend(&store_a).await;
     let _ = daemon.open_backend(&store_b).await;
     let producer_dir = daemon.root().join("producer");
-    // Deliberately NOT pre-created: `ensure_owner_private_producer_root` creates a fresh root
-    // with the owner-only descriptor, and *validates* (never rewrites) one that already exists.
-    // A root created by an ordinary `mkdir` under a broadly-ACLed tree fails closed, which is
-    // the intended posture.
+    // Producer paths follow the host profile on Windows; daemon-owned intent files stay private.
     let root_id = format!("multi_root_{}", std::process::id());
     let root = register_test_producer_root(&root_id, &producer_dir);
     let secret = "m".repeat(64);
@@ -811,10 +805,7 @@ async fn station_intent_over_budget_scope_is_bounded_degraded_and_never_pruned()
     let store_key = daemon.store_key("overcap");
     let _ = daemon.open_backend(&store_key).await;
     let producer_dir = daemon.root().join("producer");
-    // Deliberately NOT pre-created: `ensure_owner_private_producer_root` creates a fresh root
-    // with the owner-only descriptor, and *validates* (never rewrites) one that already exists.
-    // A root created by an ordinary `mkdir` under a broadly-ACLed tree fails closed, which is
-    // the intended posture.
+    // Producer paths follow the host profile on Windows; daemon-owned intent files stay private.
     let root_id = format!("overcap_root_{}", std::process::id());
     let root = register_test_producer_root(&root_id, &producer_dir);
     let secret = "o".repeat(64);

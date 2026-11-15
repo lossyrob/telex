@@ -96,6 +96,49 @@ Do not delete shared files or disrupt another binding to force installation.
 These restrictions also apply to upgrades and recovery; this is not a
 reload-only API.
 
+### Windows inherited permissions and RC1 upgrades
+
+RC2 uses the existing three-module Node bridge without a persistent helper.
+Windows bridge directories, registry credentials and binding metadata inherit
+the host profile's access policy. Telex no longer rejects these producer paths
+based on owner or ACL entries, nor rewrites their permissions. Unix producer
+checks and Telex-owned daemon capabilities/intents remain strict.
+
+**Known limitation:** anyone able to read a Windows registry file learns the
+bridge secret. With write access to that session's named pipe, they can submit
+prompts as turns. Foreign-readable roots therefore do not provide credential
+confidentiality or sandbox isolation. Foreign-writable producer files permit
+disruption and, with control of a same-user server at the derived endpoint,
+producer impersonation. Rust retains bounded regular/non-reparse file reads,
+daemon-side containment, derived endpoint names and same-user/PID/start-time/
+executable verification before sending credentials; none restores secrecy of a
+readable file or protects against an already-compromised same-user process.
+
+An already-loaded RC1 bridge needs no module rewrite or extension reload for
+this correction. Upgrade/restart its owning daemon using the normal coordinated
+upgrade procedure, then `copilot resume` with the original backend/options and
+verify attended-push health and real delivery. An RC1 daemon retains the old
+permission rejection; a CLI-only swap does not update that process.
+
+Failed attach now removes only this attempt's binding and intent generation.
+It never removes modules or the producer registry. An existing empty binding
+file is retained; an attempt-created file can remain as `[]`, discoverable by
+normal GC. Retained modules may later load an unbound producer; this does not
+establish attended push. Do not use absent-binding detach as a cleanup shortcut.
+Deliberate last detach/GC retain their separate teardown semantics.
+
+Binding attach/finalize/rollback is serialized under one OS-released lock, so a
+failed attempt cannot remove a later same-address adoption. Contenders wait at
+most five seconds before an explicit retryable error. A rollback write failure
+is reported and can leave this attempt's address recorded; inspect state before
+deliberately detaching that address. The empty lock file remains between operations. On Windows a
+live RC1 lock holder is excluded, and RC1 cannot delete a lock held by RC2.
+RC1 may refuse updates because the retained file exists; use the matching CLI
+for all writes instead of running mixed-version attach/detach commands. No
+simultaneous mixed-version Unix writer interoperability is promised.
+A legacy lock being deleted can cause an immediate access-denied refusal; retry
+with the matching CLI after that operation ends.
+
 ## Bind and provision the bridge
 
 Choose an already-loaded, live bridge, a supported live loader, or startup

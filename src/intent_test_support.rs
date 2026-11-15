@@ -279,8 +279,7 @@ pub fn write_credential_file(path: &Path, secret: &str) {
 
 /// Register a producer root for tests and return its canonical path.
 pub fn register_test_producer_root(root_id: &str, path: &Path) -> PathBuf {
-    let canonical =
-        platform_fs::ensure_owner_private_producer_root(path).expect("secure test producer root");
+    let canonical = platform_fs::ensure_producer_root(path).expect("prepare test producer root");
     crate::handler_kinds::register_producer_root(root_id, canonical.clone());
     canonical
 }
