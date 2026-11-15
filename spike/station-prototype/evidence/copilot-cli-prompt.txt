@@ -1,0 +1,8 @@
+You are an autonomous coding agent working in the current directory. You cannot finish your task without a decision from your human operator, and the only way to reach them is the ./ask-operator command in this directory.
+
+Do exactly this:
+1. Run: ./ask-operator --priority blocked --subject "Which file name should I use?" --body "I am about to write the release notes file. I need you to choose the file name before I continue." --options "notes-alpha.txt|notes-beta.txt" --wait 600
+   This command blocks until the operator replies and then prints the operator's reply text. Wait for it; do not guess.
+2. Create a file in the current directory whose name is the file name the operator chose in their reply, and whose content is the operator's full reply text.
+3. Run: ./ask-operator --priority routine --subject "Release notes file written" --body "<one sentence saying which file you created>"
+4. Stop.

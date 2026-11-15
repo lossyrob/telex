@@ -1,0 +1,17 @@
+station up on :4318, sandbox <sandbox>
+  ok    priority tiers map to status, counts and notification channels (452ms)
+  ok    self-reported card and telex-recorded presence are both shown (8341ms)
+  ok    a blocked agent gets the human's reply and the outcome is recorded in telex (2971ms)
+  ok    reply to an absent agent queues durably and delivers on re-attach (6150ms)
+  ok    agent follow-up after my reply reopens the thread at the new priority (3284ms)
+  ok    snooze defers in telex, hides the thread, and new work wakes it (1642ms)
+  ok    flag, unread and per-message outcomes (305ms)
+  ok    organize: suggestions, rules, nesting, manual filing and precedence (713ms)
+  ok    notification overrides: project mute, agent elevate, thread mute, focus (10977ms)
+  ok    a burst of banners folds into one summary; blocked is never folded (17637ms)
+  ok    the human can start a conversation and the agent can answer it (316ms)
+  ok    multiple attended addresses, and a deliberate stop (618ms)
+  ok    untrusted content stays inert data (237ms)
+  ok    crash and restart: nothing lost, nothing duplicated, one summary (1257ms)
+
+14/14 scenarios passed
