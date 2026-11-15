@@ -2101,16 +2101,24 @@ across all roots in that process. Later admissions MUST NOT observe, signal,
 reap or release it based on a numeric PID, an old ownership flag, or matching
 start-time queries: a competing same-process waiter can consume the original
 and allow PID reuse between checks and a consuming wait. There is NO
-opportunistic parked-child reap. A confirmed terminal reap during the
-ORIGINAL ACTIVE attempt releases its slot normally; once parked, even an
-apparently exited child retains the slot and witness until CLIENT restart.
+opportunistic parked-child reap. During the ORIGINAL ACTIVE attempt, a
+confirmed terminal reap followed by independent process-group absence
+releases the slot; once parked, even an apparently exited or already reaped
+child retains the slot and witness until CLIENT restart.
 Already-admitted manifests and cached same-key completion
 do not enter this gate. Quarantine is not successful cleanup or native proof.
-macOS cleanup diagnostics distinguish ownership refusal, the group-signal
-return/errno and signal seal, and the consuming terminal-wait result, with
-thread labels for correlation. Finalization reports when signal failure
-skips the reap. A terminal leader observation alone does not establish group
-containment or successful cleanup; these diagnostics grant no new authority.
+On macOS the final anchored group `SIGKILL` may return `EPERM` when only
+the zombie leader remains. Retain that failed attempt in custody, seal
+signal authority, and proceed to the exact terminal reap. Neither `EPERM`
+nor a successful signal or leader reap establishes cleanup: afterward the
+supported POSIX `kill(-PGID, 0)` binding MUST independently return
+`-1/ESRCH` before releasing custody and its executable witness. Zero means
+presence; denied or unknown observations refuse. Read-only presence checks
+may continue only within the original deadline, with no later nonzero
+signal or consuming wait. Unconfirmed cleanup retains the quarantine.
+Failure diagnostics remain bounded; successful probes do not emit routine
+library stderr. This follows the existing credential-command cleanup
+contract, without changing Linux or Windows probe behavior.
 Unsupported or indeterminate
 launch/identity/ownership refuses without an unsuspended fallback.
 This is the weaker mapped-vnode guarantee below: path replacement is

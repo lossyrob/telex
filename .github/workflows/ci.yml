@@ -564,6 +564,19 @@ jobs:
             --test installed_current_process -- --test-threads=1 --nocapture \
             2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/process.log"
 
+      - name: Test public Application Client and Operator Station behavior
+        # Exercise the external Rust consumer through InstalledCurrent,
+        # including bidirectional Station replies/dispositions and durable
+        # ingest recovery in a fresh consumer process. The same conformance
+        # battery used on Linux/Windows runs against isolated SQLite stores.
+        run: |
+          set -o pipefail
+          cargo test --locked --no-default-features --features sqlite \
+            --test application_client_fixture \
+            --test application_client_conformance \
+            -- --test-threads=1 --nocapture \
+            2>&1 | tee "$TELEX_V021_PROOF_EVIDENCE/application-client.log"
+
       - name: Verify the architecture-matching official v0.2.1 archive
         run: |
           case "$(uname -m)" in

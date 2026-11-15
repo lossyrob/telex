@@ -1041,8 +1041,6 @@ impl ProbeProcessGroup {
         #[cfg(target_os = "macos")]
         let thread = std::thread::current().id();
         if self.ownership == ProbeGroupOwnership::Sealed {
-            #[cfg(target_os = "macos")]
-            eprintln!("telex: admission probe group cleanup; thread={thread:?} phase=already-sealed signal_attempted=false");
             return Ok(());
         }
         #[cfg(target_os = "macos")]
@@ -1089,11 +1087,19 @@ impl ProbeProcessGroup {
         };
         self.ownership.seal();
         #[cfg(target_os = "macos")]
-        eprintln!(
-            "telex: admission probe group cleanup; thread={thread:?} phase=group-kill observed={observed:?} result={result} errno={errno:?} ownership={:?} generation_known={}",
-            self.ownership,
-            child.owns_generation()
-        );
+        {
+            child.record_final_signal(errno);
+            // Darwin's POSIX kill binding returns EPERM for a zombie-only
+            // group. This is a failed attempt, not evidence of termination.
+            // Signal authority stays sealed; exact reap AND an independent
+            // post-reap ESRCH observation are still required to release custody.
+            if errno == Some(libc::EPERM) {
+                return Ok(());
+            }
+            if result != 0 {
+                eprintln!("telex: admission probe group termination failed; errno={errno:?}");
+            }
+        }
         if result == 0 {
             Ok(())
         } else {
@@ -1438,7 +1444,7 @@ fn observe_probe_pid(pid: u32) -> Result<ProbeLeaderState, ProbeObserveError> {
     let status = unsafe { info.si_status() };
     let observed = classify_probe_wait_observation(pid, observed_pid, code, status);
     #[cfg(target_os = "macos")]
-    if observed_pid != 0 || observed.is_err() {
+    if observed.is_err() {
         eprintln!(
             "telex: admission probe waitid observation; pid_matches={} code={code} status={status} options=0x{options:x} classified={observed:?} thread={:?}",
             observed_pid == pid,
@@ -1737,7 +1743,9 @@ fn terminate_direct_probe_process(child: &mut ProbeChild, deadline: Instant) {
         unsafe {
             libc::kill(child.id() as libc::pid_t, libc::SIGKILL);
         }
-        if reap_probe_leader(child, deadline).is_err() {
+        if reap_probe_leader(child, deadline).is_err()
+            || child.confirm_group_absence(deadline).is_err()
+        {
             eprintln!("telex: admission probe direct-child cleanup unconfirmed");
         }
     } else {
@@ -1755,11 +1763,10 @@ fn fail_probe_process(
 ) -> DaemonBootstrapFailure {
     #[cfg(target_os = "macos")]
     {
-        if group.signal_and_seal(child).is_err() || reap_probe_leader(child, deadline).is_err() {
+        if finalize_probe_process(child, group, deadline).is_err() {
             eprintln!("telex: admission probe failed ({primary}); cleanup unconfirmed");
             return DaemonBootstrapFailure::IncompatibleManifest;
         }
-        group.mark_reaped();
     }
     #[cfg(not(target_os = "macos"))]
     terminate_probe_process(child, group, deadline);
@@ -1820,6 +1827,8 @@ fn finalize_probe_process(
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     group.mark_reaped();
+    #[cfg(target_os = "macos")]
+    child.confirm_group_absence(deadline)?;
     Ok(())
 }
 
@@ -1878,18 +1887,6 @@ fn reap_probe_leader(
         } else {
             None
         };
-        #[cfg(target_os = "macos")]
-        {
-            let observed_status = (result == pid).then_some(status);
-            let terminal =
-                (result == pid).then_some(libc::WIFEXITED(status) || libc::WIFSIGNALED(status));
-            eprintln!(
-                "telex: admission probe active reap; thread={thread:?} phase=waitpid pid_matches={} returned_zero={} returned_error={} errno={errno:?} status={observed_status:?} terminal={terminal:?}",
-                result == pid,
-                result == 0,
-                result < 0
-            );
-        }
         if result == pid {
             #[cfg(target_os = "macos")]
             {
@@ -1898,7 +1895,6 @@ fn reap_probe_leader(
                     return Err(DaemonBootstrapFailure::IncompatibleManifest);
                 }
                 child.mark_reaped();
-                eprintln!("telex: admission probe active reap; thread={thread:?} phase=confirmed-terminal-reap");
             }
             return Ok(());
         }

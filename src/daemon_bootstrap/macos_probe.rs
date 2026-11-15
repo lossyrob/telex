@@ -11,6 +11,8 @@ struct Custody {
     _witness: std::fs::File,
     _verified_start: Option<u64>,
     generation_known: bool,
+    leader_reaped: bool,
+    final_signal_errno: Option<i32>,
 }
 
 static CUSTODY: Mutex<Option<Custody>> = Mutex::new(None);
@@ -22,6 +24,8 @@ thread_local! {
     static GROUP_SIGNALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static CONTINUES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static OBSERVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static GROUP_QUERY_RESULT: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
+    static GROUP_QUERIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -103,9 +107,45 @@ impl Child {
         }
     }
 
+    pub(super) fn record_final_signal(&mut self, errno: Option<i32>) {
+        if let Some(owner) = self.custody.as_mut().and_then(|slot| slot.as_mut()) {
+            owner.final_signal_errno = errno;
+        }
+    }
+
     pub(super) fn mark_reaped(&mut self) {
-        if let Some(mut slot) = self.custody.take() {
-            slot.take();
+        if let Some(owner) = self.custody.as_mut().and_then(|slot| slot.as_mut()) {
+            owner.generation_known = false;
+            owner.leader_reaped = true;
+        }
+    }
+
+    pub(super) fn confirm_group_absence(
+        &mut self,
+        deadline: Instant,
+    ) -> Result<(), DaemonBootstrapFailure> {
+        if !self
+            .custody
+            .as_ref()
+            .and_then(|slot| slot.as_ref())
+            .is_some_and(|owner| owner.leader_reaped)
+        {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        // After exact reap the numeric PGID is only a read-only observation
+        // key. No branch below may restore signal or wait authority.
+        loop {
+            if group_absent(self.pid as libc::pid_t)? {
+                if let Some(mut slot) = self.custody.take() {
+                    slot.take();
+                }
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                eprintln!("telex: admission probe cleanup unconfirmed; phase=post-reap-group-absence deadline=expired");
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 
@@ -217,6 +257,8 @@ impl Child {
             _witness: held_witness,
             _verified_start: None,
             generation_known: true,
+            leader_reaped: false,
+            final_signal_errno: None,
         });
         // The global slot and witness are armed before spawn, and the kernel
         // writes its PID directly into that custody. Nothing fallible allocates
@@ -248,6 +290,36 @@ impl Drop for Child {
             // The slot retains original custody and the CLOEXEC witness after
             // unlocking, never future wait authority over the stored PID.
             unresolved_custody();
+        }
+    }
+}
+
+// Use the same supported POSIX/UNIX03 libc binding as credential cleanup.
+// Only ESRCH proves absence. EPERM is denied/inconclusive even when the
+// preceding nonzero termination attempt also returned EPERM.
+fn group_absent(pid: libc::pid_t) -> Result<bool, DaemonBootstrapFailure> {
+    #[cfg(test)]
+    GROUP_QUERIES.with(|count| count.set(count.get() + 1));
+    #[cfg(test)]
+    if let Some((result, errno)) = GROUP_QUERY_RESULT.with(|result| result.get()) {
+        return classify_group_absence(result, errno);
+    }
+    let (result, errno) = unsafe {
+        let errno = libc::__error();
+        *errno = 0;
+        let result = libc::kill(-pid, 0);
+        (result, *errno)
+    };
+    classify_group_absence(result, errno)
+}
+
+fn classify_group_absence(result: i32, errno: i32) -> Result<bool, DaemonBootstrapFailure> {
+    match (result, errno) {
+        (-1, libc::ESRCH) => Ok(true),
+        (0, _) | (-1, libc::EINTR) => Ok(false),
+        _ => {
+            eprintln!("telex: admission probe cleanup unconfirmed; phase=post-reap-group-query result={result} errno={errno}");
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
         }
     }
 }
@@ -489,6 +561,134 @@ mod tests {
         assert_eq!(CONTINUES.with(|count| count.get()), 0);
         assert!(!marker.exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "subprocess role used by the native zombie-only group cleanup regression"]
+    fn post_reap_custody_fixture() {
+        let Some(case) = std::env::var_os("TELEX_TEST_POST_REAP_CASE") else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("telex-post-reap-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let witness = super::super::open_macos_witness(&executable).unwrap();
+        let mut command = Command::new(&executable);
+        command
+            .env_clear()
+            .env("TELEX_TEST_PROBE_ENTRY_MARKER", root.join("entry"))
+            .args([
+                "--exact",
+                "daemon_bootstrap::tests::macos_admission_marker_fixture",
+                "--ignored",
+            ]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut child = Child::spawn(&command, &witness, deadline).unwrap();
+        let mut group = super::super::ProbeProcessGroup::attach(&child).unwrap();
+        super::super::authenticate_suspended_probe(&mut child, witness.identity).unwrap();
+        super::super::resume_probe_process(&mut child, deadline).unwrap();
+        loop {
+            match super::super::observe_probe_leader(&mut child).unwrap() {
+                super::super::ProbeLeaderState::Exited(success) => {
+                    assert!(success);
+                    break;
+                }
+                _ => {
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+        // The native final attempt must encounter the actual Darwin
+        // zombie-only EPERM, not a mocked successful kill.
+        group.signal_and_seal(&mut child).unwrap();
+        assert_eq!(
+            child
+                .custody
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .final_signal_errno,
+            Some(libc::EPERM)
+        );
+        assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
+        assert_eq!(GROUP_QUERIES.with(|count| count.get()), 0);
+        assert!(child.owns_generation());
+        let injected = if case == "denied" {
+            Some((-1, libc::EPERM))
+        } else if case == "present" {
+            Some((0, 0))
+        } else if case == "unknown" {
+            Some((-1, libc::EINVAL))
+        } else {
+            assert_eq!(case, "absent");
+            None
+        };
+        GROUP_QUERY_RESULT.with(|result| result.set(injected));
+        let result = super::super::finalize_probe_process(&mut child, &mut group, Instant::now());
+        assert_eq!(GROUP_QUERIES.with(|count| count.get()), 1);
+        assert_eq!(group.ownership, super::super::ProbeGroupOwnership::Reaped);
+        assert!(!child.owns_generation());
+        if injected.is_none() {
+            result.expect("exact reap followed by native ESRCH releases custody");
+            assert!(CUSTODY.try_lock().unwrap().is_none());
+            // A subsequent compatibility probe must remain usable in the same
+            // client process after a normal zombie-only completion.
+            let output = super::super::run_bounded_probe_process(
+                command,
+                Duration::from_secs(10),
+                4096,
+                &witness,
+            )
+            .unwrap();
+            assert!(output.success);
+            assert!(CUSTODY.try_lock().unwrap().is_none());
+        } else {
+            assert_eq!(result, Err(DaemonBootstrapFailure::IncompatibleManifest));
+            let owner = child.custody.as_ref().unwrap().as_ref().unwrap();
+            assert!(owner.leader_reaped);
+            assert_eq!(owner.final_signal_errno, Some(libc::EPERM));
+            assert!(owner._witness.metadata().is_ok());
+            let observations = OBSERVATIONS.with(|count| count.get());
+            assert!(group.signal_and_seal(&mut child).is_err());
+            assert!(super::super::resume_probe_process(&mut child, deadline).is_err());
+            assert!(
+                super::super::finalize_probe_process(&mut child, &mut group, deadline).is_err()
+            );
+            assert_eq!(GROUP_SIGNALS.with(|count| count.get()), 1);
+            assert_eq!(OBSERVATIONS.with(|count| count.get()), observations);
+            drop(child);
+            assert!(CUSTODY.try_lock().unwrap().as_ref().unwrap().leader_reaped);
+            assert!(Child::spawn(&command, &witness, deadline).is_err());
+            assert_eq!(GROUP_QUERIES.with(|count| count.get()), 1);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_zombie_group_requires_exact_reap_and_independent_absence_before_release() {
+        for case in ["absent", "denied", "present", "unknown"] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .env("TELEX_TEST_POST_REAP_CASE", case)
+                .args([
+                    "--exact",
+                    "daemon_bootstrap::macos_probe::tests::post_reap_custody_fixture",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]

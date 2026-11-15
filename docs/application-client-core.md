@@ -163,6 +163,16 @@ variants:
 current-executable behavior for legacy and internal callers. It is
 never an automatic fallback from `InstalledCurrent`.
 
+Both explicit bootstrap policies support macOS. Native macOS applications
+can use the Rust client directly, including bidirectional Operator Station
+membership, replies, acknowledgments, and durable ingest recovery. Build
+the application against a Telex library containing macOS bootstrap support
+and select a matching daemon executable or installed version; changing only
+the CLI binary does not update an application's linked client library.
+macOS verifies the running image's mapped vnode as described in the
+[daemon contract](design/daemon.md#16-minimal-upgrade-floor); unsupported or
+indeterminate image identity still refuses before application data is sent.
+
 ### Installed layout expectations
 
 `InstalledCurrent { trusted_root }` reads a strict versioned layout
