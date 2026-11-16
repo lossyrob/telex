@@ -1,0 +1,10 @@
+{
+  "name": "telex-claude-channel-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Spike: push Telex messages into a running Claude Code session via a Channel (MCP) server",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
