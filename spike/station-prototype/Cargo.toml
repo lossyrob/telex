@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["core", "src-tauri"]
+
+[profile.dev]
+# Keep prototype rebuilds fast; debug info is not needed for the UI work.
+debug = 0
