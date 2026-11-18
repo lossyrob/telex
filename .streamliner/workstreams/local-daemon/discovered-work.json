@@ -10808,6 +10808,23 @@
       "status": "planned",
       "decisionState": "accepted",
       "dispositionAuthority": "Campaign call_z0388IxGA0nikCW3cQby2UPr authorizes private Tier B promotion preparation; call_dz8v25rGilQnAmjAhkJxzxIK withdraws the earlier conditional normal App-owner launch and confirms pending external routing. No publication/FINAL/slot/merge/native/release/install authority. Actual fresh owning Local/Watcher reviews remain required."
+    },
+    {
+      "id": "local-daemon-windows-daemon-lifecycle-visibility-265",
+      "sourceNode": null,
+      "source": "Public issue #265; Campaign call_4Phmye2pkPI9HOupJSAgGqEc and refinement call_aAa0wcrw8gBCtnB5cQMfs1gu.",
+      "description": "Windows field report: daemon disappeared while the Copilot bridge remained loaded. Record the attendance/evidence gap without attributing the unexplained exits.",
+      "affectedOutcome": "Truthful bridge-versus-daemon/push attendance and bounded owner-private daemon lifecycle evidence.",
+      "requiredness": "Bounded initial #265 outcome; not a new campaign completion gate.",
+      "sequencing": "Reviewed canonical node/task landing precedes exact-path preparation verification for the existing candidate, session-online and separate bounded write authorization.",
+      "recommendedDisposition": "One Local node/task tracked by #265; no unproved dependency or historical tracker retargeting.",
+      "selectedDisposition": "Campaign requested this launch-prerequisite proposal and existing-surface refinement. Actual publication and owner write authorization remain ungranted.",
+      "target": "local-daemon/windows-daemon-lifecycle-visibility / issue #265",
+      "owner": "Accountable Local aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57; sole existing candidate 7c642fe4-3aa1-4d50-8cb8-363409a1706a remains read-only.",
+      "terminalPath": "Deliver the bounded #265 slice with isolated Windows ready/drain/abrupt-loss evidence, unchanged embedded modules/hash pins, truthful guidance, explicit sink-design disposition where needed and normal exact-head review/CI/design/Campaign gates. No cause claim or recovery automation acceptance.",
+      "status": "planned",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Campaign call_4Phmye2pkPI9HOupJSAgGqEc accepts preparation of this bounded slice; call_aAa0wcrw8gBCtnB5cQMfs1gu refines it. Accepted disposition means preparation scope only, not canonical publication, implementation, native/provider or merge authority."
     }
   ]
 }

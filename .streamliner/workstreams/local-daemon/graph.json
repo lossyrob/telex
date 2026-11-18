@@ -675,6 +675,24 @@
         "number": 259
       },
       "dependsOn": []
+    },
+    {
+      "id": "windows-daemon-lifecycle-visibility",
+      "type": "task",
+      "title": "Windows daemon lifecycle evidence and truthful attendance",
+      "summary": "Planned #265 slice distinguishes live bridge, authenticated daemon and push attendance using existing no-spawn status surfaces, and adds bounded owner-private lifecycle evidence only after any required sink-contract decision. Require isolated Windows authenticated-Hello ready, exact-process intentional drain and fixture-owned abrupt-loss proof, truthful unknowns and ownership-aware recovery guidance. Preserve all three embedded JS modules and fixture hashes. Sole candidate 7c642fe4 remains read-only pending canonical landing, exact-path preparation, session-online and separate bounded write authority. No automatic recovery, supervision, launch/job change, producer refresh, field-exit diagnosis or inferred #264/#231/#153 dependency.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 265
+      },
+      "dependsOn": []
     }
   ],
   "checkpoints": [
