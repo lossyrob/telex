@@ -1603,6 +1603,17 @@ mod postgres_fixture {
             "only the committed higher id is visible while A's transaction is open"
         );
 
+        assert_eq!(
+            backend
+                .first_pending_delivery(addr)
+                .await
+                .unwrap()
+                .unwrap()
+                .message
+                .id,
+            id_higher
+        );
+
         // The holder delivers the higher id (this is the moment a high-water cursor would advance
         // past it and lose the still-uncommitted lower id forever, until a restart).
         backend
@@ -1625,6 +1636,17 @@ mod postgres_fixture {
             undelivered,
             vec![id_lower],
             "fetch_undelivered returns the concurrently-committed lower id (issue #18 closed)"
+        );
+
+        assert_eq!(
+            backend
+                .first_pending_delivery(addr)
+                .await
+                .unwrap()
+                .unwrap()
+                .message
+                .id,
+            id_lower
         );
 
         // CONTRAST: the OLD high-water cursor model (`id > <delivered>`) skips it. We run that raw

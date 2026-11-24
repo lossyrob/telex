@@ -6094,6 +6094,52 @@ fn scheduled_inbox_round_trip_and_revocation() {
     assert_eq!(run(THREAD, &ack, 0)["result"], "acknowledged");
     assert_eq!(run(THREAD, &ack, 0)["result"], "acknowledged");
     assert_eq!(run(THREAD, &check, 0)["result"], "empty");
+    // Model a historical delivery accepted before the frame-size cap existed.
+    let legacy = run(
+        THREAD,
+        &["--address", "desk:tx", "attach", "--session", "sender"],
+        0,
+    );
+    assert!(legacy["lease_epoch"].is_number());
+    let send = [
+        "send",
+        "--session",
+        "sender",
+        "--from",
+        "desk:tx",
+        "--to",
+        "desk:rx",
+        "--body",
+        "legacy",
+    ];
+    let oversized = run(THREAD, &send, 0)["id"].as_i64().unwrap();
+    let following = run(THREAD, &send, 0)["id"].clone();
+    let db = rusqlite::Connection::open(env.home.join("telex.db")).unwrap();
+    db.execute(
+        "UPDATE messages SET body=?1 WHERE id=?2",
+        rusqlite::params![
+            "x".repeat(telex::daemon_ipc::MAX_JSONL_FRAME_BYTES),
+            oversized
+        ],
+    )
+    .unwrap();
+    drop(db);
+    let quarantined = run(THREAD, &check, 6);
+    assert_eq!(quarantined["detail"]["message_id"], oversized);
+    let after = run(THREAD, &check, 0);
+    assert_eq!(after["message"]["id"], following);
+    run(
+        THREAD,
+        &[
+            "codex",
+            "ack",
+            "--binding",
+            binding,
+            "--receipt",
+            after["receipt"].as_str().unwrap(),
+        ],
+        0,
+    );
     run(
         THREAD,
         &["--address", "desk:rx", "detach", "--session", THREAD],
