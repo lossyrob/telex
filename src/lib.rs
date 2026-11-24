@@ -46,6 +46,7 @@ pub mod release;
 // Legacy address-keyed holder registry; daemon singleton status is exposed via
 // `daemon`.
 pub mod registry;
+pub mod scheduled;
 pub mod session_watch;
 /// Durable, host-local, owner-private station-intent records (ADR 0052).
 pub mod station_intent;

@@ -1865,6 +1865,24 @@ fn claim_epoch_inner(
 // Backend trait implementation
 // ---------------------------------------------------------------------------
 
+fn pending_delivery_sql(first_only: bool) -> String {
+    let terminal = terminal_dispositions_sql_list();
+    let limit = if first_only { " LIMIT 1" } else { "" };
+    format!(
+        "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                        (SELECT version FROM application_state_version WHERE singleton=1)
+                        AS snapshot_version
+                 FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                  AND d.consumed_at_ms IS NULL \
+                  AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                 WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
+                 ORDER BY d.message_id{limit}"
+    )
+}
+
 #[async_trait]
 impl Backend for SqliteBackend {
     fn kind(&self) -> &'static str {
@@ -2831,6 +2849,22 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn first_pending_delivery(&self, address: &str) -> Result<Option<WaitCandidate>> {
+        let address = address.to_owned();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &address)?;
+            Ok(c.query_row(&pending_delivery_sql(true), [&address], |row| {
+                Ok(WaitCandidate::primary(
+                    map_message(row)?,
+                    row.get(14)?,
+                    row.get(15)?,
+                ))
+            })
+            .optional()?)
+        })
+        .await
+    }
+
     async fn fetch_wait_candidates(
         &self,
         address: &str,
@@ -2839,20 +2873,7 @@ impl Backend for SqliteBackend {
         let a = address.to_string();
         self.run(move |c| {
             materialize_pending_delivery_rows_for_recipient(c, &a)?;
-            let terminal = terminal_dispositions_sql_list();
-            let primary_sql = format!(
-                "SELECT {MSG_COLS_M}, d.id AS delivery_id,
-                        (SELECT version FROM application_state_version WHERE singleton=1)
-                        AS snapshot_version
-                 FROM deliveries d \
-                 JOIN messages m ON m.id=d.message_id \
-                 WHERE d.recipient=?1 \
-                  AND d.consumed_at_ms IS NULL \
-                  AND COALESCE((SELECT disp.state FROM dispositions disp \
-                                 WHERE disp.message_id=m.id AND disp.recipient=?1 \
-                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
-                 ORDER BY d.message_id"
-            );
+            let primary_sql = pending_delivery_sql(false);
             let mut candidates = c
                 .prepare(&primary_sql)?
                 .query_map(params![a.as_str()], |row| {
@@ -2865,6 +2886,7 @@ impl Backend for SqliteBackend {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
 
             if options.wake_on_cc {
+                let terminal = terminal_dispositions_sql_list();
                 let cc_sql = format!(
                     "SELECT {MSG_COLS_M}, d.id AS delivery_id,
                             (SELECT version FROM application_state_version WHERE singleton=1)

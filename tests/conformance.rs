@@ -117,6 +117,7 @@ where
     leases_liveness(make_store().await).await;
     undelivered_delivery(make_store().await).await;
     delivery_backlog(make_store().await).await;
+    scheduled_single_scan(make_store().await).await;
     epoch_leases_and_ack_fence(make_store().await).await;
     epoch_concurrent_first_claim(make_store().await).await;
     detach_tombstones(make_store().await).await;
@@ -128,6 +129,38 @@ where
     dispositions(make_store().await).await;
     export_filters(make_store().await).await;
     concurrency(make_store().await).await;
+}
+
+/// The bounded scan includes ordinary informational notes, skips terminal work and CC copies,
+/// and reads without consuming even with more pending mail than the default inbox page.
+async fn scheduled_single_scan(store: Store) {
+    let b = store.connect().await;
+    let addr = "scheduled:test";
+    assert!(b.first_pending_delivery(addr).await.unwrap().is_none());
+    let mut cc = new_msg("scheduled:other");
+    cc.cc = Some(addr.into());
+    b.insert_message(&cc).await.unwrap();
+    let terminal = b.insert_message(&new_msg(addr)).await.unwrap();
+    b.insert_disposition(terminal.id, addr, "handled", None, None)
+        .await
+        .unwrap();
+    assert!(b.first_pending_delivery(addr).await.unwrap().is_none());
+    let first = b.insert_message(&new_msg(addr)).await.unwrap();
+    let mut required = new_msg(addr);
+    required.requires_disposition = true;
+    let next = b.insert_message(&required).await.unwrap();
+    for _ in 0..60 {
+        b.insert_message(&new_msg(addr)).await.unwrap();
+    }
+    for _ in 0..2 {
+        let selected = b.first_pending_delivery(addr).await.unwrap().unwrap();
+        assert_eq!(selected.message.id, first.id);
+        assert!(selected.delivery_id.is_some());
+    }
+    b.mark_delivered(first.id, addr, None).await.unwrap();
+    let selected = b.first_pending_delivery(addr).await.unwrap().unwrap();
+    assert_eq!(selected.message.id, next.id);
+    assert!(selected.message.requires_disposition);
 }
 
 /// Epoch leases + explicit Ack fence: the durable owner/epoch row is the authority

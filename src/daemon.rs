@@ -412,6 +412,9 @@ fn verify_cap_bootstrap_evidence(
     Ok(())
 }
 
+#[path = "daemon_scheduled.rs"]
+mod scheduled;
+
 pub struct DaemonState {
     paths: DaemonPaths,
     instance_id: String,
@@ -564,6 +567,7 @@ impl DeliveryAdmissionTestControl {
 
 #[derive(Clone, Debug)]
 struct MemberRecord {
+    scheduled_check: Option<crate::scheduled::Observation>,
     address: String,
     capability: StationCapability,
     store_key: String,
@@ -1625,24 +1629,42 @@ impl MemberRecord {
             inbound_actionable_count,
             push_delivery,
         );
-        let unattended_since_ms = if !self.idle && live_waiters_count == 0 {
-            self.unattended_since_ms
-                .or(self.last_waiter_exit_at_ms)
-                .or(Some(now))
-        } else {
-            None
-        };
+        let (station_health, delivery_mode, health_detail) =
+            match self.scheduled_check.as_ref().filter(|_| !self.idle) {
+                Some(check) => (
+                    check.health(now),
+                    DeliveryMode::Scheduled,
+                    check.last_outcome.clone(),
+                ),
+                None => (station_health, delivery_mode, health_detail),
+            };
+        let unattended_since_ms =
+            if !self.idle && live_waiters_count == 0 && self.scheduled_check.is_none() {
+                self.unattended_since_ms
+                    .or(self.last_waiter_exit_at_ms)
+                    .or(Some(now))
+            } else {
+                None
+            };
         let unattended_for_ms = unattended_since_ms.map(|since| now.saturating_sub(since));
-        let deaf_since_ms = if station_health == StationHealth::UnattendedWithBacklog {
-            self.unattended_with_backlog_since_ms.or(Some(now))
-        } else {
-            None
-        };
+        let deaf_since_ms =
+            if station_health == StationHealth::ScheduledOverdue && pending_unconsumed_count > 0 {
+                self.scheduled_check
+                    .as_ref()
+                    .and_then(|o| o.overdue_ms())
+                    .map(|due| due.max(self.unattended_with_backlog_since_ms.unwrap_or(now)))
+            } else if station_health == StationHealth::UnattendedWithBacklog {
+                self.unattended_with_backlog_since_ms.or(Some(now))
+            } else {
+                None
+            };
         let deaf_for_ms = deaf_since_ms.map(|since| now.saturating_sub(since));
-        let deaf_warn = station_health == StationHealth::UnattendedWithBacklog
-            && deaf_for_ms
-                .map(|age| age >= deaf_warn_threshold_ms)
-                .unwrap_or(false);
+        let deaf_warn = matches!(
+            station_health,
+            StationHealth::UnattendedWithBacklog | StationHealth::ScheduledOverdue
+        ) && deaf_for_ms
+            .map(|age| age >= deaf_warn_threshold_ms)
+            .unwrap_or(false);
         MemberStatus {
             store_key: self.store_key.clone(),
             backend: self.backend.clone(),
@@ -1656,6 +1678,7 @@ impl MemberRecord {
             pending_unconsumed_count,
             inbound_actionable_count,
             station_health,
+            scheduled_check: self.scheduled_check.clone(),
             delivery_mode,
             push_delivery,
             push_suppressed_count,
@@ -4829,6 +4852,23 @@ async fn handle_request_with_capabilities(
     supports_delivery_quarantine: bool,
 ) -> (Response, ClientAction) {
     let response = match request {
+        Request::Scheduled {
+            store_key,
+            session_id,
+            address,
+            binding,
+            action,
+        } => {
+            scheduled::request(
+                state.clone(),
+                store_key,
+                session_id,
+                address,
+                binding,
+                action,
+            )
+            .await
+        }
         Request::Ping => Response::Pong {
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
@@ -5273,6 +5313,50 @@ async fn register_member(
         )
         .await;
     let _delivery_admission_guard = delivery_admission.lock().await;
+    if let Err(response) = scheduled::require_unscheduled(&state, &store_key, &session_id, &address)
+    {
+        return response;
+    }
+    register_member_admitted(
+        state,
+        store_key,
+        address,
+        session_id,
+        occupant,
+        description,
+        scope,
+        tags,
+        watch_pids,
+        replace_watch_pids,
+        recovery,
+        on_deliver,
+        replace_on_deliver,
+        on_deliver_wake_on_cc,
+        application_responsibility,
+        capability,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn register_member_admitted(
+    state: Arc<DaemonState>,
+    store_key: String,
+    address: String,
+    session_id: String,
+    occupant: String,
+    description: Option<String>,
+    scope: Option<String>,
+    tags: Option<String>,
+    watch_pids: Vec<WatchPidSpec>,
+    replace_watch_pids: bool,
+    recovery: bool,
+    on_deliver: Option<Vec<String>>,
+    replace_on_deliver: bool,
+    on_deliver_wake_on_cc: bool,
+    application_responsibility: Option<String>,
+    capability: Option<StationCapability>,
+) -> Response {
     let watch_pids = capture_watch_pids(watch_pids);
 
     // Does this register *owe* a durable armed proof?
@@ -5782,6 +5866,7 @@ async fn register_member(
         }
     };
     let record = MemberRecord {
+        scheduled_check: None,
         address: address.clone(),
         capability: capability.unwrap_or_default(),
         store_key: store_key.clone(),
@@ -6112,6 +6197,13 @@ async fn end_session_members(
         .map(|member| member.address)
         .collect();
     addresses.extend(durable.into_iter().map(|binding| binding.address));
+    match crate::scheduled::load(&state.paths, &session_id) {
+        Ok(Some(b)) if b.store_key == store_key && b.phase != crate::scheduled::Phase::Disabled => {
+            addresses.insert(b.address);
+        }
+        Err(e) => return proto::internal(e.to_string()),
+        _ => {}
+    }
 
     let mut affected = Vec::new();
     for address in addresses {
@@ -6140,6 +6232,9 @@ async fn end_session_members(
         // *now*, including one a reconcile pass published while this loop was waiting for
         // admission. Acting on the pre-admission snapshot is what let a freshly restored member
         // outlive the desired state that authorized it.
+        if let Err(e) = crate::scheduled::disable(&state.paths, &store_key, &session_id, &address) {
+            return proto::internal(e.to_string());
+        }
         if let Some(member) = state.get_member(&store_key, &session_id, &address) {
             if !member.idle {
                 if let Some(response) =
@@ -6301,6 +6396,10 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         .map(|member| member.session_id)
         .collect();
     sessions.extend(durable.into_iter().map(|binding| binding.session_id));
+    match crate::scheduled::sessions_for_address(&state.paths, &store_key, &address) {
+        Ok(ids) => sessions.extend(ids),
+        Err(e) => return proto::internal(e.to_string()),
+    }
 
     let mut affected = Vec::new();
     for session_id in sessions {
@@ -6327,6 +6426,9 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         };
         // Re-read under the guard, so a member a reconcile pass published while this loop waited
         // for admission is idled by this reset rather than surviving it.
+        if let Err(e) = crate::scheduled::disable(&state.paths, &store_key, &session_id, &address) {
+            return proto::internal(e.to_string());
+        }
         if let Some(prior) = state.mark_member_idle(
             &store_key,
             &session_id,
@@ -6512,6 +6614,20 @@ async fn detach_member(
             ));
         }
     };
+    let response = detach_member_admitted(state, store_key, session_id, address).await;
+    drop(admit);
+    response
+}
+
+async fn detach_member_admitted(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+) -> Response {
+    if let Err(e) = crate::scheduled::disable(&state.paths, &store_key, &session_id, &address) {
+        return proto::internal(format!("revoking scheduled binding: {e}"));
+    }
     let member = state.get_member(&store_key, &session_id, &address);
     if let Some(member) = member {
         let backend = match state.backend_for(&store_key).await {
@@ -6593,7 +6709,7 @@ async fn detach_member(
                 ));
             }
         }
-        drop(admit);
+
         Response::Ack {
             message: Some("detached".to_string()),
             delivery_outcome: None,
@@ -6635,7 +6751,7 @@ async fn detach_member(
             ));
         }
         state.remove_member(&store_key, &session_id, &address);
-        drop(admit);
+
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
@@ -6760,6 +6876,42 @@ async fn detach_application_member(
             lease_epoch: None,
             drain_intents: None,
         }
+    }
+}
+
+fn delivery_frame(
+    row: MessageRow,
+    address: &str,
+    delivery_id: i64,
+    snapshot_version: i64,
+    epoch: i64,
+) -> Response {
+    let cc = cc_recipients(row.cc.as_deref());
+    let delivery_role = delivery_role(address, &row.to_addr, row.cc.as_deref()).to_string();
+    let requires_disposition_for_current_recipient =
+        requires_disposition_for_recipient(row.requires_disposition, address, &row.to_addr);
+    Response::Message {
+        id: row.id,
+        thread_id: row.thread_id,
+        parent_id: row.parent_id,
+        from_addr: row.from_addr,
+        to_addr: row.to_addr.clone(),
+        delivered_to: address.to_owned(),
+        primary_to: row.to_addr,
+        cc,
+        delivery_role,
+        kind: row.kind,
+        attention: row.attention,
+        requires_disposition: row.requires_disposition,
+        requires_disposition_for_current_recipient,
+        subject: row.subject,
+        body: row.body,
+        metadata: row.metadata,
+        sent_at_ms: row.sent_at_ms,
+        buffered_at_ms: now_ms(),
+        delivery_id: Some(delivery_id),
+        snapshot_version: Some(snapshot_version),
+        lease_epoch: Some(epoch),
     }
 }
 
@@ -6894,6 +7046,10 @@ async fn wait_for_message_with_idle_ttl(
         )
         .await;
     let delivery_admission_guard = delivery_admission.lock().await;
+    if let Err(response) = scheduled::require_unscheduled(&state, &store_key, &session_id, &address)
+    {
+        return response;
+    }
     // Repeat the member/mode checks after all async preflight work. The opposite-mode recheck and
     // waiter installation below share the same per-station admission guard.
     match state.get_member(&store_key, &session_id, &address) {
@@ -7249,44 +7405,21 @@ async fn wait_for_message_with_idle_ttl(
             if current.lease_epoch != proved_epoch || current.owner_instance_id != proved_owner {
                 continue 'wait;
             }
-            let cc = cc_recipients(row.cc.as_deref());
-            let delivery_role =
-                delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
-            let requires_disposition_for_current_recipient = requires_disposition_for_recipient(
-                row.requires_disposition,
+            let message_id = row.id;
+            let response = delivery_frame(
+                row,
                 &address,
-                &row.to_addr,
+                delivery_id,
+                snapshot_version,
+                current.lease_epoch,
             );
-            let response = Response::Message {
-                id: row.id,
-                thread_id: row.thread_id,
-                parent_id: row.parent_id,
-                from_addr: row.from_addr,
-                to_addr: row.to_addr.clone(),
-                delivered_to: address.clone(),
-                primary_to: row.to_addr,
-                cc,
-                delivery_role,
-                kind: row.kind,
-                attention: row.attention,
-                requires_disposition: row.requires_disposition,
-                requires_disposition_for_current_recipient,
-                subject: row.subject,
-                body: row.body,
-                metadata: row.metadata,
-                sent_at_ms: row.sent_at_ms,
-                buffered_at_ms: now_ms(),
-                delivery_id: Some(delivery_id),
-                snapshot_version: Some(snapshot_version),
-                lease_epoch: Some(current.lease_epoch),
-            };
             match proto::json_line_frame_len(&response) {
                 Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {
                     state.record_waiter_message_exit(
                         &store_key,
                         &session_id,
                         &address,
-                        row.id,
+                        message_id,
                         waiter_pid,
                     );
                     return response;
@@ -7298,7 +7431,7 @@ async fn wait_for_message_with_idle_ttl(
                                 "OversizedCcNotificationFrame",
                                 format!(
                                     "skipped oversized notification-only CC frame store={store_key} address={address} message_id={} delivery_id={delivery_id}: serialized frame is {len} bytes, limit is {}",
-                                    row.id,
+                                    message_id,
                                     proto::MAX_JSONL_FRAME_BYTES
                                 ),
                             );
@@ -7314,7 +7447,7 @@ async fn wait_for_message_with_idle_ttl(
                             &address,
                             &current.owner_instance_id,
                             current.lease_epoch,
-                            row.id,
+                            message_id,
                             delivery_id,
                             Disposition::Rejected.as_str(),
                             Some(&note),
@@ -7332,7 +7465,7 @@ async fn wait_for_message_with_idle_ttl(
                                 "OversizedDeliveryFrame",
                                 format!(
                                     "durably rejected undeliverable historical message store={store_key} address={address} message_id={} delivery_id={delivery_id}: serialized frame is {len} bytes, limit is {}",
-                                    row.id,
+                                    message_id,
                                     proto::MAX_JSONL_FRAME_BYTES
                                 ),
                             );
@@ -7358,7 +7491,7 @@ async fn wait_for_message_with_idle_ttl(
                             waiter_guard.suppress_abnormal_on_drop();
                             return proto::internal(format!(
                                 "rejecting oversized historical message {} delivery {delivery_id} returned {other:?} with disposition={}",
-                                row.id,
+                                message_id,
                                 disposition.is_some()
                             ));
                         }
@@ -7366,7 +7499,7 @@ async fn wait_for_message_with_idle_ttl(
                             waiter_guard.suppress_abnormal_on_drop();
                             return proto::internal(format!(
                                 "consuming oversized historical message {} delivery {delivery_id}: {e:#}",
-                                row.id
+                                message_id
                             ));
                         }
                     }
@@ -7379,14 +7512,14 @@ async fn wait_for_message_with_idle_ttl(
                         Some(6),
                         Some(format!(
                             "message_id={}; delivery_id={delivery_id}; serialized_bytes={len}; max_bytes={}",
-                            row.id,
+                            message_id,
                             proto::MAX_JSONL_FRAME_BYTES
                         )),
                         waiter_pid_for_status,
                     );
                     return if supports_delivery_quarantine {
                         Response::DeliveryQuarantined {
-                            message_id: row.id,
+                            message_id,
                             recipient: address.clone(),
                             serialized_bytes: len,
                             max_bytes: proto::MAX_JSONL_FRAME_BYTES,
@@ -7397,14 +7530,17 @@ async fn wait_for_message_with_idle_ttl(
                             proto::ERROR_INCOMPATIBLE,
                             format!(
                                 "message {} exceeds the peer response limit; its unchanged delivery was quarantined",
-                                row.id
+                                message_id
                             ),
                         )
                     };
                 }
                 Err(e) => {
                     waiter_guard.suppress_abnormal_on_drop();
-                    return proto::internal(format!("sizing message {} IPC frame: {e}", row.id));
+                    return proto::internal(format!(
+                        "sizing message {} IPC frame: {e}",
+                        message_id
+                    ));
                 }
             }
         }
@@ -15350,6 +15486,7 @@ pub mod test_support {
                 other => panic!("expected a fresh epoch claim, got {other:?}"),
             };
             self.state.insert_member(MemberRecord {
+                scheduled_check: None,
                 address: address.to_string(),
                 capability: StationCapability::default(),
                 store_key: store_key.to_string(),

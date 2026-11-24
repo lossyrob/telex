@@ -24,6 +24,7 @@
 # Guides
 
 - [Set up an agent (pull)](guides/agent-pull.md)
+- [Scheduled stations in Codex desktop](guides/codex-scheduled.md)
 - [Copilot CLI push delivery](guides/copilot-push.md)
 - [Watcher installation and launch](guides/watcher-installation.md)
 - [Copilot group stall detection](guides/copilot-stalls.md)
