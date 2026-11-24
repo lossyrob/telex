@@ -147,9 +147,23 @@ fn classify_wait_error(error: anyhow::Error) -> anyhow::Error {
 }
 
 pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
-    let tls = native_tls::TlsConnector::builder()
-        .build()
-        .context("building TLS connector")?;
+    make_profile_tls(None)
+}
+
+pub(crate) fn make_profile_tls(
+    ca_file: Option<&std::path::Path>,
+) -> Result<postgres_native_tls::MakeTlsConnector> {
+    let mut builder = native_tls::TlsConnector::builder();
+    if let Some(path) = ca_file {
+        let pem = std::fs::read(path)
+            .with_context(|| format!("reading TLS CA file {}", path.display()))?;
+        let cert = native_tls::Certificate::from_pem(&pem)
+            .with_context(|| format!("parsing TLS CA certificate {}", path.display()))?;
+        builder
+            .disable_built_in_roots(true)
+            .add_root_certificate(cert);
+    }
+    let tls = builder.build().context("building TLS connector")?;
     Ok(postgres_native_tls::MakeTlsConnector::new(tls))
 }
 
@@ -973,8 +987,8 @@ impl PgBackend {
         config: tokio_postgres::Config,
         schema: Option<&str>,
     ) -> Result<Self> {
-        let client = Self::open_client(&config, schema).await?;
-        let wait_client = Self::open_wait_client(&config, schema).await?;
+        let client = Self::open_client(&config, schema, None).await?;
+        let wait_client = Self::open_wait_client(&config, schema, None).await?;
         let release_config = Self::release_config(&config);
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
@@ -1010,11 +1024,21 @@ impl PgBackend {
         prepare_release: bool,
     ) -> Result<Self> {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
-        let client = Self::open_client(&config, schema.as_deref()).await?;
-        let wait_client = Self::open_wait_client(&config, schema.as_deref()).await?;
+        let client =
+            Self::open_client(&config, schema.as_deref(), profile.tls_ca_file.as_deref()).await?;
+        let wait_client =
+            Self::open_wait_client(&config, schema.as_deref(), profile.tls_ca_file.as_deref())
+                .await?;
         let release_config = Self::release_config(&config);
         let release_client = if prepare_release {
-            Some(Self::open_release_client(&release_config, schema.as_deref()).await?)
+            Some(
+                Self::open_release_client(
+                    &release_config,
+                    schema.as_deref(),
+                    profile.tls_ca_file.as_deref(),
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -1044,9 +1068,10 @@ impl PgBackend {
     async fn open_client(
         config: &tokio_postgres::Config,
         schema: Option<&str>,
+        ca_file: Option<&std::path::Path>,
     ) -> Result<tokio_postgres::Client> {
         let (client, connection) = config
-            .connect(make_tls()?)
+            .connect(make_profile_tls(ca_file)?)
             .await
             .context("connecting to postgres")?;
         let connection = tokio::spawn(async move {
@@ -1084,9 +1109,10 @@ impl PgBackend {
     async fn open_release_client(
         config: &tokio_postgres::Config,
         schema: Option<&str>,
+        ca_file: Option<&std::path::Path>,
     ) -> Result<ManagedPgClient> {
         let (client, connection) = config
-            .connect(make_tls()?)
+            .connect(make_profile_tls(ca_file)?)
             .await
             .context("connecting PostgreSQL release client")?;
         let driver = tokio::spawn(async move {
@@ -1119,6 +1145,7 @@ impl PgBackend {
     async fn open_wait_client(
         config: &tokio_postgres::Config,
         schema: Option<&str>,
+        ca_file: Option<&std::path::Path>,
     ) -> Result<ManagedPgClient> {
         let mut config = config.clone();
         config.application_name(format!(
@@ -1126,7 +1153,7 @@ impl PgBackend {
             config.get_application_name().unwrap_or("telex")
         ));
         let (client, connection) = config
-            .connect(make_tls()?)
+            .connect(make_profile_tls(ca_file)?)
             .await
             .context("connecting PostgreSQL candidate client")?;
         let driver = tokio::spawn(async move {
@@ -1161,7 +1188,7 @@ impl PgBackend {
             let replacement = match &self.connector {
                 PgConnector::Static { config, schema } => {
                     progress.set(WaitFetchPhase::Connect);
-                    Self::open_wait_client(config, schema.as_deref()).await?
+                    Self::open_wait_client(config, schema.as_deref(), None).await?
                 }
                 PgConnector::Profile(profile) => {
                     progress.set(WaitFetchPhase::Credential);
@@ -1169,7 +1196,12 @@ impl PgBackend {
                         .await
                         .context("resolving postgres candidate reconnect profile")?;
                     progress.set(WaitFetchPhase::Connect);
-                    let replacement = Self::open_wait_client(&config, schema.as_deref()).await?;
+                    let replacement = Self::open_wait_client(
+                        &config,
+                        schema.as_deref(),
+                        profile.tls_ca_file.as_deref(),
+                    )
+                    .await?;
                     *self.release.connection.lock().await = (Self::release_config(&config), schema);
                     replacement
                 }
@@ -1224,8 +1256,15 @@ impl PgBackend {
                     let cached = release.connection.lock().await;
                     (cached.0.clone(), cached.1.clone())
                 };
-                let replacement =
-                    PgBackend::open_release_client(&config, schema.as_deref()).await?;
+                let replacement = PgBackend::open_release_client(
+                    &config,
+                    schema.as_deref(),
+                    release
+                        .profile
+                        .as_ref()
+                        .and_then(|p| p.tls_ca_file.as_deref()),
+                )
+                .await?;
                 let mut client = release.client.lock().await;
                 if client
                     .as_ref()
@@ -1247,14 +1286,16 @@ impl PgBackend {
         Option<(tokio_postgres::Config, Option<String>)>,
     )> {
         match &self.connector {
-            PgConnector::Static { config, schema } => Self::open_client(config, schema.as_deref())
-                .await
-                .map(|client| (client, None)),
+            PgConnector::Static { config, schema } => {
+                Self::open_client(config, schema.as_deref(), None)
+                    .await
+                    .map(|client| (client, None))
+            }
             PgConnector::Profile(profile) => {
                 let (config, schema) = crate::profiles::pg_connect_config(profile)
                     .await
                     .context("resolving postgres reconnect profile")?;
-                Self::open_client(&config, schema.as_deref())
+                Self::open_client(&config, schema.as_deref(), profile.tls_ca_file.as_deref())
                     .await
                     .map(|client| (client, Some((config, schema))))
             }
@@ -1754,7 +1795,14 @@ impl Backend for PgBackend {
                 };
             let replacement = match tokio::time::timeout_at(
                 deadline,
-                Self::open_release_client(&config, schema.as_deref()),
+                Self::open_release_client(
+                    &config,
+                    schema.as_deref(),
+                    self.release
+                        .profile
+                        .as_ref()
+                        .and_then(|p| p.tls_ca_file.as_deref()),
+                ),
             )
             .await
             {

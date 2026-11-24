@@ -207,6 +207,7 @@ impl Fixture {
             password_command: None,
             schema: Some(schema.clone()),
             entra_cred: None,
+            tls_ca_file: None,
             entra_scope: None,
         };
         let config = ConfigFile {

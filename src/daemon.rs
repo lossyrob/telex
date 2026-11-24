@@ -4,7 +4,7 @@
 
 #[cfg(feature = "postgres")]
 use crate::backend::postgres::{
-    make_tls as make_postgres_tls, notify_channel_for_schema, sanitize_ident,
+    make_profile_tls as make_postgres_tls, notify_channel_for_schema, sanitize_ident,
 };
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
@@ -3362,7 +3362,13 @@ fn spawn_postgres_notify_listener(
                 let (_, profile) = resolve_postgres_profile_for_store_key(&store_key)
                     .map_err(|response| anyhow::anyhow!("{response:?}"))?;
                 let (cfg, schema) = crate::profiles::pg_connect_config(&profile).await?;
-                run_postgres_notify_listener(&cfg, schema.as_deref(), notify.clone()).await
+                run_postgres_notify_listener(
+                    &cfg,
+                    schema.as_deref(),
+                    profile.tls_ca_file.as_deref(),
+                    notify.clone(),
+                )
+                .await
             }
             .await;
             match result {
@@ -3419,10 +3425,11 @@ fn push_recent_error_to_queue(
 async fn run_postgres_notify_listener(
     cfg: &tokio_postgres::Config,
     schema: Option<&str>,
+    ca_file: Option<&std::path::Path>,
     notify: Arc<Notify>,
 ) -> anyhow::Result<()> {
     let (client, mut connection) = cfg
-        .connect(make_postgres_tls()?)
+        .connect(make_postgres_tls(ca_file)?)
         .await
         .context("connecting postgres LISTEN client")?;
     let (tx, mut rx) = mpsc::unbounded_channel();

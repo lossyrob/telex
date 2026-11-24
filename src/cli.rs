@@ -808,6 +808,9 @@ pub struct BackendAddArgs {
     /// SQLite file path (with --sqlite).
     #[arg(long)]
     pub path: Option<String>,
+    /// PEM CA certificate for this Postgres profile (requires sslmode=require).
+    #[arg(long, requires = "postgres", value_name = "PEM")]
+    pub tls_ca_file: Option<std::path::PathBuf>,
     /// Postgres schema to isolate telex tables in.
     #[arg(long)]
     pub schema: Option<String>,

@@ -4315,6 +4315,7 @@ mod tests {
             password_env: None,
             password_command: None,
             entra_cred: None,
+            tls_ca_file: None,
             entra_scope: None,
         };
         let provenance = principal_provenance(&profile);

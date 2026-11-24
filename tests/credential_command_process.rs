@@ -19,6 +19,7 @@ fn profile(command: String) -> BackendProfile {
         password_command: Some(command),
         schema: None,
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     }
 }

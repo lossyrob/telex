@@ -627,12 +627,14 @@ Options:
           SQLite file path (with --sqlite)
       --json
           Force JSON output
+      --tls-ca-file <PEM>
+          PEM CA certificate for this Postgres profile (requires sslmode=require)
       --schema <SCHEMA>
           Postgres schema to isolate telex tables in
-      --password-env <PASSWORD_ENV>
-          Read the Postgres password from this environment variable
       --text
           Force concise text output
+      --password-env <PASSWORD_ENV>
+          Read the Postgres password from this environment variable
       --password-command <PASSWORD_COMMAND>
           Obtain the Postgres password by running this shell command (its stdout)
       --entra

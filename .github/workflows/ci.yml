@@ -125,6 +125,10 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
+      - name: Verify profile-local PostgreSQL CA trust
+        shell: bash
+        run: python tests/postgres_profile_tls.py "target/debug/telex${{ runner.os == 'Windows' && '.exe' || '' }}"
+
       - name: Prove Windows inherited-profile bridge access
         if: runner.os == 'Windows'
         shell: pwsh

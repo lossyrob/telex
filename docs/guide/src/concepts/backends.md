@@ -38,6 +38,23 @@ telex backend add prod \
   --entra --schema telex --default
 ```
 
+### A private CA for one PostgreSQL profile
+
+Supply the public CA certificate in PEM format and set `sslmode=require`. For example,
+from PowerShell:
+
+```powershell
+telex backend add personal --postgres 'host=db.home.test port=5432 dbname=telex user=telex sslmode=require' --tls-ca-file '.\home-ca.pem' --password-env TELEX_PG_PASSWORD
+```
+
+Telex saves the absolute certificate path as `tls_ca_file` in the backend profile.
+When editing the profile by hand, use an absolute path on the client machine. Each
+new connection uses this file as its trust anchor, including daemon notification and
+recovery connections. The server certificate must be valid for the hostname or IP
+address in the connection string. The CA stays local to this profile and the OS
+trust store is untouched. Existing profiles without this option use system trust.
+The same TLS option works with password or Entra authentication.
+
 ## Managing backends
 
 ```sh

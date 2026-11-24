@@ -241,6 +241,7 @@ fn profile(command: &str) -> BackendProfile {
         password_command: Some(command.into()),
         schema: None,
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     }
 }
