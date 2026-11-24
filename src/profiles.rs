@@ -73,6 +73,9 @@ pub struct BackendProfile {
     /// Connection string: a libpq URI or a key=value DSN.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Absolute path to a private CA certificate trusted only by this profile.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<PathBuf>,
     /// "password" | "entra" (entra requires the `entra` feature).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<String>,
@@ -138,11 +141,19 @@ pub fn store_key(profile: &BackendProfile, db_override: Option<&str>) -> String 
             };
             format!("sqlite:{path}")
         }
-        "postgres" => format!(
-            "postgres:{}|{}",
-            profile.url.as_deref().map(redact_conn).unwrap_or_default(),
-            profile.schema.as_deref().unwrap_or("")
-        ),
+        "postgres" => {
+            let mut key = format!(
+                "postgres:{}|{}",
+                profile.url.as_deref().map(redact_conn).unwrap_or_default(),
+                profile.schema.as_deref().unwrap_or("")
+            );
+            // A daemon connection opened under another trust policy cannot serve this profile.
+            if let Some(path) = &profile.tls_ca_file {
+                key.push_str("|tls-ca=");
+                key.push_str(&path.to_string_lossy());
+            }
+            key
+        }
         other => format!("{other}:{}", profile.target()),
     }
 }
@@ -209,6 +220,7 @@ pub fn implicit_sqlite(db_override: Option<&str>) -> BackendProfile {
         password_command: None,
         schema: None,
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     }
 }
@@ -276,16 +288,31 @@ pub async fn build_readonly(
     }
 }
 #[cfg(feature = "postgres")]
-pub async fn pg_connect_config(
-    profile: &BackendProfile,
-) -> Result<(tokio_postgres::Config, Option<String>)> {
+pub(crate) fn pg_transport_config(profile: &BackendProfile) -> Result<tokio_postgres::Config> {
     let url = profile
         .url
         .as_deref()
         .ok_or_else(|| anyhow!("postgres backend has no connection string"))?;
-    let mut cfg: tokio_postgres::Config = url
+    let cfg: tokio_postgres::Config = url
         .parse()
         .context("parsing postgres connection string (expected a libpq URI or key=value DSN)")?;
+
+    if let Some(path) = &profile.tls_ca_file {
+        if !path.is_absolute() {
+            bail!("tls_ca_file must be an absolute path");
+        }
+        if cfg.get_ssl_mode() != tokio_postgres::config::SslMode::Require {
+            bail!("tls_ca_file requires sslmode=require in the postgres connection string");
+        }
+    }
+    Ok(cfg)
+}
+
+#[cfg(feature = "postgres")]
+pub async fn pg_connect_config(
+    profile: &BackendProfile,
+) -> Result<(tokio_postgres::Config, Option<String>)> {
+    let mut cfg = pg_transport_config(profile)?;
 
     let auth = profile.auth.as_deref().unwrap_or("password");
     match auth {
@@ -394,8 +421,38 @@ mod tests {
             password_command: None,
             schema: None,
             entra_cred: None,
+            tls_ca_file: None,
             entra_scope: None,
         }
+    }
+
+    #[cfg(feature = "postgres")]
+    #[test]
+    fn private_ca_requires_mandatory_tls_and_isolates_daemon_connections() {
+        let mut profile: BackendProfile = toml::from_str(
+            r#"kind = "postgres"
+               url = "host=db dbname=telex""#,
+        )
+        .unwrap();
+        let original = store_key(&profile, None);
+        assert!(pg_transport_config(&profile).is_ok());
+        profile.tls_ca_file = Some(std::env::temp_dir().join("test-ca.pem"));
+        assert_ne!(original, store_key(&profile, None));
+        for url in [
+            "host=db dbname=telex",
+            "host=db sslmode=prefer",
+            "host=db sslmode=disable",
+        ] {
+            profile.url = Some(url.into());
+            assert!(pg_transport_config(&profile)
+                .unwrap_err()
+                .to_string()
+                .contains("requires sslmode=require"));
+        }
+        profile.url = Some("host=db sslmode=require".into());
+        assert!(pg_transport_config(&profile).is_ok());
+        profile.tls_ca_file = Some("relative.pem".into());
+        assert!(pg_transport_config(&profile).is_err());
     }
 
     #[test]

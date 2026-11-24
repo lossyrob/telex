@@ -251,6 +251,7 @@ async fn application_client_schema_v3_operation_smoke() {
                 password_command: None,
                 schema: Some(schema.clone()),
                 entra_cred: None,
+                tls_ca_file: None,
                 entra_scope: None,
             },
         )]),
@@ -1224,6 +1225,7 @@ async fn postgres_profile_resolution_ambiguous_fails_closed() {
         password_command: None,
         schema: Some("telex_ambiguous".to_string()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let mut profile_two = profile.clone();
@@ -1284,6 +1286,7 @@ async fn postgres_wake_on_cc_delivers_live_cc_without_replay() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -1406,6 +1409,7 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -1539,6 +1543,7 @@ async fn postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -1704,6 +1709,7 @@ async fn postgres_competing_daemon_epoch_self_demotes_without_double_delivery() 
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     if profile.password_env.is_none() {
@@ -1811,6 +1817,7 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -2027,6 +2034,7 @@ async fn postgres_listener_degradation_surfaces_recent_error() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -2111,6 +2119,7 @@ async fn postgres_reset_does_not_abort_pull_or_unregister_push_station() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -2361,6 +2370,7 @@ async fn postgres_wait_does_not_retry_permanent_reconnect_configuration() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -2529,6 +2539,7 @@ async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_me
         password_command: Some(command),
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -2764,6 +2775,7 @@ async fn postgres_candidate_waits_do_not_queue_behind_status_and_report_sql_phas
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store = profiles::store_key(&profile, None);
@@ -2960,6 +2972,7 @@ async fn postgres_station_intent_restore_is_single_writer() {
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let store_key = profiles::store_key(&profile, None);
@@ -3777,6 +3790,7 @@ async fn postgres_process_boundary_fences_an_already_active_predecessor_consumer
         password_command: None,
         schema: Some(schema.clone()),
         entra_cred: None,
+        tls_ca_file: None,
         entra_scope: None,
     };
     let mut backends = BTreeMap::new();

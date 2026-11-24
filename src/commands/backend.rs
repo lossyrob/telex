@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 
 use crate::backend::available_kinds;
@@ -38,6 +38,7 @@ fn add(ctx: &Ctx, args: BackendAddArgs) -> Result<i32> {
             password_command: None,
             schema: None,
             entra_cred: None,
+            tls_ca_file: None,
             entra_scope: None,
         }
     } else if let Some(conn) = &args.postgres {
@@ -50,6 +51,14 @@ fn add(ctx: &Ctx, args: BackendAddArgs) -> Result<i32> {
             password_env: args.password_env.clone(),
             password_command: args.password_command.clone(),
             schema: args.schema.clone(),
+            tls_ca_file: args
+                .tls_ca_file
+                .as_ref()
+                .map(|path| {
+                    path.canonicalize()
+                        .with_context(|| format!("resolving TLS CA file {}", path.display()))
+                })
+                .transpose()?,
             entra_cred: if args.entra {
                 args.entra_cred.clone()
             } else {
@@ -64,6 +73,16 @@ fn add(ctx: &Ctx, args: BackendAddArgs) -> Result<i32> {
     } else {
         bail!("specify a backend kind: --sqlite or --postgres <connection-string>");
     };
+
+    if profile.tls_ca_file.is_some() {
+        #[cfg(feature = "postgres")]
+        {
+            profiles::pg_transport_config(&profile)?;
+            crate::backend::postgres::make_profile_tls(profile.tls_ca_file.as_deref())?;
+        }
+        #[cfg(not(feature = "postgres"))]
+        bail!("--tls-ca-file requires a build with the postgres feature");
+    }
 
     let mut cfg = profiles::load()?;
     let first = cfg.backends.is_empty();
@@ -158,6 +177,7 @@ fn show(ctx: &Ctx, name: &str) -> Result<i32> {
         "target": p.target(),
         "auth": p.auth,
         "schema": p.schema,
+        "tls_ca_file": p.tls_ca_file,
         "password_source": password_source,
         "password_env": p.password_env,
         "password_command": p.password_command,
@@ -169,6 +189,9 @@ fn show(ctx: &Ctx, name: &str) -> Result<i32> {
         if p.kind == "postgres" {
             println!("auth      {}", p.auth.as_deref().unwrap_or("password"));
             println!("password  {password_source}");
+            if let Some(path) = &p.tls_ca_file {
+                println!("TLS CA    {}", path.display());
+            }
             if let Some(s) = &p.schema {
                 println!("schema    {s}");
             }
