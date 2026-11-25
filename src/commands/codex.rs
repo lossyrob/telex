@@ -110,7 +110,7 @@ pub async fn run(ctx: &Ctx, cmd: Command) -> Result<i32> {
 
 async fn execute(ctx: &Ctx, cmd: Command) -> Result<i32> {
     if matches!(cmd, Command::Skill) {
-        print!("{}", include_str!("../../codex/skills/telex/SKILL.md"));
+        print!("{}", include_str!("../../codex/CODEX.md"));
         return Ok(0);
     }
     let session = session_id()?;

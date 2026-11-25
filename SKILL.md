@@ -13,17 +13,14 @@ Your operator will tell you which address to attach to. You can reload these ins
 
 ## Harness-specific delivery
 
-Some agent harnesses have a native telex integration that delivers messages to you
-as **turns** (push delivery) instead of requiring you to run a pull waiter. If your
-harness has one, load its version-matched instructions from the installed binary and
-follow those instead of the generic pull loop below:
+Use the version-matched workflow for the receiving harness. Copilot supports push delivery, and a local Codex desktop chat can check its inbox on a schedule.
 
 ```sh
-telex <harness> skill      # e.g. in Copilot CLI: telex copilot skill
+telex copilot skill       # Copilot
+telex codex skill         # Codex desktop
 ```
 
-The pull workflow below is the generic path for harnesses without a native
-integration (scripts, CI, and any harness where a push bridge is unavailable).
+For scripts, CI, and harnesses without a native integration, use the pull workflow below.
 
 ## Pull mode: `telex wait`
 
