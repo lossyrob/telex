@@ -5971,3 +5971,221 @@ fn station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_on
         "and must leave the restored store's manifest intact too"
     );
 }
+
+/// The desktop scheduler invokes the same ordinary CLI every time from an otherwise idle chat.
+#[test]
+fn scheduled_inbox_round_trip_and_revocation() {
+    const THREAD: &str = "88888888-1234-4321-9876-012345678902";
+    let env = ProcessEnv::new("scheduled");
+    let timeout = Duration::from_secs(15);
+    let run = |thread: &str, args: &[&str], code: i32| -> Value {
+        let mut cmd = env.command_with_session(thread);
+        // Exercise a clean, zero-config installation and a new working directory on every call.
+        cmd.current_dir(&env.root)
+            .env_remove("TELEX_DB")
+            .env("CODEX_THREAD_ID", thread)
+            .args(["--json"])
+            .args(args);
+        let out = run_command_with_capture(cmd, &env.root, timeout);
+        assert_eq!(out.code, Some(code), "{args:?}: {out:?}");
+        out.json("scheduled command")
+    };
+    let setup = ["--address", "desk:rx", "codex", "bind", "--every", "5m"];
+    let pending = run(THREAD, &setup, 0);
+    let binding = pending["binding"].as_str().unwrap();
+    assert_eq!(pending["phase"], "pending");
+    assert_eq!(run(THREAD, &setup, 0)["binding"], binding);
+    let check = ["codex", "check", "--binding", binding];
+    assert_eq!(run(THREAD, &check, 5)["result"], "inactive");
+    let confirm = [
+        "codex",
+        "confirm",
+        "--binding",
+        binding,
+        "--automation",
+        "mock-heartbeat",
+    ];
+    assert_eq!(run(THREAD, &confirm, 0)["health"], "awaiting_first_check");
+    assert_eq!(run(THREAD, &check, 0)["result"], "empty");
+    assert_eq!(
+        run("00000000-0000-0000-0000-000000000012", &check, 5)["result"],
+        "inactive"
+    );
+    run(
+        THREAD,
+        &["--address", "desk:tx", "attach", "--session", "sender"],
+        0,
+    );
+    let sent = run(
+        THREAD,
+        &[
+            "send",
+            "--session",
+            "sender",
+            "--from",
+            "desk:tx",
+            "--to",
+            "desk:rx",
+            "--body",
+            "synthetic note",
+        ],
+        0,
+    );
+    let (one, two) = std::thread::scope(|scope| {
+        let contender = || {
+            let mut cmd = env.command_with_session(THREAD);
+            cmd.current_dir(&env.root)
+                .env_remove("TELEX_DB")
+                .env("CODEX_THREAD_ID", THREAD)
+                .args(check);
+            run_command_with_capture(cmd, &env.root, timeout)
+        };
+        let a = scope.spawn(contender);
+        (contender(), a.join().unwrap())
+    });
+    let (delivery, busy) = if one.code == Some(0) {
+        (one, two)
+    } else {
+        (two, one)
+    };
+    delivery.assert_success("one receiver");
+    assert_eq!(busy.code, Some(2), "{busy:?}");
+    assert_eq!(busy.json("overlap")["result"], "busy");
+    let delivered = delivery.json("delivery");
+    let receipt = delivered["receipt"].as_str().unwrap();
+    assert_eq!(delivered["message"]["body"], "synthetic note");
+    assert_eq!(delivered["message"]["id"], sent["id"]);
+    let status = run(THREAD, &["--address", "desk:rx", "station", "status"], 0);
+    let station = &status["stations"][0];
+    assert_eq!(station["delivery_mode"], "scheduled", "{status}");
+    assert_eq!(station["live_waiters_count"], 0, "{status}");
+    assert_eq!(station["station_health"], "attended_scheduled");
+    let file = env.root.join("body.txt");
+    std::fs::write(&file, "synthetic reply").unwrap();
+    let reply = [
+        "codex",
+        "reply",
+        "--binding",
+        binding,
+        "--receipt",
+        receipt,
+        "--body-file",
+        file.to_str().unwrap(),
+    ];
+    let original = run(THREAD, &reply, 0);
+    assert_eq!(original["reply"]["parent_id"], sent["id"]);
+    assert_eq!(run(THREAD, &reply, 0), original);
+    std::fs::write(&file, "changed reply").unwrap();
+    assert_eq!(run(THREAD, &reply, 1)["result"], "error");
+    // A reply committed before the receiver crashed. On restart the unconsumed message
+    // returns with a fresh receipt; replay the old reply without emitting a second message.
+    assert!(env.stop_daemon_best_effort());
+    let recovered = run(THREAD, &check, 0);
+    let fresh = recovered["receipt"].as_str().unwrap();
+    assert_ne!(fresh, receipt);
+    assert_eq!(recovered["message"]["id"], sent["id"]);
+    let stale_ack = ["codex", "ack", "--binding", binding, "--receipt", receipt];
+    assert_eq!(run(THREAD, &stale_ack, 1)["code"], "StaleReceipt");
+    std::fs::write(&file, "synthetic reply").unwrap();
+    let mut retry = reply;
+    retry[5] = fresh;
+    assert_eq!(run(THREAD, &retry, 0), original);
+    let ack = ["codex", "ack", "--binding", binding, "--receipt", fresh];
+    assert_eq!(run(THREAD, &ack, 0)["result"], "acknowledged");
+    assert_eq!(run(THREAD, &ack, 0)["result"], "acknowledged");
+    assert_eq!(run(THREAD, &check, 0)["result"], "empty");
+    // Model a historical delivery accepted before the frame-size cap existed.
+    let legacy = run(
+        THREAD,
+        &["--address", "desk:tx", "attach", "--session", "sender"],
+        0,
+    );
+    assert!(legacy["lease_epoch"].is_number());
+    let send = [
+        "send",
+        "--session",
+        "sender",
+        "--from",
+        "desk:tx",
+        "--to",
+        "desk:rx",
+        "--body",
+        "legacy",
+    ];
+    let oversized = run(THREAD, &send, 0)["id"].as_i64().unwrap();
+    let following = run(THREAD, &send, 0)["id"].clone();
+    let db = rusqlite::Connection::open(env.home.join("telex.db")).unwrap();
+    db.execute(
+        "UPDATE messages SET body=?1 WHERE id=?2",
+        rusqlite::params![
+            "x".repeat(telex::daemon_ipc::MAX_JSONL_FRAME_BYTES),
+            oversized
+        ],
+    )
+    .unwrap();
+    drop(db);
+    let quarantined = run(THREAD, &check, 6);
+    assert_eq!(quarantined["detail"]["message_id"], oversized);
+    let after = run(THREAD, &check, 0);
+    assert_eq!(after["message"]["id"], following);
+    run(
+        THREAD,
+        &[
+            "codex",
+            "ack",
+            "--binding",
+            binding,
+            "--receipt",
+            after["receipt"].as_str().unwrap(),
+        ],
+        0,
+    );
+    run(
+        THREAD,
+        &["--address", "desk:rx", "detach", "--session", THREAD],
+        0,
+    );
+    assert_eq!(run(THREAD, &check, 5)["result"], "inactive");
+    let next = run(THREAD, &setup, 0);
+    assert_ne!(next["binding"], binding);
+    assert_eq!(run(THREAD, &check, 5)["result"], "inactive");
+    let new_id = next["binding"].as_str().unwrap();
+    // Change the logical store at the same bound path across a clean daemon restart.
+    run(
+        THREAD,
+        &[
+            "codex",
+            "confirm",
+            "--binding",
+            new_id,
+            "--automation",
+            "second",
+        ],
+        0,
+    );
+    assert!(env.stop_daemon_best_effort());
+    let connection = rusqlite::Connection::open(env.home.join("telex.db")).unwrap();
+    connection.execute("UPDATE application_store_identity SET logical_store_id='replacement' WHERE singleton=1", []).unwrap();
+    drop(connection);
+    let refused = run(THREAD, &["codex", "check", "--binding", new_id], 1);
+    assert!(refused["message"]
+        .as_str()
+        .unwrap()
+        .contains("logical store changed"));
+    run(THREAD, &["codex", "unbind", "--binding", new_id], 0);
+    assert_eq!(
+        run(
+            THREAD,
+            &[
+                "codex",
+                "confirm",
+                "--binding",
+                new_id,
+                "--automation",
+                "late"
+            ],
+            5
+        )["result"],
+        "inactive"
+    );
+}

@@ -3190,3 +3190,26 @@ evidence-only rewrites deliberately do not.
 A cached projection is never *retracted* by the durable read at the same generation, so a scope that
 vanishes under a running daemon is still reported from what that daemon proved, and a manifest that
 cannot be read at all contributes nothing rather than being invented.
+
+## Externally scheduled receive checks
+
+The optional `scheduled-check-v1` IPC capability adds one bounded, primary-recipient
+scan to an explicitly enrolled station. A scheduler submits a normal command in the
+receiving session. The daemon serializes it with registration, waiter admission and
+withdrawal. Each successful scan proves current lease ownership, selects at most one
+pending delivery in message-ID order, and emits the existing delivery frame. Historical
+oversized frames use the existing epoch-fenced quarantine path.
+
+The daemon persists an owner-private, generation-specific binding under its runtime
+directory. An unacknowledged reservation expires after one configured interval or a
+change of lease epoch. A later scan can redeliver the same row. A binding and receipt
+are required for an exact ack or a threaded reply. A reply stages an application
+operation keyed by the input message and recipient delivery, checks the payload
+fingerprint and recovers the durable message mapping on retry. Acknowledgment,
+workflow disposition and reply acceptance each have their own evidence.
+
+A confirmed schedule supplies expected cadence. Only an empty or delivered scan
+advances the last successful check. Standard status projects local attendance and
+continues to count pending deliveries independently. A generic detach, station reset
+or session end revokes the binding. The host adapter owns scheduler cleanup.
+The [Codex desktop guide](../guide/src/guides/codex-scheduled.md) describes the CLI protocol.

@@ -397,18 +397,16 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
 }
 
 #[test]
-fn root_skill_points_copilot_sessions_at_the_binary_command() {
+fn root_skill_points_sessions_at_their_harness_commands() {
     let root_skill =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("SKILL.md"))
             .expect("read root skill");
-    // The harness-neutral root skill names `telex copilot skill` as the example of the
-    // generic `telex <harness> skill` pointer. When a second harness ships, extend this
-    // to assert its `telex <harness> skill` pointer too — keep the root skill neutral:
-    // it should route to the binary, not embed per-harness mechanics.
-    assert!(
-        root_skill.contains("telex copilot skill"),
-        "root skill should route the Copilot session to `telex copilot skill`"
-    );
+    for command in ["telex copilot skill", "telex codex skill"] {
+        assert!(
+            root_skill.contains(command),
+            "root skill should route the session to `{command}`"
+        );
+    }
 
     // Regression guard (ADR 0044): the neutral root skill must NOT embed Copilot/harness
     // mechanics. A positive pointer assertion alone would still pass if Copilot recipes

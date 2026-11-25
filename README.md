@@ -142,6 +142,10 @@ under `copilot/plugin`). See the
 for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
 compatibility notes.
 
+## Codex desktop
+
+A local Codex chat can attend an address with a native recurring heartbeat. In the receiving chat, ask Codex to read `telex codex skill` and attend your address every five minutes. The chat can finish its turn between checks. Remote senders use the usual Telex address and shared backend. [Scheduled station setup and troubleshooting](docs/guide/src/guides/codex-scheduled.md)
+
 ## Watcher runtime
 
 `telex-watcher` runs trusted local detectors and sends receipt-gated events.

@@ -3266,6 +3266,9 @@ impl PgProcessEnv {
     fn try_run(&self, session: &str, args: &[&str], timeout: Duration) -> Option<PgCmdOutput> {
         let (stdout_path, stderr_path) = self.capture_paths("cmd")?;
         let mut cmd = self.command(session);
+        if args.contains(&"codex") {
+            cmd.env("CODEX_THREAD_ID", session);
+        }
         cmd.args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::from(
@@ -4048,4 +4051,113 @@ async fn postgres_process_boundary_fences_an_already_active_predecessor_consumer
 
     successor.shutdown();
     predecessor.shutdown();
+}
+
+/// Two independent daemon homes share only the selected database. This exercises the same CLI
+/// arguments a desktop heartbeat invokes while the sender can come and go independently.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_scheduled_inbox_across_installations() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_scheduled_inbox_across_installations") else {
+        return;
+    };
+    let schema =
+        sanitize_ident(&format!("telex_sched_{}_{}", std::process::id(), now_ms())).unwrap();
+    let _schema_guard = PgSchemaGuard::new(pg_config(&url), schema.clone());
+    let profile = BackendProfile {
+        kind: "postgres".into(),
+        url: Some(url),
+        auth: Some("password".into()),
+        schema: Some(schema),
+        password_env: std::env::var_os("TELEX_PG_PASSWORD").map(|_| "TELEX_PG_PASSWORD".into()),
+        ..profiles::implicit_sqlite(None)
+    };
+    let config = write_temp_config(
+        "scheduled",
+        &ConfigFile {
+            default: Some("team".into()),
+            backends: BTreeMap::from([("team".into(), profile)]),
+        },
+    );
+    let _config_guard = PgTempTreeGuard::new(config.parent().unwrap().to_owned());
+    let receiver = PgProcessEnv::new("rx", &config);
+    let sender = PgProcessEnv::new("tx", &config);
+    let thread = "abcdabcd-1234-4123-aaaa-123456789abc";
+    let limit = Duration::from_secs(30);
+    let rx = |args: &[&str]| receiver.run_ok(thread, args, limit).json("receiver");
+    let setup = rx(&[
+        "--backend",
+        "team",
+        "--address",
+        "desk:rx",
+        "codex",
+        "bind",
+        "--every",
+        "5m",
+    ]);
+    let b = setup["binding"].as_str().unwrap();
+    assert_eq!(setup["backend"], "team");
+    rx(&[
+        "codex",
+        "confirm",
+        "--binding",
+        b,
+        "--automation",
+        "synthetic",
+    ]);
+    let check = ["codex", "check", "--binding", b];
+    assert_eq!(rx(&check)["result"], "empty");
+    sender.attach("sender", "desk:tx");
+    let sent = sender
+        .run_ok(
+            "sender",
+            &[
+                "--json",
+                "send",
+                "--from",
+                "desk:tx",
+                "--to",
+                "desk:rx",
+                "--body",
+                "synthetic",
+            ],
+            limit,
+        )
+        .json("send");
+    sender.run_ok(
+        "sender",
+        &["--json", "--address", "desk:tx", "detach"],
+        limit,
+    );
+    let delivery = rx(&check);
+    assert_eq!(delivery["message"]["id"], sent["id"]);
+    let receipt = delivery["receipt"].as_str().unwrap();
+    let body = receiver.root.join("reply.txt");
+    std::fs::write(&body, "synthetic reply").unwrap();
+    let reply = [
+        "codex",
+        "reply",
+        "--binding",
+        b,
+        "--receipt",
+        receipt,
+        "--body-file",
+        body.to_str().unwrap(),
+    ];
+    let accepted = rx(&reply);
+    assert_eq!(accepted["reply"]["parent_id"], sent["id"]);
+    assert_eq!(rx(&reply), accepted);
+    rx(&["codex", "ack", "--binding", b, "--receipt", receipt]);
+    assert_eq!(rx(&check)["result"], "empty");
+    let inbox = sender
+        .run_ok(
+            "sender",
+            &["--address", "desk:tx", "--json", "inbox", "--all"],
+            limit,
+        )
+        .json("sender inbox");
+    assert_eq!(inbox["count"], 1);
+    assert_eq!(inbox["items"][0]["body"], "synthetic reply");
+    rx(&["codex", "unbind", "--binding", b]);
+    assert_eq!(receiver.run(thread, &check, limit).code, Some(5));
 }

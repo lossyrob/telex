@@ -58,6 +58,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "foreign_session": foreign_session,
                         "address": member.address,
                         "station_health": member.station_health,
+                        "scheduled_check": member.scheduled_check,
                         "delivery_mode": member.delivery_mode,
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,

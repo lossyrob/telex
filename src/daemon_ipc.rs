@@ -199,6 +199,13 @@ pub struct HelloAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
+    Scheduled {
+        store_key: String,
+        session_id: String,
+        address: String,
+        binding: Option<String>,
+        action: crate::scheduled::Action,
+    },
     Register {
         store_key: String,
         address: String,
@@ -645,6 +652,9 @@ pub struct DrainIntentReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
+    Scheduled {
+        result: serde_json::Value,
+    },
     Registered {
         lease_epoch: i64,
         owner_instance_id: String,
@@ -858,6 +868,8 @@ pub struct MemberStatus {
     pub inbound_actionable_count: i64,
     #[serde(default)]
     pub station_health: StationHealth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_check: Option<crate::scheduled::Observation>,
     /// Configured delivery path, separate from whether that path is currently healthy/armed.
     #[serde(default)]
     pub delivery_mode: DeliveryMode,
@@ -935,6 +947,9 @@ pub enum WaiterOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StationHealth {
+    AwaitingFirstCheck,
+    AttendedScheduled,
+    ScheduledOverdue,
     Armed,
     RecentlyDelivered,
     #[default]
@@ -958,6 +973,7 @@ pub enum StationHealth {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryMode {
+    Scheduled,
     Push,
     Pull,
     Conflict,
@@ -1145,6 +1161,7 @@ pub fn daemon_capabilities() -> Vec<String> {
     caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
     caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
     caps.push(CAP_WAIT_BACKEND_RECOVERY.to_string());
+    caps.push(crate::scheduled::CAPABILITY.to_string());
     caps
 }
 

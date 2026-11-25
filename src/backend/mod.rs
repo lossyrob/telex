@@ -467,6 +467,10 @@ pub trait Backend: Send + Sync {
     /// The two do-not-deliver signals are a consumed delivery record (primary) and a terminal
     /// disposition (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
+    /// One ordinary pending delivery, bounded at the storage boundary and in waiter order.
+    async fn first_pending_delivery(&self, _address: &str) -> Result<Option<WaitCandidate>> {
+        bail!("single-scan delivery is not supported by this backend")
+    }
     async fn fetch_wait_candidates(
         &self,
         address: &str,

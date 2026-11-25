@@ -112,6 +112,10 @@ pub enum Command {
     #[command(subcommand)]
     Backend(BackendCmd),
 
+    /// Attend a Telex address from a scheduled Codex desktop thread.
+    #[command(subcommand)]
+    Codex(crate::commands::codex::Command),
+
     /// Hidden Copilot CLI plugin adapter commands.
     #[command(hide = true, subcommand)]
     Copilot(CopilotCmd),
@@ -938,6 +942,7 @@ pub async fn run() -> i32 {
         Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
         Command::Detach(a) => crate::commands::detach::run(&ctx, a).await,
+        Command::Codex(cmd) => crate::commands::codex::run(&ctx, cmd).await,
         Command::Station(cmd) => crate::commands::station::run(&ctx, cmd).await,
         Command::Wait(a) => crate::commands::wait::run(&ctx, a).await,
         Command::Inbox(a) => crate::commands::inbox::run(&ctx, a).await,

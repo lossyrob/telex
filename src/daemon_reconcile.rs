@@ -1795,6 +1795,7 @@ async fn register_member_reconciled(
     // would resurrect an explicitly detached station.
 
     let record = MemberRecord {
+        scheduled_check: None,
         address: intent.address.clone(),
         capability: crate::daemon_ipc::StationCapability::Bidirectional,
         store_key: intent.store_key.clone(),
@@ -1920,6 +1921,14 @@ pub async fn reconcile_intent_locked(
     }
     if !intent.is_reconcilable() {
         return IntentOutcome::terminal(intent.state, "not_reconcilable");
+    }
+
+    match crate::scheduled::load(&state.paths, &intent.session_id) {
+        Ok(Some(b)) if b.matches(&intent.store_key, &intent.address) => {
+            return IntentOutcome::terminal(IntentRecoveryState::Incompatible, "scheduled_binding");
+        }
+        Err(_) => return IntentOutcome::failed("scheduled_binding_unreadable"),
+        _ => {}
     }
 
     // Host/boot binding. This closes both the Linux boot-relative `(pid, start_time)`

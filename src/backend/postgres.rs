@@ -1263,6 +1263,24 @@ impl PgBackend {
     }
 }
 
+fn pending_delivery_sql(first_only: bool) -> String {
+    let terminal = terminal_dispositions_sql_list();
+    let limit = if first_only { " LIMIT 1" } else { "" };
+    format!(
+        "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                        (SELECT version FROM application_state_version WHERE singleton=1)
+                        AS snapshot_version
+                 FROM deliveries d
+                 JOIN messages m ON m.id=d.message_id
+                 WHERE d.recipient=$1
+                   AND d.consumed_at_ms IS NULL
+                   AND COALESCE((SELECT disp.state FROM dispositions disp
+                                 WHERE disp.message_id=m.id AND disp.recipient=$1
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})
+                 ORDER BY d.message_id{limit}"
+    )
+}
+
 #[async_trait]
 impl Backend for PgBackend {
     fn kind(&self) -> &'static str {
@@ -2347,6 +2365,23 @@ impl Backend for PgBackend {
         Ok(rows.iter().map(map_message).collect())
     }
 
+    async fn first_pending_delivery(&self, address: &str) -> Result<Option<WaitCandidate>> {
+        let progress = WaitFetchProgress::default();
+        let connection = self.candidate_client(&progress).await?;
+        let client = &connection.client;
+        materialize_pending_delivery_rows_for_recipient(client, address).await?;
+        Ok(client
+            .query_opt(&pending_delivery_sql(true), &[&address])
+            .await?
+            .map(|row| {
+                WaitCandidate::primary(
+                    map_message(&row),
+                    row.get("delivery_id"),
+                    row.get("snapshot_version"),
+                )
+            }))
+    }
+
     async fn fetch_wait_candidates(
         &self,
         address: &str,
@@ -2368,20 +2403,7 @@ impl Backend for PgBackend {
             progress.set(WaitFetchPhase::Materialization);
             materialize_pending_delivery_rows_for_recipient(client, address).await?;
             progress.set(WaitFetchPhase::PrimaryRead);
-            let terminal = terminal_dispositions_sql_list();
-            let primary_sql = format!(
-                "SELECT {MSG_COLS_M}, d.id AS delivery_id,
-                        (SELECT version FROM application_state_version WHERE singleton=1)
-                        AS snapshot_version
-                 FROM deliveries d
-                 JOIN messages m ON m.id=d.message_id
-                 WHERE d.recipient=$1
-                   AND d.consumed_at_ms IS NULL
-                   AND COALESCE((SELECT disp.state FROM dispositions disp
-                                 WHERE disp.message_id=m.id AND disp.recipient=$1
-                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})
-                 ORDER BY d.message_id"
-            );
+            let primary_sql = pending_delivery_sql(false);
             let mut candidates: Vec<WaitCandidate> = client
                 .query(&primary_sql, &[&address])
                 .await?
@@ -2396,6 +2418,7 @@ impl Backend for PgBackend {
                 .collect();
 
             if options.wake_on_cc {
+                let terminal = terminal_dispositions_sql_list();
                 progress.set(WaitFetchPhase::CcRead);
                 let cc_sql = format!(
                     "SELECT {MSG_COLS_M}, d.id AS delivery_id,

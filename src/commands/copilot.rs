@@ -4986,6 +4986,7 @@ mod tests {
 
     fn member(address: &str, live_waiters_count: usize, pending: i64) -> MemberStatus {
         MemberStatus {
+            scheduled_check: None,
             store_key: "sqlite:/tmp/telex.db".to_string(),
             backend: "sqlite".to_string(),
             session_id: "s1".to_string(),
